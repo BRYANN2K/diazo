@@ -172,16 +172,51 @@ export function nameMatches(pattern: string, name: string): boolean {
   return globRegExp(pattern.replace(/\{category\}/g, '*')).test(name.trim())
 }
 
+/* `16 `, `00 · `, `013.`: a page or section number, never part of the name
+   (a status code such as `404 pages` is kept) */
+const LEADING_NUMBER = /^(?!404\b|500\b)\d{1,3}(?:\.\d+)*(?=[\s.·:)\-–—]|$)[\s.·:)\-–—]*/
+/* `· A–L`, `(S–E)`, ` A-Z`: an alphabetical range that split one category
+   across pages */
+const LETTER_RANGE = /[\s·:,(\-–—]*\(?\b[A-Za-z]\s*[–—-]\s*[A-Za-z]\b\)?\s*$/
+/* `· 2`, `(2)`, `part 2`, `2/3`: a continuation, not a different category */
+const CONTINUATION = /(?:\s*·\s*|\s+part\s+|\s*\()\d{1,2}(?:\/\d{1,2})?\)?\s*$/i
+
+/** One level of a category, without what numbering and splitting added:
+ *  the leading number, an alphabetical range, a continuation number and a
+ *  trailing separator. '' when nothing is left. */
+export function tidyCategoryPart(part: string): string {
+  let out = part.trim()
+  for (let i = 0; i < 3; i++) {
+    const before = out
+    out = out
+      .replace(LEADING_NUMBER, '')
+      .replace(LETTER_RANGE, '')
+      .replace(CONTINUATION, '')
+      .replace(/^[\s·:\-–—]+|[\s·:,\-–—]+$/g, '')
+      .trim()
+    if (out === before) break
+  }
+  return /^\d+$/.test(out) ? '' : out
+}
+
+/** A category path with every level tidied and the empty levels dropped:
+ *  `16/Blog, team & about` → `Blog, team & about`. Null when nothing is left. */
+export function tidyCategory(path: string): string | null {
+  const parts = path.split('/').map(tidyCategoryPart).filter(Boolean)
+  return parts.length ? parts.join('/') : null
+}
+
 /** The category a section frame starts: `{category}`, under the domain the
- *  pattern's `*` captured, with a trailing sub-letter (`Inputs A`) dropped. */
+ *  pattern's `*` captured, with a trailing sub-letter (`Inputs A`), page
+ *  numbers and alphabetical ranges dropped. */
 export function sectionCategory(pattern: string | null, name: string): string | null {
   if (!pattern || !pattern.includes('{category}')) return null
   const m = globRegExp(pattern, true).exec(name.trim())
   if (!m) return null
   const parts = m.slice(1).map((s) => (s ?? '').trim())
-  const category = parts.pop() ?? ''
+  const category = tidyCategoryPart(parts.pop() ?? '')
   const domain = parts
-    .map((p) => p.replace(/\s+[A-Z]$/, '').trim())
+    .map((p) => tidyCategoryPart(p.replace(/\s+[A-Z]$/, '')))
     .filter(Boolean)
     .join('/')
   if (!category) return domain || null

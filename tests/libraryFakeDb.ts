@@ -5,6 +5,7 @@
  *   vi.mock('../server/db/persist.ts', async () => (await import('./libraryFakeDb')).fakePersist())
  */
 import type { LibraryItem, LibraryItemMeta } from '../shared/library'
+import type { CurationJob } from '../shared/libraryCuration'
 
 export const fakeDb = {
   items: new Map<string, Map<string, LibraryItem>>(),
@@ -12,7 +13,9 @@ export const fakeDb = {
   html: new Map<string, string>(),
   savedLibraries: [] as unknown[],
   versions: [] as { frameId: string; html: string }[],
+  curations: new Map<string, CurationJob>(),
   reset() {
+    this.curations.clear()
     this.versions.length = 0
     this.items.clear()
     this.meta.clear()
@@ -86,5 +89,9 @@ export function fakePersist() {
     deleteLibraryItems: async (canvasId: string) => {
       fakeDb.items.delete(canvasId)
     },
+    saveCuration: async (job: CurationJob) => {
+      fakeDb.curations.set(job.id, structuredClone(job))
+    },
+    loadCurations: async () => [...fakeDb.curations.values()].map((j) => structuredClone(j)),
   }
 }

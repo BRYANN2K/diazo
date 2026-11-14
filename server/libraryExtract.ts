@@ -9,9 +9,15 @@ import { createHash } from 'node:crypto'
 import type { LibraryItem, LibraryTaxonomy, RuleFinding } from '../shared/library.ts'
 import { UNSORTED } from '../shared/library.ts'
 import { assignItemId, isItemId, itemSlug, parseItemId, splitFrameName } from '../shared/libraryIds.ts'
-import { isIgnoredName, sectionCategory as readSection, type LibraryRules } from '../shared/libraryRules.ts'
+import {
+  isIgnoredName,
+  sectionCategory as readSection,
+  tidyCategoryPart,
+  type LibraryRules,
+} from '../shared/libraryRules.ts'
 import type { Frame } from '../shared/types.ts'
 import { ELEMENT_ID_ATTR } from '../shared/elementId.ts'
+import { originOf, sourceKeyOf } from '../shared/libraryProvenance.ts'
 import {
   attr,
   bodyOf,
@@ -66,13 +72,15 @@ function cleanLabel(label: string): string {
   return label.replace(/\s*\(\d+\)\s*$/, '').trim()
 }
 
-/** `013 Inputs & forms · Checkboxes… — title` → `Inputs & forms`. */
+/** `013 Inputs & forms · Checkboxes… — title` → `Inputs & forms`;
+ *  `00 · Index` → `Index`; `01 Heroes · AI products · A–L` → `Heroes`. */
 export function pageCategory(pageName: string): string | null {
   const name = pageName
     .replace(/\s+—\s+title$/i, '')
     .replace(/^\d+[\s.·-]*/, '')
-    .split(' · ')[0]!
-    .trim()
+    .split(' · ')
+    .map(tidyCategoryPart)
+    .find(Boolean)
   return name || null
 }
 
@@ -386,6 +394,8 @@ export function extractFrameItems(input: ExtractInput): ExtractResult {
     searchText: `${label} ${textRoot ? itemText(textRoot, skipChrome) : ''}`.trim().slice(0, MAX_TEXT),
     sourceUrl,
     license,
+    sourceKey: sourceKeyOf(frame.html || ''),
+    origin: originOf(frame.html || ''),
   }
   return { items: [family, ...variants], scripted, ignored: false }
 }

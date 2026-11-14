@@ -136,6 +136,11 @@ describe('the library write tools', () => {
       'insert_library_item',
       'import_to_library',
       'set_library_item',
+      /* read-only: "do we already have it?" */
+      'check_library',
+      /* a curation only proposes: the human reviews it and creates the library */
+      'start_library_curation',
+      'get_library_curation',
     ])
     for (const tool of tools.DESIGN_LIBRARY_TOOLS) {
       expect(Object.keys(tool.shape)).not.toEqual(expect.arrayContaining(['rules']))

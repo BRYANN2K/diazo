@@ -3,7 +3,7 @@
  * moving curation between libraries. Planning is pure; applying writes.
  * Spec: .context/specs/design-libraries.md, "Import rules" and "Migration".
  */
-import type { Actor } from '../shared/types.ts'
+import type { Actor, Canvas } from '../shared/types.ts'
 import type { LibraryItem, LibraryItemMeta } from '../shared/library.ts'
 import type { ImportReport } from '../shared/library.ts'
 import { canvasPages, framePageId } from '../shared/pages.ts'
@@ -13,7 +13,10 @@ import * as actions from './actions.ts'
 import { store } from './store.ts'
 import { lintFrame } from './lint.ts'
 import { updateFrameMeta } from './pageTools.ts'
-import { markDraft, planImport, stageLint, type ImportFrame } from './libraryImportPlan.ts'
+import { markCategory, markDraft, markItemId, planImport, stageLint, type ImportFrame } from './libraryImportPlan.ts'
+import { findDuplicates, describeMatches } from './libraryDuplicates.ts'
+import { withOrigin } from '../shared/libraryProvenance.ts'
+import { itemSlug } from '../shared/libraryIds.ts'
 import { sectionCategory } from '../shared/libraryRules.ts'
 import { readingOrder } from '../shared/frameOrder.ts'
 
@@ -107,13 +110,22 @@ export interface ImportRequest {
   tags?: string[]
   dryRun?: boolean
   actor: Actor
+  /** where else to look for a duplicate (the person's libraries); the
+   *  target library is always looked at */
+  libraries?: Canvas[]
+  /** import even what a library already holds */
+  force?: boolean
+  /** import as a variant of this family of the target library (implies force) */
+  asVariantOf?: string
 }
 
 export interface ImportOutcome {
   report: ImportReport
   /** per frame: the library frame it became, or why it failed */
-  applied: { frameId: string; libraryFrameId?: string; error?: string }[]
+  applied: { frameId: string; libraryFrameId?: string; error?: string; duplicate?: boolean }[]
 }
+
+export class ImportRefusal extends Error {}
 
 /** The section a frame sits under on its own page, by the library's rule. */
 function sectionAbove(frameId: string, rule: string | null): string | null {
@@ -154,6 +166,27 @@ export async function runImport(req: ImportRequest): Promise<ImportOutcome> {
       section: sectionAbove(frameId, record.rules.detect.section),
     })
   }
+  /* "we already have it": frames a library holds are left out unless forced */
+  const duplicates: NonNullable<ImportReport['duplicates']> = []
+  let variantOf: LibraryItem | undefined
+  if (req.asVariantOf) {
+    variantOf = (await libraryItems(req.libraryId)).find((i) => i.itemId === req.asVariantOf && !i.parentId)
+    if (!variantOf) throw new ImportRefusal(`no family "${req.asVariantOf}" in this library to add a variant to`)
+  }
+  if (!req.force && !variantOf && sources.length) {
+    const lookIn = [canvas, ...(req.libraries ?? []).filter((c) => c.id !== canvas.id)]
+    const found = await findDuplicates(
+      sources.map((src) => ({ name: src.name, html: src.html, ref: `${origin.get(src.frameId)}:${src.frameId}` })),
+      lookIn,
+    )
+    found.forEach((matches, at) => {
+      if (matches.length) duplicates.push({ frameId: sources[at]!.frameId, name: sources[at]!.name, matches })
+    })
+    if (duplicates.length) {
+      const left = new Set(duplicates.map((d) => d.frameId))
+      for (let at = sources.length - 1; at >= 0; at--) if (left.has(sources[at]!.frameId)) sources.splice(at, 1)
+    }
+  }
   const existing = (await libraryItems(req.libraryId))
     .filter((item) => !req.frameIds.includes(item.frameId))
     .map((item) => ({ itemId: item.itemId, hash: item.hash, frameId: item.frameId }))
@@ -182,9 +215,14 @@ export async function runImport(req: ImportRequest): Promise<ImportOutcome> {
     const source = store.getFrame(frameId)!
     return lintFrame({ ...source, html })
   })
+  if (duplicates.length) report.duplicates = duplicates
   if (req.dryRun) return { report, applied: [] }
 
-  const applied: ImportOutcome['applied'] = []
+  const applied: ImportOutcome['applied'] = duplicates.map((d) => ({
+    frameId: d.frameId,
+    duplicate: true,
+    error: `left out: ${describeMatches(d.matches)}`,
+  }))
   const pagesByName = new Map<string, string>()
   for (const f of report.frames) {
     try {
@@ -203,11 +241,20 @@ export async function runImport(req: ImportRequest): Promise<ImportOutcome> {
       const source = sources.find((s) => s.frameId === f.frameId)!
       let html = f.changes.html ?? source.html
       if (f.item?.status === 'draft') html = markDraft(html)
+      if (req.category && f.item) html = markCategory(html, f.item.category)
+      let name = f.changes.name ?? source.name
+      if (variantOf && f.item) {
+        const variantId = `${variantOf.itemId}-${itemSlug(f.item.label || source.name) || 'variant'}`
+        html = markItemId(html, variantId)
+        html = markCategory(html, variantOf.category)
+        name = `${variantId} — ${f.item.label || source.name}`
+      }
       if (origin.get(f.frameId) !== req.libraryId) {
+        html = withOrigin(html, `${origin.get(f.frameId)}:${f.frameId}`)
         const copy = actions.createFrame(
           req.libraryId,
           {
-            name: f.changes.name ?? source.name,
+            name,
             ...(pageId ? { pageId } : {}),
             x: f.changes.x,
             y: f.changes.y,

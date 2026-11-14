@@ -10,6 +10,7 @@ import { Input } from '../ui/input'
 import { Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from '../ui/modal'
 import { Segmented, SegmentedItem } from '../ui/segmented'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs'
+import { CurateLibraryModal } from './CurateLibraryModal'
 
 type Step = 'preset' | 'report' | 'taxonomy'
 
@@ -36,6 +37,7 @@ export function ConvertToLibraryModal({
   const [categories, setCategories] = useState<LibraryCategory[] | null>(null)
   const [failed, setFailed] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [curating, setCurating] = useState(false)
 
   useEffect(() => {
     let stale = false
@@ -77,6 +79,8 @@ export function ConvertToLibraryModal({
     }
   }
 
+  if (curating) return <CurateLibraryModal initialSources={[canvasId]} onClose={onClose} />
+
   const counts = report && (
     <p data-testid="library-preview-counts">
       {t('library.countFamilies', { count: report.families })} ·{' '}
@@ -115,6 +119,12 @@ export function ConvertToLibraryModal({
             ) : (
               <p>{t('library.previewing')}</p>
             )}
+          </div>
+          <div className="mt-2 flex items-center gap-2 rounded-card p-3 shadow-ring">
+            <p className="min-w-0 flex-1 text-caption text-ink-soft">{t('library.curateHint')}</p>
+            <Button size="sm" onClick={() => setCurating(true)}>
+              {t('library.curateOpen')}
+            </Button>
           </div>
         </div>
       )}

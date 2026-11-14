@@ -22,7 +22,7 @@ import {
   type RuleFinding,
 } from '../shared/library.ts'
 import { parentIdOf } from '../shared/libraryIds.ts'
-import { NON_INSERTABLE_KINDS, sectionCategory, type LibraryRules } from '../shared/libraryRules.ts'
+import { NON_INSERTABLE_KINDS, sectionCategory, tidyCategory, type LibraryRules } from '../shared/libraryRules.ts'
 import { buildIndex, type LibraryIndex } from '../shared/librarySearch.ts'
 import { readingOrder } from '../shared/frameOrder.ts'
 import { canvasPages, framePageId } from '../shared/pages.ts'
@@ -667,6 +667,21 @@ export function resetIndexerForTest(): void {
 
 /* ---- the dry run ---- */
 
+/** Fold categories that differ only by case or by what `tidyCategory`
+ *  removes into one, keeping the first spelling and adding the counts. */
+export function mergeCategories(counts: Map<string, number>): Map<string, number> {
+  const spelling = new Map<string, string>()
+  const out = new Map<string, number>()
+  for (const [raw, count] of counts) {
+    const path = tidyCategory(raw) ?? raw
+    const key = path.toLowerCase()
+    const kept = spelling.get(key) ?? path
+    spelling.set(key, kept)
+    out.set(kept, (out.get(kept) ?? 0) + count)
+  }
+  return out
+}
+
 /** What indexing a canvas under `rules` would give, without writing
  *  anything: counts, frames it ignored, frames it could not read, ids
  *  claimed twice, and the categories it found. */
@@ -733,11 +748,17 @@ export async function previewIndex(
       }
     }
   }
-  report.categories = [...categories]
+  /* `Pricing` and `pricing` (or two pages tidied to one name) are one category */
+  const merged = mergeCategories(categories)
+  report.categories = [...merged]
     .map(([path, count]) => ({ path, count }))
     .sort((a, b) => b.count - a.count || a.path.localeCompare(b.path))
   /* the section frames name categories too, even before anything sits under them */
-  const paths = new Set([...categories.keys(), ...report.ignored.flatMap((f) => (f.section ? [f.section] : []))])
+  const paths = new Set(
+    mergeCategories(
+      new Map([...merged.keys(), ...report.ignored.flatMap((f) => (f.section ? [f.section] : []))].map((p) => [p, 0])),
+    ).keys(),
+  )
   const known = (id: string) => taxonomy.kinds.find((k) => k.id === id)
   report.taxonomy = {
     kinds: [...kinds.keys()].sort().map((id) => ({

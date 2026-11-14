@@ -128,4 +128,18 @@ describe('the gallery', () => {
     await mount()
     expect(host.querySelector('[data-testid="inbox-badge"]')).toBeNull()
   })
+
+  it('says how to add items when the library is empty', async () => {
+    libraryItems.mockImplementation(async () => ({
+      ...OTP_RESULT,
+      hits: [],
+      total: 0,
+      facets: { kind: [], category: [], source: [], tag: [] },
+    }))
+    await mount()
+    const ways = host.querySelector('[data-testid="library-empty-ways"]')!.textContent
+    expect(ways).toContain('Add to library…')
+    expect(ways).toContain('import_to_library')
+    expect(host.querySelector('[data-testid="library-grid"]')).toBeNull()
+  })
 })

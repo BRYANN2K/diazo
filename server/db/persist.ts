@@ -19,6 +19,7 @@ import type {
   LibraryVisibility,
 } from '../../shared/library.ts'
 import { parseRunnerPick } from '../../shared/agentRunner.ts'
+import type { CurationJob } from '../../shared/libraryCuration.ts'
 import { cleanPlanReferences } from '../../shared/chat.ts'
 import { byStack } from '../../shared/frameStack.ts'
 import { unloadHtml } from '../frameHtml.ts'
@@ -1671,4 +1672,37 @@ export async function copyItemMeta(fromCanvasId: string, toCanvasId: string): Pr
       .values(rows.map((row) => ({ ...row, canvasId: toCanvasId })))
       .onConflictDoNothing()
   })
+}
+
+/* ---- library curation jobs (server/libraryCuration.ts) ---- */
+
+const curationWrites = new Map<string, Promise<unknown>>()
+
+/** Write a curation job; writes of one job run in order, a newer one last. */
+export function saveCuration(job: CurationJob): Promise<void> {
+  const row = {
+    id: job.id,
+    ownerId: job.ownerId,
+    status: job.status,
+    job,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  }
+  const previous = curationWrites.get(job.id) ?? Promise.resolve()
+  const done = previous
+    .catch(() => {})
+    .then(async () => {
+      await db.insert(t.libraryCurations).values(row).onConflictDoUpdate({ target: t.libraryCurations.id, set: row })
+    })
+  curationWrites.set(job.id, done)
+  void done.finally(() => {
+    if (curationWrites.get(job.id) === done) curationWrites.delete(job.id)
+  })
+  swallow(done)
+  return done.catch(() => {})
+}
+
+export async function loadCurations(): Promise<CurationJob[]> {
+  const rows = await db.select().from(t.libraryCurations)
+  return rows.map((row) => row.job)
 }

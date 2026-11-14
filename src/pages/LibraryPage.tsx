@@ -3,6 +3,7 @@ import type { LibraryDetail, LibrarySearchHit, LibrarySearchResult } from '../..
 import { api } from '../lib/api'
 import { navigate } from '../lib/navigate'
 import { useT } from '../lib/i18n'
+import { EmptyState } from '../components/ui/empty-state'
 import {
   EMPTY_QUERY,
   galleryQueryString,
@@ -222,22 +223,40 @@ export function LibraryPage({ libraryId, itemId }: { libraryId: string; itemId: 
               onKind={(kind) => set({ kind })}
               onCategory={(category) => set({ in: category })}
             />
-            <LibraryGrid
-              items={result?.hits ?? []}
-              hasMore={!!result?.cursor}
-              onEnd={loadMore}
-              render={(hit) => (
-                <LibraryItemTile
-                  key={hit.item.id}
-                  item={hit.item}
-                  variantCount={hit.variantCount}
-                  curator={curator}
-                  live={live === hit.item.id}
-                  onHover={setLive}
-                  onOpen={() => navigate(itemPath(hit.item.id))}
-                />
-              )}
-            />
+            {result && result.total === 0 && !query.q && !query.kind && !query.in ? (
+              <EmptyState
+                className="self-start"
+                title={t('library.galleryEmptyTitle')}
+                description={t('library.galleryEmptyDescription')}
+                action={
+                  <ul
+                    className="flex list-disc flex-col gap-1.5 pl-5 text-copy text-ink-soft"
+                    data-testid="library-empty-ways"
+                  >
+                    <li>{t('library.galleryEmptyFrame')}</li>
+                    <li>{t('library.galleryEmptyImport')}</li>
+                    <li>{t('library.galleryEmptyAgent')}</li>
+                  </ul>
+                }
+              />
+            ) : (
+              <LibraryGrid
+                items={result?.hits ?? []}
+                hasMore={!!result?.cursor}
+                onEnd={loadMore}
+                render={(hit) => (
+                  <LibraryItemTile
+                    key={hit.item.id}
+                    item={hit.item}
+                    variantCount={hit.variantCount}
+                    curator={curator}
+                    live={live === hit.item.id}
+                    onHover={setLive}
+                    onOpen={() => navigate(itemPath(hit.item.id))}
+                  />
+                )}
+              />
+            )}
           </div>
           {panel && detail && (
             <Sheet open onOpenChange={(open) => !open && setPanel(null)}>

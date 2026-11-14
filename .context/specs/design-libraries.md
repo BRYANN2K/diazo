@@ -518,6 +518,47 @@ Turning the existing canvases into libraries changes no frame.
 - **Licences.** Items show their source and licence. Public sharing is off by default (D6).
 - No new outbound request, so no new SSRF surface. The pull script runs by hand, outside the server.
 
+## AI curation
+
+Built 2026-11-14 (branch `feat/ai-library-curation`, migration 0068). Bryan's library is four
+canvases whose page names are numbered and split alphabetically (`01 Heroes · AI products · A–L`,
+`02 … · L–Z`); categories read from them were junk.
+
+- **One merged library, sources untouched.** A curation reads up to 8 canvases the requester
+  manages, folds duplicates (same markup, or same label and text across sources; the first source
+  wins) and keeps a family's cards in one entry.
+- **The model builds the tree from the items.** A spread of up to 450 entries (name, page, a
+  little text) goes to the requester's own configured model, which answers a tree of at most three
+  levels with short human names; the answer is read strictly (`parseTree`). The account's small
+  tier then files every entry, 60 per call (`n|name|page|WxH|text`, about 100 characters each),
+  answered as `{"a":{"1":"c12"}}` (`parseAssignments`). Thumbnails are not sent: vision on 7,000
+  items would cost ten times more for little gain over names and text.
+- **Review before writing.** The plan (tree, assignments, duplicates, entries already in another
+  library) is edited with `rename`, `merge`, `delete`, `move`, `add`, `assign`; nothing is written
+  but the job row until apply.
+- **Apply.** A new canvas, one page per category with items (named by path; up to 1,000 pages as
+  the canvas becomes a library), copies in a shelf grid, then `createLibrary` with the tree as its
+  taxonomy and the category read from the page first.
+- **Cost.** About `ceil(items / 60) + 1` calls, plus retries; 400 at most. Usage is totalled on the
+  job and priced with `shared/modelPrices.ts`.
+- **No account, no curation.** The server tier is never spent on it.
+
+Also: **Start empty** (`POST /api/libraries/new`, starting categories typed or suggested by the
+same model routing) and the import's chosen category written as `data-doop-category`, so the
+index keeps it (before, the page rule kept the top level only).
+
+## Duplicates on import
+
+Built 2026-11-14 (migration 0069). Provenance lives in the frame HTML so the projection can be
+rebuilt: `doop-import-source` (website imports) or `data-doop-source-url` gives
+`library_items.source_key` (normalised: host without `www`, path without trailing slash, non-tracking
+query kept, no scheme or fragment); `data-doop-origin="<canvasId>:<frameId>"` (every import and
+curation copy, the first origin kept) gives `origin`. Every import (REST, Add to library…, Start
+empty, MCP and resident `import_to_library`, the curation for other libraries) checks every library
+the person can use: `same-url`, `same-content` (origin or family hash), `similar` (word Jaccard ≥
+0.8 on name and text). Matches are not imported unless `force` or `as_variant_of`; `check_library`
+and `POST /api/libraries/check` ask without writing.
+
 ## Out of scope
 
 - Live-linked snapshot items. A block that must follow its source is a component (`<doop-use>`).

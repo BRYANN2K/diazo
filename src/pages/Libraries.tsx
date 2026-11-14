@@ -6,10 +6,12 @@ import { navigate } from '../lib/navigate'
 import { useT } from '../lib/i18n'
 import { AppRail, railLayout } from '../components/AppRail'
 import { ConvertToLibraryModal } from '../components/library/ConvertToLibraryModal'
+import { CurateLibraryModal } from '../components/library/CurateLibraryModal'
+import { NewLibraryModal } from '../components/library/NewLibraryModal'
 import { LibraryTile } from '../components/library/LibraryTile'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/ui/empty-state'
-import { PlusIcon } from '../components/ui/icons'
+import { PlusIcon, SparkIcon } from '../components/ui/icons'
 import { Modal, ModalActions, ModalLede, ModalTitle } from '../components/ui/modal'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { Skeleton } from '../components/ui/skeleton'
@@ -24,6 +26,8 @@ export function Libraries() {
   const [libraries, setLibraries] = useState<LibraryListEntry[] | null>(null)
   const [picking, setPicking] = useState(false)
   const [converting, setConverting] = useState<string | null>(null)
+  const [curating, setCurating] = useState(false)
+  const [starting, setStarting] = useState(false)
 
   function load() {
     api
@@ -39,7 +43,10 @@ export function Libraries() {
       <DashMain className="[background:var(--paper)]">
         <DashHeader variant="bare">
           <span className="flex-1" />
-          <Button variant="primary" size="bar" onClick={() => setPicking(true)}>
+          <Button size="bar" onClick={() => setCurating(true)} title={t('library.curateHint')}>
+            <SparkIcon width={15} height={15} strokeWidth={1.75} /> {t('library.curateOpen')}
+          </Button>
+          <Button variant="primary" size="bar" onClick={() => setStarting(true)}>
             <PlusIcon width={15} height={15} strokeWidth={1.75} /> {t('library.newLibrary')}
           </Button>
         </DashHeader>
@@ -78,6 +85,24 @@ export function Libraries() {
             setConverting(id)
           }}
           exclude={new Set((libraries ?? []).map((l) => l.id))}
+        />
+      )}
+      {starting && (
+        <NewLibraryModal
+          onClose={() => setStarting(false)}
+          onPath={(path) => {
+            setStarting(false)
+            if (path === 'canvas') setPicking(true)
+            else setCurating(true)
+          }}
+        />
+      )}
+      {curating && (
+        <CurateLibraryModal
+          onClose={() => {
+            setCurating(false)
+            load()
+          }}
         />
       )}
       {converting && (

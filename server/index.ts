@@ -1,7 +1,10 @@
 import * as libraries from './libraries.ts'
 import * as libraryIndex from './libraryIndex.ts'
 import { libraryRouter } from './libraryRoutes.ts'
+import { curationRouter } from './libraryCurationRoutes.ts'
 import { wireLibraryDescribe } from './libraryDescribe.ts'
+import { hydrateCurations, resumeCurations } from './libraryCuration.ts'
+import { resumeApplies } from './libraryCurationApply.ts'
 import { env } from './env.ts'
 import {
   catalogEntry,
@@ -204,6 +207,9 @@ libraryIndex.wireIndexer()
 wireLibraryDescribe() // AI descriptions, only on libraries that turned them on
 /* full index runs a restart cut off go on in the background */
 void Promise.all(libraryIndex.resumeIndexing(libraries.allLibraries()))
+await hydrateCurations() // AI library curations; the ones a restart cut off go on
+resumeCurations()
+resumeApplies()
 await hydrateInstanceSettings() // the sign-in policy, read on every signup
 await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use
@@ -1159,6 +1165,7 @@ app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/fonts', fontsRouter)
 app.use('/api/libraries', libraryRouter)
+app.use('/api/library-curations', curationRouter)
 
 /* the font library a canvas designs with: its workspace's, or its owner's */
 app.get('/api/canvases/:id/fonts', (req, res) => {
