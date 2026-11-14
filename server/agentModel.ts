@@ -89,7 +89,7 @@ let anthropic: Anthropic | null = null
 function anthropicTier(model: string = ANTHROPIC_MODEL): AgentModel | null {
   if (!env.ANTHROPIC_API_KEY) {
     warnOnce(
-      '[doop-agent] ANTHROPIC_API_KEY not set — the free Doop Agent tier is off. Users who connect a model account of their own still get the agent; everyone else sees queued cards and @mentions go unpicked. See README → "The Doop Agent".',
+      '[doop-agent] ANTHROPIC_API_KEY not set — the free Doop Agent tier is off. Users who connect a model account of their own still get the agent; everyone else sees queued cards and @mentions go unpicked. See docs/doop-reference.md → "The Doop Agent".',
     )
     return null
   }
