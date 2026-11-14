@@ -51,6 +51,7 @@ server/            - Express backend, WebSocket room, MCP server, better-auth
 server/db/         - drizzle-orm schema (schema.ts, auth-schema.ts) and migrations
 shared/            - types/utilities shared between server and client
 desktop/           - Tauri desktop app wrapper
+cli/               - the `doop` command line (`bun run doop`; talks to /mcp with an agent key)
 desktop/src-tauri/ - Rust side of the desktop app
 scripts/           - repo maintenance scripts
 tests/             - vitest test suite
