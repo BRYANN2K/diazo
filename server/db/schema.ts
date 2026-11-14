@@ -1083,6 +1083,36 @@ export const driftComparisons = pgTable(
   (t) => [index('drift_comparisons_frame_idx').on(t.frameId)],
 )
 
+/** The usage meter's ledger (server/agentRuns.ts): one row per resident run,
+ *  written once when it ends. `models` holds the per-model TokenUsage list;
+ *  the token columns are its totals, and the cost was priced at write time
+ *  (null = some model had no provider figure and no price row). */
+export const agentRuns = pgTable(
+  'agent_runs',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    /** 'design' | 'chat' */
+    kind: text('kind').notNull(),
+    agent: text('agent').notNull(),
+    label: text('label').notNull(),
+    provider: text('provider').notNull(),
+    payerId: text('payer_id'),
+    models: jsonb('models').notNull(),
+    inputTokens: integer('input_tokens').notNull(),
+    outputTokens: integer('output_tokens').notNull(),
+    cacheReadTokens: integer('cache_read_tokens').notNull(),
+    cacheWriteTokens: integer('cache_write_tokens').notNull(),
+    costUsd: doublePrecision('cost_usd'),
+    costEstimated: boolean('cost_estimated').notNull(),
+    /** 'done' | 'failed' | 'stopped' */
+    outcome: text('outcome').notNull(),
+    startedAt: bigint('started_at', { mode: 'number' }).notNull(),
+    endedAt: bigint('ended_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('agent_runs_canvas_idx').on(t.canvasId, t.startedAt)],
+)
+
 /** The instance's sign-in policy (shared/instanceSettings.ts): one row, id
  *  'instance', written by admins in Admin → Sign-in and read into memory at
  *  boot. Absent row = the defaults. */

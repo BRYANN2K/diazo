@@ -66,6 +66,7 @@ import type {
 } from '../shared/types.ts'
 import { CHAT_HISTORY_LINES, chatThreadId, cleanChatPlan } from '../shared/chat.ts'
 import { findInCanvas } from './canvasFind.ts'
+import { startRun } from './agentRuns.ts'
 import * as library from './referenceLibrary.ts'
 import { canvasPages, framePageId, MAX_PAGE_NAME, pageFrames, samePages } from '../shared/pages.ts'
 import { addPage, pageList, parsePageList, savePages, updateFrameMeta } from './pageTools.ts'
@@ -490,8 +491,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
   /* Only work that predates per-user attribution falls back to the canvas
      owner — a real requester never bills a collaborator or the owner. */
   const canvasOwner = store.getCanvas(canvasId)?.ownerId
-  const model = await pickModel(payer || canvasOwner, runner)
-  if (!model) {
+  const picked = await pickModel(payer || canvasOwner, runner)
+  if (!picked) {
     stalled.add(key)
     return 'no-model'
   }
@@ -503,8 +504,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
   /* a chat ask takes the plan-only loop instead: read tools, propose_plan
      and ask_in_chat — nothing that touches the canvas before a human
      presses Go design */
-  if (work.chat) return runChat(canvasId, role, payer, model, actor, stalled, key, runnerFilter)
-  if (!model.userId && RESIDENT_TASK_LIMIT <= 0) {
+  if (work.chat) return runChat(canvasId, role, payer, picked, actor, stalled, key, runnerFilter)
+  if (!picked.userId && RESIDENT_TASK_LIMIT <= 0) {
     const reason =
       'The Doop Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini, DeepSeek, Kimi or Claude API key in Settings, then retry.'
     for (const f of actions.takeFeedbackFor(canvasId, role.name, payer, runnerFilter))
@@ -527,6 +528,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     stalled.add(key)
     return 'no-model'
   }
+  /* from here on every model call is metered into this run's ledger row */
+  const meter = startRun(picked, { canvasId, kind: 'design', agent: role.name })
+  const model = meter.model
+  let delivered = false
   /* structured repo cards (the GitHub import) have their own runner with
      repo-reading tools; drift-review cards ride the loop below like prompt
      cards — their delivery is findings, not frame edits */
@@ -558,6 +563,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     if (claimed.length === 0 && comments.length === 0 && cards.length === 0) {
       clearInterval(heartbeat)
       actions.setAgentStatus(canvasId, actor, '')
+      void meter.finish(repoCards.every((c) => c.endedAt) ? 'done' : 'failed')
       return 'ran'
     }
   }
@@ -1089,6 +1095,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     }
     if (canceled()) return 'ran'
     if (finished && !blockedWebsiteAccess && !noMutation && !unverifiedMutation && !unresolvedLint) {
+      delivered = true
       for (const f of claimed) actions.completeTaskFeedback(f.id)
       settleComments(canvasId, comments, actor, { ok: true, summary }, runState)
       /* a card moves to the next agent in its pipeline, or finishes here */
@@ -1123,6 +1130,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       }
     }
   } finally {
+    void meter.finish(canceled() ? 'stopped' : delivered ? 'done' : 'failed')
     checks.delete(stopCheck)
     if (checks.size === 0) stopChecks.delete(canvasId)
     clearInterval(heartbeat)
@@ -1456,7 +1464,7 @@ async function runChat(
   canvasId: string,
   role: AgentRole,
   payer: string,
-  model: AgentModel,
+  picked: AgentModel,
   actor: Actor,
   stalled: Set<string>,
   key: string,
@@ -1466,7 +1474,7 @@ async function runChat(
   const asks = actions.takeChatAsksFor(canvasId, role.name, payer, runnerFilter)
   /* With no free tier the server's key never pays — the asks still fail
      visibly with the fix, like claimed cards do. */
-  if (!model.userId && RESIDENT_TASK_LIMIT <= 0) {
+  if (!picked.userId && RESIDENT_TASK_LIMIT <= 0) {
     const reason =
       'The Doop Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini, DeepSeek, Kimi or Claude API key in Settings, then retry.'
     for (const m of asks) actions.failChatAsk(m.id, reason)
@@ -1477,6 +1485,8 @@ async function runChat(
     stalled.add(key)
     return 'no-model'
   }
+  const meter = startRun(picked, { canvasId, kind: 'chat', agent: role.name })
+  const model = meter.model
   const canvas = store.getCanvas(canvasId)
   const repoUserId = payer || canvas?.ownerId
   const repoLink = repoUserId ? await linkFor(repoUserId, canvasId).catch(() => undefined) : undefined
@@ -1671,6 +1681,7 @@ async function runChat(
     clearInterval(heartbeat)
     actions.setAgentStatus(canvasId, actor, '')
   }
+  void meter.finish(finished ? 'done' : 'failed')
 
   console.log(
     `[resident] chat run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} plan=${!!runState.planProposed}`,
