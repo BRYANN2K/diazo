@@ -11,7 +11,7 @@ import { api } from '../lib/api'
 import { navigate } from '../lib/navigate'
 import { footerHint, insertLibraryItem, isLibraryItem, rowAction, type InsertTarget } from '../lib/findInsert'
 import type { CanvasFindHit } from '../../shared/canvasFind'
-import { splitFrameName } from '../../shared/libraryIds'
+import { focusOf, groupByFrame, looksLikeId, resultRows, rowDomId, rowKey, type ResultRow } from '../lib/findRows'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { IconButton } from './ui/icon-button'
@@ -19,8 +19,8 @@ import { ArrowDownIcon, ArrowUpIcon, ChevronRightIcon, XIcon } from './ui/icons'
 import { Input } from './ui/input'
 import { Pressable } from './ui/pressable'
 import { SearchField } from './ui/search-field'
-import { FramePreview } from './FramePreview'
 import { FindPreview } from './FindPreview'
+import { FindResultList } from './find/FindResultList'
 import { useFindDrag } from './FindDrag'
 import { useInsertedBox } from '../lib/insertedBox'
 
@@ -38,70 +38,6 @@ type Scope = 'page' | 'canvas' | 'all'
 /** remote scopes are answered by the server, grouped by frame */
 const isRemote = (scope: Scope) => scope !== 'page'
 
-/** One frame in the all-pages results, with every match found in it. */
-export interface FrameGroup {
-  frameId: string
-  pageId: string
-  pageName: string
-  canvasName?: string
-  /** library frames are named `<library_id> — <label>` */
-  id: string | null
-  label: string
-  hits: CanvasFindHit[]
-  /** the distinct things matched inside: library ids when the snippet holds one */
-  inside: { label: string; hit: CanvasFindHit }[]
-}
-
-const LIBRARY_ID = /[a-z][\w-]*\.[\w.-]*[\w]/gi
-
-function groupByFrame(hits: CanvasFindHit[], query: string): FrameGroup[] {
-  const q = query.trim().toLowerCase()
-  const groups: FrameGroup[] = []
-  const byId = new Map<string, FrameGroup>()
-  for (const hit of hits) {
-    let g = byId.get(hit.frameId)
-    if (!g) {
-      g = {
-        frameId: hit.frameId,
-        pageId: hit.pageId,
-        pageName: hit.pageName,
-        ...(hit.canvasName ? { canvasName: hit.canvasName } : {}),
-        ...splitFrameName(hit.frameName),
-        hits: [],
-        inside: [],
-      }
-      byId.set(hit.frameId, g)
-      groups.push(g)
-    }
-    g.hits.push(hit)
-    if (hit.where === 'name') continue
-    /* a library sheet's matches are its variants' ids: list those, once each */
-    const around = hit.before + hit.text + hit.after
-    const ids = [...around.matchAll(LIBRARY_ID)].map((m) => m[0]).filter((id) => id.toLowerCase().includes(q))
-    const label = ids.find((id) => id !== g.id) ?? `${hit.before.slice(-24)}${hit.text}${hit.after.slice(0, 24)}`.trim()
-    if (!g.inside.some((x) => x.label === label)) g.inside.push({ label, hit })
-  }
-  return groups.sort((a, b) => relevance(b, q) - relevance(a, q))
-}
-
-/* what you searched for first: a frame named for it, then a sheet holding
-   variants of it, then passing mentions; section headers (§) last */
-function relevance(g: FrameGroup, q: string): number {
-  const id = (g.id ?? '').toLowerCase()
-  const label = g.label.toLowerCase()
-  let score = 0
-  if (id.includes(q)) score += 1000
-  if (id.split(/[.-]/).includes(q)) score += 400
-  if (label.includes(q)) score += 300
-  score += Math.min(variantIds(g).length, 30) * 25
-  score += Math.min(g.hits.length, 20)
-  if (g.label.startsWith('§') || id.startsWith('§')) score -= 2000
-  return score
-}
-
-const looksLikeId = (s: string) => /^[a-z][\w-]*\.[\w.-]+$/i.test(s)
-const variantIds = (g: FrameGroup) => g.inside.filter((x) => looksLikeId(x.label))
-
 const SCOPE_LABEL = {
   page: { short: 'actions.findScopePageShort', long: 'actions.findScopePage' },
   canvas: { short: 'actions.findAllPagesShort', long: 'actions.findAllPages' },
@@ -111,48 +47,6 @@ const SCOPE_LABEL = {
 /** How long the pointer rests on a row before the preview follows it, so
  *  sweeping across the list does not flicker the preview. */
 const HOVER_INTENT_MS = 70
-
-/** Frames listed in the all-pages results. */
-const MAX_GROUPS = 300
-
-/** Variants listed under an expanded frame. */
-const MAX_INSIDE = 40
-
-/** One line of the all-pages results: a frame, or a variant listed under it. */
-export interface ResultRow {
-  key: string
-  group: FrameGroup
-  groupIndex: number
-  variant?: { label: string; hit: CanvasFindHit }
-}
-
-const rowKey = (g: FrameGroup, variant?: string) => (variant === undefined ? g.frameId : `${g.frameId}\n${variant}`)
-const rowDomId = (key: string) => `find-row-${key.replace(/[^\w-]/g, '_')}`
-
-/** Every visible row in list order: each frame, then its variants when expanded. */
-export function resultRows(groups: FrameGroup[], open: ReadonlySet<string>): ResultRow[] {
-  return groups
-    .slice(0, MAX_GROUPS)
-    .flatMap((group, groupIndex) => [
-      { key: rowKey(group), group, groupIndex },
-      ...(open.has(group.frameId)
-        ? group.inside
-            .slice(0, MAX_INSIDE)
-            .map((variant) => ({ key: rowKey(group, variant.label), group, groupIndex, variant }))
-        : []),
-    ])
-}
-
-/** What the preview frames, and an insert copies, for a row. */
-function focusOf(row: ResultRow, query: string): string {
-  return row.variant?.label ?? defaultFocus(row.group, query)
-}
-
-/** What the preview frames when a frame row (not a variant) is shown. */
-function defaultFocus(g: FrameGroup, query: string): string {
-  const q = query.trim()
-  return variantIds(g)[0]?.label ?? (g.id && g.id.toLowerCase().includes(q.toLowerCase()) ? g.id : q)
-}
 
 /** How long typing settles before an all-pages search asks the server. */
 const CANVAS_FIND_DEBOUNCE_MS = 220
@@ -577,100 +471,26 @@ export function FindBar({
           <p className="px-1 text-caption text-ink-faint">
             {t('actions.findFramesSummary', { frames: groups.length, total: remote?.total ?? remoteHits.length })}
           </p>
-          <ul
-            className="max-h-80 overflow-y-auto"
-            aria-label={t('actions.findLabel')}
-            onMouseLeave={() => window.clearTimeout(intent.current)}
-          >
-            {groups.slice(0, MAX_GROUPS).map((g, i) => {
-              const expanded = open.has(g.frameId)
-              const variants = variantIds(g).length
-              return (
-                <li key={g.frameId}>
-                  <div
-                    id={rowDomId(rowKey(g))}
-                    className={cn(
-                      'flex items-center gap-2 rounded-row px-1.5 py-1',
-                      pointed === rowKey(g) || (!pointedRow && i === active) ? 'bg-paper-deep' : 'hover:bg-sub',
-                    )}
-                    onMouseEnter={() => hover(rowKey(g))}
-                  >
-                    <Pressable
-                      focus="none"
-                      onPointerDown={(e) => pressRow(e, { key: rowKey(g), group: g, groupIndex: i })}
-                      onClick={(e) => activate({ key: rowKey(g), group: g, groupIndex: i }, e.shiftKey)}
-                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                    >
-                      <span className="h-[30px] w-[46px] flex-none overflow-hidden rounded-tag bg-sub ring-1 ring-line-soft">
-                        <FramePreview frameId={g.frameId} empty={null} />
-                      </span>
-                      <span className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate font-mono text-caption text-ink">{g.id ?? g.label}</span>
-                        <span className="truncate text-caption text-ink-faint">
-                          {g.id ? `${g.label} · ` : ''}
-                          {scope === 'all' && g.canvasName ? `${g.canvasName} · ` : ''}
-                          {g.pageName}
-                        </span>
-                      </span>
-                    </Pressable>
-                    <span className="flex-none text-caption text-ink-faint tabular-nums">
-                      {variants
-                        ? t('actions.findVariants', { count: variants })
-                        : t('actions.findMatches', { count: g.hits.length })}
-                    </span>
-                    {g.inside.length > 0 ? (
-                      <IconButton
-                        size="sm"
-                        aria-label={t('actions.findShowInside')}
-                        aria-expanded={expanded}
-                        onClick={() =>
-                          setOpen((prev) => {
-                            const next = new Set(prev)
-                            if (next.has(g.frameId)) next.delete(g.frameId)
-                            else next.add(g.frameId)
-                            return next
-                          })
-                        }
-                      >
-                        <ChevronRightIcon
-                          width={14}
-                          height={14}
-                          aria-hidden
-                          className={cn('transition-transform', expanded && 'rotate-90')}
-                        />
-                      </IconButton>
-                    ) : (
-                      <span className="size-7 flex-none" />
-                    )}
-                  </div>
-                  {expanded && (
-                    <ul className="pb-1 pl-[62px]">
-                      {g.inside.slice(0, MAX_INSIDE).map((x) => (
-                        <li key={x.label} id={rowDomId(rowKey(g, x.label))}>
-                          <Pressable
-                            focus="none"
-                            onMouseEnter={() => hover(rowKey(g, x.label))}
-                            onPointerDown={(e) =>
-                              pressRow(e, { key: rowKey(g, x.label), group: g, groupIndex: i, variant: x })
-                            }
-                            onClick={(e) =>
-                              activate({ key: rowKey(g, x.label), group: g, groupIndex: i, variant: x }, e.shiftKey)
-                            }
-                            className={cn(
-                              'w-full truncate rounded-row px-1.5 py-0.5 text-left font-mono text-caption text-ink-soft',
-                              pointed === rowKey(g, x.label) ? 'bg-paper-deep' : 'hover:bg-sub',
-                            )}
-                          >
-                            {x.label}
-                          </Pressable>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
+          <FindResultList
+            groups={groups}
+            open={open}
+            pointed={pointed}
+            hasPointedRow={!!pointedRow}
+            active={active}
+            showCanvas={scope === 'all'}
+            onToggle={(frameId) =>
+              setOpen((prev) => {
+                const next = new Set(prev)
+                if (next.has(frameId)) next.delete(frameId)
+                else next.add(frameId)
+                return next
+              })
+            }
+            onHover={hover}
+            onLeave={() => window.clearTimeout(intent.current)}
+            onPress={pressRow}
+            onActivate={activate}
+          />
           {hint && hint.kind !== 'none' && (
             <p
               className="truncate border-t border-line-soft px-1 pt-1.5 text-caption text-ink-faint"
