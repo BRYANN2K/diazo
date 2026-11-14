@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { MemoryPanel } from './MemoryPanel'
 import { UsagePanel } from './UsagePanel'
+import { DuelCards } from './DuelCards'
 import {
   Panel,
   type PanelResize,
@@ -158,6 +159,7 @@ export function ActivityPanel({
             the prompt composer is docked underneath */}
         <PanelTabPanel value="tasks" className={tabEnter}>
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+            {canEdit && <DuelCards canvasId={canvasId} />}
             <RecentTasks />
           </div>
           {/* the composer briefs agents to change frames: editors only */}

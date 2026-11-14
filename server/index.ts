@@ -57,6 +57,7 @@ import { compareFrameWithUrl, driftErrorMessage, getComparison, listComparisons 
 import { classifyDriftUrl } from '../shared/drift.ts'
 import { usageReport } from './agentRuns.ts'
 import { RollbackConflictError, rollbackRun, runTimeline } from './runReplay.ts'
+import { DuelInputError, listDuels, pickDuel, startDuel } from './duels.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
@@ -3702,6 +3703,53 @@ app.post('/api/canvases/:id/import', async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: e instanceof Error ? e.message : 'import failed' })
   }
+})
+
+/* model duels (server/duels.ts): one brief to 2-3 model picks, each into its
+   own sibling frame; metered one resident task per entry */
+app.post('/api/canvases/:id/duels', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  const picks: unknown[] = Array.isArray(req.body?.picks) ? req.body.picks : []
+  const brief = String(req.body?.brief ?? '')
+  const pageId = typeof req.body?.pageId === 'string' ? req.body.pageId : undefined
+  for (let i = 0; i < Math.min(picks.length, 3); i++) {
+    const gate = await allowance.consumeResidentTask(req.user!.id)
+    if (!gate.ok) return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
+  }
+  try {
+    const duel = await startDuel({
+      canvasId: req.params.id,
+      ...(pageId ? { pageId } : {}),
+      brief,
+      picks,
+      actor: userActor(req),
+      userId: req.user!.id,
+    })
+    res.json(duel)
+  } catch (err) {
+    if (err instanceof DuelInputError) return res.status(400).json({ error: err.message })
+    console.error('[duel] could not start', err)
+    res.status(500).json({ error: 'The duel could not start' })
+  }
+})
+
+/* keep one entry: a canvas decision, the others archived */
+app.post('/api/canvases/:id/duels/:duelId/pick', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  try {
+    const duel = await pickDuel(req.params.id, req.params.duelId, String(req.body?.frameId ?? ''), userActor(req))
+    if (!duel) return res.status(404).json({ error: 'No such duel on this canvas' })
+    res.json(duel)
+  } catch (err) {
+    if (err instanceof DuelInputError) return res.status(400).json({ error: err.message })
+    console.error('[duel] could not keep the pick', err)
+    res.status(500).json({ error: 'The pick could not be saved' })
+  }
+})
+
+app.get('/api/canvases/:id/duels', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  res.json(await listDuels(req.params.id))
 })
 
 app.post('/api/canvases/:id/cards', async (req, res) => {

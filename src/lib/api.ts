@@ -5,6 +5,7 @@ import { beginFrameSave } from './frameSaves'
 import type { StackWrite } from '../../shared/frameStack'
 import type { UsageReport } from '../../shared/agentRuns'
 import type { RollbackResult, RunTimeline } from '../../shared/runReplay'
+import type { DuelView, ModelDuel } from '../../shared/duel'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type { RepoLink, RepoLinkStatus, RepoRequest, RepoResult } from '../../shared/localRepo'
 import type { HandoffFile, HandoffPack, HandoffWriteResult } from '../../shared/handoff'
@@ -528,6 +529,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ url }),
     }),
+  startDuel: (canvasId: string, brief: string, picks: RunnerPick[], pageId?: string) =>
+    req<ModelDuel>(`/api/canvases/${canvasId}/duels`, {
+      method: 'POST',
+      body: JSON.stringify({ brief, picks, pageId }),
+    }),
+  pickDuel: (canvasId: string, duelId: string, frameId: string) =>
+    req<DuelView>(`/api/canvases/${canvasId}/duels/${duelId}/pick`, {
+      method: 'POST',
+      body: JSON.stringify({ frameId }),
+    }),
+  listDuels: (canvasId: string) => req<DuelView[]>(`/api/canvases/${canvasId}/duels`),
   rollbackRun: (canvasId: string, runId: string, force = false) =>
     req<RollbackResult>(`/api/canvases/${canvasId}/runs/${runId}/rollback`, {
       method: 'POST',

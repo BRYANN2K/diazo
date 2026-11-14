@@ -27,6 +27,7 @@ import { handoff } from './handoff'
 import { built } from './built'
 import { usage } from './usage'
 import { replay } from './replay'
+import { duel } from './duel'
 
 /** The source catalog, one namespace per area of the app. */
 export const en = {
@@ -59,4 +60,5 @@ export const en = {
   built,
   usage,
   replay,
+  duel,
 }

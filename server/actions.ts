@@ -3274,6 +3274,17 @@ export function recordChatDecision(canvasId: string, text: string, actor: Actor)
   })
 }
 
+/** A model duel was settled: the kept entry is the decision, in Memory like
+ *  any other, pointing at the frame that won. */
+export function recordDuelDecision(canvasId: string, text: string, frameId: string, actor: Actor): DesignDecision {
+  return captureDecision(canvasId, {
+    text: text.slice(0, MAX_DECISION_CHARS),
+    source: 'duel',
+    frameId,
+    from: actor.name,
+  })
+}
+
 /** Pin a frame to Memory as a style reference. Throws with a caller-facing
  *  message on limits; returns undefined when canvas/frame are missing. */
 export function pinReference(canvasId: string, frameId: string, actor: Actor): MemoryReference | undefined {

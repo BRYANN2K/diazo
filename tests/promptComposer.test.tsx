@@ -20,6 +20,8 @@ vi.mock('../src/lib/api', () => ({
     agentAllowance: mocks.agentAllowance,
     /* the composer's model picker lists the connections a task can run on */
     agentRunners: () => Promise.resolve({ runners: [] }),
+    /* the comparison cards of open model duels sit above the task list */
+    listDuels: () => Promise.resolve([]),
   },
   ApiError: class ApiError extends Error {},
 }))

@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { nanoid } from 'nanoid'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm'
 import { db } from './index.ts'
 import * as t from './schema.ts'
 import { extractAssetIds } from '../assets.ts'
@@ -747,6 +747,16 @@ export async function listRunActivity(runId: string): Promise<(ActivityItem & { 
   }))
 }
 
+/** The resident runs that logged activity on a frame, newest first. */
+export async function listFrameRunIds(frameId: string): Promise<string[]> {
+  const rows = await db
+    .select({ runId: t.activity.runId })
+    .from(t.activity)
+    .where(and(eq(t.activity.frameId, frameId), isNotNull(t.activity.runId)))
+    .orderBy(desc(t.activity.at))
+  return [...new Set(rows.flatMap((r) => (r.runId ? [r.runId] : [])))]
+}
+
 /** One version in full; undefined when the id is unknown OR belongs to
  *  another frame, so a caller can never read across frames by id alone. */
 export async function getFrameVersion(frameId: string, versionId: string): Promise<FrameVersion | undefined> {
@@ -818,6 +828,7 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.decisions).where(eq(t.decisions.canvasId, canvasId)))
   swallow(db.delete(t.memoryProposals).where(eq(t.memoryProposals.canvasId, canvasId)))
   swallow(db.delete(t.agentRuns).where(eq(t.agentRuns.canvasId, canvasId)))
+  swallow(db.delete(t.modelDuels).where(eq(t.modelDuels.canvasId, canvasId)))
   swallow(db.delete(t.canvasMembers).where(eq(t.canvasMembers.canvasId, canvasId)))
   swallow(db.delete(t.canvases).where(eq(t.canvases.id, canvasId)))
 }
