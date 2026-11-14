@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { nanoid } from 'nanoid'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm'
 import { db } from './index.ts'
 import * as t from './schema.ts'
 import { extractAssetIds } from '../assets.ts'
@@ -716,6 +716,16 @@ export async function listRunActivity(runId: string): Promise<(ActivityItem & { 
     at: row.at,
     runId,
   }))
+}
+
+/** The resident runs that logged activity on a frame, newest first. */
+export async function listFrameRunIds(frameId: string): Promise<string[]> {
+  const rows = await db
+    .select({ runId: t.activity.runId })
+    .from(t.activity)
+    .where(and(eq(t.activity.frameId, frameId), isNotNull(t.activity.runId)))
+    .orderBy(desc(t.activity.at))
+  return [...new Set(rows.flatMap((r) => (r.runId ? [r.runId] : [])))]
 }
 
 /** One version in full; undefined when the id is unknown OR belongs to

@@ -12,4 +12,9 @@ export const duel = {
   started: { one: 'Duelo iniciado com {count} modelo', other: 'Duelo iniciado com {count} modelos' },
   failed: 'Não foi possível iniciar o duelo.',
   cancel: 'Cancelar',
+  cardsTitle: 'Duelos de modelos',
+  lint: 'lint {score}',
+  statusQueued: 'Na fila',
+  statusRunning: 'Desenhando…',
+  statusFailed: 'Falhou',
 } as const

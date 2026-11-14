@@ -9,13 +9,14 @@ vi.mock('../server/db/persist.ts', () => ({
   saveFrameVersion: () => {},
   saveDecision: () => {},
   deleteFrame: () => {},
+  listFrameRunIds: async () => [],
 }))
 vi.mock('../server/db/index.ts', () => ({ db: {} }))
 vi.mock('../server/resident.ts', () => ({ onFeedback: () => {} }))
 vi.mock('../server/distill.ts', () => ({ onDecision: () => {} }))
 
 const { duelProblem } = await import('../shared/duel.ts')
-const { DUEL_FRAME, DuelInputError, duelDeps, pickLabel, startDuel } = await import('../server/duels.ts')
+const { DUEL_FRAME, DuelInputError, duelDeps, duelView, pickLabel, startDuel } = await import('../server/duels.ts')
 const { store } = await import('../server/store.ts')
 const actions = await import('../server/actions.ts')
 
@@ -84,5 +85,35 @@ describe('startDuel', () => {
 
   it('labels a pick by its connection name', () => {
     expect(pickLabel({ provider: 'claude-local' })).toBe('Claude Plan')
+  })
+})
+
+describe('duelView', () => {
+  it('shows each entry with its card status, lint score and its run’s cost and time', async () => {
+    store.init([structuredClone(CANVAS)])
+    vi.spyOn(duelDeps, 'insert').mockResolvedValue()
+    const duel = await startDuel({ canvasId: 'c1', brief: 'Hero', picks: [gpt, claude], actor: human, userId: 'u1' })
+    const [a, b] = duel.entries
+    store.getFrame(a!.frameId)!.lint = { score: 92, errors: 0, warnings: 1 } as never
+    actions.failCard('c1', b!.cardId, 'model gone')
+    vi.spyOn(duelDeps, 'frameRuns').mockImplementation(async (frameId) => (frameId === a!.frameId ? ['run-a'] : []))
+    vi.spyOn(duelDeps, 'run').mockResolvedValue({
+      costUsd: 0.12,
+      costEstimated: true,
+      startedAt: 1000,
+      endedAt: 61_000,
+    } as never)
+    const view = await duelView(duel)
+    expect(view.results[0]).toMatchObject({
+      status: 'queued',
+      exists: true,
+      lintScore: 92,
+      runId: 'run-a',
+      costUsd: 0.12,
+      costEstimated: true,
+      durationMs: 60_000,
+    })
+    expect(view.results[1]).toMatchObject({ status: 'failed', exists: true })
+    expect(view.results[1]!.runId).toBeUndefined()
   })
 })

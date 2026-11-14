@@ -6,7 +6,16 @@ import { store } from './store.ts'
 import * as actions from './actions.ts'
 import type { Actor } from '../shared/types.ts'
 import { RUNNER_NAMES, isRunnerProvider, parseRunnerPick, type RunnerPick } from '../shared/agentRunner.ts'
-import { duelLetter, duelProblem, type DuelEntry, type ModelDuel } from '../shared/duel.ts'
+import {
+  duelLetter,
+  duelProblem,
+  type DuelEntry,
+  type DuelEntryResult,
+  type DuelView,
+  type ModelDuel,
+} from '../shared/duel.ts'
+import * as persist from './db/persist.ts'
+import { getRun } from './agentRuns.ts'
 import { isCustomProviderKind } from '../shared/customProvider.ts'
 
 /* Model duels (shared/duel.ts): one brief, 2-3 model picks, one empty
@@ -28,6 +37,8 @@ export const duelDeps = {
   },
   list: (canvasId: string) =>
     db.select().from(modelDuels).where(eq(modelDuels.canvasId, canvasId)).orderBy(desc(modelDuels.createdAt)).limit(20),
+  frameRuns: (frameId: string) => persist.listFrameRunIds(frameId),
+  run: (runId: string) => getRun(runId),
   get: (canvasId: string, id: string) =>
     db
       .select()
@@ -132,8 +143,40 @@ export async function startDuel(input: {
   return duel
 }
 
-export async function listDuels(canvasId: string): Promise<ModelDuel[]> {
-  return (await duelDeps.list(canvasId)).map(toDuel)
+/** Each entry as the comparison card shows it: where its card is, the
+ *  frame's lint score, and the cost and time of the run that designed it. */
+export async function duelView(duel: ModelDuel): Promise<DuelView> {
+  const cards = actions.getTasks(duel.canvasId)
+  const results: DuelEntryResult[] = []
+  for (const entry of duel.entries) {
+    const card = cards.find((c) => c.id === entry.cardId)
+    const frame = store.getFrame(entry.frameId)
+    const status: DuelEntryResult['status'] = !card
+      ? 'done'
+      : card.failedAt
+        ? 'failed'
+        : card.endedAt
+          ? 'done'
+          : card.agentName
+            ? 'running'
+            : 'queued'
+    const [runId] = await duelDeps.frameRuns(entry.frameId)
+    const run = runId ? await duelDeps.run(runId) : undefined
+    results.push({
+      ...entry,
+      status,
+      exists: !!frame,
+      ...(frame?.lint ? { lintScore: frame.lint.score } : {}),
+      ...(runId ? { runId } : {}),
+      ...(run?.costUsd !== undefined ? { costUsd: run.costUsd } : {}),
+      ...(run ? { costEstimated: run.costEstimated, durationMs: run.endedAt - run.startedAt } : {}),
+    })
+  }
+  return { ...duel, results }
+}
+
+export async function listDuels(canvasId: string): Promise<DuelView[]> {
+  return Promise.all((await duelDeps.list(canvasId)).map(toDuel).map(duelView))
 }
 
 export async function getDuel(canvasId: string, id: string): Promise<ModelDuel | undefined> {

@@ -12,4 +12,9 @@ export const duel = {
   started: { one: 'Duel started with {count} model', other: 'Duel started with {count} models' },
   failed: 'Could not start the duel.',
   cancel: 'Cancel',
+  cardsTitle: 'Model duels',
+  lint: 'lint {score}',
+  statusQueued: 'Queued',
+  statusRunning: 'Designing…',
+  statusFailed: 'Failed',
 } as const

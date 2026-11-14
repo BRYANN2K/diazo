@@ -45,3 +45,21 @@ export function duelProblem(brief: string, picks: readonly RunnerPick[]): string
 export function duelLetter(index: number): string {
   return String.fromCharCode(65 + index)
 }
+
+/** One entry as the comparison card shows it. */
+export interface DuelEntryResult extends DuelEntry {
+  status: 'queued' | 'running' | 'done' | 'failed'
+  /** false = the frame was deleted */
+  exists: boolean
+  /** the anti-slop lint score of the frame, 0-100 */
+  lintScore?: number
+  /** the run that designed it (agent_runs) */
+  runId?: string
+  costUsd?: number
+  costEstimated?: boolean
+  durationMs?: number
+}
+
+export interface DuelView extends ModelDuel {
+  results: DuelEntryResult[]
+}
