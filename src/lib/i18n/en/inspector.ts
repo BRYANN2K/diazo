@@ -271,4 +271,20 @@ export const inspector = {
   colorNone: 'none',
   pageBackground: 'Background',
   pageBackgroundFailed: 'Could not save the page background',
+
+  // code mapping: where the frame or its component lives in the linked repo
+  codeLinkTitle: 'Code',
+  codeLinkNone: 'Not mapped to a file yet',
+  codeLinkComponent: 'Component “{name}”',
+  codeLinkPath: 'File in the repo',
+  codeLinkExport: 'Export',
+  codeLinkSave: 'Save',
+  codeLinkEdit: 'Edit',
+  codeLinkRemove: 'Remove',
+  codeLinkSuggest: 'Suggest from repo',
+  codeLinkSuggestTitle: 'Search the linked project for the file this lives in',
+  codeLinkSuggesting: 'Searching…',
+  codeLinkNoSuggestions: 'No likely file in {repo}',
+  codeLinkUse: 'Use',
+  codeLinkFailed: 'Could not save the mapping',
 } as const

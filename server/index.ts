@@ -29,6 +29,15 @@ import { FIRST_CANVAS_PATH, SIGNUP_PARAM, parseSignupMethod } from '../shared/fi
 import { localAgentRouter, handleLocalAgentMcp, wake as wakeUserWork } from './localAgent.ts'
 import { deleteLink, linkFor, localRepo, localRepoRouter, putLink, repoToolCall } from './localRepo.ts'
 import { buildHandoffPack, HandoffError } from './handoff.ts'
+import { CodeLinkError, deleteCodeLink, listCodeLinks, putCodeLink } from './codeLinks.ts'
+import { suggestCodeLinks } from './codeSuggest.ts'
+import {
+  CODE_LINK_KINDS,
+  CODE_LINK_MAX_EXPORT,
+  CODE_LINK_MAX_PATH,
+  CODE_LINK_SOURCES,
+  isCodeLinkKind,
+} from '../shared/codeLinks.ts'
 import {
   handoffFilesProblem,
   HANDOFF_MAX_FILE_BYTES,
@@ -1205,7 +1214,8 @@ app.post('/api/canvases/:id/handoff', async (req, res) => {
           return r.ok ? (r.result as RepoReadResult) : undefined
         }
       : undefined
-    const pack = await buildHandoffPack(c.id, { ...parsed.data, requesterId: req.user!.id, readRepo })
+    const codeLinks = await listCodeLinks(c.id).catch(() => [])
+    const pack = await buildHandoffPack(c.id, { ...parsed.data, requesterId: req.user!.id, readRepo, codeLinks })
     res.json({ pack, link: link ? { name: link.name } : null, writable })
   } catch (e) {
     if (e instanceof HandoffError) return res.status(e.status).json({ error: e.message })
@@ -1253,6 +1263,68 @@ app.post('/api/canvases/:id/handoff/write', async (req, res) => {
     if (e instanceof HandoffError) return res.status(e.status).json({ error: e.message })
     throw e
   }
+})
+
+/* ---- component ↔ file mapping (shared/codeLinks.ts): where a component or
+   a frame lives in the linked repo. Storing a mapping never reads or writes
+   the repo; it is a canvas-level note every implementer reads. */
+
+const codeLinkBody = z.object({
+  targetKind: z.enum(CODE_LINK_KINDS),
+  targetId: z.string().min(1).max(100),
+  path: z.string().max(CODE_LINK_MAX_PATH + 20),
+  exportName: z.string().max(CODE_LINK_MAX_EXPORT).nullable().optional(),
+  source: z.enum(CODE_LINK_SOURCES).optional(),
+})
+
+app.get('/api/canvases/:id/code-links', async (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'view')
+  if (!c) return
+  res.json({ links: await listCodeLinks(c.id) })
+})
+
+app.put('/api/canvases/:id/code-links', async (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'edit')
+  if (!c) return
+  const parsed = codeLinkBody.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid code link' })
+  try {
+    res.json({ link: await putCodeLink(c.id, parsed.data, req.user!.name) })
+  } catch (e) {
+    if (e instanceof CodeLinkError) return res.status(e.status).json({ error: e.message })
+    throw e
+  }
+})
+
+/* suggestions read the caller's own linked project (repo_search + repo_list) */
+app.post('/api/canvases/:id/code-links/suggest', async (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'edit')
+  if (!c) return
+  const parsed = z
+    .object({ targetKind: z.enum(CODE_LINK_KINDS), targetId: z.string().min(1).max(100) })
+    .safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid target' })
+  const { targetKind, targetId } = parsed.data
+  try {
+    res.json(
+      await suggestCodeLinks(
+        req.user!.id,
+        c.id,
+        targetKind === 'frame' ? { frame_id: targetId } : { component: targetId },
+      ),
+    )
+  } catch (e) {
+    if (e instanceof CodeLinkError) return res.status(e.status).json({ error: e.message })
+    throw e
+  }
+})
+
+app.delete('/api/canvases/:id/code-links/:kind/:targetId', async (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'edit')
+  if (!c) return
+  const kind = req.params.kind
+  if (!isCodeLinkKind(kind)) return res.status(400).json({ error: "kind must be 'component' or 'frame'" })
+  res.json({ ok: await deleteCodeLink(c.id, kind, req.params.targetId!) })
 })
 
 app.use('/api/admin', adminRouter)

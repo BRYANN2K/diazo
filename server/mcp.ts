@@ -43,6 +43,16 @@ import { renderFrame } from './screenshot.ts'
 import { lintAndStore } from './lint.ts'
 import { checkAndStore, checkOutcomeForAgent } from './frameChecks.ts'
 import { buildHandoffPack, HandoffError } from './handoff.ts'
+import {
+  CodeLinkError,
+  SET_CODE_LINK_DESCRIPTION,
+  componentCodeLink,
+  frameCodeLinks,
+  listCodeLinks,
+  setCodeLinkTool,
+} from './codeLinks.ts'
+import { suggestCodeLinks } from './codeSuggest.ts'
+import { CODE_LINK_MAX_EXPORT, CODE_LINK_MAX_PATH } from '../shared/codeLinks.ts'
 import { imagesForFrames } from './assets.ts'
 import type { FrameImage } from '../shared/imageDescriptions.ts'
 import { renderedHeight } from './renderLimits.ts'
@@ -1727,11 +1737,17 @@ export function buildMcpServer(
       arrive(f.canvasId, agent_name)
       const images = (await imagesForFrames([f.id])).get(f.id)
       const instances = f.html.includes(INSTANCE_ATTR) ? instancesIn(f) : []
+      const codeLinks = await frameCodeLinks(
+        f.canvasId,
+        f.id,
+        instances.map((i) => i.component_id),
+      )
       return withFeedbackNotice(
         text({
           ...frameSummary(f, images),
           html: expand_components ? f.html : compactFrameHtml(f),
           ...(instances.length ? { instances } : {}),
+          ...(codeLinks ? { code_links: codeLinks } : {}),
         }),
         f.canvasId,
         agent_name ? actorFrom(agent_name) : undefined,
@@ -2487,7 +2503,10 @@ export function buildMcpServer(
             workspaces.canvasesFor(ownerId ?? '').flatMap((meta) => store.getCanvas(meta.id) ?? []),
         })
         if (!outcome.ok) return err(outcome.error)
-        const { data, note, frames } = outcome.result
+        const { note, frames } = outcome.result
+        let { data } = outcome.result
+        if (tool.name === 'get_component' && data && typeof data === 'object' && 'id' in data)
+          data = { ...data, code_link: await componentCodeLink(canvasId, String((data as { id: unknown }).id)) }
         const result = note ? textWithNudge(data, note) : text(data)
         for (const frame of frames ?? []) withComponentNotes(result, frame)
         return tool.readOnly
@@ -2610,11 +2629,70 @@ export function buildMcpServer(
           title,
           changeId: change_id,
           docs: proposal || spec || tasks ? { proposal, spec, tasks } : undefined,
+          codeLinks: await listCodeLinks(canvas_id).catch(() => []),
         })
         return text(pack)
       } catch (e) {
         if (e instanceof HandoffError) return err(e.message)
         return err(`handoff failed: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    },
+  )
+
+  server.registerTool(
+    'suggest_code_links',
+    {
+      title: 'Suggest the file a component or frame lives in',
+      description:
+        "Search the connected account's linked local project for the file a component or frame probably lives in: export declarations named after it, and files named alike. Answers up to 5 ranked suggestions (path, export, reason); nothing is stored — confirm one with set_code_link. Needs the doop desktop app open on the machine holding the linked folder.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        component: z.string().optional().describe('Component name or id — or pass frame_id'),
+        frame_id: z.string().optional().describe('A frame — or pass component'),
+        agent_name: agentName.optional(),
+      },
+    },
+    async (input) => {
+      if (!canvasFor(input.canvas_id, 'edit')) return noCanvas(input.canvas_id)
+      if (!ownerId) return err('this connection is not signed in to a Doop account')
+      arrive(input.canvas_id, input.agent_name)
+      try {
+        return text(await suggestCodeLinks(ownerId, input.canvas_id, input))
+      } catch (e) {
+        if (e instanceof CodeLinkError) return err(e.message)
+        throw e
+      }
+    },
+  )
+
+  server.registerTool(
+    'set_code_link',
+    {
+      title: 'Map a component or frame to its file',
+      description: SET_CODE_LINK_DESCRIPTION,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        component: z.string().optional().describe('Component name or id — or pass frame_id'),
+        frame_id: z.string().optional().describe('A frame (a screen or a page) — or pass component'),
+        path: z
+          .string()
+          .max(CODE_LINK_MAX_PATH)
+          .nullable()
+          .describe('Repo-relative file, e.g. "src/components/Button.tsx"; null clears the mapping'),
+        export_name: z.string().max(CODE_LINK_MAX_EXPORT).optional().describe('The export, e.g. "Button" or "default"'),
+        agent_name: agentName.optional(),
+      },
+    },
+    async (input) => {
+      if (!canvasFor(input.canvas_id, 'edit')) return noCanvas(input.canvas_id)
+      arrive(input.canvas_id, input.agent_name)
+      try {
+        return text(await setCodeLinkTool(input.canvas_id, input, actorFrom(input.agent_name).name))
+      } catch (e) {
+        if (e instanceof CodeLinkError) return err(e.message)
+        throw e
       }
     },
   )

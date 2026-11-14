@@ -169,4 +169,32 @@ describe('buildHandoffPack', () => {
     const empty = store.createCanvas('empty', 'bryan')
     await expect(buildHandoffPack(empty.id, { frameIds: ['ghost'] })).rejects.toThrow(/nothing to hand off/)
   })
+
+  it('carries the code mapping of its frames', async () => {
+    const { canvas, home, cart } = seedCanvas()
+    const link = (targetId: string, path: string, exportName: string | null) => ({
+      id: targetId,
+      canvasId: canvas.id,
+      targetKind: 'frame' as const,
+      targetId,
+      path,
+      exportName,
+      source: 'manual' as const,
+      updatedBy: 'bryan',
+      updatedAt: 0,
+    })
+    const pack = await buildHandoffPack(canvas.id, {
+      renderPng,
+      frameIds: [home.id],
+      codeLinks: [link(home.id, 'src/pages/Home.tsx', 'HomePage'), link(cart.id, 'src/pages/Cart.tsx', null)],
+    })
+    const map = JSON.parse(pack.files.find((f) => f.path.endsWith('/code-links.json'))!.text!)
+    expect(map).toEqual({ links: [{ kind: 'frame', name: 'Home', path: 'src/pages/Home.tsx', export: 'HomePage' }] })
+    expect(pack.spec).toContain('src/pages/Home.tsx#HomePage')
+    expect(pack.spec).not.toContain('Cart.tsx')
+    expect(pack.proposal).toContain('code-links.json')
+    /* without a mapping there is no file */
+    const plain = await buildHandoffPack(canvas.id, { renderPng, frameIds: [cart.id] })
+    expect(plain.files.some((f) => f.path.endsWith('code-links.json'))).toBe(false)
+  })
 })

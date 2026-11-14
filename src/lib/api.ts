@@ -10,6 +10,8 @@ import type { RepoLink, RepoLinkStatus, RepoRequest, RepoResult } from '../../sh
 import type { HandoffFile, HandoffPack, HandoffWriteResult } from '../../shared/handoff'
 import type { DriftComparison, DriftFetchRequest, DriftFetchResult } from '../../shared/drift'
 import type { BuiltHookInfo } from '../../shared/built'
+import type { CodeLink, CodeLinkInput, CodeLinkKind } from '../../shared/codeLinks'
+import type { CodeSuggestion } from '../../shared/codeSuggest'
 import type { ImageDescriptionMode, ImageDescriptionPreference } from '../../shared/imageDescriptions'
 import type { AgentRunners, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
 import type { CanvasFindResult } from '../../shared/canvasFind'
@@ -465,6 +467,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ changeId, files }),
     }),
+  /* component ↔ file mapping: where a component or frame lives in the linked repo */
+  codeLinks: (canvasId: string) => req<{ links: CodeLink[] }>(`/api/canvases/${canvasId}/code-links`),
+  putCodeLink: (canvasId: string, input: CodeLinkInput) =>
+    req<{ link: CodeLink }>(`/api/canvases/${canvasId}/code-links`, { method: 'PUT', body: JSON.stringify(input) }),
+  deleteCodeLink: (canvasId: string, kind: CodeLinkKind, targetId: string) =>
+    req<{ ok: boolean }>(`/api/canvases/${canvasId}/code-links/${kind}/${encodeURIComponent(targetId)}`, {
+      method: 'DELETE',
+    }),
+  suggestCodeLinks: (canvasId: string, targetKind: CodeLinkKind, targetId: string) =>
+    req<{ suggestions: CodeSuggestion[]; repo: string; truncated: boolean }>(
+      `/api/canvases/${canvasId}/code-links/suggest`,
+      { method: 'POST', body: JSON.stringify({ targetKind, targetId }) },
+    ),
   /* drift review: compare a frame with the page shipped at a URL */
   compareDrift: (frameId: string, url: string) =>
     req<{ comparison: DriftComparison; shippedFrame: Frame }>(`/api/frames/${frameId}/drift`, {

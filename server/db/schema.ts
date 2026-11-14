@@ -1139,6 +1139,7 @@ export const builtHooks = pgTable('built_hooks', {
   createdBy: text('created_by').notNull(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 })
+
 /** The usage meter's ledger (server/agentRuns.ts): one row per resident run,
  *  written once when it ends. `models` holds the per-model TokenUsage list;
  *  the token columns are its totals, and the cost was priced at write time
@@ -1167,6 +1168,27 @@ export const agentRuns = pgTable(
     endedAt: bigint('ended_at', { mode: 'number' }).notNull(),
   },
   (t) => [index('agent_runs_canvas_idx').on(t.canvasId, t.startedAt)],
+)
+
+/** Where a component or a frame lives in the linked repo (shared/codeLinks.ts):
+ *  a repo-relative path plus the export name. Canvas-level, one row per
+ *  target; the repo itself is never read to store it. */
+export const codeLinks = pgTable(
+  'code_links',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    /** 'component' | 'frame' */
+    targetKind: text('target_kind').notNull(),
+    targetId: text('target_id').notNull(),
+    path: text('path').notNull(),
+    exportName: text('export_name'),
+    /** 'manual' | 'suggested' | 'generated' — how the mapping was made */
+    source: text('source').notNull(),
+    updatedBy: text('updated_by').notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [uniqueIndex('code_links_target_idx').on(t.canvasId, t.targetKind, t.targetId)],
 )
 
 /** The instance's sign-in policy (shared/instanceSettings.ts): one row, id

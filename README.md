@@ -149,6 +149,10 @@ to upstream's.
 - **Run replay** — every frame version and activity line a resident run writes carries its run
   id: open a run from the Usage tab to see its timeline and each frame before and after, then roll
   the whole run back in one undo step (frames edited since need a confirmation).
+- **Component ↔ file mapping** — map a component or a frame to its file and export in the linked
+  repo (`code_links`). The Inspector's Code row suggests the file from `repo_search` /
+  `repo_list`; `get_component`, `get_frame` and the Stip pack (`code-links.json`) carry the
+  mapping. Agents call `set_code_link` and `suggest_code_links`. Read-only on the repo.
 - **Self-hosting** — Docker image `ghcr.io/bryann2k/doop:bryann2k-main` (amd64 + arm64) built on every push, k3s
   manifests in `deploy/k3s/` with a persistent volume for uploads, exposed through Tailscale
   Serve only (no ingress, no Funnel).

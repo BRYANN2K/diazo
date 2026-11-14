@@ -271,4 +271,20 @@ export const inspector: Catalog['inspector'] = {
   colorNone: 'nenhuma',
   pageBackground: 'Fundo',
   pageBackgroundFailed: 'Não foi possível salvar o fundo da página',
+
+  // mapeamento de código: onde o frame ou seu componente vive no repositório vinculado
+  codeLinkTitle: 'Código',
+  codeLinkNone: 'Ainda não mapeado para um arquivo',
+  codeLinkComponent: 'Componente “{name}”',
+  codeLinkPath: 'Arquivo no repositório',
+  codeLinkExport: 'Export',
+  codeLinkSave: 'Salvar',
+  codeLinkEdit: 'Editar',
+  codeLinkRemove: 'Remover',
+  codeLinkSuggest: 'Sugerir do repositório',
+  codeLinkSuggestTitle: 'Procurar no projeto vinculado o arquivo onde isto vive',
+  codeLinkSuggesting: 'Procurando…',
+  codeLinkNoSuggestions: 'Nenhum arquivo provável em {repo}',
+  codeLinkUse: 'Usar',
+  codeLinkFailed: 'Não foi possível salvar o mapeamento',
 }
