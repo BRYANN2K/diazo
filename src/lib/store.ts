@@ -1,3 +1,4 @@
+import type { LibraryInfo } from '../../shared/library'
 import type { CanvasSkill } from '../../shared/skills'
 import { create } from 'zustand'
 import { canvasPages, framePageId } from '../../shared/pages'
@@ -111,7 +112,7 @@ interface State {
   /** the Layers rail is showing (desktop); the choice sticks across visits */
   layersOpen: boolean
   /** which face the Layers panel shows: the layer tree, or the design tokens */
-  layersTab: 'layers' | 'components' | 'tokens'
+  layersTab: 'layers' | 'components' | 'tokens' | 'library'
   /** ⌘. — every panel and toolbar is off screen, leaving only the canvas.
    *  A plain overlay flag: the panels' own open/closed state is untouched
    *  underneath, so toggling back shows exactly what was open before */
@@ -216,6 +217,8 @@ interface State {
   /** upsert (doc set) or remove (doc null) a style guide on the open canvas */
   setGuidelineLocal(name: string, doc: GuidelineDoc | null): void
   setSkillLocal(name: string, skill: CanvasSkill | null): void
+  /** the open canvas became a library, changed, or stopped being one (null) */
+  setLibraryLocal(library: LibraryInfo | null): void
   /** a component changed in the room, or was deleted (null) */
   setComponentLocal(id: string, component: import('../../shared/components').ComponentDef | null): void
   /** replace the open canvas's design tokens and themes (the room sends the whole list) */
@@ -275,7 +278,7 @@ interface State {
   pickElements(frameId: string, selectors: string[]): void
   setElementPanelOpen(v: boolean): void
   setLayersOpen(v: boolean): void
-  setLayersTab(tab: 'layers' | 'components' | 'tokens'): void
+  setLayersTab(tab: 'layers' | 'components' | 'tokens' | 'library'): void
   toggleUiHidden(): void
   setPrototypeMode(on: boolean): void
   setViewport(v: Viewport): void
@@ -580,6 +583,12 @@ export const useStore = create<State>((set, get) => ({
       if (!s.canvas) return {}
       const others = (s.canvas.components ?? []).filter((def) => def.id !== id)
       return { canvas: { ...s.canvas, components: component ? [...others, component] : others } }
+    }),
+  setLibraryLocal: (library) =>
+    set((s) => {
+      if (!s.canvas) return {}
+      const { library: _previous, ...rest } = s.canvas
+      return { canvas: library ? { ...rest, library } : rest }
     }),
   setSkillLocal: (name, skill) =>
     set((s) => {

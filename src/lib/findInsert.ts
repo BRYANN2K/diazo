@@ -9,19 +9,28 @@ import { isCanvasElement } from './drawing'
 import { canEditOpenCanvas, pickedSelectors, useStore } from './store'
 import { freshElementId, insertElements, placeElement, removeElements, type DropTarget } from './layers'
 import { ELEMENT_ID_ATTR, elementIdSelector } from '../../shared/elementId'
-import type { LibrarySnapshot } from './findPreviewRuntime'
+import type { ItemFocus } from './findPreviewRuntime'
+import { libraryBlock, REF_ATTR, REF_LIB_ATTR, REF_REV_ATTR, refId } from '../../shared/libraryBlock'
 import { snapshotLibraryItem } from './findSnapshot'
 import { saveFrameHtml } from './layerEdits'
+import { api } from './api'
+import type { LibraryItemSummary } from '../../shared/library'
+import { focusOfItem, isInsertable } from './findLibrary'
+import { replaceBlock, type LibraryRef } from './libraryRefs'
 
 type StoreState = ReturnType<typeof useStore.getState>
 
-/** Library ids are `cp.*` (copied components) and `ui.*` (UI kits). */
-const LIBRARY_ID = /^(cp|ui)\.[\w.-]+$/i
-const LIBRARY_CANVAS = /design library/i
+/** A result row as an insert sees it: the library item it stands for (none
+ *  for a text hit) and the frame it lives in. */
+export interface InsertSource {
+  item: LibraryItemSummary | null
+  frameId: string
+}
 
-/** Is this result a library item, which a click copies in? */
-export function isLibraryItem(id: string | null | undefined, canvasName: string | null | undefined): boolean {
-  return (!!id && LIBRARY_ID.test(id)) || (!!canvasName && LIBRARY_CANVAS.test(canvasName))
+/** Is this result a library item a click copies in? Only rows the library
+ *  index answered carry an item, and only insertable kinds are copied. */
+export function isLibraryItem(source: InsertSource | null | undefined): boolean {
+  return isInsertable(source?.item)
 }
 
 /** Where an insert lands: a frame, and in it a slot (a drop between
@@ -53,83 +62,30 @@ export type RowAction = { kind: 'insert'; target: InsertTarget } | { kind: 'go' 
 
 /** Click inserts only for a library item while a frame is selected; ⇧ (or
  *  anything else) goes to the item. */
-export function rowAction(
-  s: StoreState,
-  item: { id: string | null; canvasName?: string | null; frameId: string },
-  shift: boolean,
-): RowAction {
-  if (shift || !isLibraryItem(item.id, item.canvasName ?? s.canvas?.name)) return { kind: 'go' }
-  const target = insertTarget(s, item.frameId)
+export function rowAction(s: StoreState, source: InsertSource, shift: boolean): RowAction {
+  if (shift || !isLibraryItem(source)) return { kind: 'go' }
+  const target = insertTarget(s, source.frameId)
   return target ? { kind: 'insert', target } : { kind: 'go' }
 }
 
 /** The footer line under the results. */
 export type FooterHint = { kind: 'insert'; frameName: string } | { kind: 'select' } | { kind: 'go' } | { kind: 'none' }
 
-export function footerHint(
-  s: StoreState,
-  item: { id: string | null; canvasName?: string | null; frameId: string } | null,
-): FooterHint {
-  if (!item) return { kind: 'none' }
-  if (!isLibraryItem(item.id, item.canvasName ?? s.canvas?.name)) return { kind: 'go' }
-  const target = insertTarget(s, item.frameId)
+export function footerHint(s: StoreState, source: InsertSource | null): FooterHint {
+  if (!source) return { kind: 'none' }
+  if (!isLibraryItem(source)) return { kind: 'go' }
+  const target = insertTarget(s, source.frameId)
   return target ? { kind: 'insert', frameName: target.frame.name } : { kind: 'select' }
 }
 
 /* ---- the copy ---- */
 
-/** The attribute that keeps an inserted block's provenance (`cp.x`). */
-export const REF_ATTR = 'data-doop-ref'
-
-/** A reference id safe inside an attribute selector. */
-export function refId(id: string): string {
-  return id.replace(/[^\w.-]/g, '-').slice(0, 120) || 'library-item'
-}
-
-const escapeAttr = (v: string) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
-const attrsHtml = (attrs: [string, string][]) =>
-  attrs
-    .filter(([name]) => /^[a-z][\w:-]*$/i.test(name))
-    .map(([name, value]) => ` ${name}="${escapeAttr(value)}"`)
-    .join('')
-
-/** The block an insert writes: the item's markup inside its ancestors (as
- *  `display: contents` boxes, so its descendant selectors still match), in a
- *  wrapper carrying the reference, with the CSS scoped to that wrapper so
- *  it neither leaks into the frame nor loses its own variables and text
- *  styles. */
-export function libraryBlock(snap: LibrarySnapshot, ref: string): string {
-  const scope = `[${REF_ATTR}="${ref}"]`
-  const own = [...snap.vars, ...snap.inherited].map(([p, v]) => `${p}: ${v};`).join(' ')
-  const css = [
-    `@scope (${scope}) {`,
-    own ? `:scope { ${own} }` : '',
-    ...snap.rules,
-    '}',
-    ...snap.keyframes,
-    ...snap.fontFaces,
-  ]
-    .filter(Boolean)
-    .join('\n')
-  let inner = snap.html
-  for (const a of [...snap.ancestors].reverse()) {
-    if (!/^[a-z][\w-]*$/i.test(a.tag)) continue
-    inner = `<${a.tag}${attrsHtml(a.attrs)} style="display: contents">${inner}</${a.tag}>`
-  }
-  const classes = snap.rootClasses.filter((c) => /^[\w-]+$/.test(c)).join(' ')
-  const wrapperAttrs: [string, string][] = [
-    [REF_ATTR, ref],
-    ['data-doop-name', ref],
-    ...(classes ? ([['class', classes]] as [string, string][]) : []),
-    ...snap.rootAttrs.filter(([name]) => name !== REF_ATTR && !name.startsWith('data-doop-')),
-  ]
-  return `<div${attrsHtml(wrapperAttrs)}><style data-doop-ref-style>${css.replace(/<\/style/gi, '<\\/style')}</style>${inner}</div>`
-}
+export { REF_ATTR, refId, libraryBlock }
 
 /* what the library's own editor state says about an element does not hold
    in the frame it lands in: comments, links, locks, prototype wiring,
    component instances */
-const KEPT_DOOP_ATTRS = new Set([REF_ATTR, 'data-doop-name', 'data-doop-ref-style'])
+const KEPT_DOOP_ATTRS = new Set([REF_ATTR, REF_LIB_ATTR, REF_REV_ATTR, 'data-doop-name', 'data-doop-ref-style'])
 
 function placeBlock(html: string, at: DropTarget | string | null, block: string) {
   if (at && typeof at !== 'string') return placeElement(html, at, block)
@@ -177,6 +133,9 @@ export interface InsertedItem {
   /** the block's own `data-doop-id`, which finds it after later edits */
   elementId: string
   ref: string
+  /** the library canvas and the item's revision, when the index gave the item */
+  libraryId?: string
+  rev?: number
   /** false: the item was not found in its sheet and the whole document was copied */
   found: boolean
   /** the item's sheet runs scripts: the copy is a still of what they rendered */
@@ -191,10 +150,15 @@ export interface InsertedItem {
  *  as one undo step, and pick the inserted block. */
 export async function insertLibraryItem(opts: {
   sourceFrameId: string
-  focus: string
+  focus: ItemFocus
   ref: string
   target: InsertTarget
+  libraryId?: string
+  rev?: number
+  /** a component item becomes a linked instance, through the server */
+  mode?: 'snapshot' | 'component'
 }): Promise<InsertedItem | null> {
+  if (opts.mode === 'component' && opts.libraryId) return insertComponentItem(opts as Required<typeof opts>)
   const snap = await snapshotLibraryItem(opts.sourceFrameId, opts.focus)
   if (!snap) return null
   const s = useStore.getState()
@@ -202,9 +166,16 @@ export async function insertLibraryItem(opts: {
   const frame = s.canvas?.frames.find((f) => f.id === opts.target.frame.id)
   if (!frame || frame.locked || frame.htmlDeferred) return null
   const ref = refId(opts.ref)
-  const done = insertLibraryBlock(frame.html, opts.target.at, libraryBlock(snap, ref))
+  const block = libraryBlock(snap, {
+    ref,
+    ...(opts.libraryId ? { libraryId: opts.libraryId } : {}),
+    ...(opts.rev !== undefined ? { rev: opts.rev } : {}),
+    prefix: `${ref}-${Math.random().toString(36).slice(2, 7)}-`,
+  })
+  const done = insertLibraryBlock(frame.html, opts.target.at, block)
   if (!done) return null
   saveFrameHtml(frame, done.html)
+  if (opts.libraryId) void api.libraryItemUsed(opts.libraryId, opts.ref).catch(() => {})
   s.select(frame.id)
   s.pickElement({ frameId: frame.id, selector: done.selector }, true)
   return {
@@ -212,9 +183,67 @@ export async function insertLibraryItem(opts: {
     selector: done.selector,
     elementId: done.elementId,
     ref,
+    ...(opts.libraryId ? { libraryId: opts.libraryId } : {}),
+    ...(opts.rev !== undefined ? { rev: opts.rev } : {}),
     found: snap.found,
     scripted: snap.scripted,
     approvalWithdrawn: frame.approval?.status === 'ready_for_dev',
+    before: frame.html,
+  }
+}
+
+/** Put a fresh copy of a block's item in its place (its item moved on):
+ *  the block keeps its place and id, one undo step. Local edits to the
+ *  block are lost, which the caller confirmed. */
+export async function replaceLibraryBlock(frameId: string, block: LibraryRef): Promise<boolean> {
+  const detail = await api.libraryItem(block.libraryId, block.ref)
+  const snap = await snapshotLibraryItem(detail.item.frameId, focusOfItem(detail.item))
+  if (!snap) return false
+  const frame = useStore.getState().canvas?.frames.find((f) => f.id === frameId)
+  if (!frame || frame.locked || frame.htmlDeferred) return false
+  const ref = refId(detail.item.id)
+  const html = replaceBlock(
+    frame.html,
+    block.elementId,
+    libraryBlock(snap, {
+      ref,
+      libraryId: block.libraryId,
+      rev: detail.item.rev,
+      prefix: `${ref}-${Math.random().toString(36).slice(2, 7)}-`,
+    }),
+  )
+  if (!html) return false
+  saveFrameHtml(frame, html)
+  return true
+}
+
+/** A component item: the server imports its component and places an
+ *  instance; the room brings the frame back. */
+async function insertComponentItem(opts: {
+  ref: string
+  target: InsertTarget
+  libraryId: string
+}): Promise<InsertedItem | null> {
+  const at = typeof opts.target.at === 'string' ? opts.target.at : null
+  const s = useStore.getState()
+  const frame = s.canvas?.frames.find((f) => f.id === opts.target.frame.id)
+  if (!frame) return null
+  const afterId = at
+    ? new DOMParser().parseFromString(frame.html, 'text/html').querySelector(at)?.getAttribute('data-doop-id')
+    : null
+  const r = await api.insertLibraryItem(opts.libraryId, opts.ref, {
+    frameId: frame.id,
+    ...(afterId ? { afterElementId: afterId } : {}),
+  })
+  return {
+    frameId: frame.id,
+    selector: `[data-doop-id="${r.elementId}"]`,
+    elementId: r.elementId,
+    ref: opts.ref,
+    libraryId: opts.libraryId,
+    found: true,
+    scripted: false,
+    approvalWithdrawn: r.approvalWithdrawn,
     before: frame.html,
   }
 }

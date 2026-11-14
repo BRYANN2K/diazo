@@ -1,3 +1,7 @@
+import * as libraries from './libraries.ts'
+import * as libraryIndex from './libraryIndex.ts'
+import { libraryRouter } from './libraryRoutes.ts'
+import { wireLibraryDescribe } from './libraryDescribe.ts'
 import { env } from './env.ts'
 import {
   catalogEntry,
@@ -70,7 +74,7 @@ import { eq, inArray } from 'drizzle-orm'
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { WebSocketServer, WebSocket } from 'ws'
-import { GuideLimitError, PageLimitError, store } from './store.ts'
+import { GuideLimitError, maxPages, PageLimitError, store } from './store.ts'
 import { parseGuide } from '../shared/guides.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
@@ -151,6 +155,7 @@ import {
 import { setStoredDefault } from './agentDefaults.ts'
 import { isRunnerProvider, parseRunnerPick } from '../shared/agentRunner.ts'
 import { findInCanvas } from './canvasFind.ts'
+import { findInLibrary } from './libraryQueries.ts'
 import type { CanvasFindResult } from '../shared/canvasFind.ts'
 import * as library from './referenceLibrary.ts'
 import { modelCatalogFor } from './modelCatalog.ts'
@@ -192,6 +197,13 @@ if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
 }
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
+await libraries.hydrateLibraries() // canvas.library, before the first canvas is sent
+libraries.wireLibraries()
+void libraries.purgeDisabledLibraries().catch((error: unknown) => console.error('[libraries] purge failed', error))
+libraryIndex.wireIndexer()
+wireLibraryDescribe() // AI descriptions, only on libraries that turned them on
+/* full index runs a restart cut off go on in the background */
+void Promise.all(libraryIndex.resumeIndexing(libraries.allLibraries()))
 await hydrateInstanceSettings() // the sign-in policy, read on every signup
 await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use
@@ -1146,6 +1158,7 @@ app.use('/api/image-descriptions', imageDescriptions.imageDescriptionsRouter)
 app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/fonts', fontsRouter)
+app.use('/api/libraries', libraryRouter)
 
 /* the font library a canvas designs with: its workspace's, or its owner's */
 app.get('/api/canvases/:id/fonts', (req, res) => {
@@ -1829,7 +1842,8 @@ app.put('/api/library', async (req, res) => {
   /* only canvases the user can still open may be designated — the same set
      find_references will be allowed to search */
   const reachable = new Set(workspaces.canvasesFor(req.user!.id).map((meta) => meta.id))
-  const unknown = wanted.find((id) => !reachable.has(id))
+  /* a public design library may be picked without canvas access */
+  const unknown = wanted.find((id) => !reachable.has(id) && !libraries.libraryRole(req.user!.id, store.getCanvas(id)))
   if (unknown) return res.status(400).json({ error: `canvas ${unknown} is not yours to use as a library` })
   await library.setLibraryCanvasIds(req.user!.id, wanted)
   res.json({ canvases: await library.libraryFor(req.user!.id) })
@@ -2642,7 +2656,7 @@ app.put('/api/canvases/:id/pages', (req, res) => {
   if (
     !Array.isArray(pages) ||
     !pages.length ||
-    pages.length > 100 ||
+    pages.length > maxPages(canvas) ||
     pages.some(
       (p) =>
         !p ||
@@ -2655,7 +2669,9 @@ app.put('/api/canvases/:id/pages', (req, res) => {
     ) ||
     new Set(pages.map((p) => p.id)).size !== pages.length
   ) {
-    return res.status(400).json({ error: 'Provide 1–100 pages with unique IDs and names of up to 100 characters.' })
+    return res.status(400).json({
+      error: `Provide 1–${maxPages(canvas).toLocaleString('en-US')} pages with unique IDs and names of up to 100 characters.`,
+    })
   }
   if (!samePages(req.body?.expectedPages, canvasPages(canvas)))
     return res
@@ -3315,7 +3331,8 @@ app.post('/api/comments/:id/replies', async (req, res) => {
 /* ------------------------------------------------------------------ */
 
 /* ⌘F everywhere: every canvas the user can open — find a library component
-   from any project. Each canvas's frame HTML is loaded on demand. */
+   from any project. A library answers from its index (its items, as name
+   hits); every other canvas's frame HTML is loaded on demand. */
 app.get('/api/find', async (req, res) => {
   const q = String(req.query.q ?? '').slice(0, 200)
   const matchCase = req.query.case === '1'
@@ -3323,9 +3340,10 @@ app.get('/api/find', async (req, res) => {
   for (const meta of workspaces.canvasesFor(req.user!.id)) {
     const listed = store.getCanvas(meta.id)
     if (!listed || !canvasRole(req.user!.id, listed)) continue
-    const canvas = await store.load(meta.id)
+    const fromIndex = await findInLibrary(listed, q, { matchCase })
+    const canvas = fromIndex ? listed : await store.load(meta.id)
     if (!canvas) continue
-    const r = findInCanvas(canvas, q, { matchCase })
+    const r = fromIndex ?? findInCanvas(canvas, q, { matchCase })
     out.total += r.total
     out.frames += r.frames
     for (const h of r.hits) {

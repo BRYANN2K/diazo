@@ -17,6 +17,17 @@ import type { CanvasGuide, CanvasPageInfo, ChatPlan, FrameApproval } from '../..
 import type { FrameLint } from '../../shared/slopRules.ts'
 import type { FrameChecks } from '../../shared/frameChecks.ts'
 import type { BuiltDelivery } from '../../shared/built.ts'
+import type {
+  ItemBox,
+  ItemLocator,
+  ItemMode,
+  ItemStatus,
+  ItemSuggestion,
+  LibraryIndexState,
+  LibraryTaxonomy,
+  LibraryVisibility,
+  RuleFinding,
+} from '../../shared/library.ts'
 import type { AutomationRunState, AutomationTrigger, Schedule, Step } from '../../shared/automations.ts'
 import type {
   ComponentCode,
@@ -1219,3 +1230,83 @@ export const instanceSettings = pgTable('instance_settings', {
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   updatedBy: text('updated_by'),
 })
+
+/** Design libraries (shared/library.ts, server/libraries.ts): a canvas is a
+ *  library when it has a row here. `rules` is LibraryRules, read through
+ *  parseLibraryRules; `disabled_at` keeps the rules and curation of a
+ *  library that stopped being one for 30 days. */
+export const libraries = pgTable('libraries', {
+  canvasId: text('canvas_id').primaryKey(),
+  description: text('description').notNull().default(''),
+  rules: jsonb('rules').notNull(),
+  taxonomy: jsonb('taxonomy').$type<LibraryTaxonomy>().notNull(),
+  visibility: text('visibility').$type<LibraryVisibility>().notNull().default('private'),
+  indexState: jsonb('index_state').$type<LibraryIndexState>(),
+  rulesVersion: integer('rules_version').notNull().default(1),
+  disabledAt: bigint('disabled_at', { mode: 'number' }),
+  /** AI descriptions and tags for thin items (server/libraryDescribe.ts); off by default */
+  describeItems: boolean('describe_items').notNull().default(false),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  updatedBy: text('updated_by'),
+})
+
+/** The items of each library: a projection of its frames, dropped and
+ *  rebuilt at will (server/libraryIndex.ts). Never the source of truth. */
+export const libraryItems = pgTable(
+  'library_items',
+  {
+    canvasId: text('canvas_id').notNull(),
+    itemId: text('item_id').notNull(),
+    parentId: text('parent_id'),
+    frameId: text('frame_id').notNull(),
+    pageId: text('page_id').notNull(),
+    position: integer('position').notNull(),
+    label: text('label').notNull(),
+    description: text('description').notNull(),
+    kind: text('kind').notNull(),
+    source: text('source').notNull(),
+    category: text('category').notNull(),
+    tags: jsonb('tags').$type<string[]>().notNull(),
+    mode: text('mode').$type<ItemMode>().notNull(),
+    locator: jsonb('locator').$type<ItemLocator>().notNull(),
+    box: jsonb('box').$type<ItemBox>(),
+    scripted: boolean('scripted').notNull(),
+    status: text('status').$type<ItemStatus>().notNull(),
+    findings: jsonb('findings').$type<RuleFinding[]>().notNull(),
+    hash: text('hash').notNull(),
+    rev: integer('rev').notNull(),
+    searchText: text('search_text').notNull(),
+    sourceUrl: text('source_url'),
+    license: text('license'),
+    indexedAt: bigint('indexed_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.canvasId, t.itemId] }),
+    index('library_items_frame_idx').on(t.canvasId, t.frameId),
+    index('library_items_parent_idx').on(t.canvasId, t.parentId),
+    index('library_items_category_idx').on(t.canvasId, t.category),
+  ],
+)
+
+/** What people curate on an item, never touched by a rebuild. A null
+ *  field falls through to the indexed value (effectiveItem). */
+export const libraryItemMeta = pgTable(
+  'library_item_meta',
+  {
+    canvasId: text('canvas_id').notNull(),
+    itemId: text('item_id').notNull(),
+    label: text('label'),
+    description: text('description'),
+    category: text('category'),
+    tags: jsonb('tags').$type<string[]>(),
+    status: text('status').$type<'active' | 'deprecated' | 'hidden'>(),
+    useCount: integer('use_count').notNull().default(0),
+    lastUsedAt: bigint('last_used_at', { mode: 'number' }),
+    /** a model's description and tags, until a person accepts them */
+    suggested: jsonb('suggested').$type<ItemSuggestion>(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+    updatedBy: text('updated_by'),
+  },
+  (t) => [primaryKey({ columns: [t.canvasId, t.itemId] })],
+)

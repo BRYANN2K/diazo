@@ -55,6 +55,7 @@ function stubHost(): ActionHost {
     placeImage: vi.fn(),
     newCanvas: vi.fn(),
     duplicateCanvas: vi.fn(),
+    openConvertLibrary: vi.fn(),
     present: vi.fn(),
     toggleHideUi: vi.fn(),
     toggleAgents: vi.fn(),

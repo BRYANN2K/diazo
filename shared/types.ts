@@ -1,3 +1,4 @@
+import type { LibraryInfo } from './library.ts'
 import type { CanvasSkill } from './skills'
 import type { BillingInterval, WorkspaceStatus } from './billing.ts'
 import type { CanvasRole, LinkAccess } from './canvasRole.ts'
@@ -221,6 +222,8 @@ export interface Canvas {
   tokenThemes?: string[]
   /** frames pinned to Memory as style exemplars — HTML snapshotted at pin time */
   references?: MemoryReference[]
+  /** set while the canvas is a design library (shared/library.ts) */
+  library?: LibraryInfo
 }
 
 /* ---- workspaces ---- */
@@ -602,6 +605,8 @@ export interface ChatPlanReference {
   label: string
   /** why this screen builds on it */
   why: string
+  /** the library item it names, when the canvas is a design library */
+  itemId?: string
 }
 
 /** One canvas of a user's reference library, as GET /api/library reports it
@@ -766,6 +771,7 @@ export type ServerMessage =
   | { type: 'guide'; id: string; guide: CanvasGuide | null; actor: Actor }
   /** a component changed, or was deleted (`component` null) */
   | { type: 'component'; id: string; component: ComponentDef | null; actor: Actor }
+  | { type: 'library'; library: LibraryInfo | null; actor: Actor }
   /** a style-guide doc was written, moved (doc set) or deleted (doc null) */
   | { type: 'guidelines'; name: string; doc: GuidelineDoc | null; actor: Actor }
   | { type: 'skill'; name: string; skill: CanvasSkill | null; actor: Actor }

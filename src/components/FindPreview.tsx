@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../lib/store'
-import { withFindPreviewScript, type FindPreviewMessage } from '../lib/findPreviewRuntime'
+import { withFindPreviewScript, type FindPreviewMessage, type ItemFocus } from '../lib/findPreviewRuntime'
 import { clearLivePreview, frameHtml, setLivePreview } from '../lib/findSnapshot'
 import { FramePreview } from './FramePreview'
 
@@ -31,7 +31,7 @@ export function FindPreview({
   staticNote,
 }: {
   frameId: string
-  focus: string
+  focus: ItemFocus
   /** shown over a preview whose sheet runs scripts, which the copy loses */
   staticNote?: string
 }) {
@@ -72,6 +72,7 @@ export function FindPreview({
     }
   }, [frameId])
 
+  const { key, text, selector, anchor } = focus
   const current = doc?.frameId === frameId ? doc : null
   const token = current?.token ?? null
 
@@ -98,8 +99,9 @@ export function FindPreview({
      again on ready, since the first one can beat the script's load */
   useEffect(() => {
     if (!token) return
-    iframeRef.current?.contentWindow?.postMessage({ doopFindPreview: token, focus }, '*')
-  }, [token, focus, ready])
+    const find = { text, ...(selector ? { selector } : {}), ...(anchor ? { anchor } : {}) }
+    iframeRef.current?.contentWindow?.postMessage({ doopFindPreview: token, focus: key, find }, '*')
+  }, [token, key, text, selector, anchor, ready])
 
   useEffect(() => {
     const el = wrapRef.current

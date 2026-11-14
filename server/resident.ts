@@ -3,7 +3,7 @@ import { skillSlug } from '../shared/skills.ts'
 import { DRIFT_SEVERITIES, isDriftSeverity } from '../shared/drift.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import type Anthropic from '@anthropic-ai/sdk'
-import { store } from './store.ts'
+import { store, maxPages } from './store.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { libraryBrief } from '../shared/fonts.ts'
 import { webFontsBrief } from '../shared/webFonts.ts'
@@ -37,11 +37,22 @@ import * as backgrounds from './backgrounds.ts'
 import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
 import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageImport.ts'
-import { COMPONENTS, DESIGN_BRIEF, DESIGN_QUALITY, FRAME_STYLES, PROTOTYPES } from './guide.ts'
+import { COMPONENTS, DESIGN_BRIEF, DESIGN_QUALITY, FRAME_STYLES, LIBRARIES, PROTOTYPES } from './guide.ts'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import { z } from 'zod'
 import { catalogEntry, compactFrameHtml, findComponent } from './componentActions.ts'
 import { COMPONENT_TOOLS, COMPONENT_TOOL_NAMES, componentWriteNotes, runComponentTool } from './componentTools.ts'
+import {
+  DESIGN_LIBRARY_TOOLS,
+  DESIGN_LIBRARY_TOOL_NAMES,
+  librariesOf,
+  designLibrariesBrief,
+  runLibraryTool,
+} from './libraryTools.ts'
+import { getLibrary } from './libraries.ts'
+import { indexFor, libraryItems } from './libraryIndex.ts'
+import { itemUrl, thumbUrl } from './libraryQueries.ts'
+import { searchIndex } from '../shared/librarySearch.ts'
 import { CodeLinkError, SET_CODE_LINK_DESCRIPTION, componentCodeLink, setCodeLinkTool } from './codeLinks.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
@@ -218,7 +229,10 @@ ${PROTOTYPES}
 - Frame ids are the id= values in the frame list of your request.
 
 Components:
-${COMPONENTS}`
+${COMPONENTS}
+
+Design libraries:
+${LIBRARIES}`
 
 /** The system prompt for one agent: the shared harness rules plus its specialty. */
 export function systemFor(role: AgentRole): string {
@@ -1176,6 +1190,7 @@ export const CHAT_READ_TOOL_NAMES = new Set([
   'get_reference',
   'view_website',
   'search_inspiration',
+  ...DESIGN_LIBRARY_TOOLS.filter((tool) => tool.readOnly).map((tool) => tool.name),
 ])
 
 const CHAT_SYSTEM = `You are a resident agent of the Doop canvas — a multiplayer design tool where humans and AI agents design HTML frames together — answering in the canvas CHAT, not editing. Humans talk the next design over with you here; the canvas only changes after an editor presses "Go design" on a plan card, which queues one board card per screen.
@@ -1330,10 +1345,21 @@ async function planReferenceError(screens: ChatPlanScreen[], runState: RunState)
     if (!libraryIds.has(ref.canvasId)) {
       return `reference "${ref.label}" on "${ref.screen}" points at canvas ${ref.canvasId}, which is not in the asker's reference library — only frames find_references returned may be named`
     }
-    const canvas = await store.load(ref.canvasId)
+    /* frame metadata only: a library's html never needs to load for this */
+    const canvas = store.getCanvas(ref.canvasId)
     const frame = canvas?.frames.find((f) => f.id === ref.frameId)
     if (!frame || frame.hidden || frame.demo) {
       return `reference "${ref.label}" on "${ref.screen}" names frame ${ref.frameId}, which does not exist on canvas ${ref.canvasId} — check it with find_references`
+    }
+    if (ref.itemId) {
+      const items = getLibrary(ref.canvasId) ? await libraryItems(ref.canvasId) : []
+      const item = items.find((i) => i.itemId === ref.itemId)
+      if (!item) {
+        return `reference "${ref.label}" on "${ref.screen}" names item ${ref.itemId}, which is not in library ${ref.canvasId} — use an item_id find_references returned`
+      }
+      if (item.frameId !== ref.frameId) {
+        return `reference "${ref.label}" on "${ref.screen}" names item ${ref.itemId}, which lives in frame ${item.frameId}, not ${ref.frameId}`
+      }
     }
   }
   return undefined
@@ -1403,6 +1429,31 @@ export async function execChatTool(
       let total = 0
       let frames = 0
       for (const lib of canvases) {
+        /* a design library answers from its index: families, never its html */
+        const index = getLibrary(lib.id) ? await indexFor(lib.id) : null
+        if (index) {
+          const r = searchIndex(index, query, { limit: Math.max(1, limit - hits.length) })
+          total += r.total
+          frames += r.hits.length
+          for (const h of r.hits) {
+            if (hits.length >= limit) break
+            const frame = store.getFrame(h.item.frameId)
+            hits.push({
+              canvas_id: lib.id,
+              canvas_name: lib.name,
+              frame_id: h.item.frameId,
+              frame_name: frame?.name ?? h.item.label,
+              item_id: h.item.itemId,
+              label: h.item.label,
+              category: h.item.category,
+              variant_count: h.variantCount,
+              where: 'item',
+              thumbnail: thumbUrl(h.item),
+              url: itemUrl(lib.id, h.item.itemId),
+            })
+          }
+          continue
+        }
         const c = await store.load(lib.id)
         if (!c) continue
         const r = findInCanvas(c, query, { matchCase: input.match_case === true })
@@ -1504,7 +1555,7 @@ async function runChat(
   const repoLink = repoUserId ? await linkFor(repoUserId, canvasId).catch(() => undefined) : undefined
   /* the asker's reference library, resolved like their repo link: the run
      searches only these canvases, and a plan's references must point inside */
-  const libraryCanvases = repoUserId ? await library.libraryFor(repoUserId).catch(() => []) : []
+  const libraryCanvases = repoUserId ? await library.libraryFor(repoUserId, canvasId).catch(() => []) : []
   const runState: RunState = {
     mutatedFrames: new Set(),
     sourceFrames: new Set(),
@@ -1598,7 +1649,10 @@ async function runChat(
               `each screen of the plan names the references it will reuse (canvas_id, frame_id, a label ` +
               `and why). The humans approve the references along with the plan, and Go design hands them ` +
               `to the design agent as the base to work from — prefer a library frame that fits over ` +
-              `improvising one from nothing.`,
+              `improvising one from nothing.` +
+              (libraryCanvases.some((c) => getLibrary(c.id))
+                ? ` For a design library, name the item too (item_id from find_references).\n\n${designLibrariesBrief(libraryCanvases.map((c) => c.id))}`
+                : ''),
           },
         ]
       : []
@@ -2433,6 +2487,13 @@ const TOOLS: Anthropic.Tool[] = [
 
 /* the same tools as MCP, minus the arguments a resident run already has */
 for (const tool of COMPONENT_TOOLS) {
+  TOOLS.push({
+    name: tool.name,
+    description: tool.description,
+    input_schema: zodToJsonSchema(z.object(tool.shape)) as Anthropic.Tool['input_schema'],
+  })
+}
+for (const tool of DESIGN_LIBRARY_TOOLS) {
   TOOLS.push({
     name: tool.name,
     description: tool.description,
@@ -3388,7 +3449,7 @@ export async function execTool(
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
         const raw = block.input as { expectedPages?: unknown; pages?: unknown }
-        const pages = parsePageList(raw.pages)
+        const pages = parsePageList(raw.pages, maxPages(store.getCanvas(canvasId)))
         if (typeof pages === 'string') return fail(pages)
         const previous = pageList(canvas)
         const saved = savePages(canvas, raw.expectedPages, pages, actor)
@@ -3461,6 +3522,32 @@ export async function execTool(
         return ok(await frameImageBlocks(previewFrame(canvasId, def)))
       }
       default: {
+        if (DESIGN_LIBRARY_TOOL_NAMES.includes(block.name)) {
+          const canvas = store.getCanvas(canvasId)
+          /* libraries are read as the person who asked, plus this canvas when it is one */
+          const reader = runState.payerId ?? canvas?.ownerId
+          const outcome = await runLibraryTool(block.name, block.input as Record<string, unknown>, {
+            userId: reader,
+            actor,
+            canvas,
+            libraries: () => librariesOf(reader, canvas),
+            canEdit: (id) => id === canvasId,
+            canRead: (id) => id === canvasId || (!!reader && canReadCanvas(reader, id)),
+          })
+          if (!outcome.ok) return fail(outcome.error)
+          /* an insert is a design write: the run's delivery check and its lint pass see it */
+          const lintNotes: string[] = []
+          for (const frameId of outcome.frames ?? []) {
+            runState.mutatedFrames.add(frameId)
+            runState.verifiedFrames.delete(frameId)
+            lintNotes.push(await lintNote(frameId, actor, runState))
+          }
+          return ok(
+            [JSON.stringify(outcome.data), ...(outcome.note ? [outcome.note] : []), ...lintNotes.filter(Boolean)].join(
+              '\n',
+            ),
+          )
+        }
         if (!COMPONENT_TOOL_NAMES.includes(block.name)) return fail(`unknown tool ${block.name}`)
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')

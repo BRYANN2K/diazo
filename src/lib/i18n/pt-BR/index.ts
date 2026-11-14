@@ -29,6 +29,7 @@ import { built } from './built'
 import { usage } from './usage'
 import { replay } from './replay'
 import { duel } from './duel'
+import { library } from './library'
 
 export const ptBR: Catalog = {
   common,
@@ -61,4 +62,5 @@ export const ptBR: Catalog = {
   usage,
   replay,
   duel,
+  library,
 }

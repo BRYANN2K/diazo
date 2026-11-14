@@ -6,9 +6,10 @@ import type { CanvasMeta } from '../../shared/types'
 import { CardDescription, CardHeader, CardTitle, SettingsCard } from './ui/card'
 import { Checkbox } from './ui/checkbox'
 import { FrameIcon } from './ui/icons'
+import { Badge } from './ui/badge'
 
 /* keep in step with LIBRARY_MAX_CANVASES in server/referenceLibrary.ts */
-const MAX_LIBRARY_CANVASES = 8
+const MAX_LIBRARY_CANVASES = 20
 
 /**
  * The reference library: the canvases the chat agent searches before it
@@ -21,6 +22,7 @@ export function ReferenceLibraryCard() {
   const t = useT()
   const [picked, setPicked] = useState<string[] | null>(null)
   const [canvases, setCanvases] = useState<CanvasMeta[] | null>(null)
+  const [libraryIds, setLibraryIds] = useState<Set<string>>(() => new Set())
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -30,6 +32,10 @@ export function ReferenceLibraryCard() {
       () => setPicked([]),
     )
     api.listCanvases().then(setCanvases, () => {})
+    Promise.resolve()
+      .then(() => api.listLibraries())
+      .then((r) => setLibraryIds(new Set(r.libraries.map((l) => l.id))))
+      .catch(() => {})
   }, [])
   useEffect(refresh, [refresh])
 
@@ -87,6 +93,7 @@ export function ReferenceLibraryCard() {
                       </span>
                     )}
                     <span className="min-w-0 flex-1 truncate text-body text-ink">{c.name}</span>
+                    {libraryIds.has(c.id) && <Badge tone="outline">{t('library.badge')}</Badge>}
                     <span className="flex-none text-caption text-ink-faint tabular-nums">
                       {t('settings.libraryFrames', { count: c.frameCount })}
                     </span>

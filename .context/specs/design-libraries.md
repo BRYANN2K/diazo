@@ -4,7 +4,9 @@ A library is a canvas whose frames are indexed as **items** with **variants**, *
 **import rules**. People browse it in a gallery, pull from it with ⌘F, and agents search and insert through
 tools. Today all of this is a naming convention read by regexes.
 
-Status: proposed (2026-11-14). Plan: [../plans/design-libraries.md](../plans/design-libraries.md).
+Status: built (2026-11-14, branch `feat/design-libraries`, migrations 0066 and 0067). Plan:
+[../plans/design-libraries.md](../plans/design-libraries.md); what changed from this spec while building is its
+"Deviations" section (notably: the pull script reads through MCP, AI suggestions have their own column).
 
 ## Open decisions
 

@@ -28,6 +28,7 @@ export function installActionKeys() {
     placeImage: noop,
     newCanvas: noop,
     duplicateCanvas: noop,
+    openConvertLibrary: noop,
     present: noop,
     toggleHideUi: noop,
     toggleAgents: noop,

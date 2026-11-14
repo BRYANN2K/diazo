@@ -20,8 +20,9 @@ the code is built in your repo, and agents carry it between the two.
 - **Agents that know your canvas.** Any MCP client designs on the canvas. Agents search every
   page and canvas with `find_in_canvas`, load the canvas's skills ("how we do a pricing page
   here"), and each run is metered and can be replayed or rolled back.
-- **A library you build from.** ⌘F finds a library component and its variants, previews them
-  live, and drops a scoped copy into your frame. Frames are checked for anti-slop rules,
+- **A library you build from.** Turn a canvas into a design library: its frames become items
+  with variants, categories and tags. ⌘F finds a component and its variants, previews them live,
+  and drops a scoped copy into your frame; agents search the same index. Frames are checked for anti-slop rules,
   responsive layout and accessibility.
 - **Yours to run.** One command on a Mac, or your own server behind Tailscale. Your canvases,
   uploads and keys live on your machine or your server.

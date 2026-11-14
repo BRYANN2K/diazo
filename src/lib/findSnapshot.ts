@@ -7,7 +7,12 @@
  */
 import { api } from './api'
 import { useStore } from './store'
-import { withFindPreviewScript, type FindPreviewMessage, type LibrarySnapshot } from './findPreviewRuntime'
+import {
+  withFindPreviewScript,
+  type FindPreviewMessage,
+  type ItemFocus,
+  type LibrarySnapshot,
+} from './findPreviewRuntime'
 
 interface Loaded {
   html: string
@@ -81,7 +86,7 @@ async function ask(win: Window, token: string): Promise<LibrarySnapshot | null> 
   return (await reply)?.snapshot ?? null
 }
 
-async function offscreen(frameId: string, focus: string): Promise<LibrarySnapshot | null> {
+async function offscreen(frameId: string, focus: ItemFocus): Promise<LibrarySnapshot | null> {
   const { html, width, height } = await frameHtml(frameId)
   const token = `snap-${Math.random().toString(36).slice(2)}`
   const iframe = document.createElement('iframe')
@@ -104,7 +109,7 @@ async function offscreen(frameId: string, focus: string): Promise<LibrarySnapsho
   try {
     if (!(await ready) || !iframe.contentWindow) return null
     const found = waitFor(token, (m) => m.type === 'box' && !!m.box, FIND_WAIT_MS)
-    iframe.contentWindow.postMessage({ doopFindPreview: token, focus }, '*')
+    iframe.contentWindow.postMessage({ doopFindPreview: token, focus: focus.key, find: focus }, '*')
     await found
     return await ask(iframe.contentWindow, token)
   } finally {
@@ -113,7 +118,7 @@ async function offscreen(frameId: string, focus: string): Promise<LibrarySnapsho
 }
 
 /** The item `focus` names in the frame, as rendered. */
-export function snapshotLibraryItem(frameId: string, focus: string): Promise<LibrarySnapshot | null> {
-  if (live && live.frameId === frameId && live.focus === focus && live.found) return ask(live.win, live.token)
+export function snapshotLibraryItem(frameId: string, focus: ItemFocus): Promise<LibrarySnapshot | null> {
+  if (live && live.frameId === frameId && live.focus === focus.key && live.found) return ask(live.win, live.token)
   return offscreen(frameId, focus)
 }

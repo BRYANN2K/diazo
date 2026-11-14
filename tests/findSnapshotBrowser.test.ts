@@ -3,6 +3,7 @@ import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
 import { withFindPreviewScript, type LibrarySnapshot } from '../src/lib/findPreviewRuntime'
 import { pagePerTest } from './browser'
+import { fixture } from './libraryFixtures'
 
 const SHEET = `<!doctype html><html class="dark"><head><style>
   :root{--brand:#0177d3;--unused:red}
@@ -56,5 +57,29 @@ describe.skipIf(!findBrowserPath())('⌘F snapshot', () => {
     expect(snap.vars).toEqual([['--brand', '#0177d3']])
     expect(snap.inherited).toContainEqual(['font-family', 'Georgia'])
     expect(snap.rootClasses).toEqual(['dark'])
+  })
+
+  it('copies the symbol a variant uses, drops handlers and unused rules', async () => {
+    await page.setViewport({ width: 2040, height: 600 })
+    await page.setContent(withFindPreviewScript(fixture('sheet-static'), 't'), { waitUntil: 'load' })
+    const take = (id: string) =>
+      page.evaluate(
+        (text) =>
+          new Promise<LibrarySnapshot>((resolve) => {
+            window.addEventListener('message', (e) => {
+              const d = e.data as { type: string; box?: unknown; snapshot?: LibrarySnapshot }
+              if (d.type === 'box' && d.box) window.postMessage({ doopFindPreview: 't', snapshot: 'r' + text }, '*')
+              if (d.type === 'snapshot' && d.snapshot) resolve(d.snapshot)
+            })
+            window.postMessage({ doopFindPreview: 't', focus: text, find: { text, anchor: true } }, '*')
+          }),
+        id,
+      )
+    const first = await take('bk.scb-login-minimal-email-password')
+    expect(first.html).toMatch(/^<div class="v"/)
+    expect(first.defs?.join('')).toContain('<symbol id="key"')
+    expect(first.rules.join('\n')).not.toContain('.unused')
+    const second = await take('bk.scb-login-social-with-email-option')
+    expect(second.html).not.toContain('onclick')
   })
 })

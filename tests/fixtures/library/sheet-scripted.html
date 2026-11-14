@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+  <head>
+    <style>
+      #g {
+        display: grid;
+        grid-template-columns: repeat(8, 240px);
+        grid-auto-rows: 200px;
+        gap: 12px;
+      }
+      .c {
+        display: flex;
+        flex-direction: column;
+      }
+      .d {
+        flex: 1;
+        display: grid;
+        place-items: center;
+      }
+      .m {
+        height: 52px;
+      }
+      .m b {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="k">tuff · E</span>
+      <h1>TuffUI · Interactive answers (3)</h1>
+      <span class="n">3 items · tuffui.com/r · MIT</span>
+    </header>
+    <div id="g"></div>
+    <script>
+      const P = 'cp.tuff-'
+      const I = [
+        ['chart-card', 'bars grow 500ms', '<div class="sh">Tickets</div>'],
+        ['dot-histogram', 'every sample a dot', '<svg width="210" height="108"></svg>'],
+        ['json-viewer', 'collapsible tree', '<pre class="js">{ }</pre>'],
+      ]
+      const G = document.getElementById('g')
+      I.forEach(([id, r, h]) =>
+        G.insertAdjacentHTML(
+          'beforeend',
+          `<div class="c"><div class="d">${h}</div><div class="m"><b>${P}${id}</b><span>${r}</span></div></div>`,
+        ),
+      )
+    </script>
+  </body>
+</html>

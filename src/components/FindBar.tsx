@@ -9,17 +9,42 @@ import { findInHtml, replaceInHtml, type TextMatch } from '../lib/actions/findTe
 import { saveFramesHtml } from '../lib/actions/edits'
 import { api } from '../lib/api'
 import { navigate } from '../lib/navigate'
-import { footerHint, insertLibraryItem, isLibraryItem, rowAction, type InsertTarget } from '../lib/findInsert'
+import {
+  footerHint,
+  insertLibraryItem,
+  isLibraryItem,
+  rowAction,
+  type InsertSource,
+  type InsertTarget,
+} from '../lib/findInsert'
 import type { CanvasFindHit } from '../../shared/canvasFind'
+import type { LibraryItemSummary, LibrarySearchResult } from '../../shared/library'
+import { focusOf, groupByFrame, resultRows, rowDomId, rowItem, rowKey, type ResultRow } from '../lib/findRows'
+import {
+  itemCanvasUrl,
+  libraryFocus,
+  libraryRows,
+  personHasLibraries,
+  resetHasLibrariesForTest,
+} from '../lib/findLibrary'
+import { textFocus } from '../lib/findPreviewRuntime'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { IconButton } from './ui/icon-button'
 import { ArrowDownIcon, ArrowUpIcon, ChevronRightIcon, XIcon } from './ui/icons'
 import { Input } from './ui/input'
 import { Pressable } from './ui/pressable'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu'
+import { ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
 import { SearchField } from './ui/search-field'
-import { FramePreview } from './FramePreview'
 import { FindPreview } from './FindPreview'
+import { FindResultList } from './find/FindResultList'
 import { useFindDrag } from './FindDrag'
 import { useInsertedBox } from '../lib/insertedBox'
 
@@ -31,135 +56,31 @@ interface Hit {
 }
 
 /** Where ⌘F looks: the open page (find and replace, on the HTML the client
- *  holds) or every page of the canvas (find only, answered by the server). */
-type Scope = 'page' | 'canvas' | 'all'
+ *  holds), every page of the canvas or every canvas (find only, answered by
+ *  the server), or the design libraries (answered by their index). */
+type Scope = 'page' | 'canvas' | 'all' | 'library'
 
 /** remote scopes are answered by the server, grouped by frame */
 const isRemote = (scope: Scope) => scope !== 'page'
-
-/** One frame in the all-pages results, with every match found in it. */
-export interface FrameGroup {
-  frameId: string
-  pageId: string
-  pageName: string
-  canvasName?: string
-  /** library frames are named `<library_id> — <label>` */
-  id: string | null
-  label: string
-  hits: CanvasFindHit[]
-  /** the distinct things matched inside: library ids when the snippet holds one */
-  inside: { label: string; hit: CanvasFindHit }[]
-}
-
-const LIBRARY_ID = /[a-z][\w-]*\.[\w.-]*[\w]/gi
-
-function splitFrameName(name: string): { id: string | null; label: string } {
-  const at = name.indexOf(' — ')
-  if (at > 0 && /^[\w.§-]+$/.test(name.slice(0, at).trim())) {
-    return { id: name.slice(0, at).trim(), label: name.slice(at + 3).trim() }
-  }
-  return { id: null, label: name }
-}
-
-function groupByFrame(hits: CanvasFindHit[], query: string): FrameGroup[] {
-  const q = query.trim().toLowerCase()
-  const groups: FrameGroup[] = []
-  const byId = new Map<string, FrameGroup>()
-  for (const hit of hits) {
-    let g = byId.get(hit.frameId)
-    if (!g) {
-      g = {
-        frameId: hit.frameId,
-        pageId: hit.pageId,
-        pageName: hit.pageName,
-        ...(hit.canvasName ? { canvasName: hit.canvasName } : {}),
-        ...splitFrameName(hit.frameName),
-        hits: [],
-        inside: [],
-      }
-      byId.set(hit.frameId, g)
-      groups.push(g)
-    }
-    g.hits.push(hit)
-    if (hit.where === 'name') continue
-    /* a library sheet's matches are its variants' ids: list those, once each */
-    const around = hit.before + hit.text + hit.after
-    const ids = [...around.matchAll(LIBRARY_ID)].map((m) => m[0]).filter((id) => id.toLowerCase().includes(q))
-    const label = ids.find((id) => id !== g.id) ?? `${hit.before.slice(-24)}${hit.text}${hit.after.slice(0, 24)}`.trim()
-    if (!g.inside.some((x) => x.label === label)) g.inside.push({ label, hit })
-  }
-  return groups.sort((a, b) => relevance(b, q) - relevance(a, q))
-}
-
-/* what you searched for first: a frame named for it, then a sheet holding
-   variants of it, then passing mentions; section headers (§) last */
-function relevance(g: FrameGroup, q: string): number {
-  const id = (g.id ?? '').toLowerCase()
-  const label = g.label.toLowerCase()
-  let score = 0
-  if (id.includes(q)) score += 1000
-  if (id.split(/[.-]/).includes(q)) score += 400
-  if (label.includes(q)) score += 300
-  score += Math.min(variantIds(g).length, 30) * 25
-  score += Math.min(g.hits.length, 20)
-  if (g.label.startsWith('§') || id.startsWith('§')) score -= 2000
-  return score
-}
-
-const looksLikeId = (s: string) => /^[a-z][\w-]*\.[\w.-]+$/i.test(s)
-const variantIds = (g: FrameGroup) => g.inside.filter((x) => looksLikeId(x.label))
 
 const SCOPE_LABEL = {
   page: { short: 'actions.findScopePageShort', long: 'actions.findScopePage' },
   canvas: { short: 'actions.findAllPagesShort', long: 'actions.findAllPages' },
   all: { short: 'actions.findEverywhereShort', long: 'actions.findEverywhere' },
+  library: { short: 'library.scopeShort', long: 'library.scope' },
 } as const
+
+const SCOPES: Scope[] = ['page', 'canvas', 'all', 'library']
+
+/** How long typing settles before the library index is asked. */
+const LIBRARY_FIND_DEBOUNCE_MS = 120
+
+/** For tests: forget whether this person has libraries. */
+export const resetFindLibrariesForTest = resetHasLibrariesForTest
 
 /** How long the pointer rests on a row before the preview follows it, so
  *  sweeping across the list does not flicker the preview. */
 const HOVER_INTENT_MS = 70
-
-/** Frames listed in the all-pages results. */
-const MAX_GROUPS = 300
-
-/** Variants listed under an expanded frame. */
-const MAX_INSIDE = 40
-
-/** One line of the all-pages results: a frame, or a variant listed under it. */
-export interface ResultRow {
-  key: string
-  group: FrameGroup
-  groupIndex: number
-  variant?: { label: string; hit: CanvasFindHit }
-}
-
-const rowKey = (g: FrameGroup, variant?: string) => (variant === undefined ? g.frameId : `${g.frameId}\n${variant}`)
-const rowDomId = (key: string) => `find-row-${key.replace(/[^\w-]/g, '_')}`
-
-/** Every visible row in list order: each frame, then its variants when expanded. */
-export function resultRows(groups: FrameGroup[], open: ReadonlySet<string>): ResultRow[] {
-  return groups
-    .slice(0, MAX_GROUPS)
-    .flatMap((group, groupIndex) => [
-      { key: rowKey(group), group, groupIndex },
-      ...(open.has(group.frameId)
-        ? group.inside
-            .slice(0, MAX_INSIDE)
-            .map((variant) => ({ key: rowKey(group, variant.label), group, groupIndex, variant }))
-        : []),
-    ])
-}
-
-/** What the preview frames, and an insert copies, for a row. */
-function focusOf(row: ResultRow, query: string): string {
-  return row.variant?.label ?? defaultFocus(row.group, query)
-}
-
-/** What the preview frames when a frame row (not a variant) is shown. */
-function defaultFocus(g: FrameGroup, query: string): string {
-  const q = query.trim()
-  return variantIds(g)[0]?.label ?? (g.id && g.id.toLowerCase().includes(q.toLowerCase()) ? g.id : q)
-}
 
 /** How long typing settles before an all-pages search asks the server. */
 const CANVAS_FIND_DEBOUNCE_MS = 220
@@ -207,14 +128,56 @@ export function FindBar({
   const inputRef = useRef<HTMLInputElement>(null)
   const canvasId = useStore((s) => s.canvas?.id)
   const pageCount = useStore((s) => s.canvas?.pages?.length ?? 1)
-  /* a canvas with several pages (a library) is searched whole by default */
-  /* a single-page canvas is usually a project: searching everywhere reaches the library */
-  const [scope, setScope] = useState<Scope>(pageCount > 1 ? 'canvas' : 'all')
+  const isLibraryCanvas = useStore((s) => !!s.canvas?.library)
+  /* a library canvas, or a person with a library, searches the libraries;
+     else a canvas of several pages is searched whole, a one-page project
+     everywhere */
+  const [scope, setScope] = useState<Scope>(isLibraryCanvas ? 'library' : pageCount > 1 ? 'canvas' : 'all')
+  const scopeTouched = useRef(false)
+  useEffect(() => {
+    if (isLibraryCanvas) return
+    let stale = false
+    void personHasLibraries().then((has) => {
+      if (has && !stale && !scopeTouched.current) setScope('library')
+    })
+    return () => {
+      stale = true
+    }
+  }, [isLibraryCanvas])
   const [remote, setRemote] = useState<{ q: string; hits: CanvasFindHit[]; total: number; frames: number } | null>(null)
   const [searching, setSearching] = useState(false)
+  const [kind, setKind] = useState('')
+  const [libraryResult, setLibraryResult] = useState<{ q: string; kind: string; result: LibrarySearchResult } | null>(
+    null,
+  )
 
   useEffect(() => {
-    if (!isRemote(scope) || (scope === 'canvas' && !canvasId)) return
+    if (scope !== 'library') return
+    const q = query.trim()
+    if (!q) return
+    let stale = false
+    const timer = window.setTimeout(() => {
+      setSearching(true)
+      api
+        .searchLibraries({ q, ...(kind ? { kind: [kind] } : {}), limit: 30 })
+        .then((result) => {
+          if (!stale) setLibraryResult({ q, kind, result })
+        })
+        .catch(() => {
+          if (!stale) setLibraryResult({ q, kind, result: { hits: [], total: 0, facets: emptyFacets() } })
+        })
+        .finally(() => {
+          if (!stale) setSearching(false)
+        })
+    }, LIBRARY_FIND_DEBOUNCE_MS)
+    return () => {
+      stale = true
+      window.clearTimeout(timer)
+    }
+  }, [scope, query, kind])
+
+  useEffect(() => {
+    if (!isRemote(scope) || scope === 'library' || (scope === 'canvas' && !canvasId)) return
     const q = query.trim()
     if (!q) return
     let stale = false
@@ -256,11 +219,18 @@ export function FindBar({
   }, [page?.frames, query, matchCase])
   /* an answer for an older query is not shown while the new one is asked */
   const remoteHits = useMemo(
-    () => (isRemote(scope) && remote?.q === query.trim() ? remote.hits : []),
+    () => (isRemote(scope) && scope !== 'library' && remote?.q === query.trim() ? remote.hits : []),
     [scope, remote, query],
   )
-  /* all pages: one row per frame, stepped frame by frame */
-  const groups = useMemo(() => groupByFrame(remoteHits, query), [remoteHits, query])
+  const libraryAnswer =
+    scope === 'library' && libraryResult?.q === query.trim() && libraryResult.kind === kind
+      ? libraryResult.result
+      : null
+  /* all pages: one row per frame, stepped frame by frame; the libraries: one row per family */
+  const groups = useMemo(
+    () => (scope === 'library' ? (libraryAnswer ? libraryRows(libraryAnswer) : []) : groupByFrame(remoteHits, query)),
+    [scope, libraryAnswer, remoteHits, query],
+  )
   const [open, setOpen] = useState<Set<string>>(() => new Set())
   /* the row the preview shows: hovered (after an intent delay) or reached
      with ↑/↓; leaving the list keeps it, so the pointer can reach the preview */
@@ -301,42 +271,52 @@ export function FindBar({
     if (hit.where === 'text') pickWhenLoaded(hit.frameId, query.trim(), hit.n, matchCase)
   }
 
+  /* a library item lives on its library canvas: fly there, or open it */
+  function goToItem(libraryId: string, item: LibraryItemSummary) {
+    const s = useStore.getState()
+    if (libraryId !== s.canvas?.id) return navigate(itemCanvasUrl(libraryId, item))
+    s.select(item.frameId)
+    s.requestFlyTo(item.frameId)
+  }
+
   function goRemote(index: number) {
     const group = groups[index]
     if (!group) return
     setCursor(index)
     setPointed(rowKey(group))
+    if (group.item && group.libraryId) return goToItem(group.libraryId, group.item)
     /* the frame's first readable match is picked; a name match just frames it */
-    flyToHit(group.hits.find((h) => h.where === 'text') ?? group.hits[0]!)
+    const hit = group.hits.find((h) => h.where === 'text') ?? group.hits[0]
+    if (hit) flyToHit(hit)
   }
 
-  /* the row's own item: a variant names its library id, a frame its own */
-  const itemOf = (row: ResultRow) => ({
-    id: row.variant && looksLikeId(row.variant.label) ? row.variant.label : row.group.id,
-    canvasName: row.group.canvasName ?? null,
-    frameId: row.group.frameId,
-  })
+  /* the row's library item, and the frame it is copied from */
+  const sourceOf = (row: ResultRow): InsertSource => {
+    const item = rowItem(row)
+    return { item, frameId: item?.frameId ?? row.group.frameId }
+  }
 
   function goRow(row: ResultRow) {
     if (!row.variant) return goRemote(row.groupIndex)
     setCursor(row.groupIndex)
     setPointed(row.key)
-    flyToHit(row.variant.hit)
+    if (row.variant.item && row.group.libraryId) return goToItem(row.group.libraryId, row.variant.item)
+    if (row.variant.hit) flyToHit(row.variant.hit)
   }
 
   const drag = useFindDrag()
 
   /* a library row drags onto any frame; the click stays the fallback */
   function pressRow(e: ReactPointerEvent<HTMLElement>, row: ResultRow) {
-    const item = itemOf(row)
-    if (!canEdit || !isLibraryItem(item.id, item.canvasName ?? useStore.getState().canvas?.name)) return
-    drag.start(e, item.id ?? row.group.label, row.group.frameId, (target) => void insertRow(row, target))
+    const source = sourceOf(row)
+    if (!canEdit || !isLibraryItem(source) || !source.item) return
+    drag.start(e, source.item.id, source.frameId, (target) => void insertRow(row, target))
   }
 
   /* a click, or ↩: insert a library item into the selected frame, else go */
   function activate(row: ResultRow, shift: boolean) {
     if (drag.swallowClick()) return
-    const action = rowAction(useStore.getState(), itemOf(row), shift)
+    const action = rowAction(useStore.getState(), sourceOf(row), shift)
     if (action.kind === 'insert') void insertRow(row, action.target)
     else goRow(row)
   }
@@ -345,17 +325,21 @@ export function FindBar({
 
   async function insertRow(row: ResultRow, target: InsertTarget) {
     if (inserting) return
-    const ref = itemOf(row).id ?? row.group.label
+    const source = sourceOf(row)
+    const ref = source.item?.id ?? row.group.label
     const notice = useStore.getState().pushNotice
     setInserting(true)
     setPointed(row.key)
     notice(t('actions.findInserting', { ref }), { busy: true })
     try {
       const done = await insertLibraryItem({
-        sourceFrameId: row.group.frameId,
-        focus: focusOf(row, query),
+        sourceFrameId: source.frameId,
+        focus: source.item ? libraryFocus(row) : textFocus(focusOf(row, query)),
         ref,
         target,
+        ...(source.item && row.group.libraryId
+          ? { libraryId: row.group.libraryId, rev: source.item.rev, mode: source.item.mode }
+          : {}),
       })
       if (!done) return notice(t('actions.findInsertFailed', { ref }))
       const parts = [
@@ -375,7 +359,7 @@ export function FindBar({
   }
 
   function copyRowId(row: ResultRow): boolean {
-    const id = itemOf(row).id
+    const id = rowItem(row)?.id ?? row.group.id
     if (!id) return false
     navigator.clipboard
       .writeText(id)
@@ -457,11 +441,11 @@ export function FindBar({
   useStore((s) => s.selectedId)
   useStore((s) => s.canvas?.frames)
   const hintRow = isRemote(scope) ? currentRow() : null
-  const hint = hintRow ? footerHint(useStore.getState(), itemOf(hintRow)) : null
+  const hint = hintRow ? footerHint(useStore.getState(), sourceOf(hintRow)) : null
 
   const count = !query.trim()
     ? ''
-    : isRemote(scope) && (searching || remote?.q !== query.trim())
+    : isRemote(scope) && (searching || (scope === 'library' ? !libraryAnswer : remote?.q !== query.trim()))
       ? '…'
       : listLength
         ? t('actions.findCount', {
@@ -509,19 +493,36 @@ export function FindBar({
           aria-label={t('actions.findPlaceholder')}
           trailing={<span className="flex-none font-mono text-caption text-ink-faint">{count}</span>}
         />
-        {/* where to look: this page → every page → every canvas */}
-        <IconButton
-          size="sm"
-          aria-label={t(SCOPE_LABEL[scope].long)}
-          title={t(SCOPE_LABEL[scope].long)}
-          on={isRemote(scope)}
-          onClick={() => {
-            setScope((v) => (v === 'page' ? (pageCount > 1 ? 'canvas' : 'all') : v === 'canvas' ? 'all' : 'page'))
-            setCursor(0)
-          }}
-        >
-          <span className="font-mono text-caption">{t(SCOPE_LABEL[scope].short)}</span>
-        </IconButton>
+        {/* where to look: this page, every page, every canvas, the libraries */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <IconButton
+              size="sm"
+              aria-label={t('library.scopeMenu')}
+              title={t(SCOPE_LABEL[scope].long)}
+              on={isRemote(scope)}
+            >
+              <span className="font-mono text-caption">{t(SCOPE_LABEL[scope].short)}</span>
+            </IconButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent width="md" align="end">
+            <DropdownMenuRadioGroup
+              value={scope}
+              onValueChange={(next) => {
+                scopeTouched.current = true
+                setScope(next as Scope)
+                setCursor(0)
+                setPointed(null)
+              }}
+            >
+              {SCOPES.filter((s) => s !== 'canvas' || pageCount > 1).map((s) => (
+                <DropdownMenuRadioItem key={s} value={s}>
+                  {t(SCOPE_LABEL[s].long)}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <IconButton
           size="sm"
           aria-label={t('actions.matchCase')}
@@ -565,6 +566,26 @@ export function FindBar({
           </Button>
         </div>
       )}
+      {scope === 'library' && (libraryAnswer?.facets.kind.length ?? 0) > 1 && (
+        <ToggleChipGroup
+          className="gap-1 px-1"
+          aria-label={t('library.kinds')}
+          value={kind || 'all'}
+          onValueChange={(next) => {
+            setKind(next === 'all' ? '' : next)
+            setCursor(0)
+          }}
+        >
+          <ToggleChipItem size="sm" value="all">
+            {t('library.allKinds')}
+          </ToggleChipItem>
+          {libraryAnswer!.facets.kind.map((k) => (
+            <ToggleChipItem key={k.value} size="sm" value={k.value}>
+              {k.label} {k.count}
+            </ToggleChipItem>
+          ))}
+        </ToggleChipGroup>
+      )}
       {isRemote(scope) && groups.length > 0 && (
         <>
           {/* the frame under the pointer, else the active one, live and framed on what matched */}
@@ -572,112 +593,41 @@ export function FindBar({
             const shown = pointedRow?.group ?? groups[Math.max(active, 0)]
             if (!shown) return null
             const row = pointedRow?.group === shown ? pointedRow : { key: rowKey(shown), group: shown, groupIndex: 0 }
-            const library = isLibraryItem(itemOf(row).id, shown.canvasName ?? useStore.getState().canvas?.name)
+            const source = sourceOf(row)
+            const library = isLibraryItem(source)
             return (
               <FindPreview
-                frameId={shown.frameId}
-                focus={focusOf(row, query)}
+                frameId={source.frameId}
+                focus={source.item ? libraryFocus(row) : textFocus(focusOf(row, query))}
                 staticNote={library ? t('actions.findStaticNote') : undefined}
               />
             )
           })()}
           <p className="px-1 text-caption text-ink-faint">
-            {t('actions.findFramesSummary', { frames: groups.length, total: remote?.total ?? remoteHits.length })}
+            {scope === 'library'
+              ? t('library.findSummary', { count: libraryAnswer?.total ?? groups.length })
+              : t('actions.findFramesSummary', { frames: groups.length, total: remote?.total ?? remoteHits.length })}
           </p>
-          <ul
-            className="max-h-80 overflow-y-auto"
-            aria-label={t('actions.findLabel')}
-            onMouseLeave={() => window.clearTimeout(intent.current)}
-          >
-            {groups.slice(0, MAX_GROUPS).map((g, i) => {
-              const expanded = open.has(g.frameId)
-              const variants = variantIds(g).length
-              return (
-                <li key={g.frameId}>
-                  <div
-                    id={rowDomId(rowKey(g))}
-                    className={cn(
-                      'flex items-center gap-2 rounded-row px-1.5 py-1',
-                      pointed === rowKey(g) || (!pointedRow && i === active) ? 'bg-paper-deep' : 'hover:bg-sub',
-                    )}
-                    onMouseEnter={() => hover(rowKey(g))}
-                  >
-                    <Pressable
-                      focus="none"
-                      onPointerDown={(e) => pressRow(e, { key: rowKey(g), group: g, groupIndex: i })}
-                      onClick={(e) => activate({ key: rowKey(g), group: g, groupIndex: i }, e.shiftKey)}
-                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                    >
-                      <span className="h-[30px] w-[46px] flex-none overflow-hidden rounded-tag bg-sub ring-1 ring-line-soft">
-                        <FramePreview frameId={g.frameId} empty={null} />
-                      </span>
-                      <span className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate font-mono text-caption text-ink">{g.id ?? g.label}</span>
-                        <span className="truncate text-caption text-ink-faint">
-                          {g.id ? `${g.label} · ` : ''}
-                          {scope === 'all' && g.canvasName ? `${g.canvasName} · ` : ''}
-                          {g.pageName}
-                        </span>
-                      </span>
-                    </Pressable>
-                    <span className="flex-none text-caption text-ink-faint tabular-nums">
-                      {variants
-                        ? t('actions.findVariants', { count: variants })
-                        : t('actions.findMatches', { count: g.hits.length })}
-                    </span>
-                    {g.inside.length > 0 ? (
-                      <IconButton
-                        size="sm"
-                        aria-label={t('actions.findShowInside')}
-                        aria-expanded={expanded}
-                        onClick={() =>
-                          setOpen((prev) => {
-                            const next = new Set(prev)
-                            if (next.has(g.frameId)) next.delete(g.frameId)
-                            else next.add(g.frameId)
-                            return next
-                          })
-                        }
-                      >
-                        <ChevronRightIcon
-                          width={14}
-                          height={14}
-                          aria-hidden
-                          className={cn('transition-transform', expanded && 'rotate-90')}
-                        />
-                      </IconButton>
-                    ) : (
-                      <span className="size-7 flex-none" />
-                    )}
-                  </div>
-                  {expanded && (
-                    <ul className="pb-1 pl-[62px]">
-                      {g.inside.slice(0, MAX_INSIDE).map((x) => (
-                        <li key={x.label} id={rowDomId(rowKey(g, x.label))}>
-                          <Pressable
-                            focus="none"
-                            onMouseEnter={() => hover(rowKey(g, x.label))}
-                            onPointerDown={(e) =>
-                              pressRow(e, { key: rowKey(g, x.label), group: g, groupIndex: i, variant: x })
-                            }
-                            onClick={(e) =>
-                              activate({ key: rowKey(g, x.label), group: g, groupIndex: i, variant: x }, e.shiftKey)
-                            }
-                            className={cn(
-                              'w-full truncate rounded-row px-1.5 py-0.5 text-left font-mono text-caption text-ink-soft',
-                              pointed === rowKey(g, x.label) ? 'bg-paper-deep' : 'hover:bg-sub',
-                            )}
-                          >
-                            {x.label}
-                          </Pressable>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
+          <FindResultList
+            groups={groups}
+            open={open}
+            pointed={pointed}
+            hasPointedRow={!!pointedRow}
+            active={active}
+            showCanvas={scope === 'all' || scope === 'library'}
+            onToggle={(key) =>
+              setOpen((prev) => {
+                const next = new Set(prev)
+                if (next.has(key)) next.delete(key)
+                else next.add(key)
+                return next
+              })
+            }
+            onHover={hover}
+            onLeave={() => window.clearTimeout(intent.current)}
+            onPress={pressRow}
+            onActivate={activate}
+          />
           {hint && hint.kind !== 'none' && (
             <p
               className="truncate border-t border-line-soft px-1 pt-1.5 text-caption text-ink-faint"
@@ -691,6 +641,27 @@ export function FindBar({
             </p>
           )}
         </>
+      )}
+      {scope === 'library' && groups.length > 0 && (
+        <Button
+          size="inline"
+          className="self-start px-1"
+          onClick={() => {
+            const lib = (pointedRow?.group ?? groups[Math.max(active, 0)])?.libraryId
+            const from = useStore.getState().canvas?.id
+            const frame = useStore.getState().selectedId
+            const params = new URLSearchParams({ q: query.trim() })
+            if (from && from !== lib) params.set('from', from)
+            if (from && from !== lib && frame) {
+              params.set('frame', frame)
+              const name = useStore.getState().canvas?.frames.find((f) => f.id === frame)?.name
+              if (name) params.set('fname', name)
+            }
+            if (lib) navigate(`/l/${lib}?${params}`)
+          }}
+        >
+          {t('library.openInGallery')}
+        </Button>
       )}
       {scope === 'page' && hits.length > 0 && (
         <ul className="max-h-56 overflow-y-auto" aria-label={t('actions.findLabel')}>
@@ -718,4 +689,8 @@ export function FindBar({
       {drag.overlay}
     </div>
   )
+}
+
+function emptyFacets(): LibrarySearchResult['facets'] {
+  return { kind: [], category: [], source: [], tag: [] }
 }

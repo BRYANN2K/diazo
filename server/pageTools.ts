@@ -1,6 +1,6 @@
 import { normalizeRotation } from '../shared/frameRotation.ts'
 import * as actions from './actions.ts'
-import { MAX_PAGES, PageLimitError } from './store.ts'
+import { MAX_PAGES, maxPages, PageLimitError } from './store.ts'
 import { canvasPages, framePageId, MAX_PAGE_NAME, samePages } from '../shared/pages.ts'
 import type { Actor, Canvas, CanvasPageInfo, Frame } from '../shared/types.ts'
 
@@ -31,9 +31,9 @@ export function pageListText(canvas: Canvas): string {
 }
 
 /** A model's page list, checked the way the MCP schema checks it. */
-export function parsePageList(raw: unknown): CanvasPageInfo[] | string {
+export function parsePageList(raw: unknown, max = MAX_PAGES): CanvasPageInfo[] | string {
   if (!Array.isArray(raw) || raw.length === 0) return 'pages must be a non-empty list of { id, name }'
-  if (raw.length > MAX_PAGES) return `a canvas holds at most ${MAX_PAGES} pages`
+  if (raw.length > max) return `a canvas holds at most ${max.toLocaleString('en-US')} pages`
   const pages: CanvasPageInfo[] = []
   for (const entry of raw as unknown[]) {
     const { id, name } = (entry ?? {}) as { id?: unknown; name?: unknown }
@@ -74,6 +74,8 @@ export function savePages(
   if (!samePages(expected, canvasPages(canvas)))
     return { ok: false, error: `Pages changed. The pages are now: ${pageListText(canvas)}. Retry with that list.` }
   if (new Set(pages.map((p) => p.id)).size !== pages.length) return { ok: false, error: 'Page IDs must be unique' }
+  if (pages.length > maxPages(canvas))
+    return { ok: false, error: `A canvas holds at most ${maxPages(canvas).toLocaleString('en-US')} pages.` }
   const stranded = canvas.frames.find((f) => !pages.some((p) => p.id === framePageId(canvas, f)))
   if (stranded)
     return {

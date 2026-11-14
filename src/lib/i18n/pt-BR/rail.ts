@@ -20,6 +20,7 @@ export const rail: Catalog['rail'] = {
   explore: 'Explorar',
   community: 'Comunidade',
   resources: 'Recursos',
+  libraries: 'Bibliotecas',
   automations: 'Automações',
   integrations: 'Integrações',
   agents: 'Agentes',

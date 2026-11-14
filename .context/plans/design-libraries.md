@@ -975,3 +975,46 @@ Linear order for a single executor: 0.1, 0.2, 0.3, 1.1-1.7, 2.1-2.5, 7.1, 7.2, 7
 - The exact call sites for `store.onFrameWrite` (step 1.3) and the renderer's priority option (step 2.1) must be
   confirmed in `server/store.ts` and `server/renderBrowser.ts` before coding.
 - No test was run and no feature code was written for this plan.
+
+## Deviations
+
+Built on `feat/design-libraries`, every step done, one commit each (2026-11-14). Where the plan was wrong
+or impossible, the smallest sound change was made; each is also in its commit body.
+
+- 0.1: `names.json` fixtures were partly reconstructed: the live name list of doop.design was not pulled.
+- 0.1: `splitFrameName` is stricter than planned (an id must match the grammar before the dash).
+- 0.2: `ids.defaultKind` added to the rules, for frames whose id carries no kind.
+- 0.3: prefix matching applies to the last word and to words of 3 characters or more.
+- 1.1: libraries hydrate in their own pass after `store.init`; `source_url` and `license` columns added to
+  `library_items` for the vendor warning.
+- 1.2: a small parse5 selector engine (`server/libraryDom.ts`) instead of a selector dependency.
+- 1.3: index rows are patched on curation; postings are rebuilt lazily on the next search.
+- 1.7 / 3.x: `docs/FEATURES.md` carries the README's "This fork" detail; FORK.md is written in French.
+- 2.1: the infinite-loop browser test became a deadline on a huge document; rendered-only rows carry an
+  `r:` hash so they are told apart from static ones.
+- 2.2: the anchor design is resolved in the runtime from the id texts; `findPreviewRuntime` moved to `shared/`.
+- 3.2: `use-windowed-grid` was written in 7.3 (the gallery came first without it, then used it).
+- 3.3: the "Used in" tab shows the use count only (no per-canvas list is stored).
+- 3.4: `?inserted=` is tested through the store helper, not the `CanvasPage` fixture.
+- 3.5: the Layers panel drag browser test was not written (click to insert is tested).
+- 4.1: `planImport` is a pure module of its own (`server/libraryImportPlan.ts`).
+- 4.2: lint cases live in `libraryTokens.test.ts`; draft status is a `data-doop-status` marker, findings
+  are not stored.
+- 4.4: the "Add to library" UI of 7.2 arrived with 4.4.
+- 5.2: the resident write case lives in `libraryWriteTools.test.ts`; 5.3's index cases in
+  `libraryReferencesIndex.test.ts`.
+- 6.1: `DOOP_PUBLIC_LIBRARIES`, the public role, `/public` and `/copy` landed in 6.1, 6.2 added the shelf.
+  ⌘F's in-browser preview of a public library item still reads `/api/frames`, which a stranger cannot.
+- 6.3: "From library" sits in the element panel, not the Inspector. Kinds and sources tables are read-only.
+- 6.4: a component item is inserted by the server (import, then instance) even from ⌘F.
+- 7.5: REST does not take agent keys, so the script reads the source through MCP's read-only `get_canvas`
+  and `get_frame` (plus GETs of public assets) and writes the target through MCP; the test asserts the source
+  saw only those. Past 100 pages it stops until the target is turned into a library. It was not run against
+  any real instance.
+- 8.1: synonyms count for 0.6 of a direct match (a several-word one as one word), so defaults widen a search
+  without reordering exact hits.
+- 8.2: the suggestion has its own column (`library_item_meta.suggested`, migration 0067) instead of a mark in
+  `findings`, which live on the rebuildable projection; the daily cap is in memory, like image descriptions'.
+- 8.3: the scale test measures through `indexFor` and `searchLibraries` (the search route's body), not
+  over HTTP, so the per-account rate limit does not shape it. Measured: build 72 ms, heap +25 MB, p95 3.5 ms,
+  largest response 39 KB.

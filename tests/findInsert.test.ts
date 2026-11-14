@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Canvas, Frame } from '../shared/types'
+import type { LibraryItemSummary } from '../shared/library'
 
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 
@@ -20,7 +21,26 @@ const frame = (id: string, name: string, extra: Partial<Frame> = {}): Frame =>
     ...extra,
   }) as Frame
 
-const lib = { id: 'cp.vui-button-primary', canvasName: 'Design Library', frameId: 'lib1' }
+const summary = (id: string, kind: string, frameId = 'lib1'): LibraryItemSummary => ({
+  id,
+  parentId: null,
+  label: id,
+  kind,
+  source: '',
+  category: 'Unsorted',
+  tags: [],
+  status: 'active',
+  mode: 'snapshot',
+  frameId,
+  pageId: 'p1',
+  locator: { whole: true },
+  box: null,
+  scripted: false,
+  rev: 1,
+  thumb: '',
+})
+
+const lib = { item: summary('cp.vui-button-primary', 'cp'), frameId: 'lib1' }
 
 function open(frames: Frame[], name = 'Client portal') {
   useStore.setState({
@@ -33,12 +53,12 @@ function open(frames: Frame[], name = 'Client portal') {
 }
 
 describe('isLibraryItem', () => {
-  it('knows library ids and the Design Library canvas', () => {
-    expect(isLibraryItem('cp.scb-otp', null)).toBe(true)
-    expect(isLibraryItem('ui.card', null)).toBe(true)
-    expect(isLibraryItem(null, 'Design Library')).toBe(true)
-    expect(isLibraryItem('auth.otp-6', 'Client portal')).toBe(false)
-    expect(isLibraryItem(null, null)).toBe(false)
+  it('is a row the library index answered, of an insertable kind', () => {
+    expect(isLibraryItem(lib)).toBe(true)
+    expect(isLibraryItem({ item: summary('auth.otp-6', 'auth'), frameId: 'x' })).toBe(true)
+    expect(isLibraryItem({ item: summary('rs.shadcnblocks', 'rs'), frameId: 'x' })).toBe(false)
+    expect(isLibraryItem({ item: null, frameId: 'x' })).toBe(false)
+    expect(isLibraryItem(null)).toBe(false)
   })
 })
 
@@ -61,10 +81,10 @@ describe('rowAction', () => {
   it('goes on ⇧, for a text hit, into a locked frame, or into the item’s own frame', () => {
     useStore.setState({ selectedId: 'login' })
     expect(rowAction(useStore.getState(), lib, true)).toEqual({ kind: 'go' })
-    expect(rowAction(useStore.getState(), { id: null, canvasName: 'Client portal', frameId: 'x' }, false)).toEqual({
+    expect(rowAction(useStore.getState(), { item: null, frameId: 'x' }, false)).toEqual({
       kind: 'go',
     })
-    expect(footerHint(useStore.getState(), { id: null, frameId: 'x' })).toEqual({ kind: 'go' })
+    expect(footerHint(useStore.getState(), { item: null, frameId: 'x' })).toEqual({ kind: 'go' })
     useStore.setState({ selectedId: 'locked' })
     expect(rowAction(useStore.getState(), lib, false)).toEqual({ kind: 'go' })
     useStore.setState({ selectedId: 'login' })

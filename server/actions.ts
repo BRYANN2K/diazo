@@ -1,8 +1,9 @@
+import type { LibraryInfo } from '../shared/library.ts'
 import { nanoid } from 'nanoid'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import { prepareChunk, prepareFrameHtml, referencesComponent } from './components.ts'
 import { COMPONENT_ATTR, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
-import { MAX_PAGES, PageLimitError, store } from './store.ts'
+import { maxPages, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
@@ -2164,6 +2165,19 @@ export function broadcastComponent(canvasId: string, component: ComponentDef, ac
   broadcast(canvasId, { type: 'component', id: component.id, component, actor })
 }
 
+/** Write markup that only marks the frame up (ids, library markers):
+ *  sign-off stands, no version is filed; viewers get the frame. */
+export function annotateFrame(frameId: string, html: string, actor: Actor): Frame | undefined {
+  const frame = store.updateFrame(frameId, { html }, actor.name, { annotation: true })
+  if (frame) broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
+  return frame
+}
+
+/** A library started, changed or stopped (server/libraries.ts). */
+export function broadcastLibrary(canvasId: string, library: LibraryInfo | null, actor: Actor) {
+  broadcast(canvasId, { type: 'library', library, actor })
+}
+
 export function broadcastComponentDeleted(canvasId: string, id: string, actor: Actor) {
   broadcast(canvasId, { type: 'component', id, component: null, actor })
 }
@@ -2319,7 +2333,7 @@ export function createCanvasPage(canvasId: string, name: string, actor: Actor) {
   const canvas = store.canvases.get(canvasId)
   if (!canvas) return undefined
   const pages = canvasPages(canvas)
-  if (pages.length >= MAX_PAGES) throw new PageLimitError()
+  if (pages.length >= maxPages(canvas)) throw new PageLimitError(maxPages(canvas))
   const page = { id: nanoid(10), name }
   return { page, pages: setCanvasPages(canvasId, [...pages, page], actor) }
 }

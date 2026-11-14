@@ -183,7 +183,8 @@
 - Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and
   every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
   empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)
-  and returns it for `create_frame`'s `pageId`; `set_canvas_pages` stays the whole-list call for
+  and returns it for `create_frame`'s `pageId` (a canvas holds 100 pages, a design library 1,000:
+  `maxPages` in `server/store.ts`; past 100 the Pages panel gets a filter and a windowed list); `set_canvas_pages` stays the whole-list call for
   rename, reorder and delete; `update_frame` moves a frame between pages (it keeps its x/y; an
   unknown `pageId` is refused with the canvas's page list). The guide's "Frames and HTML" section says when a page beats a
   frame. The resident agent has the same three tools under the same names; both surfaces run
@@ -785,6 +786,68 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   linked by id, so they follow); an instance's row is not renamed on its own. Stored in `components`
   (migration `0052_components`). Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
   `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`.
+- Design libraries (`.context/specs/design-libraries.md`, plan in `.context/plans/design-libraries.md`):
+  a canvas is a library when it has a `libraries` row (migration 0066: `libraries`, the rebuildable
+  projection `library_items`, the curation `library_item_meta`), mirrored on `canvas.library`
+  (`LibraryInfo`) and broadcast as a `library` room message. `shared/library.ts` (types,
+  `effectiveItem`), `shared/libraryIds.ts` (the id grammar, `splitFrameName`, `parentIdOf`),
+  `shared/libraryRules.ts` (`LibraryRules`, presets `blank` and `sheets`, strict parser),
+  `shared/librarySearch.ts` (the in-memory index: BM25 over weighted fields, prefix and one-edit
+  matching, filters, facets, families). `server/libraries.ts` keeps the rows and is the one gate
+  (`libraryRole`: read / curate / manage, on top of `canvasRole`, which is not changed);
+  `server/libraryExtract.ts` reads one frame's items over parse5 (`server/libraryDom.ts`, a small
+  selector engine for rule selectors); `server/libraryIndex.ts` keeps the projection in step
+  (full runs 50 frames at a time through `store.renderableFrame`, resumed at boot; one frame 1.5 s
+  after `store.onFrameWrite`; the search index built on first use, dropped after 10 idle minutes).
+  Two passes: the static one reads the HTML (no browser); the rendered one (`renderedPass`, at most
+  2 background pages, 1.7 s for late scripts) runs `shared/libraryCollect.ts` in the headless page
+  to read a scripted sheet's variants and every item's box. Variants only the page shows carry an
+  `r:` hash and are kept across static reindexes until the next rendered pass.
+  Item images: `GET /api/libraries/:id/items/:itemId/thumb.jpg?v=<hash>` (`server/libraryThumbs.ts`):
+  the frame rendered clipped to the item's box plus 12 px, JPEG, 640 px on its longest side, at
+  background priority, stored under `lt/<canvasId>/<itemId>-<hash>.jpg` and served immutable for
+  its hash; 404 while the item has no box, 503 when the renderer is busy, and the client
+  (`src/components/library/ItemThumb.tsx`) then crops the frame preview with CSS.
+  Two insert paths, one block (`shared/libraryBlock.ts`, `data-doop-ref` / `-ref-lib` / `-ref-rev`):
+  ⌘F snapshots in the browser's preview iframe; the gallery and agents call
+  `POST /api/libraries/:id/items/:itemId/insert` (`server/librarySnapshot.ts`), which runs the same
+  preview runtime and snapshot (`shared/findPreviewRuntime.ts`, `shared/librarySnapshot.ts`) in the
+  headless browser, or, without one, reads the element by parse5 and keeps the frame's `<style>`
+  blocks whole under the scope (`fidelity: 'static'`). Either is one ordinary design write.
+  The gallery (`/libraries`, `/l/<id>`, `/l/<id>/i/<item>`: `src/pages/Libraries.tsx`,
+  `src/pages/LibraryPage.tsx`, `src/components/library/*`, view in the URL via `src/lib/libraryQuery.ts`,
+  a windowed grid through `src/hooks/use-windowed-grid.ts`) and the Layers panel's Library tab
+  (`LibraryPanel.tsx`, shown once the person has a library; its pick is kept per browser under
+  `doop:library-panel`).
+  Rules live on the library row (`libraries.rules`, versioned, read through `parseLibraryRules`); only
+  a manager (`canManageCanvas`) changes them, from the gallery's Settings sheet
+  (`LibrarySettings.tsx`, `LibraryRulesForm.tsx`: one card per rule group, a dry run of the edited
+  rules 400 ms after the last edit), and a change bumps `rules_version` and reindexes.
+  Agents write to a library through `import_to_library` and `set_library_item` only while
+  `AGENT_LIBRARY_WRITES` is true (the default; false answers with the same "curated by people"
+  refusal as `AGENT_GUIDELINE_WRITES`), with the curate role, and a resident run only on the library
+  it works on; no tool changes rules, visibility or whether a canvas is a library.
+  REST under `/api/libraries` (`server/libraryRoutes.ts`, 30 searches per 10 s per account; never
+  `store.load`); agent tools in `server/libraryTools.ts`, registered for MCP and the resident agent
+  under the same names. ⌘F's Library scope (`src/lib/findLibrary.ts`, `src/lib/findRows.ts`,
+  `src/components/find/FindResultList.tsx`) and File → Turn into a library
+  (`src/components/library/ConvertToLibraryModal.tsx`). ⌘F everywhere (`GET /api/find`) and MCP
+  `find_in_canvas` without `canvas_id` answer a library from its index (`findInLibrary` in
+  `server/libraryQueries.ts`: its items as `name` hits carrying `item`), so a search across canvases
+  never loads a library's frame HTML; other canvases are searched as before (`canvasFindEverywhere.test.ts`).
+  `scripts/pull-library.ts` copies a library canvas between two instances over their `/mcp` (agent
+  keys from `DOOP_FROM_KEY` / `DOOP_TO_KEY`, the source only read, `/a/` assets re-uploaded,
+  resumable; `scripts/README.md`, `pullLibrary.test.ts`).
+  AI descriptions (`server/libraryDescribe.ts`, migration 0067): off per library until a manager
+  turns on Settings → "Describe thin items with AI" (`libraries.describe_items`; while off no model
+  is called). Then each item whose description or tags a person left empty gets one vision call on
+  its thumbnail, paid by the library canvas's owner as an image description is (`describerFor`:
+  their connected model, else the server's; their image-description Off stops it too), at most 200
+  a library per UTC day (in memory). Results sit in `library_item_meta.suggested`: searchable at
+  once, shown in the inbox with Accept / Dismiss, written as the item's own only when accepted.
+  Tests: `libraryDescribe.test.ts`.
+  Tests: `library*.test.ts`,
+  `librariesHttp.test.ts`, `findLibrary*.test.ts*`, `findRows.test.ts`, `convertLibraryUi.test.tsx`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
   `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`
@@ -854,6 +917,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   edit, and share-link visitors the link's level (`none` / `view` / `comment` / `edit`). REST,
   the WebSocket room and MCP gate reads, comments and writes on it separately; spec in
   `.context/specs/share-link-roles.md`.
+- Design libraries add their own gate beside canvas access, never inside it: `libraryRole` in
+  `server/libraries.ts` (manage = `canManageCanvas`, curate = `canEditCanvas`, read =
+  `canAccessCanvas`, plus every signed-in account for a `public` library while
+  `DOOP_PUBLIC_LIBRARIES` is on). A library read opens the library routes and tools only, never
+  `/api/canvases/:id`, the room or the frame tools. Visibility (`private` / `workspace` / `public`)
+  is set from the share dialog by a manager; `workspace` needs the canvas in a workspace.
 
 - Bun 1.3.10 - package manager; lockfile at `bun.lock`, installed with `bun install
 --frozen-lockfile` in CI.

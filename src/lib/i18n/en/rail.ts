@@ -19,6 +19,7 @@ export const rail = {
   explore: 'Explore',
   community: 'Community',
   resources: 'Resources',
+  libraries: 'Libraries',
   automations: 'Automations',
   integrations: 'Integrations',
   agents: 'Agents',

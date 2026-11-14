@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+  <head>
+    <style>
+      .hd {
+        height: 72px;
+        display: flex;
+        gap: 18px;
+      }
+      .g {
+        display: grid;
+        grid-template-columns: repeat(4, 490px);
+        gap: 20px 12px;
+      }
+      .v {
+        width: 490px;
+        height: 300px;
+        overflow: hidden;
+        background: #fff;
+      }
+      .v.dk {
+        background: #09090b;
+      }
+      .m {
+        font: 10px/1.5 monospace;
+        color: #7d7a72;
+      }
+      .b {
+        background: #09090b;
+        color: #fff;
+        height: 44px;
+      }
+      .ic {
+        width: 20px;
+        height: 20px;
+        stroke: currentColor;
+      }
+      @keyframes pu {
+        50% {
+          opacity: 0.4;
+        }
+      }
+      .unused {
+        color: red;
+      }
+    </style>
+  </head>
+  <body>
+    <svg width="0" height="0">
+      <symbol id="key" viewBox="0 0 24 24"><path d="M2 12h20" /></symbol>
+    </svg>
+    <div class="hd">
+      <span class="k">bk · scb</span>
+      <h1>shadcnblocks · Login</h1>
+      <p>Sign-in screens: keep one primary path.</p>
+      <span class="r">4 variants of 8 · shadcnblocks.com/blocks/login</span>
+    </div>
+    <div class="g">
+      <div>
+        <div class="v">
+          <span class="b"
+            >Sign in<svg class="ic"><use href="#key"></use></svg
+          ></span>
+        </div>
+        <div class="m"><b>bk.scb-login-minimal-email-password</b> · 420px column, focus ring 4px</div>
+      </div>
+      <div>
+        <div class="v dk"><span class="b" onclick="x()">Log in</span></div>
+        <div class="m"><b>bk.scb-login-social-with-email-option</b> · dark, 3 stacked provider buttons</div>
+      </div>
+    </div>
+    <script>
+      setInterval(() => document.body.classList.toggle('go'), 8000)
+    </script>
+  </body>
+</html>

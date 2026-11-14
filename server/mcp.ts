@@ -1,4 +1,5 @@
 import { findInCanvas } from './canvasFind.ts'
+import { findInLibrary } from './libraryQueries.ts'
 import { env } from './env.ts'
 import { MAX_SKILL_CHARS, MAX_SKILL_DESCRIPTION_CHARS, skillSlug } from '../shared/skills.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
@@ -16,7 +17,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { Request, Response } from 'express'
 import { fromNodeHeaders } from 'better-auth/node'
 import { z } from 'zod'
-import { store } from './store.ts'
+import { store, MAX_LIBRARY_PAGES } from './store.ts'
 import { addPage, savePages, updateFrameMeta } from './pageTools.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { describeLibrary, libraryBrief } from '../shared/fonts.ts'
@@ -111,6 +112,7 @@ import {
 } from '../shared/agentFeedback.ts'
 import { catalogEntry, compactFrameHtml, findComponent, instancesIn } from './componentActions.ts'
 import { COMPONENT_TOOLS, componentWriteNotes, runComponentTool } from './componentTools.ts'
+import { DESIGN_LIBRARY_TOOLS, librariesOf, runLibraryTool } from './libraryTools.ts'
 import { previewFrame } from './componentPreview.ts'
 import { INSTANCE_ATTR } from '../shared/components.ts'
 
@@ -547,7 +549,7 @@ export function buildMcpServer(
     {
       title: 'Find in a canvas (all pages)',
       description:
-        "Search frames for a term across every page of one canvas, or of every canvas the user can open when canvas_id is omitted — the same search as ⌘F with All pages. Matches frame names, the text a person reads in the frame, and string literals in its scripts (library sheets often render their items from a JS array, so ids like cp.scb-input-otp live there). Use it to answer 'find the OTP designs' instead of paging through get_canvas. Results come in reading order (page, then top to bottom), each with its frame id, page and a snippet; open one with get_frame or link it as /c/<canvas>?frame=<frame>.",
+        "Search frames for a term across every page of one canvas, or of every canvas the user can open when canvas_id is omitted — the same search as ⌘F with All pages. Without canvas_id, a design library answers from its index: its items come back as name hits carrying item_id (read one with get_library_item). Matches frame names, the text a person reads in the frame, and string literals in its scripts (library sheets often render their items from a JS array, so ids like cp.scb-input-otp live there). Use it to answer 'find the OTP designs' instead of paging through get_canvas. Results come in reading order (page, then top to bottom), each with its frame id, page and a snippet; open one with get_frame or link it as /c/<canvas>?frame=<frame>.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         query: z.string().min(1).max(200).describe('The term to find, e.g. "OTP" or "cp.vui-otp-input"'),
@@ -567,10 +569,13 @@ export function buildMcpServer(
           if (canvas_id) return noCanvas(canvas_id)
           continue
         }
-        /* frame HTML is loaded per canvas on demand */
-        const c = await store.load(id)
+        /* everywhere, a library answers from its index; frame HTML is
+           loaded per canvas on demand */
+        const listed = store.getCanvas(id)
+        const fromIndex = !canvas_id && listed ? await findInLibrary(listed, query, { matchCase: !!match_case }) : null
+        const c = fromIndex ? listed : await store.load(id)
         if (!c) continue
-        const r = findInCanvas(c, query, { matchCase: !!match_case })
+        const r = fromIndex ?? findInCanvas(c, query, { matchCase: !!match_case })
         total += r.total
         frames += r.frames
         for (const h of r.hits) {
@@ -584,6 +589,7 @@ export function buildMcpServer(
             page_name: h.pageName,
             where: h.where,
             snippet: `${h.before}[${h.text}]${h.after}`,
+            ...(h.item ? { item_id: h.item.id, item_kind: h.item.kind } : {}),
             url: `/c/${c.id}?frame=${h.frameId}`,
           })
         }
@@ -1502,7 +1508,8 @@ export function buildMcpServer(
         pages: z
           .array(z.object({ id: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(100) }))
           .min(1)
-          .max(100),
+          .max(MAX_LIBRARY_PAGES)
+          .describe('At most 100 pages, 1,000 on a design library'),
         agent_name: agentName,
       },
     },
@@ -2513,6 +2520,43 @@ export function buildMcpServer(
         return tool.readOnly
           ? withFeedbackNotice(result, canvasId, agent ? actor : undefined)
           : withFeedback(result, canvasId, actor)
+      }) as never,
+    )
+  }
+
+  for (const tool of DESIGN_LIBRARY_TOOLS) {
+    server.registerTool(
+      tool.name,
+      {
+        title: tool.title,
+        description: tool.description,
+        annotations: {
+          readOnlyHint: tool.readOnly,
+          destructiveHint: false,
+          idempotentHint: tool.readOnly,
+          openWorldHint: false,
+        },
+        inputSchema: { ...tool.shape, agent_name: agentName.optional() } as never,
+      },
+      (async (raw: Record<string, unknown>) => {
+        const agent = raw.agent_name as string | undefined
+        const actor = actorFrom(agent)
+        const target = typeof raw.canvas_id === 'string' ? raw.canvas_id : undefined
+        if (target && !tool.readOnly) arrive(target, agent)
+        const outcome = await runLibraryTool(tool.name, raw, {
+          userId: ownerId,
+          actor,
+          libraries: () => librariesOf(ownerId),
+          canEdit: (canvasId) => !!canvasFor(canvasId, 'edit'),
+          canRead: (canvasId) => !!canvasFor(canvasId, 'view'),
+        })
+        if (!outcome.ok) return err(outcome.error)
+        const result = outcome.note ? textWithNudge(outcome.data, outcome.note) : text(outcome.data)
+        for (const frameId of outcome.frames ?? []) {
+          const frame = store.getFrame(frameId)
+          if (frame) withComponentNotes(result, frame)
+        }
+        return target && !tool.readOnly ? withFeedback(result, target, actor) : result
       }) as never,
     )
   }

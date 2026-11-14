@@ -56,6 +56,7 @@ import {
   ungroupSelection,
 } from './edits'
 import { promptMakeComponent } from '../components'
+import { navigate } from '../navigate'
 
 /** What the canvas page lends the registry: its own modals and panels. */
 export interface ActionHost {
@@ -82,6 +83,8 @@ export interface ActionHost {
   placeImage(): void
   newCanvas(): void
   duplicateCanvas(): void
+  /** the "Turn into a library" dialog */
+  openConvertLibrary(): void
   present(): void
   toggleHideUi(): void
   toggleAgents(): void
@@ -223,6 +226,26 @@ export const ACTIONS: readonly CanvasAction[] = [
     section: 0,
     enabled: () => !h()?.guest,
     run: () => h()?.duplicateCanvas(),
+  },
+  {
+    id: 'library-open',
+    label: 'library.openLibraries',
+    menu: 'file',
+    section: 0,
+    enabled: () => !h()?.guest,
+    run: () => {
+      const canvas = store().canvas
+      navigate(canvas?.library ? `/l/${canvas.id}` : '/libraries')
+    },
+  },
+  {
+    id: 'library-convert',
+    label: 'library.convert',
+    menu: 'file',
+    section: 0,
+    edit: true,
+    enabled: () => !h()?.guest && !!store().canvas && !store().canvas?.library,
+    run: () => h()?.openConvertLibrary(),
   },
   {
     id: 'place-image',

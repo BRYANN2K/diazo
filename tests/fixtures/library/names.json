@@ -1,0 +1,202 @@
+[
+  {
+    "name": "§ Inputs A — Text fields & core inputs",
+    "id": null,
+    "label": "§ Inputs A — Text fields & core inputs"
+  },
+  {
+    "name": "013 Inputs & forms · Checkboxes & choice cards + Whole forms & validation + Switches — title",
+    "id": null,
+    "label": "013 Inputs & forms · Checkboxes & choice cards + Whole forms & validation + Switches — title"
+  },
+  {
+    "name": "INDEX — all domains & pages",
+    "id": null,
+    "label": "INDEX — all domains & pages"
+  },
+  {
+    "name": "AS-IMG-02 — One icon family, one stroke",
+    "id": "AS-IMG-02",
+    "label": "One icon family, one stroke"
+  },
+  {
+    "name": "rs.shadcnblocks — rs.shadcnblocks",
+    "id": "rs.shadcnblocks",
+    "label": "rs.shadcnblocks"
+  },
+  {
+    "name": "footer.fd-dark-1 — footer.design · Dark 1/3 (12)",
+    "id": "footer.fd-dark-1",
+    "label": "footer.design · Dark 1/3 (12)"
+  },
+  {
+    "name": "mo.tk-staggered-y-spin — rotateY 0 → 360°",
+    "id": "mo.tk-staggered-y-spin",
+    "label": "rotateY 0 → 360°"
+  },
+  {
+    "name": "photo-stack — stack",
+    "id": "photo-stack",
+    "label": "stack"
+  },
+  {
+    "name": "Login screen",
+    "id": null,
+    "label": "Login screen"
+  },
+  {
+    "name": "bk.scb-login — shadcnblocks · Login (4)",
+    "id": "bk.scb-login",
+    "label": "shadcnblocks · Login (4)"
+  },
+  {
+    "name": "cp.tuff-answers — TuffUI · Interactive answers (3)",
+    "id": "cp.tuff-answers",
+    "label": "TuffUI · Interactive answers (3)"
+  },
+  {
+    "name": "cp.scb-login-button-passkey-dark — Sign in with passkey · inverted on dark",
+    "id": "cp.scb-login-button-passkey-dark",
+    "label": "Sign in with passkey · inverted on dark"
+  },
+  {
+    "name": "§ Inputs B — Selects & pickers",
+    "id": null,
+    "label": "§ Inputs B — Selects & pickers"
+  },
+  {
+    "name": "§ Auth A — Log in & sign up",
+    "id": null,
+    "label": "§ Auth A — Log in & sign up"
+  },
+  {
+    "name": "014 Auth & onboarding · Log in + Sign up + OTP — title",
+    "id": null,
+    "label": "014 Auth & onboarding · Log in + Sign up + OTP — title"
+  },
+  {
+    "name": "001 Foundations · Colour & type — title",
+    "id": null,
+    "label": "001 Foundations · Colour & type — title"
+  },
+  {
+    "name": "INDEX — kinds",
+    "id": null,
+    "label": "INDEX — kinds"
+  },
+  {
+    "name": "cp.scb-otp-input — shadcnblocks · OTP input (6)",
+    "id": "cp.scb-otp-input",
+    "label": "shadcnblocks · OTP input (6)"
+  },
+  {
+    "name": "cp.scb-login-button — shadcnblocks · Auth entry buttons (8)",
+    "id": "cp.scb-login-button",
+    "label": "shadcnblocks · Auth entry buttons (8)"
+  },
+  {
+    "name": "hero.scb-split-image — Split hero · image right",
+    "id": "hero.scb-split-image",
+    "label": "Split hero · image right"
+  },
+  {
+    "name": "bg.grain-mesh-violet — Grainy mesh · violet",
+    "id": "bg.grain-mesh-violet",
+    "label": "Grainy mesh · violet"
+  },
+  {
+    "name": "sw.brand-blues — Swatches · brand blues",
+    "id": "sw.brand-blues",
+    "label": "Swatches · brand blues"
+  },
+  {
+    "name": "tx.display-serif — Display serif scale",
+    "id": "tx.display-serif",
+    "label": "Display serif scale"
+  },
+  {
+    "name": "ft.inter-tight — Inter Tight · specimen",
+    "id": "ft.inter-tight",
+    "label": "Inter Tight · specimen"
+  },
+  {
+    "name": "ic.lucide-auth — Lucide · auth icons",
+    "id": "ic.lucide-auth",
+    "label": "Lucide · auth icons"
+  },
+  {
+    "name": "AS-COL-01 — Two neutrals, one accent",
+    "id": "AS-COL-01",
+    "label": "Two neutrals, one accent"
+  },
+  {
+    "name": "rs.tuffui — rs.tuffui",
+    "id": "rs.tuffui",
+    "label": "rs.tuffui"
+  },
+  {
+    "name": "footer.fd-light-2 — footer.design · Light 2/3 (12)",
+    "id": "footer.fd-light-2",
+    "label": "footer.design · Light 2/3 (12)"
+  },
+  {
+    "name": "mo.tk-fade-up — opacity 0 → 1, y 12 → 0",
+    "id": "mo.tk-fade-up",
+    "label": "opacity 0 → 1, y 12 → 0"
+  },
+  {
+    "name": "mo.tk-press-scale — scale 0.97 on press",
+    "id": "mo.tk-press-scale",
+    "label": "scale 0.97 on press"
+  },
+  {
+    "name": "cp.tuff-chart-card — TuffUI · chart card",
+    "id": "cp.tuff-chart-card",
+    "label": "TuffUI · chart card"
+  },
+  {
+    "name": "bk.scb-pricing — shadcnblocks · Pricing (5)",
+    "id": "bk.scb-pricing",
+    "label": "shadcnblocks · Pricing (5)"
+  },
+  {
+    "name": "cp.ui-switch — Switch · sizes and states",
+    "id": "cp.ui-switch",
+    "label": "Switch · sizes and states"
+  },
+  {
+    "name": "card-grid — grid",
+    "id": "card-grid",
+    "label": "grid"
+  },
+  {
+    "name": "Pricing page",
+    "id": null,
+    "label": "Pricing page"
+  },
+  {
+    "name": "Untitled frame",
+    "id": null,
+    "label": "Untitled frame"
+  },
+  {
+    "name": "Settings — notifications",
+    "id": null,
+    "label": "Settings — notifications"
+  },
+  {
+    "name": "§ Data A — Tables & lists",
+    "id": null,
+    "label": "§ Data A — Tables & lists"
+  },
+  {
+    "name": "021 Data display · Tables + Lists — title",
+    "id": null,
+    "label": "021 Data display · Tables + Lists — title"
+  },
+  {
+    "name": "cp.scb-otp-input-dark — OTP input · dark",
+    "id": "cp.scb-otp-input-dark",
+    "label": "OTP input · dark"
+  }
+]

@@ -9,14 +9,45 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
 - **⌘F across every page** — results grouped by frame, with thumbnails and a large preview.
   Agents get the same search with the `find_in_canvas` MCP tool.
 - **Insert from ⌘F** — hovering a result moves the live preview onto that variant without
-  reloading it. Clicking a library item (`cp.*`, `ui.*`) while a frame is selected inserts a
+  reloading it. Clicking a library item (a row the library index answered) while a frame is selected inserts a
   copy: its HTML plus only the CSS that matches it, scoped with `@scope`, with fresh
-  `data-doop-id`s and a `data-doop-ref` that keeps where it came from. You can also drag the
+  `data-doop-id`s, the SVG symbols and gradients it points at (ids prefixed per insert), nothing
+  that runs (no scripts, handlers or `javascript:` URLs), and `data-doop-ref` /
+  `data-doop-ref-lib` / `data-doop-ref-rev` keeping the item, its library and its revision. You can also drag the
   row onto any frame; a line shows the drop slot between elements. ⇧ click goes to the item,
   ↩ / ⇧↩ / ⌘C do the same from the keyboard. A box beside the copy sends an instruction to the
   chat (**Adapt**, through the plan → Go flow) or removes the copy (**Undo**).
+- **Design libraries** — a canvas becomes a library (File → Turn into a library…): its frames are
+  indexed as items, a family with its variants, each with a kind, a category and tags, read from
+  the frame names (`<id> — <label>`), `§` section frames and the sheets' cells, or from
+  `data-doop-item` / `data-doop-variant` markers. Converting changes no frame. ⌘F has a Library
+  scope answered by the index: one row per family, its variants under it, kind chips, and insert
+  as before. The Libraries page (rail → Libraries, `/libraries`) lists them as tiles; a library's gallery
+  (`/l/<id>`) filters by kind, category and search and opens an item with every variant side by side;
+  "Use" inserts it into the frame the gallery was opened from (⌘F → Open in gallery), or into a
+  canvas and frame picked there, and the canvas opens with the block picked.
+  A frame's menu has "Add to library…": the library's rules give each copy an id, its variants'
+  markers, the SVG definitions it points at, a category, a page and a status (a low lint score can
+  keep it a draft), shown as a dry run first; the frames themselves are not changed.
+  Who can use a library is set in its share dialog: the people with access, its workspace, or —
+  only with `DOOP_PUBLIC_LIBRARIES=true`, off by default — every account on the instance, after a
+  warning that library content is often a vendor's. A public library is searched, browsed and
+  inserted from (Community has a Libraries shelf: Use, Copy), never opened as a canvas.
+  A block inserted from a library shows "From library" in the element panel, with Update when its
+  item has a newer revision (a fresh copy in its place, one undo step, after a confirmation).
+  Agents call `list_libraries`, `get_library`, `search_library`, `get_library_item` (with the item as
+  a scoped block) and `insert_library_item`, which places the copy for them; `import_to_library` and
+  `set_library_item` write to one while `AGENT_LIBRARY_WRITES` is on (the default).
+  An item whose frame holds a component goes in as a linked instance ("Promote to component" makes
+  one). ⌘F everywhere answers libraries from their index, without loading them. Search knows common
+  UI synonyms ("login" finds "sign in") and ranks what is used most first. A library can let a
+  model describe and tag its thin items (off by default, 200 a day, suggestions wait in the inbox).
+  `scripts/pull-library.ts` copies a library from another Doop (see FORK.md).
 - **Reference library** — store design-library items as references, find them with
-  `find_references`, and attach them to plan cards (thumbnails, remove button, Settings card).
+  `find_references`, and attach them to plan cards (thumbnails, remove button, Settings card). Up to
+  20 canvases; the workspace's design libraries come along without being picked. On a design
+  library `find_references` answers from its index (families, with `item_id`), and a plan may name
+  the item, which is checked and shown with its own image.
 - **Plan-first Chat tab** — thread list, one composer, plan card and repo chip. An editor's line
   in the Chat tab asks Doop without an `@mention`, with a model picker per ask. A thread's Reply
   action points the composer at that thread. The composer and the message bubbles follow the

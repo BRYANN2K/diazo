@@ -49,7 +49,8 @@ function cleanReference(value: unknown): ChatPlanReference | undefined {
   const why = cleanText(raw.why, REF_WHY_CHARS)
   if (!canvasId || !frameId || !label || !why) return undefined
   const libraryId = cleanText(raw.library_id ?? raw.libraryId, ID_CHARS) ?? `${canvasId}:${frameId}`
-  return { libraryId, canvasId, frameId, label, why }
+  const itemId = cleanText(raw.item_id ?? raw.itemId, ID_CHARS)
+  return { libraryId, canvasId, frameId, label, why, ...(itemId ? { itemId } : {}) }
 }
 
 /** A references list from the wire (a screen's, or a queued card's): the

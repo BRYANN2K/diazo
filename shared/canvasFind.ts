@@ -1,5 +1,7 @@
 /** ⌘F across every page of a canvas — the wire shape of GET /api/canvases/:id/find. */
 
+import type { LibraryItemSummary } from './library.ts'
+
 export interface CanvasFindHit {
   /** set by the everywhere search, which spans canvases */
   canvasId?: string
@@ -15,6 +17,8 @@ export interface CanvasFindHit {
   before: string
   text: string
   after: string
+  /** a library canvas answered from its index: the item this hit is */
+  item?: LibraryItemSummary
 }
 
 export interface CanvasFindResult {
