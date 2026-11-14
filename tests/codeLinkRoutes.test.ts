@@ -125,4 +125,52 @@ describe('/api/canvases/:id/code-links', () => {
       await agent.close()
     }
   })
+
+  it('suggests files from the linked project through the device bridge', async () => {
+    const body = { targetKind: 'frame', targetId: frameId }
+    const noLink = await owner.post(`/api/canvases/${canvasId}/code-links/suggest`, body)
+    expect(noLink.status).toBe(409)
+    expect((await noLink.json()).error).toMatch(/no linked project/)
+    const LINK_ID = '8a2c1e4f-0000-4000-8000-0000000000c1'
+    const DEVICE = '9b3d2f5a-0000-4000-8000-0000000000c2'
+    await owner.post(`/api/canvases/${canvasId}/repo`, { linkId: LINK_ID, name: 'site', deviceId: DEVICE })
+    const poll = () =>
+      fetch(`${server.base}/api/local-repo/poll`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: owner.header() },
+        body: JSON.stringify({ deviceId: DEVICE, grants: [LINK_ID] }),
+      }).then((r) => r.json() as Promise<{ request: { id: string; op: string; args: Record<string, unknown> } }>)
+    const first = poll()
+    await new Promise((r) => setTimeout(r, 300))
+    const suggest = owner.post(`/api/canvases/${canvasId}/code-links/suggest`, body)
+    const { request: search } = await first
+    expect(search.op).toBe('search')
+    expect(search.args.regex).toBe(true)
+    expect(String(search.args.query)).toContain('PricingPage')
+    const second = poll()
+    await owner.post(`/api/local-repo/finish/${search.id}`, {
+      deviceId: DEVICE,
+      ok: true,
+      result: {
+        matches: [{ path: 'src/pages/Pricing.tsx', line: 4, text: 'export default function Pricing() {' }],
+        truncated: false,
+      },
+    })
+    const { request: list } = await second
+    expect(list.op).toBe('list')
+    await owner.post(`/api/local-repo/finish/${list.id}`, {
+      deviceId: DEVICE,
+      ok: true,
+      result: { entries: [{ path: 'src/pages/Pricing.tsx', kind: 'file', size: 10 }], truncated: false },
+    })
+    const res = await suggest
+    expect(res.status).toBe(200)
+    const report = await res.json()
+    expect(report.repo).toBe('site')
+    expect(report.suggestions[0]).toMatchObject({
+      path: 'src/pages/Pricing.tsx',
+      exportName: 'default',
+      reason: 'export+file',
+    })
+  })
 })

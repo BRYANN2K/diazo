@@ -41,6 +41,7 @@ import { renderFrame } from './screenshot.ts'
 import { lintAndStore } from './lint.ts'
 import { buildHandoffPack, HandoffError } from './handoff.ts'
 import { CodeLinkError, SET_CODE_LINK_DESCRIPTION, setCodeLinkTool } from './codeLinks.ts'
+import { suggestCodeLinks } from './codeSuggest.ts'
 import { CODE_LINK_MAX_EXPORT, CODE_LINK_MAX_PATH } from '../shared/codeLinks.ts'
 import { imagesForFrames } from './assets.ts'
 import type { FrameImage } from '../shared/imageDescriptions.ts'
@@ -2449,6 +2450,33 @@ export function buildMcpServer(
       } catch (e) {
         if (e instanceof HandoffError) return err(e.message)
         return err(`handoff failed: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    },
+  )
+
+  server.registerTool(
+    'suggest_code_links',
+    {
+      title: 'Suggest the file a component or frame lives in',
+      description:
+        "Search the connected account's linked local project for the file a component or frame probably lives in: export declarations named after it, and files named alike. Answers up to 5 ranked suggestions (path, export, reason); nothing is stored — confirm one with set_code_link. Needs the doop desktop app open on the machine holding the linked folder.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        component: z.string().optional().describe('Component name or id — or pass frame_id'),
+        frame_id: z.string().optional().describe('A frame — or pass component'),
+        agent_name: agentName.optional(),
+      },
+    },
+    async (input) => {
+      if (!canvasFor(input.canvas_id, 'edit')) return noCanvas(input.canvas_id)
+      if (!ownerId) return err('this connection is not signed in to a Doop account')
+      arrive(input.canvas_id, input.agent_name)
+      try {
+        return text(await suggestCodeLinks(ownerId, input.canvas_id, input))
+      } catch (e) {
+        if (e instanceof CodeLinkError) return err(e.message)
+        throw e
       }
     },
   )
