@@ -72,6 +72,10 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   raw values equal to a token become `var(--token)`, mapped components are imported from their
   files. A diff preview against the repo comes first; the write goes through `repo_apply_patch`
   and then maps the frame to its new file. Agents call `export_frame_code` (returns the files).
+- **`doop` CLI** — `bun run doop`, code in `cli/` ([usage](cli.md)): link a project folder to a
+  canvas with `.doop.json`, `open` it, `find` frames, `pull` / `push` a frame as an HTML file
+  (a push is refused when the frame changed on the canvas since the pull), and `doop mcp install`
+  for Claude Code, Codex and Devin. It authenticates with an agent key.
 - **Self-hosting** — Docker image `ghcr.io/bryann2k/doop:bryann2k-main` (amd64 + arm64) built on every push, k3s
   manifests in `deploy/k3s/` with a persistent volume for uploads, exposed through Tailscale
   Serve only (no ingress, no Funnel).

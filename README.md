@@ -87,6 +87,9 @@ claude mcp add --transport http redoop http://localhost:4400/mcp
 Ask it to design on your canvas and watch the frames stream in. Codex, Cursor, OpenCode and any
 other MCP client connect the same way. Headless agents use an agent key from Settings → Agent keys.
 
+From a terminal, the `doop` CLI links a project folder to a canvas, finds frames and pulls or
+pushes them as HTML files: [docs/cli.md](docs/cli.md).
+
 ## Documentation
 
 - [Features](docs/FEATURES.md): what this fork adds, and the upstream pull requests it merged.
