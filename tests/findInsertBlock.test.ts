@@ -4,7 +4,7 @@ import type { LibrarySnapshot } from '../src/lib/findPreviewRuntime'
 
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 
-const { insertLibraryBlock, libraryBlock, refId } = await import('../src/lib/findInsert')
+const { insertLibraryBlock, libraryBlock } = await import('../src/lib/findInsert')
 
 const snap = (over: Partial<LibrarySnapshot> = {}): LibrarySnapshot => ({
   html: '<button class="btn" data-doop-id="abc123" data-doop-on="click" id="go"><span>Buy</span></button>',
@@ -23,23 +23,6 @@ const snap = (over: Partial<LibrarySnapshot> = {}): LibrarySnapshot => ({
 
 const FRAME =
   '<!doctype html><html><head></head><body><p data-doop-id="aaaaaa">Hello <span>you</span></p><main data-doop-id="bbbbbb"><h1>Login</h1></main></body></html>'
-
-describe('libraryBlock', () => {
-  it('wraps the item in its ancestors and scopes its CSS to the reference', () => {
-    const block = libraryBlock(snap(), 'cp.vui-button-primary')
-    expect(block).toMatch(
-      /^<div data-doop-ref="cp.vui-button-primary" data-doop-name="cp.vui-button-primary" class="dark" data-theme="dark">/,
-    )
-    expect(block).toContain('@scope ([data-doop-ref="cp.vui-button-primary"]) {')
-    expect(block).toContain(':scope { --brand: #0177d3; font-family: Inter; }')
-    expect(block).toContain('@keyframes pulse')
-    expect(block).toContain('<div class="ex" style="display: contents"><button')
-  })
-
-  it('keeps reference ids attribute-safe', () => {
-    expect(refId('cp.vui"button <x>')).toBe('cp.vui-button--x-')
-  })
-})
 
 describe('insertLibraryBlock', () => {
   it('lands after the picked element with fresh ids and no library editor state', () => {

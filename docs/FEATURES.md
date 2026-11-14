@@ -9,9 +9,11 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
 - **⌘F across every page** — results grouped by frame, with thumbnails and a large preview.
   Agents get the same search with the `find_in_canvas` MCP tool.
 - **Insert from ⌘F** — hovering a result moves the live preview onto that variant without
-  reloading it. Clicking a library item (`cp.*`, `ui.*`) while a frame is selected inserts a
+  reloading it. Clicking a library item (a row the library index answered) while a frame is selected inserts a
   copy: its HTML plus only the CSS that matches it, scoped with `@scope`, with fresh
-  `data-doop-id`s and a `data-doop-ref` that keeps where it came from. You can also drag the
+  `data-doop-id`s, the SVG symbols and gradients it points at (ids prefixed per insert), nothing
+  that runs (no scripts, handlers or `javascript:` URLs), and `data-doop-ref` /
+  `data-doop-ref-lib` / `data-doop-ref-rev` keeping the item, its library and its revision. You can also drag the
   row onto any frame; a line shows the drop slot between elements. ⇧ click goes to the item,
   ↩ / ⇧↩ / ⌘C do the same from the keyboard. A box beside the copy sends an instruction to the
   chat (**Adapt**, through the plan → Go flow) or removes the copy (**Undo**).
