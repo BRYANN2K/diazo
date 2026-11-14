@@ -33,6 +33,7 @@ const COMMANDS: Record<string, [number, number]> = {
   find: [1, 1],
   pull: [1, 1],
   push: [1, 1],
+  'mcp install': [0, 3],
 }
 
 /** Turns argv (without the runtime and script) into an invocation, or throws a UsageError. */
@@ -126,6 +127,7 @@ Usage
   doop find <query>           Search the linked canvas (--all: every canvas)
   doop pull <frame>           Write a frame's HTML to a file (-o file)
   doop push <file>            Replace the frame's HTML with the file, after a check
+  doop mcp install [client…]  Add doop's MCP server to claude, codex and devin
   doop config                 Show the server URL and where the agent key comes from
 
 Options

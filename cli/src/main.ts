@@ -4,6 +4,7 @@ import { DoopError } from './client.ts'
 import { ConfigError, realEnvironment, userConfigPath } from './config.ts'
 import { find, pull, push } from './frames.ts'
 import { realIo } from './io.ts'
+import { mcpInstall } from './mcpInstall.ts'
 import { PROJECT_FILE, ProjectError, writeProjectFile } from './project.ts'
 import { CommandError, Session, type Context } from './session.ts'
 
@@ -52,6 +53,7 @@ const COMMANDS: Record<string, Command> = {
   find,
   pull,
   push,
+  'mcp install': (session) => mcpInstall(session),
 }
 
 function run(invocation: Invocation, ctx: Context): Promise<number> {
