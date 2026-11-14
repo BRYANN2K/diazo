@@ -29,7 +29,10 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   Agents call `list_libraries`, `get_library`, `search_library`, `get_library_item` (with the item as
   a scoped block) and `insert_library_item`, which places the copy for them.
 - **Reference library** — store design-library items as references, find them with
-  `find_references`, and attach them to plan cards (thumbnails, remove button, Settings card).
+  `find_references`, and attach them to plan cards (thumbnails, remove button, Settings card). Up to
+  20 canvases; the workspace's design libraries come along without being picked. On a design
+  library `find_references` answers from its index (families, with `item_id`), and a plan may name
+  the item, which is checked and shown with its own image.
 - **Plan-first Chat tab** — thread list, one composer, plan card and repo chip. An editor's line
   in the Chat tab asks Doop without an `@mention`, with a model picker per ask. A thread's Reply
   action points the composer at that thread. The composer and the message bubbles follow the

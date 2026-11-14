@@ -450,7 +450,16 @@ function PlanReference({
         className="block transition-shadow focus-visible:shadow-elevation-1-focus hover:shadow-elevation-1-hover"
       >
         <img
-          src={`/i/${reference.frameId}.jpg?preview`}
+          src={
+            reference.itemId
+              ? `/api/libraries/${reference.canvasId}/items/${encodeURIComponent(reference.itemId)}/thumb.jpg`
+              : `/i/${reference.frameId}.jpg?preview`
+          }
+          onError={(e) => {
+            /* an item with no image yet: the frame's preview stands in */
+            const fallback = `/i/${reference.frameId}.jpg?preview`
+            if (!e.currentTarget.src.endsWith(fallback)) e.currentTarget.src = fallback
+          }}
           alt={reference.label}
           loading="lazy"
           className="block aspect-[4/3] w-full object-cover object-top"

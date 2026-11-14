@@ -2,6 +2,8 @@ import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { referenceLibrary } from './db/schema.ts'
 import { canvasesFor } from './workspaces.ts'
+import { store } from './store.ts'
+import { getLibrary } from './libraries.ts'
 
 /**
  * The reference library: the canvases a user marked "the design system lives
@@ -14,7 +16,7 @@ import { canvasesFor } from './workspaces.ts'
  * every stored id is checked against what the user can still reach.
  */
 
-export const LIBRARY_MAX_CANVASES = 8
+export const LIBRARY_MAX_CANVASES = 20
 
 /** The stored canvas ids, in the order they were picked. No row = no library. */
 export async function getLibraryCanvasIds(userId: string): Promise<string[]> {
@@ -30,12 +32,26 @@ export async function setLibraryCanvasIds(userId: string, canvasIds: string[]): 
 /** The library as it can be shown or searched right now: stored order,
  *  reduced to the canvases the user can still open — a deleted canvas or a
  *  revoked share simply drops out of the list. */
-export async function libraryFor(userId: string): Promise<{ id: string; name: string; frameCount: number }[]> {
+export async function libraryFor(
+  userId: string,
+  workingOn?: string,
+): Promise<{ id: string; name: string; frameCount: number }[]> {
   const ids = await getLibraryCanvasIds(userId)
-  if (!ids.length) return []
-  const reachable = new Map(canvasesFor(userId).map((meta) => [meta.id, meta]))
-  return ids.flatMap((id) => {
+  const reachableList = canvasesFor(userId)
+  const reachable = new Map(reachableList.map((meta) => [meta.id, meta]))
+  const picked = ids.flatMap((id) => {
     const meta = reachable.get(id)
     return meta ? [{ id: meta.id, name: meta.name, frameCount: meta.frameCount }] : []
   })
+  /* the design libraries of the workspace the work happens in come along
+     without being picked */
+  const workspaceId = workingOn ? store.getCanvas(workingOn)?.workspaceId : undefined
+  if (workspaceId) {
+    for (const meta of reachableList) {
+      const canvas = store.getCanvas(meta.id)
+      if (canvas?.workspaceId !== workspaceId || !getLibrary(meta.id) || picked.some((p) => p.id === meta.id)) continue
+      picked.push({ id: meta.id, name: meta.name, frameCount: meta.frameCount })
+    }
+  }
+  return picked
 }

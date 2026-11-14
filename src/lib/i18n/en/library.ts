@@ -100,4 +100,5 @@ export const library = {
   openLibraries: 'Open the design libraries',
   panelTab: 'Library',
   panelLibrary: 'Library',
+  badge: 'library',
 } as const

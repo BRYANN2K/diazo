@@ -42,7 +42,17 @@ import { zodToJsonSchema } from 'zod-to-json-schema'
 import { z } from 'zod'
 import { catalogEntry, compactFrameHtml, findComponent } from './componentActions.ts'
 import { COMPONENT_TOOLS, COMPONENT_TOOL_NAMES, componentWriteNotes, runComponentTool } from './componentTools.ts'
-import { DESIGN_LIBRARY_TOOLS, DESIGN_LIBRARY_TOOL_NAMES, librariesOf, runLibraryTool } from './libraryTools.ts'
+import {
+  DESIGN_LIBRARY_TOOLS,
+  DESIGN_LIBRARY_TOOL_NAMES,
+  librariesOf,
+  designLibrariesBrief,
+  runLibraryTool,
+} from './libraryTools.ts'
+import { getLibrary } from './libraries.ts'
+import { indexFor, libraryItems } from './libraryIndex.ts'
+import { itemUrl, thumbUrl } from './libraryQueries.ts'
+import { searchIndex } from '../shared/librarySearch.ts'
 import { CodeLinkError, SET_CODE_LINK_DESCRIPTION, componentCodeLink, setCodeLinkTool } from './codeLinks.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
@@ -1335,10 +1345,21 @@ async function planReferenceError(screens: ChatPlanScreen[], runState: RunState)
     if (!libraryIds.has(ref.canvasId)) {
       return `reference "${ref.label}" on "${ref.screen}" points at canvas ${ref.canvasId}, which is not in the asker's reference library — only frames find_references returned may be named`
     }
-    const canvas = await store.load(ref.canvasId)
+    /* frame metadata only: a library's html never needs to load for this */
+    const canvas = store.getCanvas(ref.canvasId)
     const frame = canvas?.frames.find((f) => f.id === ref.frameId)
     if (!frame || frame.hidden || frame.demo) {
       return `reference "${ref.label}" on "${ref.screen}" names frame ${ref.frameId}, which does not exist on canvas ${ref.canvasId} — check it with find_references`
+    }
+    if (ref.itemId) {
+      const items = getLibrary(ref.canvasId) ? await libraryItems(ref.canvasId) : []
+      const item = items.find((i) => i.itemId === ref.itemId)
+      if (!item) {
+        return `reference "${ref.label}" on "${ref.screen}" names item ${ref.itemId}, which is not in library ${ref.canvasId} — use an item_id find_references returned`
+      }
+      if (item.frameId !== ref.frameId) {
+        return `reference "${ref.label}" on "${ref.screen}" names item ${ref.itemId}, which lives in frame ${item.frameId}, not ${ref.frameId}`
+      }
     }
   }
   return undefined
@@ -1408,6 +1429,31 @@ export async function execChatTool(
       let total = 0
       let frames = 0
       for (const lib of canvases) {
+        /* a design library answers from its index: families, never its html */
+        const index = getLibrary(lib.id) ? await indexFor(lib.id) : null
+        if (index) {
+          const r = searchIndex(index, query, { limit: Math.max(1, limit - hits.length) })
+          total += r.total
+          frames += r.hits.length
+          for (const h of r.hits) {
+            if (hits.length >= limit) break
+            const frame = store.getFrame(h.item.frameId)
+            hits.push({
+              canvas_id: lib.id,
+              canvas_name: lib.name,
+              frame_id: h.item.frameId,
+              frame_name: frame?.name ?? h.item.label,
+              item_id: h.item.itemId,
+              label: h.item.label,
+              category: h.item.category,
+              variant_count: h.variantCount,
+              where: 'item',
+              thumbnail: thumbUrl(h.item),
+              url: itemUrl(lib.id, h.item.itemId),
+            })
+          }
+          continue
+        }
         const c = await store.load(lib.id)
         if (!c) continue
         const r = findInCanvas(c, query, { matchCase: input.match_case === true })
@@ -1509,7 +1555,7 @@ async function runChat(
   const repoLink = repoUserId ? await linkFor(repoUserId, canvasId).catch(() => undefined) : undefined
   /* the asker's reference library, resolved like their repo link: the run
      searches only these canvases, and a plan's references must point inside */
-  const libraryCanvases = repoUserId ? await library.libraryFor(repoUserId).catch(() => []) : []
+  const libraryCanvases = repoUserId ? await library.libraryFor(repoUserId, canvasId).catch(() => []) : []
   const runState: RunState = {
     mutatedFrames: new Set(),
     sourceFrames: new Set(),
@@ -1603,7 +1649,10 @@ async function runChat(
               `each screen of the plan names the references it will reuse (canvas_id, frame_id, a label ` +
               `and why). The humans approve the references along with the plan, and Go design hands them ` +
               `to the design agent as the base to work from — prefer a library frame that fits over ` +
-              `improvising one from nothing.`,
+              `improvising one from nothing.` +
+              (libraryCanvases.some((c) => getLibrary(c.id))
+                ? ` For a design library, name the item too (item_id from find_references).\n\n${designLibrariesBrief(libraryCanvases.map((c) => c.id))}`
+                : ''),
           },
         ]
       : []

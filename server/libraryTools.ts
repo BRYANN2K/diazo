@@ -335,6 +335,29 @@ export async function runLibraryTool(
   return tool.run(input, context)
 }
 
+/** The `# Libraries` brief for a prompt: each library's name, counts,
+ *  kinds and top ten categories, from its index state (no html). */
+export function designLibrariesBrief(canvasIds: string[]): string {
+  const lines: string[] = []
+  for (const id of canvasIds) {
+    const record = getLibrary(id)
+    const canvas = store.getCanvas(id)
+    if (!record || !canvas) continue
+    const kinds = record.taxonomy.kinds.map((k) => k.id).join(', ')
+    const categories = record.taxonomy.categories
+      .slice(0, 10)
+      .map((c) => c.path)
+      .join('; ')
+    lines.push(
+      `- "${canvas.name}" (${id}): ${record.counts.items} families, ${record.counts.variants} variants` +
+        (kinds ? `; kinds ${kinds}` : '') +
+        (categories ? `; categories ${categories}` : ''),
+    )
+  }
+  if (!lines.length) return ''
+  return `# Libraries\nDesign libraries you can search (search_library) and insert from (insert_library_item):\n${lines.join('\n')}`
+}
+
 /** The libraries one account may use, as canvases. */
 export async function librariesOf(userId: string | undefined, extra?: Canvas): Promise<Canvas[]> {
   const entries = userId ? await readableLibraries(userId) : []

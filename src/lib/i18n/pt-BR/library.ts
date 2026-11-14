@@ -100,4 +100,5 @@ export const library = {
   openLibraries: 'Abrir as bibliotecas de design',
   panelTab: 'Biblioteca',
   panelLibrary: 'Biblioteca',
+  badge: 'biblioteca',
 } as const

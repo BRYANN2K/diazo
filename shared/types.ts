@@ -605,6 +605,8 @@ export interface ChatPlanReference {
   label: string
   /** why this screen builds on it */
   why: string
+  /** the library item it names, when the canvas is a design library */
+  itemId?: string
 }
 
 /** One canvas of a user's reference library, as GET /api/library reports it
