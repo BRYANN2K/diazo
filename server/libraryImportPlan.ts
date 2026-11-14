@@ -5,6 +5,9 @@
  * Spec: .context/specs/design-libraries.md, "Import rules".
  */
 import type { ImportFrameReport, ImportReport, LibraryTaxonomy, RuleFinding } from '../shared/library.ts'
+import type { DesignToken } from '../shared/designTokens.ts'
+import type { FrameLint } from '../shared/slopRules.ts'
+import { applyTokenMatches, tokenMatches } from '../shared/libraryTokens.ts'
 import { UNSORTED } from '../shared/library.ts'
 import { assignItemId, isItemId, itemSlug, parseItemId, splitFrameName } from '../shared/libraryIds.ts'
 import { isIgnoredName, sectionCategory, type LibraryRules } from '../shared/libraryRules.ts'
@@ -50,6 +53,8 @@ export interface PlanInput {
   /** given by the person or the agent: wins over every rule */
   category?: string
   tags?: string[]
+  /** the library canvas's design tokens, for the token stage */
+  tokens?: readonly DesignToken[]
 }
 
 type Draft = ImportFrameReport & { html: string; name: string; source: ImportFrame }
@@ -216,6 +221,67 @@ export function stageDependencies(d: Draft, all: ImportFrame[], rules: LibraryRu
   return { ...d, html, findings, changes: { ...d.changes, html } }
 }
 
+/** 6. Tokens: literal values equal to a library token, listed or rewritten. */
+export function stageTokens(d: Draft, tokens: readonly DesignToken[], mode: LibraryRules['tokens']['map']): Draft {
+  if (d.ignored || mode === 'off' || !tokens.length) return d
+  const matches = tokenMatches(d.html, tokens)
+  if (!matches.length) return d
+  const finding: RuleFinding = {
+    kind: 'token-match',
+    message: `${matches.length} literal value${matches.length === 1 ? '' : 's'} equal a token: ${matches
+      .slice(0, 6)
+      .map((m) => `${m.value} → var(${m.token})`)
+      .join(', ')}${mode === 'apply' ? ' (rewritten)' : ''}.`,
+  }
+  if (mode === 'suggest') return { ...d, findings: [...d.findings, finding] }
+  const html = applyTokenMatches(d.html, tokens)
+  return { ...d, html, findings: [...d.findings, finding], changes: { ...d.changes, html } }
+}
+
+/** 7. The quality gate: the linter scores each frame as it would enter.
+ *  `warn` notes a low score, `draft` also keeps the item out of search
+ *  until a person accepts it. `off` never calls the linter. */
+export async function stageLint(
+  report: ImportReport,
+  htmlOf: (frameId: string) => string,
+  rules: LibraryRules,
+  lint: (html: string) => Promise<FrameLint>,
+): Promise<ImportReport> {
+  const gate = rules.lint.gate
+  if (gate === 'off') return report
+  const ignored = new Set(rules.lint.ignoreRules)
+  const frames: ImportFrameReport[] = []
+  for (const f of report.frames) {
+    if (!f.item) {
+      frames.push(f)
+      continue
+    }
+    const result = await lint(f.changes.html ?? htmlOf(f.frameId))
+    const issues = result.issues.filter((i) => !ignored.has(i.ruleId))
+    if (!issues.length || result.score >= rules.lint.minScore) {
+      frames.push(f)
+      continue
+    }
+    const finding: RuleFinding = {
+      kind: 'lint',
+      message: `Lint score ${result.score} is under ${rules.lint.minScore}: ${issues
+        .slice(0, 4)
+        .map((i) => i.ruleId)
+        .join(', ')}.`,
+      score: result.score,
+    }
+    frames.push({
+      ...f,
+      findings: [...f.findings, finding],
+      item: gate === 'draft' ? { ...f.item, status: 'draft' } : f.item,
+    })
+  }
+  return {
+    frames,
+    totals: { ...report.totals, drafts: frames.filter((r) => r.item?.status === 'draft').length },
+  }
+}
+
 /** 8. Duplicates: an id the library holds follows the collision rule (stage
  *  2); content equal to another item's follows the duplicate rule. */
 export function stageDedup(d: Draft, rules: LibraryRules, hashes: Map<string, string>): Draft {
@@ -315,6 +381,7 @@ export function planImport(input: PlanInput): ImportReport {
     d = stageNaming(d, rules)
     d = stageVariants(d, rules, library.taxonomy)
     d = stageDependencies(d, frames, rules)
+    d = stageTokens(d, input.tokens ?? [], rules.tokens.map)
     d = stageDedup(d, rules, hashes)
     d = stageCategorise(d, rules, input.category)
     if (d.item && input.tags?.length) d = { ...d, item: { ...d.item, tags: input.tags.slice(0, 12) } }
