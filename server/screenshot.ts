@@ -156,6 +156,26 @@ export function openIsolatedPage(options?: PageOptions): Promise<IsolatedPage> {
   return renderer.openPage(options)
 }
 
+/** Run `work` on a page holding the frame, under the renderer's gate and
+ *  deadline, at `options.priority`; the page is always closed. */
+export function withFramePage<T>(
+  frame: Frame,
+  step: string,
+  timeoutMs: number,
+  work: (page: Page) => Promise<T>,
+  options?: PageOptions,
+): Promise<T> {
+  return renderer.withPage(
+    step,
+    timeoutMs,
+    async (page) => {
+      await loadFrameInto(page, frame)
+      return work(page)
+    },
+    options,
+  )
+}
+
 export async function loadFramePage(frame: Frame, options?: PageOptions): Promise<IsolatedPage> {
   const loaded = await openIsolatedPage(options)
   try {

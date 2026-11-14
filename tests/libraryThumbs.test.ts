@@ -7,7 +7,6 @@ import {
   isRendering,
   NoThumbError,
   renderThumbs,
-  thumbClip,
   thumbKey,
   thumbTag,
   THUMB_VERSION,
@@ -34,11 +33,6 @@ function deps(over: Partial<ThumbDeps> = {}): ThumbDeps & { stored: Map<string, 
 }
 
 describe('thumbnails', () => {
-  it('clips to the box plus a margin, clamped to the frame', () => {
-    expect(thumbClip(item.box!, frame)).toEqual({ x: 520, y: 80, width: 514, height: 324 })
-    expect(thumbClip({ x: 0, y: 0, w: 2040, h: 440 }, frame)).toEqual({ x: 0, y: 0, width: 2040, height: 440 })
-  })
-
   it('keys the picture by content, box and version, in a key storage accepts', () => {
     const key = thumbKey('lib1', item)
     expect(key).toMatch(/^lt\/lib1\/[A-Za-z0-9_-]+\.jpg$/)
@@ -48,7 +42,7 @@ describe('thumbnails', () => {
     expect(thumbKey('lib1', { ...item, box: null })).not.toBe(key)
     /* two ids that spell the same safely still get their own keys */
     expect(thumbKey('lib1', { ...item, itemId: 'cp.a-b' })).not.toBe(thumbKey('lib1', { ...item, itemId: 'cp_a-b' }))
-    expect(THUMB_VERSION).toBeGreaterThan(0)
+    expect(THUMB_VERSION).toBe(2)
   })
 
   it('renders at the asked priority, stores, then serves the stored one', async () => {

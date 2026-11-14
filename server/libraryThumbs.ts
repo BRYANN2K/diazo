@@ -1,10 +1,11 @@
 /**
  * Item thumbnails: an image per library item, so lists and the gallery
- * never mount an iframe. The frame is rendered clipped to the item's box
- * (from the rendered pass) plus a margin, as a JPEG whose longest side is
- * 640 px, and kept in storage under a key that carries the item's content
- * hash, its box and the thumbnail version, so a changed item gets a new
- * image.
+ * never mount an iframe. The item's demo is found in the rendered frame
+ * (its element by box, data-doop-id or anchor, minus the sheet's label and
+ * caption rows), woken and trimmed to what it paints (libraryThumbRender.ts),
+ * as a 640x480 JPEG, and kept in storage under a key that carries the
+ * item's content hash, its box and the thumbnail version, so a changed item
+ * (or a new way of drawing them) gets a new image.
  *
  * A thumbnail being rendered is a promise every asker shares (the gallery
  * route and the prewarm queue never render the same key twice), and the
@@ -12,35 +13,20 @@
  */
 import { createHash } from 'node:crypto'
 import type { Frame } from '../shared/types.ts'
-import type { ItemBox, LibraryItem } from '../shared/library.ts'
+import type { LibraryItem } from '../shared/library.ts'
 import { getObject, hasObject, putObject } from './storage.ts'
-import { backgroundConcurrency, renderFrame } from './screenshot.ts'
+import type { Page } from 'puppeteer-core'
+import { backgroundConcurrency, withFramePage } from './screenshot.ts'
+import { captureItems, TIMING, type ThumbPage } from './libraryThumbRender.ts'
+import type { ThumbTarget } from './libraryThumbClip.ts'
 import { RendererBusyError, type RenderPriority } from './renderBrowser.ts'
 import { store } from './store.ts'
 
-export const THUMB_MARGIN = 12
-export const THUMB_MAX = 640
 /** Bumped when thumbnails are drawn differently: every key changes. */
-export const THUMB_VERSION = 1
+export const THUMB_VERSION = 2
 
 /** The item cannot have a thumbnail (its frame is gone): the client falls back. */
 export class NoThumbError extends Error {}
-
-export interface Clip {
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
-/** The item's box plus the margin, clamped to the frame. */
-export function thumbClip(box: ItemBox, frame: Pick<Frame, 'width' | 'height'>): Clip {
-  const x = Math.max(0, Math.floor(box.x - THUMB_MARGIN))
-  const y = Math.max(0, Math.floor(box.y - THUMB_MARGIN))
-  const right = Math.min(frame.width, Math.ceil(box.x + box.w + THUMB_MARGIN))
-  const bottom = Math.min(Math.max(frame.height, box.y + box.h), Math.ceil(box.y + box.h + THUMB_MARGIN))
-  return { x, y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) }
-}
 
 type Keyed = Pick<LibraryItem, 'itemId' | 'hash' | 'box'>
 
@@ -69,23 +55,54 @@ export interface ThumbDeps {
   frame(frameId: string): Promise<Frame | undefined>
 }
 
-async function renderClipped(frame: Frame, items: LibraryItem[], priority: RenderPriority) {
-  const out: (Buffer | Error)[] = []
-  for (const item of items) {
-    try {
-      const box = item.box ?? { x: 0, y: 0, w: frame.width, h: frame.height }
-      const clip = thumbClip(box, frame)
-      const scale = Math.min(1, THUMB_MAX / Math.max(clip.width, clip.height))
-      out.push(await renderFrame(frame, scale, { type: 'jpeg', quality: 82, clip, priority }))
-    } catch (error) {
-      out.push(error instanceof Error ? error : new Error(String(error)))
-    }
+/** Where the probe looks for an item's element. */
+export function thumbTarget(item: LibraryItem): ThumbTarget {
+  return {
+    itemId: item.itemId,
+    box: item.box,
+    ...('elementId' in item.locator ? { elementId: item.locator.elementId } : {}),
+    ...('anchor' in item.locator ? { anchor: item.locator.anchor } : {}),
   }
-  return out
+}
+
+/** The headless page as the capture needs it. */
+export function thumbPage(page: Page): ThumbPage {
+  return {
+    evaluate: (expression) => page.evaluate(expression),
+    setViewport: (viewport) => page.setViewport(viewport),
+    viewport: () => page.viewport(),
+    movePointer: (x, y, steps) => page.mouse.move(x, y, { steps }),
+    screenshot: async (clip) => Buffer.from(await page.screenshot({ type: 'png', clip, captureBeyondViewport: true })),
+  }
+}
+
+/** The page's viewport: the whole frame, as the canvas lays it out. */
+export function thumbViewport(frame: Pick<Frame, 'width' | 'height'>) {
+  return {
+    width: Math.max(1, Math.round(frame.width)),
+    height: Math.max(1, Math.min(Math.round(frame.height), 8000)),
+    deviceScaleFactor: 1,
+  }
+}
+
+/** a page settles once, then each item takes about a second */
+const RENDER_TIMEOUT_MS = 60_000
+
+function renderOnPage(frame: Frame, items: LibraryItem[], priority: RenderPriority) {
+  return withFramePage(
+    frame,
+    'rendering library thumbnails',
+    RENDER_TIMEOUT_MS,
+    async (page) => {
+      await page.setViewport(thumbViewport(frame))
+      return captureItems(thumbPage(page), items.map(thumbTarget), TIMING[priority])
+    },
+    { priority },
+  )
 }
 
 export const serverThumbDeps: ThumbDeps = {
-  render: renderClipped,
+  render: renderOnPage,
   get: (key) => getObject(key),
   has: (key) => hasObject(key),
   put: (key, body, mime) => putObject(key, body, mime),
