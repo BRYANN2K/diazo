@@ -31,7 +31,7 @@ export interface Viewport {
   zoom: number
 }
 
-export type PanelTab = 'tasks' | 'chat' | 'comments' | 'activity' | 'memory'
+export type PanelTab = 'tasks' | 'chat' | 'comments' | 'activity' | 'memory' | 'usage'
 
 /** A send from the Agents tab composer: in flight, or how the last one
  *  ended. Lives in the store because the composer unmounts with its tab and

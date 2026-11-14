@@ -2,6 +2,7 @@ import { useStore } from './store'
 import type { InstanceSettings, InstanceSettingsPatch } from '../../shared/instanceSettings'
 import { beginFrameSave } from './frameSaves'
 import type { StackWrite } from '../../shared/frameStack'
+import type { UsageReport } from '../../shared/agentRuns'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type { RepoLink, RepoLinkStatus, RepoRequest, RepoResult } from '../../shared/localRepo'
 import type { HandoffFile, HandoffPack, HandoffWriteResult } from '../../shared/handoff'
@@ -467,6 +468,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ url }),
     }),
+  getUsage: (canvasId: string) => req<UsageReport>(`/api/canvases/${canvasId}/usage`),
   listDrift: (frameId: string) => req<DriftComparison[]>(`/api/frames/${frameId}/drift`),
   analyzeDrift: (frameId: string, driftId: string) =>
     req<AgentTask>(`/api/frames/${frameId}/drift/${driftId}/analyze`, { method: 'POST' }),

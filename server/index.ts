@@ -39,6 +39,7 @@ import { REPO_WRITE_TTL_MS, type RepoReadResult } from '../shared/localRepo.ts'
 import { localDriftRouter } from './driftBridge.ts'
 import { compareFrameWithUrl, driftErrorMessage, getComparison, listComparisons } from './drift.ts'
 import { classifyDriftUrl } from '../shared/drift.ts'
+import { usageReport } from './agentRuns.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
@@ -3009,6 +3010,13 @@ app.get('/api/canvases/:id/find', (req, res) => {
   if (!canvas) return
   const q = String(req.query.q ?? '').slice(0, 200)
   res.json(findInCanvas(canvas, q, { matchCase: req.query.case === '1' }))
+})
+
+/* the usage meter (server/agentRuns.ts): every resident run's tokens, time
+   and cost on this canvas — what editors spend, so editors read it */
+app.get('/api/canvases/:id/usage', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  res.json(await usageReport(req.params.id))
 })
 
 app.get('/api/canvases/:id/chat', (req, res) => {

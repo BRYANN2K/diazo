@@ -6,6 +6,7 @@ import { timeAgo } from '../lib/time'
 import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { MemoryPanel } from './MemoryPanel'
+import { UsagePanel } from './UsagePanel'
 import {
   Panel,
   type PanelResize,
@@ -24,6 +25,7 @@ import {
   CheckIcon,
   ChevronDownIcon,
   CommentIcon,
+  CreditCardIcon,
   MessageSquareIcon,
   PulseIcon,
   SparkIcon,
@@ -144,6 +146,9 @@ export function ActivityPanel({
                 <PanelIconTab value="memory" icon={<BookOpenIcon />} title={t('panels.activityMemoryTitle')}>
                   {t('panels.activityMemory')}
                 </PanelIconTab>
+                <PanelIconTab value="usage" icon={<CreditCardIcon />} title={t('usage.tabTitle')}>
+                  {t('usage.tab')}
+                </PanelIconTab>
               </>
             )}
           </PanelTabs>
@@ -169,6 +174,9 @@ export function ActivityPanel({
         </PanelTabPanel>
         <PanelTabPanel value="memory" className={tabEnter}>
           <MemoryPanel />
+        </PanelTabPanel>
+        <PanelTabPanel value="usage" className={tabEnter}>
+          <UsagePanel canvasId={canvasId} />
         </PanelTabPanel>
       </PanelTabsRoot>
     </Panel>
