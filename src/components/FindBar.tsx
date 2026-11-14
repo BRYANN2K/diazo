@@ -9,6 +9,7 @@ import { findInHtml, replaceInHtml, type TextMatch } from '../lib/actions/findTe
 import { saveFramesHtml } from '../lib/actions/edits'
 import { api } from '../lib/api'
 import { navigate } from '../lib/navigate'
+import { footerHint, rowAction, type InsertTarget } from '../lib/findInsert'
 import type { CanvasFindHit } from '../../shared/canvasFind'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
@@ -302,6 +303,45 @@ export function FindBar({
     flyToHit(group.hits.find((h) => h.where === 'text') ?? group.hits[0]!)
   }
 
+  /* the row's own item: a variant names its library id, a frame its own */
+  const itemOf = (row: ResultRow) => ({
+    id: row.variant && looksLikeId(row.variant.label) ? row.variant.label : row.group.id,
+    canvasName: row.group.canvasName ?? null,
+    frameId: row.group.frameId,
+  })
+
+  function goRow(row: ResultRow) {
+    if (!row.variant) return goRemote(row.groupIndex)
+    setCursor(row.groupIndex)
+    setPointed(row.key)
+    flyToHit(row.variant.hit)
+  }
+
+  /* a click, or ↩: insert a library item into the selected frame, else go */
+  function activate(row: ResultRow, shift: boolean) {
+    const action = rowAction(useStore.getState(), itemOf(row), shift)
+    if (action.kind === 'insert') insertRow(row, action.target)
+    else goRow(row)
+  }
+
+  function insertRow(row: ResultRow, _target: InsertTarget) {
+    /* the copy itself arrives with the snapshot serializer */
+    goRow(row)
+  }
+
+  function copyRowId(row: ResultRow): boolean {
+    const id = itemOf(row).id
+    if (!id) return false
+    navigator.clipboard
+      .writeText(id)
+      .then(() => useStore.getState().pushNotice(t('actions.findCopiedId', { id })))
+      .catch(() => {})
+    return true
+  }
+
+  /* the row ↩ and ⌘C act on: the pointed one, else the active frame */
+  const currentRow = () => pointedRow ?? rows.find((r) => r.groupIndex === active && !r.variant) ?? null
+
   function go(index: number) {
     if (isRemote(scope)) return goRemote(index)
     const hit = hits[index]
@@ -355,9 +395,24 @@ export function FindBar({
       point(e.key === 'ArrowDown' ? 1 : -1)
     } else if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
       e.preventDefault()
-      move(e.shiftKey ? -1 : 1)
+      const row = isRemote(scope) ? currentRow() : null
+      if (row) activate(row, e.shiftKey)
+      else move(e.shiftKey ? -1 : 1)
+    } else if (isRemote(scope) && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c') {
+      /* ⌘C copies the reference id, unless text in the field is selected */
+      const field = e.currentTarget
+      if (field.selectionStart !== field.selectionEnd) return
+      const row = currentRow()
+      if (row && copyRowId(row)) e.preventDefault()
     }
   }
+
+  /* the footer follows the selection: re-rendered when it changes */
+  useStore((s) => s.selectedElement)
+  useStore((s) => s.selectedId)
+  useStore((s) => s.canvas?.frames)
+  const hintRow = isRemote(scope) ? currentRow() : null
+  const hint = hintRow ? footerHint(useStore.getState(), itemOf(hintRow)) : null
 
   const count = !query.trim()
     ? ''
@@ -497,7 +552,7 @@ export function FindBar({
                   >
                     <Pressable
                       focus="none"
-                      onClick={() => go(i)}
+                      onClick={(e) => activate({ key: rowKey(g), group: g, groupIndex: i }, e.shiftKey)}
                       className="flex min-w-0 flex-1 items-center gap-2 text-left"
                     >
                       <span className="h-[30px] w-[46px] flex-none overflow-hidden rounded-tag bg-sub ring-1 ring-line-soft">
@@ -549,11 +604,9 @@ export function FindBar({
                           <Pressable
                             focus="none"
                             onMouseEnter={() => hover(rowKey(g, x.label))}
-                            onClick={() => {
-                              setCursor(i)
-                              setPointed(rowKey(g, x.label))
-                              flyToHit(x.hit)
-                            }}
+                            onClick={(e) =>
+                              activate({ key: rowKey(g, x.label), group: g, groupIndex: i, variant: x }, e.shiftKey)
+                            }
                             className={cn(
                               'w-full truncate rounded-row px-1.5 py-0.5 text-left font-mono text-caption text-ink-soft',
                               pointed === rowKey(g, x.label) ? 'bg-paper-deep' : 'hover:bg-sub',
@@ -569,6 +622,18 @@ export function FindBar({
               )
             })}
           </ul>
+          {hint && hint.kind !== 'none' && (
+            <p
+              className="truncate border-t border-line-soft px-1 pt-1.5 text-caption text-ink-faint"
+              aria-live="polite"
+            >
+              {hint.kind === 'insert'
+                ? t('actions.findHintInsert', { frame: hint.frameName })
+                : hint.kind === 'select'
+                  ? t('actions.findHintSelect')
+                  : t('actions.findHintGo')}
+            </p>
+          )}
         </>
       )}
       {scope === 'page' && hits.length > 0 && (
