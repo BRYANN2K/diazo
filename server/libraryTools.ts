@@ -18,6 +18,8 @@ import { libraryItems } from './libraryIndex.ts'
 import { itemDetail, itemUrl, readableLibraries, searchLibraries } from './libraryQueries.ts'
 import { insertItem, InsertError, snapshotItem } from './librarySnapshot.ts'
 import { libraryBlock, refId } from '../shared/libraryBlock.ts'
+import { jobView, planView, type CurationCategoryView, type CurationJob } from '../shared/libraryCuration.ts'
+import { CurationError, curationsOf, getCuration, startCuration } from './libraryCuration.ts'
 
 export interface LibraryToolContext {
   /** whose libraries these are: the account over MCP, the asker in a run */
@@ -430,6 +432,87 @@ DESIGN_LIBRARY_TOOLS.push(
       await patchItem(libraryId, out.item.itemId, cleaned.patch, context.actor.name)
       const after = await itemDetail(allowed.canvas, out.item.itemId, 'curate')
       return { ok: true, data: after ? brief(libraryId, after.detail.item) : null }
+    },
+  },
+)
+
+/** A curation as an agent reads it: the job and, once proposed, the tree
+ *  with counts and a few item names per category. */
+function curationBrief(job: CurationJob) {
+  const view = job.plan ? planView(job.plan, 3) : null
+  const tree = (nodes: CurationCategoryView[]): unknown[] =>
+    nodes.map((n) => ({
+      id: n.id,
+      path: n.path,
+      items: n.count,
+      examples: n.samples.map((s) => s.label),
+      ...(n.children.length ? { children: tree(n.children) } : {}),
+    }))
+  return {
+    id: job.id,
+    name: job.name,
+    status: job.status,
+    progress: job.progress,
+    error: job.error ?? undefined,
+    model_calls: job.calls,
+    canvas_id: job.applied?.canvasId ?? undefined,
+    ...(view && job.plan!.tree.length
+      ? { totals: view.totals, fallback: view.fallback || undefined, categories: tree(view.tree) }
+      : {}),
+  }
+}
+
+DESIGN_LIBRARY_TOOLS.push(
+  {
+    name: 'start_library_curation',
+    title: 'Organise canvases into one library with AI',
+    description:
+      "Start an AI curation: read 1 to 8 canvases the human manages, fold their duplicates, propose one category tree from the items themselves and file every item in it. It runs in the background on the human's own model account (about one call per 60 frames) and writes nothing but the proposal: the human reviews and edits it, then creates the library from the Libraries page (Organise with AI). Follow it with get_library_curation. Start one only when the human asks for it.",
+    readOnly: false,
+    shape: {
+      canvas_ids: z.array(z.string()).min(1).max(8).describe('The source canvases, in the order duplicates are kept'),
+      name: z
+        .string()
+        .max(120)
+        .optional()
+        .describe('Name of the library it will create; "<first canvas> (curated)" by default'),
+    },
+    async run(input, context) {
+      if (!context.userId)
+        return { ok: false, error: 'a curation runs for a signed-in person; none is behind this call' }
+      const ids = Array.isArray(input.canvas_ids) ? (input.canvas_ids as unknown[]).map(String) : []
+      try {
+        const job = await startCuration({
+          ownerId: context.userId,
+          sourceIds: ids,
+          ...(typeof input.name === 'string' && input.name.trim() ? { name: input.name } : {}),
+        })
+        return {
+          ok: true,
+          data: curationBrief(job),
+          note: 'Started. Check it with get_library_curation; tell the human to review it in Libraries, Organise with AI, once it is ready.',
+        }
+      } catch (error) {
+        if (error instanceof CurationError) return { ok: false, error: error.message }
+        throw error
+      }
+    },
+  },
+  {
+    name: 'get_library_curation',
+    title: 'Read an AI library curation',
+    description:
+      "An AI curation of the human's canvases: its status (gathering, proposing, classifying, ready, applying, applied, failed), progress and, once proposed, the category tree with item counts and example item names, the duplicates folded and the items left unclassified. Without curation_id, lists the human's curations. Read-only: the human edits and applies the plan.",
+    readOnly: true,
+    shape: { curation_id: z.string().optional() },
+    async run(input, context) {
+      if (!context.userId) return { ok: false, error: 'no signed-in person is behind this call' }
+      if (typeof input.curation_id !== 'string' || !input.curation_id) {
+        return { ok: true, data: { curations: curationsOf(context.userId).map((j) => jobView(j)) } }
+      }
+      const job = getCuration(input.curation_id)
+      if (!job || job.ownerId !== context.userId) return { ok: false, error: `no curation "${input.curation_id}"` }
+      return { ok: true, data: curationBrief(job) }
     },
   },
 )
