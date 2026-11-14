@@ -1180,7 +1180,7 @@ export const CHAT_READ_TOOL_NAMES = new Set([
   'get_reference',
   'view_website',
   'search_inspiration',
-  ...DESIGN_LIBRARY_TOOL_NAMES,
+  ...DESIGN_LIBRARY_TOOLS.filter((tool) => tool.readOnly).map((tool) => tool.name),
 ])
 
 const CHAT_SYSTEM = `You are a resident agent of the Doop canvas — a multiplayer design tool where humans and AI agents design HTML frames together — answering in the canvas CHAT, not editing. Humans talk the next design over with you here; the canvas only changes after an editor presses "Go design" on a plan card, which queues one board card per screen.
@@ -3482,9 +3482,21 @@ export async function execTool(
             actor,
             canvas,
             libraries: () => librariesOf(reader, canvas),
+            canEdit: (id) => id === canvasId,
           })
           if (!outcome.ok) return fail(outcome.error)
-          return ok([JSON.stringify(outcome.data), ...(outcome.note ? [outcome.note] : [])].join('\n'))
+          /* an insert is a design write: the run's delivery check and its lint pass see it */
+          const lintNotes: string[] = []
+          for (const frameId of outcome.frames ?? []) {
+            runState.mutatedFrames.add(frameId)
+            runState.verifiedFrames.delete(frameId)
+            lintNotes.push(await lintNote(frameId, actor, runState))
+          }
+          return ok(
+            [JSON.stringify(outcome.data), ...(outcome.note ? [outcome.note] : []), ...lintNotes.filter(Boolean)].join(
+              '\n',
+            ),
+          )
         }
         if (!COMPONENT_TOOL_NAMES.includes(block.name)) return fail(`unknown tool ${block.name}`)
         const canvas = store.getCanvas(canvasId)

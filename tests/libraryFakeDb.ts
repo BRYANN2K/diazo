@@ -40,6 +40,13 @@ export function fakePersist() {
     saveFrame: () => {},
     saveFramePage: () => {},
     saveActivity: () => {},
+    saveTask: () => {},
+    saveFeedback: () => {},
+    saveComment: () => {},
+    saveChatMessage: () => {},
+    saveDecision: () => {},
+    saveProposal: () => {},
+    saveFrameNow: async () => {},
     saveFrameVersion: (v: { frameId: string; html: string }) => {
       fakeDb.versions.push({ frameId: v.frameId, html: v.html })
     },

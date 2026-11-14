@@ -2534,13 +2534,23 @@ export function buildMcpServer(
         inputSchema: { ...tool.shape, agent_name: agentName.optional() } as never,
       },
       (async (raw: Record<string, unknown>) => {
+        const agent = raw.agent_name as string | undefined
+        const actor = actorFrom(agent)
+        const target = typeof raw.canvas_id === 'string' ? raw.canvas_id : undefined
+        if (target && !tool.readOnly) arrive(target, agent)
         const outcome = await runLibraryTool(tool.name, raw, {
           userId: ownerId,
-          actor: actorFrom(raw.agent_name as string | undefined),
+          actor,
           libraries: () => librariesOf(ownerId),
+          canEdit: (canvasId) => !!canvasFor(canvasId, 'edit'),
         })
         if (!outcome.ok) return err(outcome.error)
-        return outcome.note ? textWithNudge(outcome.data, outcome.note) : text(outcome.data)
+        const result = outcome.note ? textWithNudge(outcome.data, outcome.note) : text(outcome.data)
+        for (const frameId of outcome.frames ?? []) {
+          const frame = store.getFrame(frameId)
+          if (frame) withComponentNotes(result, frame)
+        }
+        return target && !tool.readOnly ? withFeedback(result, target, actor) : result
       }) as never,
     )
   }

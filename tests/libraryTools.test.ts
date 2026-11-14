@@ -14,6 +14,7 @@ const { store } = await import('../server/store.ts')
 const libraries = await import('../server/libraries.ts')
 const indexer = await import('../server/libraryIndex.ts')
 const tools = await import('../server/libraryTools.ts')
+const snapshots = await import('../server/librarySnapshot.ts')
 
 const actor = { name: 'Agent', kind: 'agent' as const, color: '#000' }
 const FIXTURES: FrameSpec[] = [{ fixture: 'sheet-static' }, { fixture: 'sheet-scripted' }, { fixture: 'card-exploded' }]
@@ -28,11 +29,12 @@ async function seed(id: string, ownerId: string): Promise<Canvas> {
   return store.getCanvas(id)!
 }
 
-const context = (userId: string) => ({ userId, actor, libraries: () => tools.librariesOf(userId) })
+const context = (userId: string) => ({ userId, actor, libraries: () => tools.librariesOf(userId), canEdit: () => true })
 const run = (name: string, input: Record<string, unknown>, userId = 'owner') =>
   tools.runLibraryTool(name, input, context(userId))
 
 beforeEach(async () => {
+  snapshots.setSnapshotRenderer({ available: () => false, snapshot: async () => null })
   libraries.resetLibrariesForTest()
   indexer.resetIndexerForTest()
   fakeDb.reset()
@@ -79,8 +81,8 @@ describe('the library read tools', () => {
       data: { family: { id: 'bk.scb-login' }, source_url: 'https://shadcnblocks.com/blocks/login' },
     })
     const withHtml = await run('get_library_item', { library_id: 'lib1', item_id: 'bk.scb-login', include_html: true })
-    expect(withHtml).toMatchObject({ ok: true, data: { fidelity: 'frame' } })
-    expect((withHtml as { data: { html: string } }).data.html).toContain('shadcnblocks · Login')
+    expect(withHtml).toMatchObject({ ok: true, data: { fidelity: expect.stringMatching(/^(rendered|static)$/) } })
+    expect((withHtml as { data: { html: string } }).data.html).toMatch(/^<div data-doop-ref="bk.scb-login"/)
   })
 
   it('answers a library the account cannot read like a missing one', async () => {

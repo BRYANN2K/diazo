@@ -13,6 +13,8 @@ import { store } from './store.ts'
 import { getLibrary, libraryRole } from './libraries.ts'
 import { libraryItems } from './libraryIndex.ts'
 import { itemDetail, itemUrl, readableLibraries, searchLibraries } from './libraryQueries.ts'
+import { insertItem, InsertError, snapshotItem } from './librarySnapshot.ts'
+import { libraryBlock, refId } from '../shared/libraryBlock.ts'
 
 export interface LibraryToolContext {
   /** whose libraries these are: the account over MCP, the asker in a run */
@@ -22,9 +24,13 @@ export interface LibraryToolContext {
   libraries(): Promise<Canvas[]>
   /** the canvas a resident run works on */
   canvas?: Canvas
+  /** may this caller write that canvas? (an insert's target) */
+  canEdit(canvasId: string): boolean
 }
 
-export type LibraryToolResult = { ok: true; data: unknown; note?: string } | { ok: false; error: string }
+export type LibraryToolResult =
+  | { ok: true; data: unknown; note?: string; /** frames the tool wrote */ frames?: string[] }
+  | { ok: false; error: string }
 
 interface LibraryTool {
   name: string
@@ -245,19 +251,76 @@ export const DESIGN_LIBRARY_TOOLS: LibraryTool[] = [
         variants: detail.variants.map((v) => brief(canvas.id, v)),
       }
       if (input.include_html === true) {
-        const frame = await store.renderableFrame(detail.item.frameId)
-        data.html = frame?.html ?? ''
-        data.fidelity = 'frame'
+        const shot = await snapshotItem(out.item)
+        if (!shot) return { ok: false, error: 'the item is gone' }
+        data.html = libraryBlock(shot.snap, { ref: refId(out.item.itemId), libraryId: canvas.id, rev: out.item.rev })
+        data.fidelity = shot.fidelity
         return {
           ok: true,
           data,
-          note: 'This is the whole frame that holds the item, not a scoped copy: take only the part that is the item.',
+          note: 'html is the item as a block ready to drop into a frame: its markup with only the CSS it uses, scoped to the block. Prefer insert_library_item, which places it for you.',
         }
       }
       return { ok: true, data }
     },
   },
 ]
+
+DESIGN_LIBRARY_TOOLS.push({
+  name: 'insert_library_item',
+  title: 'Insert a library item',
+  description:
+    'Put a library item (a family or one of its variants) into a frame as a scoped copy: its markup with only the CSS it uses, after an element or at the end of the body. Use it instead of redrawing a pattern search_library found; then adapt the copy to the frame. ' +
+    FAMILY,
+  readOnly: false,
+  shape: {
+    canvas_id: z.string().describe('The canvas of the frame to insert into'),
+    frame_id: z.string().describe('The frame to insert into'),
+    library_id: LIBRARY_ID,
+    item_id: z.string().describe('Item id from search_library'),
+    after_element_id: z.string().optional().describe('Insert right after the element with this data-doop-id'),
+  },
+  async run(input, context) {
+    const canvasId = String(input.canvas_id ?? '')
+    const frameId = String(input.frame_id ?? '')
+    const libraryId = String(input.library_id ?? '')
+    if (context.canvas && canvasId !== context.canvas.id) {
+      return { ok: false, error: 'this run can only insert into its own canvas' }
+    }
+    const frame = store.getFrame(frameId)
+    if (!frame || frame.canvasId !== canvasId || !context.canEdit(canvasId)) {
+      return { ok: false, error: `no frame "${frameId}" you can edit on canvas ${canvasId}` }
+    }
+    const canvas = await readable(context, libraryId)
+    if (!canvas) return missing(libraryId)
+    const out = await itemDetail(canvas, String(input.item_id ?? ''), libraryRole(context.userId, canvas) ?? 'read')
+    if (!out) return { ok: false, error: `no item "${String(input.item_id)}" in this library` }
+    try {
+      const done = await insertItem({
+        item: out.item,
+        frameId,
+        ...(typeof input.after_element_id === 'string' && input.after_element_id
+          ? { afterElementId: input.after_element_id }
+          : {}),
+        actor: context.actor,
+      })
+      return {
+        ok: true,
+        frames: [frameId],
+        data: {
+          element_id: done.elementId,
+          fidelity: done.fidelity,
+          frame_id: frameId,
+          approval_withdrawn: done.approvalWithdrawn || undefined,
+        },
+        note: `Inserted as [data-doop-id="${done.elementId}"]. Adapt it to this frame's tokens and content with edit_frame_html; keep its data-doop-ref, data-doop-ref-lib and data-doop-ref-rev attributes. ${done.fidelity === 'static' ? 'It was read from the HTML (no renderer), so check it with a screenshot.' : ''}`.trim(),
+      }
+    } catch (error) {
+      if (error instanceof InsertError) return { ok: false, error: error.message }
+      throw error
+    }
+  },
+})
 
 export const DESIGN_LIBRARY_TOOL_NAMES = DESIGN_LIBRARY_TOOLS.map((tool) => tool.name)
 
