@@ -9,7 +9,7 @@ import { findInHtml, replaceInHtml, type TextMatch } from '../lib/actions/findTe
 import { saveFramesHtml } from '../lib/actions/edits'
 import { api } from '../lib/api'
 import { navigate } from '../lib/navigate'
-import { footerHint, rowAction, type InsertTarget } from '../lib/findInsert'
+import { footerHint, insertLibraryItem, isLibraryItem, rowAction, type InsertTarget } from '../lib/findInsert'
 import type { CanvasFindHit } from '../../shared/canvasFind'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
@@ -146,6 +146,11 @@ export function resultRows(groups: FrameGroup[], open: ReadonlySet<string>): Res
             .map((variant) => ({ key: rowKey(group, variant.label), group, groupIndex, variant }))
         : []),
     ])
+}
+
+/** What the preview frames, and an insert copies, for a row. */
+function focusOf(row: ResultRow, query: string): string {
+  return row.variant?.label ?? defaultFocus(row.group, query)
 }
 
 /** What the preview frames when a frame row (not a variant) is shown. */
@@ -320,13 +325,40 @@ export function FindBar({
   /* a click, or ↩: insert a library item into the selected frame, else go */
   function activate(row: ResultRow, shift: boolean) {
     const action = rowAction(useStore.getState(), itemOf(row), shift)
-    if (action.kind === 'insert') insertRow(row, action.target)
+    if (action.kind === 'insert') void insertRow(row, action.target)
     else goRow(row)
   }
 
-  function insertRow(row: ResultRow, _target: InsertTarget) {
-    /* the copy itself arrives with the snapshot serializer */
-    goRow(row)
+  const [inserting, setInserting] = useState(false)
+
+  async function insertRow(row: ResultRow, target: InsertTarget) {
+    if (inserting) return
+    const ref = itemOf(row).id ?? row.group.label
+    const notice = useStore.getState().pushNotice
+    setInserting(true)
+    setPointed(row.key)
+    notice(t('actions.findInserting', { ref }), { busy: true })
+    try {
+      const done = await insertLibraryItem({
+        sourceFrameId: row.group.frameId,
+        focus: focusOf(row, query),
+        ref,
+        target,
+      })
+      if (!done) return notice(t('actions.findInsertFailed', { ref }))
+      const parts = [
+        done.found
+          ? t('actions.findInserted', { ref: done.ref, frame: target.frame.name })
+          : t('actions.findInsertedWhole', { ref: done.ref }),
+        done.scripted ? t('actions.findInsertedStatic') : '',
+        done.approvalWithdrawn ? t('actions.findApprovalWithdrawn') : '',
+      ]
+      notice(parts.filter(Boolean).join(' · '))
+    } catch {
+      notice(t('actions.findInsertFailed', { ref }))
+    } finally {
+      setInserting(false)
+    }
   }
 
   function copyRowId(row: ResultRow): boolean {
@@ -526,8 +558,15 @@ export function FindBar({
           {(() => {
             const shown = pointedRow?.group ?? groups[Math.max(active, 0)]
             if (!shown) return null
-            const focus = pointedRow?.variant?.label ?? defaultFocus(shown, query)
-            return <FindPreview frameId={shown.frameId} focus={focus} />
+            const row = pointedRow?.group === shown ? pointedRow : { key: rowKey(shown), group: shown, groupIndex: 0 }
+            const library = isLibraryItem(itemOf(row).id, shown.canvasName ?? useStore.getState().canvas?.name)
+            return (
+              <FindPreview
+                frameId={shown.frameId}
+                focus={focusOf(row, query)}
+                staticNote={library ? t('actions.findStaticNote') : undefined}
+              />
+            )
           })()}
           <p className="px-1 text-caption text-ink-faint">
             {t('actions.findFramesSummary', { frames: groups.length, total: remote?.total ?? remoteHits.length })}

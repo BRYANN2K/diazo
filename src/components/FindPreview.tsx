@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { api } from '../lib/api'
 import { useStore } from '../lib/store'
 import { withFindPreviewScript, type FindPreviewMessage } from '../lib/findPreviewRuntime'
+import { clearLivePreview, frameHtml, setLivePreview } from '../lib/findSnapshot'
 import { FramePreview } from './FramePreview'
 
 /**
@@ -16,27 +16,6 @@ import { FramePreview } from './FramePreview'
  * the new box back; only the transform here animates.
  */
 
-interface Loaded {
-  html: string
-  width: number
-  height: number
-}
-
-const htmlCache = new Map<string, Promise<Loaded>>()
-
-/* the open canvas's frames are in the store; a hit in another canvas is fetched */
-export function frameHtml(frameId: string): Promise<Loaded> {
-  const local = useStore.getState().canvas?.frames.find((f) => f.id === frameId)
-  if (local?.html) return Promise.resolve({ html: local.html, width: local.width, height: local.height })
-  let p = htmlCache.get(frameId)
-  if (!p) {
-    p = api.frame(frameId).then((f) => ({ html: f.html ?? '', width: f.width, height: f.height }))
-    p.catch(() => htmlCache.delete(frameId))
-    htmlCache.set(frameId, p)
-  }
-  return p
-}
-
 interface Box {
   x: number
   y: number
@@ -46,7 +25,16 @@ interface Box {
 
 let tokens = 0
 
-export function FindPreview({ frameId, focus }: { frameId: string; focus: string }) {
+export function FindPreview({
+  frameId,
+  focus,
+  staticNote,
+}: {
+  frameId: string
+  focus: string
+  /** shown over a preview whose sheet runs scripts, which the copy loses */
+  staticNote?: string
+}) {
   const frame = useStore((s) => s.canvas?.frames.find((f) => f.id === frameId))
   const wrapRef = useRef<HTMLDivElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
@@ -56,6 +44,7 @@ export function FindPreview({ frameId, focus }: { frameId: string; focus: string
     html: string
     width: number
     height: number
+    scripted: boolean
   } | null>(null)
   const [ready, setReady] = useState<string | null>(null)
   const [box, setBox] = useState<{ token: string; focus: string; box: Box | null } | null>(null)
@@ -68,7 +57,14 @@ export function FindPreview({ frameId, focus }: { frameId: string; focus: string
         if (stale) return
         tokens += 1
         const token = `${tokens}`
-        setDoc({ frameId, token, html: withFindPreviewScript(html, token), width, height })
+        setDoc({
+          frameId,
+          token,
+          html: withFindPreviewScript(html, token),
+          width,
+          height,
+          scripted: /<script\b/i.test(html),
+        })
       })
       .catch(() => {})
     return () => {
@@ -85,11 +81,18 @@ export function FindPreview({ frameId, focus }: { frameId: string; focus: string
       const data = e.data as FindPreviewMessage | null
       if (!data || data.doopFindPreview !== token) return
       if (data.type === 'ready') setReady(token)
-      else if (data.type === 'box') setBox({ token, focus: data.focus ?? '', box: data.box ?? null })
+      else if (data.type === 'box') {
+        setBox({ token, focus: data.focus ?? '', box: data.box ?? null })
+        const win = iframeRef.current?.contentWindow
+        if (win) setLivePreview({ frameId, focus: data.focus ?? '', token, win, found: !!data.box })
+      }
     }
     window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
-  }, [token])
+    return () => {
+      window.removeEventListener('message', onMessage)
+      clearLivePreview(token)
+    }
+  }, [token, frameId])
 
   /* the focus travels as a message once the document listens; it is sent
      again on ready, since the first one can beat the script's load */
@@ -136,6 +139,11 @@ export function FindPreview({ frameId, focus }: { frameId: string; focus: string
         />
       ) : (
         <FramePreview frameId={frameId} empty={null} />
+      )}
+      {staticNote && current?.scripted && (
+        <span className="absolute right-1.5 bottom-1.5 rounded-tag bg-surface/90 px-1.5 py-0.5 text-micro text-ink-soft shadow-ring">
+          {staticNote}
+        </span>
       )}
     </div>
   )

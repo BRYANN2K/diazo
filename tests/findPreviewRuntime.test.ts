@@ -7,10 +7,10 @@ const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms))
 describe('withFindPreviewScript', () => {
   it('appends the script inside the last </body>', () => {
     const html = withFindPreviewScript('<html><body><p>x</p></body></html>', 't')
-    expect(html).toMatch(/<p>x<\/p><script>[\s\S]*\("t"\);<\/script><\/body><\/html>$/)
+    expect(html).toMatch(/<p>x<\/p><script data-doop-find>[\s\S]*\("t"\);<\/script><\/body><\/html>$/)
   })
   it('appends to a document without a body', () => {
-    expect(withFindPreviewScript('<p>x</p>', 't')).toMatch(/^<p>x<\/p><script>/)
+    expect(withFindPreviewScript('<p>x</p>', 't')).toMatch(/^<p>x<\/p><script data-doop-find>/)
   })
 })
 
