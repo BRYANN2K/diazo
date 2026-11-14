@@ -313,3 +313,38 @@ export interface LibraryItemPatch {
   tags?: string[] | null
   status?: 'active' | 'deprecated' | 'hidden' | null
 }
+
+/** What an import does to one frame (a dry run returns it; an apply carries it out). */
+export interface ImportFrameReport {
+  frameId: string
+  /** the name says it is not an item: placed, and yields none */
+  ignored: boolean
+  /** the duplicate rule left it out */
+  skipped?: boolean
+  item?: {
+    itemId: string
+    label: string
+    kind: string
+    source: string
+    category: string
+    tags: string[]
+    status: 'active' | 'draft'
+  }
+  /** the variant ids found in it */
+  variants: string[]
+  findings: RuleFinding[]
+  changes: {
+    name?: string
+    html?: string
+    pageId?: string
+    /** a page to create for its category, by name */
+    newPage?: string
+    x?: number
+    y?: number
+  }
+}
+
+export interface ImportReport {
+  frames: ImportFrameReport[]
+  totals: { frames: number; items: number; variants: number; ignored: number; drafts: number; findings: number }
+}
