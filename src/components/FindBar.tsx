@@ -11,6 +11,7 @@ import { api } from '../lib/api'
 import { navigate } from '../lib/navigate'
 import { footerHint, insertLibraryItem, isLibraryItem, rowAction, type InsertTarget } from '../lib/findInsert'
 import type { CanvasFindHit } from '../../shared/canvasFind'
+import { splitFrameName } from '../../shared/libraryIds'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { IconButton } from './ui/icon-button'
@@ -52,14 +53,6 @@ export interface FrameGroup {
 }
 
 const LIBRARY_ID = /[a-z][\w-]*\.[\w.-]*[\w]/gi
-
-function splitFrameName(name: string): { id: string | null; label: string } {
-  const at = name.indexOf(' — ')
-  if (at > 0 && /^[\w.§-]+$/.test(name.slice(0, at).trim())) {
-    return { id: name.slice(0, at).trim(), label: name.slice(at + 3).trim() }
-  }
-  return { id: null, label: name }
-}
 
 function groupByFrame(hits: CanvasFindHit[], query: string): FrameGroup[] {
   const q = query.trim().toLowerCase()
