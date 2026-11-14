@@ -30,7 +30,10 @@ import * as persist from './db/persist.ts'
 import { store, type FrameWrite } from './store.ts'
 import { isFrameStreaming } from './actions.ts'
 import { announceLibrary, getLibrary, onLibraryChange, setIndexState, type LibraryRecord } from './libraries.ts'
-import { extractFrameItems, type ExtractedItem } from './libraryExtract.ts'
+import { contentHash, extractFrameItems, type ExtractedItem } from './libraryExtract.ts'
+import { loadFramePage, rendererAvailable } from './screenshot.ts'
+import { collectExpression, type CollectedFrame } from '../shared/libraryCollect.ts'
+import { parseItemId } from '../shared/libraryIds.ts'
 
 export const INDEX_BATCH = 50
 export const FRAME_DEBOUNCE_MS = 1500
@@ -159,6 +162,21 @@ function framesInOrder(record: Pick<LibraryRecord, 'canvasId' | 'rules'>): Place
     }
   }
   return out
+}
+
+/** A scripted frame's static pass finds its family alone: the variants the
+ *  rendered pass read stay until the next rendered pass replaces them. */
+function keepRendered(
+  extracted: ExtractedItem[],
+  frameId: string,
+  previous: Map<string, LibraryItem>,
+): ExtractedItem[] {
+  const family = extracted.find((item) => !item.parentId)
+  if (!family?.scripted || extracted.some((item) => item.parentId)) return extracted
+  const rendered = [...previous.values()].filter(
+    (row) => row.frameId === frameId && row.parentId === family.itemId && row.hash.startsWith('r:'),
+  )
+  return [...extracted, ...rendered.map(({ canvasId: _c, rev: _r, indexedAt: _i, useCount: _u, ...row }) => row)]
 }
 
 /** Give a frame's extracted items unique ids, revisions and the library's
@@ -312,7 +330,8 @@ async function runFull(canvasId: string, resume: boolean): Promise<void> {
       if (!frame) continue
       let items: LibraryItem[]
       try {
-        items = finalize(canvasId, frame.id, extract(record, placed, frame).items, taken, previous, now)
+        const extracted = keepRendered(extract(record, placed, frame).items, frame.id, previous)
+        items = finalize(canvasId, frame.id, extracted, taken, previous, now)
       } catch (error) {
         console.error('[library-index] a frame could not be read', frame.id, error)
         state.failed++
@@ -339,6 +358,7 @@ async function runFull(canvasId: string, resume: boolean): Promise<void> {
   dropIndex(canvasId)
   setIndexState(canvasId, { ...state, status: 'done', finishedAt: Date.now() }, countsOf(rows))
   announceLibrary(canvasId, SYSTEM)
+  queueRenderedPasses(canvasId, rows)
 }
 
 /* ---- one frame at a time ---- */
@@ -398,7 +418,8 @@ async function indexFrames(record: LibraryRecord, targets: Placed[]): Promise<vo
   for (const placed of targets) {
     const frame = await store.renderableFrame(placed.frame.id)
     if (!frame) continue
-    const items = finalize(canvasId, frame.id, extract(record, placed, frame).items, taken, previous, now)
+    const extracted = keepRendered(extract(record, placed, frame).items, frame.id, previous)
+    const items = finalize(canvasId, frame.id, extracted, taken, previous, now)
     /* a card joins its family among the other frames' rows */
     if (items.length === 1 && !items[0]!.scripted) {
       const families = cache.rows.filter((r) => r.frameId !== frame.id && !r.parentId).map((r) => r.itemId)
@@ -406,10 +427,189 @@ async function indexFrames(record: LibraryRecord, targets: Placed[]): Promise<vo
     }
     await persist.replaceFrameItems(canvasId, frame.id, items)
     patchCache(canvasId, frame.id, items)
+    queueRenderedPass(canvasId, frame.id)
   }
   if (getLibrary(canvasId) !== record) return
   const counts = countsOf(cache.rows)
   setIndexState(canvasId, record.indexState, counts)
+}
+
+/* ---- the rendered pass ---- */
+
+/** What the rendered pass needs from the server renderer (swapped in tests). */
+export interface LibraryRenderer {
+  available(): boolean
+  collect(frame: Frame, expression: string): Promise<CollectedFrame>
+}
+
+/** How long a page settles before it is read: late scripts fill their grids. */
+export const RENDER_SETTLE_MS = 1700
+const MAX_RENDERS = 2
+
+const serverRenderer: LibraryRenderer = {
+  available: rendererAvailable,
+  async collect(frame, expression) {
+    const loaded = await loadFramePage(frame, { priority: 'background' })
+    try {
+      await new Promise((resolve) => setTimeout(resolve, RENDER_SETTLE_MS))
+      await loaded.page.evaluate('globalThis.__name = (target) => target')
+      return (await loaded.page.evaluate(expression)) as CollectedFrame
+    } finally {
+      await loaded.close()
+    }
+  },
+}
+
+let renderer: LibraryRenderer = serverRenderer
+
+/** For tests: render with something else than the headless browser. */
+export function setLibraryRenderer(next: LibraryRenderer | null): void {
+  renderer = next ?? serverRenderer
+}
+
+const renderQueue: { canvasId: string; frameId: string }[] = []
+const queued = new Set<string>()
+let rendering = 0
+let renderIdle: Promise<void> = Promise.resolve()
+let renderIdleDone: (() => void) | null = null
+
+/** Resolves once every queued rendered pass ran (tests). */
+export function renderedPassesSettled(): Promise<void> {
+  return rendering || renderQueue.length ? renderIdle : Promise.resolve()
+}
+
+function queueRenderedPass(canvasId: string, frameId: string) {
+  if (!renderer.available()) return
+  const key = `${canvasId}\n${frameId}`
+  if (queued.has(key)) return
+  if (!rendering && !renderQueue.length) renderIdle = new Promise((resolve) => (renderIdleDone = resolve))
+  queued.add(key)
+  renderQueue.push({ canvasId, frameId })
+  pumpRenders()
+}
+
+/** After a full run: scripted frames first (they have variants to find),
+ *  then every frame whose items have no box yet. */
+function queueRenderedPasses(canvasId: string, rows: LibraryItem[]) {
+  const frames = new Map<string, { scripted: boolean; boxed: boolean }>()
+  for (const row of rows) {
+    const f = frames.get(row.frameId) ?? { scripted: false, boxed: true }
+    f.scripted ||= row.scripted
+    f.boxed &&= !!row.box
+    frames.set(row.frameId, f)
+  }
+  const order = [...frames]
+    .filter(([, f]) => f.scripted || !f.boxed)
+    .sort(([, a], [, b]) => Number(b.scripted) - Number(a.scripted))
+  for (const [frameId] of order) queueRenderedPass(canvasId, frameId)
+}
+
+function pumpRenders() {
+  while (rendering < MAX_RENDERS && renderQueue.length) {
+    const next = renderQueue.shift()!
+    queued.delete(`${next.canvasId}\n${next.frameId}`)
+    rendering++
+    renderedPass(next.canvasId, next.frameId)
+      .catch((error: unknown) => console.error('[library-index] rendered pass failed', next.frameId, error))
+      .finally(() => {
+        rendering--
+        if (!rendering && !renderQueue.length) renderIdleDone?.()
+        pumpRenders()
+      })
+  }
+}
+
+/** A variant only the rendered page shows has its hash marked so: the next
+ *  rendered pass may drop it, never a variant the static pass read. */
+const RENDERED = 'r:'
+const isRendered = (row: LibraryItem) => row.hash.startsWith(RENDERED)
+
+/** Box a variant of the rendered page, or a new one only the page shows. */
+function renderedRow(
+  family: LibraryItem,
+  item: CollectedFrame['items'][number],
+  position: number,
+  previous: LibraryItem | undefined,
+  now: number,
+): LibraryItem {
+  const parsed = parseItemId(item.id)
+  const hash = RENDERED + contentHash(item.html)
+  const same = previous && previous.hash === hash
+  return {
+    canvasId: family.canvasId,
+    itemId: item.id,
+    parentId: family.itemId,
+    frameId: family.frameId,
+    pageId: family.pageId,
+    position,
+    label: item.label || item.id,
+    description: '',
+    kind: parsed?.kind || family.kind,
+    source: parsed?.source || family.source,
+    category: family.category,
+    tags: family.tags,
+    mode: 'snapshot',
+    locator: item.elementId ? { elementId: item.elementId } : { anchor: item.anchor },
+    box: item.box,
+    scripted: true,
+    status: 'active',
+    findings: [],
+    hash,
+    rev: previous ? (same ? previous.rev : previous.rev + 1) : 1,
+    searchText: `${item.label} ${item.text}`.trim().slice(0, 2000),
+    sourceUrl: family.sourceUrl,
+    license: family.license,
+    indexedAt: same ? previous.indexedAt : now,
+  }
+}
+
+/**
+ * Read one frame in the headless browser: a scripted sheet's variants (which
+ * only exist once its scripts ran) and every item's box. A renderer failure
+ * leaves the static items as they are and counts as `failed`.
+ */
+export async function renderedPass(canvasId: string, frameId: string): Promise<'rendered' | 'skipped' | 'failed'> {
+  const record = getLibrary(canvasId)
+  if (!record || !renderer.available()) return 'skipped'
+  const frame = await store.renderableFrame(frameId)
+  if (!frame) return 'skipped'
+  const cache = await cacheFor(canvasId)
+  const own = cache.rows.filter((r) => r.frameId === frameId)
+  const family = own.find((r) => !r.parentId) ?? own.find((r) => !own.some((o) => o.itemId === r.parentId))
+  if (!family) return 'skipped'
+  const v = record.rules.detect.variants
+  let collected: CollectedFrame
+  try {
+    collected = await renderer.collect(frame, collectExpression({ ...v, familyId: family.itemId }))
+  } catch (error) {
+    console.warn('[library-index] could not render', frameId, error)
+    const state = getLibrary(canvasId)?.indexState
+    if (state) setIndexState(canvasId, { ...state, failed: state.failed + 1 })
+    return 'failed'
+  }
+  if (getLibrary(canvasId) !== record) return 'skipped'
+  const now = Date.now()
+  const byId = new Map(own.map((r) => [r.itemId, r]))
+  const seen = new Set<string>()
+  const rows: LibraryItem[] = []
+  collected.items.forEach((item, position) => {
+    if (seen.has(item.id) || item.id.toLowerCase() === family.itemId.toLowerCase()) return
+    seen.add(item.id)
+    const previous = byId.get(item.id)
+    /* a static variant keeps what the static pass read; it gains its box */
+    if (previous && !isRendered(previous)) rows.push({ ...previous, box: item.box })
+    else if (family.scripted) rows.push(renderedRow(family, item, position, previous, now))
+  })
+  const familyBox = { x: 0, y: 0, w: collected.width || frame.width, h: collected.height || frame.height }
+  /* static variants the page did not show keep their rows; a scripted
+     sheet's variants are what the page shows, nothing else */
+  const kept = own.filter((r) => r.itemId !== family.itemId && !seen.has(r.itemId) && !isRendered(r))
+  const next = [{ ...family, box: family.box ?? familyBox }, ...rows, ...kept]
+  await persist.replaceFrameItems(canvasId, frameId, next)
+  patchCache(canvasId, frameId, next)
+  const state = getLibrary(canvasId)?.indexState
+  setIndexState(canvasId, state ? { ...state, rendered: state.rendered + 1 } : null, countsOf(cache.rows))
+  return 'rendered'
 }
 
 /** A frame left the library: its items go. */

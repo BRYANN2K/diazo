@@ -798,6 +798,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   selector engine for rule selectors); `server/libraryIndex.ts` keeps the projection in step
   (full runs 50 frames at a time through `store.renderableFrame`, resumed at boot; one frame 1.5 s
   after `store.onFrameWrite`; the search index built on first use, dropped after 10 idle minutes).
+  Two passes: the static one reads the HTML (no browser); the rendered one (`renderedPass`, at most
+  2 background pages, 1.7 s for late scripts) runs `shared/libraryCollect.ts` in the headless page
+  to read a scripted sheet's variants and every item's box. Variants only the page shows carry an
+  `r:` hash and are kept across static reindexes until the next rendered pass.
   REST under `/api/libraries` (`server/libraryRoutes.ts`, 30 searches per 10 s per account; never
   `store.load`); agent tools in `server/libraryTools.ts`, registered for MCP and the resident agent
   under the same names. ⌘F's Library scope (`src/lib/findLibrary.ts`, `src/lib/findRows.ts`,

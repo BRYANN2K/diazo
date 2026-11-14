@@ -73,6 +73,7 @@ function seed(frames: FrameSpec[], opts: Parameters<typeof libraryCanvas>[1] = {
 }
 
 beforeEach(() => {
+  indexer.setLibraryRenderer(null)
   libraries.resetLibrariesForTest()
   indexer.resetIndexerForTest()
   db.items.clear()
@@ -240,5 +241,80 @@ describe('the search index', () => {
     expect(indexer.evictIdleIndexes(Date.now() + indexer.INDEX_IDLE_MS + 1)).toBe(1)
     expect(indexer.cachedIndexCount()).toBe(0)
     expect(await indexer.indexFor('plain-not-a-library')).toBeNull()
+  })
+})
+
+describe('the rendered pass', () => {
+  const box = (x: number) => ({ x, y: 120, w: 240, h: 148 })
+  const scripted = {
+    available: () => true,
+    collect: async () => ({
+      items: ['chart-card', 'dot-histogram', 'json-viewer'].map((slug, i) => ({
+        id: `cp.tuff-${slug}`,
+        label: slug,
+        box: box(i * 252),
+        anchor: `cp.tuff-${slug}`,
+        text: slug,
+        html: `<div class="d">${slug}</div>`,
+      })),
+      width: 2040,
+      height: 714,
+      timedOut: false,
+    }),
+  }
+
+  it('gives the scripted sheet its variants, boxed', async () => {
+    indexer.setLibraryRenderer(scripted)
+    seed([{ fixture: 'sheet-scripted' }])
+    await indexer.reindexLibrary('lib1')
+    await indexer.renderedPassesSettled()
+    const variants = rows().filter((r) => r.parentId === 'cp.tuff-answers')
+    expect(variants.map((v) => [v.itemId, v.box?.w])).toEqual([
+      ['cp.tuff-chart-card', 240],
+      ['cp.tuff-dot-histogram', 240],
+      ['cp.tuff-json-viewer', 240],
+    ])
+    expect(byId('cp.tuff-answers')?.box).toEqual({ x: 0, y: 0, w: 2040, h: 714 })
+    expect(libraries.getLibrary('lib1')!.indexState?.rendered).toBe(1)
+    /* a static reindex keeps them until the next rendered pass */
+    indexer.setLibraryRenderer({ available: () => false, collect: scripted.collect })
+    await indexer.reindexFrame('lib1', 'f1')
+    expect(rows().filter((r) => r.parentId === 'cp.tuff-answers')).toHaveLength(3)
+  })
+
+  it('leaves the static items in place when the renderer fails', async () => {
+    indexer.setLibraryRenderer({
+      available: () => true,
+      collect: async () => {
+        throw new Error('browser gone')
+      },
+    })
+    seed(FIXTURES)
+    await indexer.reindexLibrary('lib1')
+    await indexer.renderedPassesSettled()
+    expect(rows()).toHaveLength(5)
+    expect(libraries.getLibrary('lib1')!.indexState?.failed).toBeGreaterThan(0)
+  })
+
+  it('boxes a static sheet without changing its variants', async () => {
+    indexer.setLibraryRenderer({
+      available: () => true,
+      collect: async () => ({
+        items: [
+          { id: 'bk.scb-login-minimal-email-password', label: 'x', box: box(0), anchor: 'x', text: '', html: '' },
+        ],
+        width: 2040,
+        height: 440,
+        timedOut: false,
+      }),
+    })
+    seed([{ fixture: 'sheet-static' }])
+    await indexer.reindexLibrary('lib1')
+    await indexer.renderedPassesSettled()
+    expect(byId('bk.scb-login-minimal-email-password')).toMatchObject({
+      box: box(0),
+      label: '420px column, focus ring 4px',
+    })
+    expect(byId('bk.scb-login-social-with-email-option')).toBeDefined()
   })
 })
