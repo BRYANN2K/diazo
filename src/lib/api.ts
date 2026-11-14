@@ -35,6 +35,7 @@ import type {
   ItemSuggestion,
 } from '../../shared/library'
 import type { RulePresetName } from '../../shared/libraryRules'
+import type { DuplicateMatch } from '../../shared/libraryProvenance'
 import type { CurationEdit, CurationJobView, CurationPlanView, CurationSample } from '../../shared/libraryCuration'
 import type { CustomProviderConfig, CustomProviderKind } from '../../shared/customProvider'
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
@@ -1055,6 +1056,8 @@ export const api = {
     }),
   createLibrary: (canvasId: string, opts: { preset?: RulePresetName; taxonomy?: LibraryTaxonomy } = {}) =>
     req<LibraryListEntry>('/api/libraries', { method: 'POST', body: JSON.stringify({ canvasId, ...opts }) }),
+  checkLibraries: (input: { frameId?: string; url?: string; name?: string; text?: string }) =>
+    req<{ duplicates: DuplicateMatch[] }>('/api/libraries/check', { method: 'POST', body: JSON.stringify(input) }),
   newLibrary: (input: { name: string; description?: string; categories?: string[] }) =>
     req<LibraryListEntry>('/api/libraries/new', { method: 'POST', body: JSON.stringify(input) }),
   suggestLibraryCategories: (brief: string) =>
@@ -1076,12 +1079,19 @@ export const api = {
   deleteLibrary: (libraryId: string) => req(`/api/libraries/${libraryId}`, { method: 'DELETE' }),
   importToLibrary: (
     libraryId: string,
-    input: { frameIds: string[]; category?: string; tags?: string[]; dryRun?: boolean },
+    input: {
+      frameIds: string[]
+      category?: string
+      tags?: string[]
+      dryRun?: boolean
+      force?: boolean
+      asVariantOf?: string
+    },
   ) =>
-    req<{ report: ImportReport; applied: { frameId: string; libraryFrameId?: string; error?: string }[] }>(
-      `/api/libraries/${libraryId}/import`,
-      { method: 'POST', body: JSON.stringify(input) },
-    ),
+    req<{
+      report: ImportReport
+      applied: { frameId: string; libraryFrameId?: string; error?: string; duplicate?: boolean }[]
+    }>(`/api/libraries/${libraryId}/import`, { method: 'POST', body: JSON.stringify(input) }),
   transferLibraryCategories: (libraryId: string, fromLibraryId: string, dryRun = false) =>
     req<{
       matched: number

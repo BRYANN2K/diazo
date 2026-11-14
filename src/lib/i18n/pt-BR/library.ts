@@ -280,4 +280,18 @@ export const library = {
   galleryEmptyAgent: 'Com um agente: peça para preencher a biblioteca; ele usa import_to_library e set_library_item.',
   addCategory: 'Categoria',
   addCategoryByRules: 'Pelas regras da biblioteca',
+  /* duplicados na importação */
+  alreadyIn: 'já está em {library} → {category}: {name}',
+  curateExisting: {
+    one: '{count} item já está em outra das suas bibliotecas (mantido aqui; tire-o de todas as categorias para deixá-lo de fora)',
+    other:
+      '{count} itens já estão em outra das suas bibliotecas (mantidos aqui; tire-os de todas as categorias para deixá-los de fora)',
+  },
+  duplicateTitle: 'Já está numa biblioteca',
+  duplicateReason_same_url: 'mesma página',
+  duplicateReason_same_content: 'mesmo design',
+  duplicateReason_similar: 'muito parecido ({score}%)',
+  duplicateOpen: 'Abrir',
+  duplicateForce: 'Importar mesmo assim',
+  duplicateVariant: 'Adicionar como variante',
 } as const

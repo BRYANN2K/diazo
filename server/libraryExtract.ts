@@ -17,6 +17,7 @@ import {
 } from '../shared/libraryRules.ts'
 import type { Frame } from '../shared/types.ts'
 import { ELEMENT_ID_ATTR } from '../shared/elementId.ts'
+import { originOf, sourceKeyOf } from '../shared/libraryProvenance.ts'
 import {
   attr,
   bodyOf,
@@ -393,6 +394,8 @@ export function extractFrameItems(input: ExtractInput): ExtractResult {
     searchText: `${label} ${textRoot ? itemText(textRoot, skipChrome) : ''}`.trim().slice(0, MAX_TEXT),
     sourceUrl,
     license,
+    sourceKey: sourceKeyOf(frame.html || ''),
+    origin: originOf(frame.html || ''),
   }
   return { items: [family, ...variants], scripted, ignored: false }
 }

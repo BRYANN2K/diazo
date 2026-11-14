@@ -1280,6 +1280,10 @@ export const libraryItems = pgTable(
     searchText: text('search_text').notNull(),
     sourceUrl: text('source_url'),
     license: text('license'),
+    /** the page it was captured from, normalised (shared/libraryProvenance.ts) */
+    sourceKey: text('source_key'),
+    /** the frame it was copied from, `<canvasId>:<frameId>` */
+    origin: text('origin'),
     indexedAt: bigint('indexed_at', { mode: 'number' }).notNull(),
   },
   (t) => [

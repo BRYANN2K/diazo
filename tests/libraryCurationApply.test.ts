@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CurationEntry } from '../shared/libraryCuration'
+import { withOrigin } from '../shared/libraryProvenance'
 import { fakeDb } from './libraryFakeDb'
 import { libraryCanvas } from './libraryFixtures'
 
@@ -142,8 +143,11 @@ describe('applying a plan', () => {
       ['cp.x-button — Button', 0, 0],
       ['cp.x-button-dark — Button dark', 760 + apply.GAP, 0],
     ])
-    for (const f of canvas.frames)
-      expect(f.html).toBe(fakeDb.html.get(sources.flatMap((c) => c.frames).find((s) => s.name === f.name)!.id))
+    /* the same HTML, marked with the frame it was copied from */
+    for (const f of canvas.frames) {
+      const source = sources.flatMap((c) => c.frames).find((s) => s.name === f.name)!
+      expect(f.html).toBe(withOrigin(fakeDb.html.get(source.id)!, `${source.canvasId}:${source.id}`))
+    }
     /* a library whose items land in their categories */
     expect(libraries.getLibrary(canvas.id)?.taxonomy.categories.map((c) => c.path)).toEqual(
       expect.arrayContaining(['Heroes', 'Heroes/AI products', 'Components/Buttons']),

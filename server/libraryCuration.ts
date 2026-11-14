@@ -52,6 +52,8 @@ import { canManageCanvas } from './access.ts'
 import { getLibrary, presetFor } from './libraries.ts'
 import { libraryItems } from './libraryIndex.ts'
 import { accountTurnModels, ModelAuthError } from './agentModel.ts'
+import { readableLibraries } from './libraryQueries.ts'
+import { findDuplicates } from './libraryDuplicates.ts'
 
 /** Items per filing call. */
 export const BATCH = 60
@@ -674,11 +676,13 @@ async function runJob(job: CurationJob): Promise<void> {
     })
     if (stopped(job)) return
     const gathered = buildEntries(frames)
+    const entries = gathered.entries.slice(0, MAX_CURATION_ENTRIES)
     job.plan = {
       tree: [],
-      entries: gathered.entries.slice(0, MAX_CURATION_ENTRIES),
+      entries,
       assignments: {},
       duplicates: gathered.duplicates,
+      existing: await alreadyElsewhere(job, entries, frames),
     }
     job.status = 'proposing'
     job.progress = { done: 0, total: 1 }
@@ -707,6 +711,41 @@ async function runJob(job: CurationJob): Promise<void> {
     job.progress = { done: plan.entries.length, total: plan.entries.length }
     await save(job, true)
   }
+}
+
+/** Entries one of the owner's OTHER libraries (not a source) already holds,
+ *  by the same page or a copy of the same frame or content: shown in the
+ *  review so the person can leave them out. */
+async function alreadyElsewhere(
+  job: CurationJob,
+  entries: CurationEntry[],
+  frames: SourceFrame[],
+): Promise<NonNullable<CurationPlan['existing']>> {
+  const sources = new Set(job.sourceIds)
+  let listed: { id: string }[]
+  try {
+    listed = await readableLibraries(job.ownerId)
+  } catch (error) {
+    /* a check that cannot run leaves the plan as it is */
+    console.warn(
+      '[curation] could not list the other libraries',
+      job.id,
+      error instanceof Error ? error.message : error,
+    )
+    return []
+  }
+  const others = listed.flatMap((e) => (sources.has(e.id) ? [] : (store.getCanvas(e.id) ?? [])))
+  if (!others.length || !entries.length) return []
+  const html = new Map(frames.map((f) => [`${f.canvasId}:${f.frame.id}`, f]))
+  const matches = await findDuplicates(
+    entries.map((e) => ({ name: e.label, html: html.get(e.key)?.html ?? '', ref: e.key })),
+    others,
+    { exact: true },
+  )
+  return entries.flatMap((e, at) => {
+    const match = matches[at]?.[0]
+    return match ? [{ key: e.key, label: e.label, match }] : []
+  })
 }
 
 async function proposeTree(job: CurationJob, model: CurationModel, entries: CurationEntry[]): Promise<CurationNode[]> {

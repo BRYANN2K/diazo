@@ -452,7 +452,7 @@ function ReviewStep({
             {t('library.curateTabUnclassified', { count: plan.totals.unclassified })}
           </TabsTrigger>
           <TabsTrigger value="duplicates">
-            {t('library.curateTabDuplicates', { count: plan.totals.duplicates })}
+            {t('library.curateTabDuplicates', { count: plan.totals.duplicates + plan.totals.existing })}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="tree" className="mt-2">
@@ -549,7 +549,26 @@ function ReviewStep({
             </>
           ) : null}
         </TabsContent>
-        <TabsContent value="duplicates" className="mt-2">
+        <TabsContent value="duplicates" className="mt-2 flex flex-col gap-2">
+          {plan.existing.length > 0 && (
+            <>
+              <span className="text-label font-medium text-ink">
+                {t('library.curateExisting', { count: plan.totals.existing })}
+              </span>
+              <ul className="flex max-h-40 flex-col gap-0.5 overflow-y-auto text-caption text-ink-soft">
+                {plan.existing.map((e) => (
+                  <li key={e.key} className="truncate">
+                    {e.label} ·{' '}
+                    {t('library.alreadyIn', {
+                      library: e.match.libraryName,
+                      category: e.match.category,
+                      name: e.match.name,
+                    })}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
           <ul className="flex max-h-72 flex-col gap-0.5 overflow-y-auto text-caption text-ink-faint">
             {plan.duplicates.map((d) => (
               <li key={`${d.dropped.canvasId}:${d.dropped.frameId}`} className="truncate">

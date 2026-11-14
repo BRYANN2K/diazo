@@ -13,6 +13,7 @@
  */
 import type { TokenUsage } from './usage.ts'
 import { tidyCategoryPart } from './libraryRules.ts'
+import type { DuplicateMatch } from './libraryProvenance.ts'
 
 /** At most this many levels in the tree (the library's category depth). */
 export const MAX_CURATION_DEPTH = 3
@@ -80,6 +81,8 @@ export interface CurationPlan {
   duplicates: CurationDuplicate[]
   /** the tree came from the page names, not from a model */
   fallback?: boolean
+  /** entries one of the person's other libraries already holds (kept, shown in review) */
+  existing?: { key: string; label: string; match: DuplicateMatch }[]
 }
 
 export interface CurationProgress {
@@ -462,8 +465,17 @@ export interface CurationCategoryView {
 
 export interface CurationPlanView {
   tree: CurationCategoryView[]
-  totals: { entries: number; frames: number; duplicates: number; unclassified: number; pages: number }
+  totals: {
+    entries: number
+    frames: number
+    duplicates: number
+    unclassified: number
+    pages: number
+    /** items another library of the person already holds */
+    existing: number
+  }
   duplicates: CurationDuplicate[]
+  existing: { key: string; label: string; match: DuplicateMatch }[]
   unclassified: CurationSample[]
   fallback: boolean
 }
@@ -509,8 +521,10 @@ export function planView(plan: CurationPlan, samples = SAMPLES): CurationPlanVie
       duplicates: plan.duplicates.length,
       unclassified: unclassified.length,
       pages: pageNodes(plan).length,
+      existing: plan.existing?.length ?? 0,
     },
     duplicates: plan.duplicates.slice(0, LIST_CAP),
+    existing: (plan.existing ?? []).slice(0, LIST_CAP),
     unclassified: unclassified.slice(0, LIST_CAP).map(sample),
     fallback: !!plan.fallback,
   }

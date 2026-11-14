@@ -17,7 +17,8 @@ import { describeRules, parseLibraryRules, RULE_PRESETS, type RulePresetName } f
 import type { LibrarySort, QueryFilters } from '../shared/librarySearch.ts'
 import { canAccessCanvas, canEditCanvas, canManageCanvas } from './access.ts'
 import { countUse, insertItem, InsertError, promoteItem } from './librarySnapshot.ts'
-import { applyTransfer, MAX_IMPORT_FRAMES, runImport } from './libraryImport.ts'
+import { applyTransfer, ImportRefusal, MAX_IMPORT_FRAMES, runImport } from './libraryImport.ts'
+import { findDuplicates, type DuplicateCandidate } from './libraryDuplicates.ts'
 import { resolveActor } from './actions.ts'
 import { store } from './store.ts'
 import {
@@ -323,15 +324,48 @@ libraryRouter.post('/:id/import', async (req, res) => {
     return res.status(429).json({ error: 'too many imports; wait a minute' })
   }
   const tags = Array.isArray(req.body?.tags) ? (req.body.tags as unknown[]).map(String).slice(0, 12) : undefined
-  const outcome = await runImport({
-    libraryId: req.params.id,
-    frameIds,
-    ...(typeof req.body?.category === 'string' ? { category: req.body.category.slice(0, 200) } : {}),
-    ...(tags ? { tags } : {}),
-    dryRun: req.body?.dryRun === true,
-    actor: actorOf(req),
-  })
-  res.json(outcome)
+  const libraries = (await readableLibraries(userId)).flatMap((e) => store.getCanvas(e.id) ?? [])
+  try {
+    const outcome = await runImport({
+      libraryId: req.params.id,
+      frameIds,
+      ...(typeof req.body?.category === 'string' ? { category: req.body.category.slice(0, 200) } : {}),
+      ...(tags ? { tags } : {}),
+      dryRun: req.body?.dryRun === true,
+      actor: actorOf(req),
+      libraries,
+      force: req.body?.force === true,
+      ...(typeof req.body?.asVariantOf === 'string' ? { asVariantOf: req.body.asVariantOf } : {}),
+    })
+    res.json(outcome)
+  } catch (error) {
+    if (error instanceof ImportRefusal) return res.status(400).json({ error: error.message })
+    throw error
+  }
+})
+
+/** "Do we have it?": the items of the caller's libraries a frame, a page
+ *  URL or a name and text would duplicate. Writes nothing. */
+libraryRouter.post('/check', async (req, res) => {
+  const userId = req.user!.id
+  const frameId = typeof req.body?.frameId === 'string' ? req.body.frameId : ''
+  const url = typeof req.body?.url === 'string' ? req.body.url.slice(0, 2000) : undefined
+  const name = typeof req.body?.name === 'string' ? req.body.name.slice(0, 200) : ''
+  const text = typeof req.body?.text === 'string' ? req.body.text.slice(0, 2000) : undefined
+  let candidate: DuplicateCandidate = { name, ...(url ? { url } : {}), ...(text ? { text } : {}) }
+  if (frameId) {
+    const frame = store.getFrame(frameId)
+    const from = frame && store.getCanvas(frame.canvasId)
+    if (!frame || !from || !canAccessCanvas(userId, from)) return res.status(404).json({ error: 'frame not found' })
+    const full = await store.renderableFrame(frameId)
+    candidate = { ...candidate, name: name || frame.name, html: full?.html ?? '', ref: `${from.id}:${frameId}` }
+  }
+  if (!candidate.name && !candidate.url && !candidate.html) {
+    return res.status(400).json({ error: 'send a frameId, a url, or a name and text' })
+  }
+  const libraries = (await readableLibraries(userId)).flatMap((e) => store.getCanvas(e.id) ?? [])
+  const [matches] = await findDuplicates([candidate], libraries)
+  res.json({ duplicates: matches ?? [] })
 })
 
 /** Take the categories of another library for the items both hold (by id).

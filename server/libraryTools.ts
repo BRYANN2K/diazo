@@ -12,7 +12,9 @@ import { describeRules, NON_INSERTABLE_KINDS } from '../shared/libraryRules.ts'
 import { store } from './store.ts'
 import { getLibrary, libraryAllows, libraryRole } from './libraries.ts'
 import { env } from './env.ts'
-import { runImport } from './libraryImport.ts'
+import { ImportRefusal, runImport } from './libraryImport.ts'
+import { describeMatches, findDuplicates, type DuplicateCandidate } from './libraryDuplicates.ts'
+import type { DuplicateMatch } from '../shared/libraryProvenance.ts'
 import { cleanItemPatch, patchItem } from './libraryRoutes.ts'
 import { libraryItems } from './libraryIndex.ts'
 import { itemDetail, itemUrl, readableLibraries, searchLibraries } from './libraryQueries.ts'
@@ -357,7 +359,8 @@ DESIGN_LIBRARY_TOOLS.push(
     name: 'import_to_library',
     title: 'Add frames to a design library',
     description:
-      'Bring up to 20 frames into a design library through its rules: each gets an id, its variants marked, the SVG definitions it points at, a category, a page and a status (a low lint score can keep it a draft). Frames from another canvas are copied, never moved. Always returns the report; with dry_run nothing is written. When authoring library content, mark items with data-doop-item / data-doop-variant.',
+      'Bring up to 20 frames into a design library through its rules: each gets an id, its variants marked, the SVG definitions it points at, a category, a page and a status (a low lint score can keep it a draft). Frames from another canvas are copied, never moved. Always returns the report; with dry_run nothing is written. When authoring library content, mark items with data-doop-item / data-doop-variant. ' +
+      'Before importing, every frame is checked against ALL the libraries you can use: one captured from the same page, copied from the same frame, or with the same or nearly the same name and text is NOT imported and comes back under `duplicates` (library, category, item, reason). When that happens, tell the human it already exists (which item, in which library and category) and ask: import anyway (force: true) or add it as a variant of that item (as_variant_of). Call check_library first when you only want to know.',
     readOnly: false,
     shape: {
       library_id: LIBRARY_ID,
@@ -365,6 +368,11 @@ DESIGN_LIBRARY_TOOLS.push(
       category: z.string().optional().describe('Put them in this category, over every rule'),
       tags: z.array(z.string()).max(12).optional(),
       dry_run: z.boolean().optional().describe('Report what would happen, write nothing'),
+      force: z.boolean().optional().describe('Import even what a library already holds (after the human said so)'),
+      as_variant_of: z
+        .string()
+        .optional()
+        .describe('Add the frames as variants of this family id of the target library (after the human said so)'),
     },
     async run(input, context) {
       const libraryId = String(input.library_id ?? '')
@@ -378,17 +386,41 @@ DESIGN_LIBRARY_TOOLS.push(
           return { ok: false, error: `no frame "${frameId}" you can read` }
         }
       }
-      const outcome = await runImport({
-        libraryId,
-        frameIds,
-        ...(typeof input.category === 'string' ? { category: input.category } : {}),
-        ...(Array.isArray(input.tags) ? { tags: (input.tags as unknown[]).map(String) } : {}),
-        dryRun: input.dry_run === true,
-        actor: context.actor,
-      })
+      let outcome: Awaited<ReturnType<typeof runImport>>
+      try {
+        outcome = await runImport({
+          libraryId,
+          frameIds,
+          ...(typeof input.category === 'string' ? { category: input.category } : {}),
+          ...(Array.isArray(input.tags) ? { tags: (input.tags as unknown[]).map(String) } : {}),
+          dryRun: input.dry_run === true,
+          actor: context.actor,
+          libraries: await context.libraries(),
+          force: input.force === true,
+          ...(typeof input.as_variant_of === 'string' && input.as_variant_of
+            ? { asVariantOf: input.as_variant_of }
+            : {}),
+        })
+      } catch (error) {
+        if (error instanceof ImportRefusal) return { ok: false, error: error.message }
+        throw error
+      }
+      const dupes = outcome.report.duplicates ?? []
       return {
         ok: true,
+        ...(dupes.length
+          ? {
+              note: `Not imported, already in a library: ${dupes
+                .map((d) => `"${d.name}" is ${describeMatches(d.matches.slice(0, 1))}`)
+                .join(
+                  '; ',
+                )}. Tell the human it already exists, then import again with force: true or as_variant_of only if they ask for it.`,
+            }
+          : {}),
         data: {
+          duplicates: dupes.length
+            ? dupes.map((d) => ({ frame_id: d.frameId, name: d.name, already_in: d.matches.map(matchBrief) }))
+            : undefined,
           dry_run: input.dry_run === true,
           totals: outcome.report.totals,
           frames: outcome.report.frames.map((f) => ({
@@ -435,6 +467,62 @@ DESIGN_LIBRARY_TOOLS.push(
     },
   },
 )
+
+function matchBrief(m: DuplicateMatch) {
+  return {
+    library_id: m.libraryId,
+    library: m.libraryName,
+    category: m.category,
+    item_id: m.itemId,
+    name: m.name,
+    reason: m.reason,
+    score: m.score,
+    url: m.url,
+  }
+}
+
+DESIGN_LIBRARY_TOOLS.push({
+  name: 'check_library',
+  title: 'Check whether a library already has something',
+  description:
+    'Ask "do we already have this?" before importing: give a frame (frame_id), a page address (url), or a name and some of its text, and get the items of every library you can use that it would duplicate: the same page (same-url), the same design (same-content) or one with nearly the same name and text (similar, with a score). Read-only. When something matches, tell the human where it already is instead of importing a second copy.',
+  readOnly: true,
+  shape: {
+    frame_id: z.string().optional().describe('A frame you can read, about to be imported'),
+    url: z.string().max(2000).optional().describe('The page it comes from'),
+    name: z.string().max(200).optional(),
+    text: z.string().max(2000).optional().describe('Some of its visible text'),
+  },
+  async run(input, context) {
+    const frameId = typeof input.frame_id === 'string' ? input.frame_id : ''
+    const name = typeof input.name === 'string' ? input.name : ''
+    let candidate: DuplicateCandidate = {
+      name,
+      ...(typeof input.url === 'string' && input.url ? { url: input.url } : {}),
+      ...(typeof input.text === 'string' && input.text ? { text: input.text } : {}),
+    }
+    if (frameId) {
+      const frame = store.getFrame(frameId)
+      const from = frame && store.getCanvas(frame.canvasId)
+      if (!from || !(context.canRead?.(from.id) ?? libraryRole(context.userId, from) !== null)) {
+        return { ok: false, error: `no frame "${frameId}" you can read` }
+      }
+      const full = await store.renderableFrame(frameId)
+      candidate = { ...candidate, name: name || frame!.name, html: full?.html ?? '', ref: `${from.id}:${frameId}` }
+    }
+    if (!candidate.name && !candidate.url && !candidate.html) {
+      return { ok: false, error: 'give a frame_id, a url, or a name and some text' }
+    }
+    const [matches = []] = await findDuplicates([candidate], await context.libraries())
+    return {
+      ok: true,
+      data: { duplicates: matches.map(matchBrief) },
+      note: matches.length
+        ? `Already there: ${describeMatches(matches.slice(0, 3))}. Tell the human instead of importing a second copy.`
+        : 'Nothing like it in your libraries.',
+    }
+  },
+})
 
 /** A curation as an agent reads it: the job and, once proposed, the tree
  *  with counts and a few item names per category. */

@@ -22,6 +22,7 @@ import { UNSORTED, type LibraryKind, type LibrarySource, type LibraryTaxonomy } 
 import { RULE_PRESETS, type LibraryRules } from '../shared/libraryRules.ts'
 import type { Actor, CanvasPageInfo } from '../shared/types.ts'
 import { nanoid } from 'nanoid'
+import { withOrigin } from '../shared/libraryProvenance.ts'
 import * as persist from './db/persist.ts'
 import { canManageCanvas } from './access.ts'
 import { store, MAX_LIBRARY_PAGES } from './store.ts'
@@ -232,7 +233,7 @@ async function runApply(
             y: spot.y,
             width: source.width,
             height: source.height,
-            html: source.html,
+            html: withOrigin(source.html, key),
           },
           actor.name,
         )

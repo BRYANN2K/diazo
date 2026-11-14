@@ -5,6 +5,8 @@
  * Spec: .context/specs/design-libraries.md.
  */
 
+import type { DuplicateMatch } from './libraryProvenance.ts'
+
 /** Who may use a library. `public` needs DOOP_PUBLIC_LIBRARIES. */
 export type LibraryVisibility = 'private' | 'workspace' | 'public'
 
@@ -129,6 +131,10 @@ export interface LibraryItem {
   searchText: string
   sourceUrl: string | null
   license: string | null
+  /** the page it was captured from, normalised: what "same page" compares */
+  sourceKey?: string | null
+  /** the frame it was copied from, `<canvasId>:<frameId>` */
+  origin?: string | null
   indexedAt: number
   /** from curation; 0 on a bare row */
   useCount?: number
@@ -363,5 +369,7 @@ export interface ImportFrameReport {
 
 export interface ImportReport {
   frames: ImportFrameReport[]
+  /** frames left out because a library already holds them (unless forced) */
+  duplicates?: { frameId: string; name: string; matches: DuplicateMatch[] }[]
   totals: { frames: number; items: number; variants: number; ignored: number; drafts: number; findings: number }
 }

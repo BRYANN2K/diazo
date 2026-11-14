@@ -431,3 +431,15 @@ export function markCategory(html: string, category: string): string {
 function escapeAttr(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
 }
+
+/** Give a frame an item id of its own (`data-doop-item` on the body):
+ *  an import as a variant names it after the family it joins. */
+export function markItemId(html: string, itemId: string): string {
+  const doc = parseHtml(html)
+  const body = bodyOf(doc)
+  if (!body) return html
+  if (attr(body, 'data-doop-item') !== undefined) {
+    return html.replace(/(\sdata-doop-item=")[^"]*(")/, (_m, a: string, b: string) => `${a}${escapeAttr(itemId)}${b}`)
+  }
+  return addAttributes(html, [{ el: body, attrs: [['data-doop-item', itemId]] }])
+}

@@ -304,3 +304,28 @@ describe('a library from scratch', () => {
     expect(items.hits[0]!.item.category).toBe('Components/Buttons')
   })
 })
+
+describe('duplicates on import', () => {
+  it('says a frame is already in a library, imports it only when forced, and the check reads every library', async () => {
+    const { curations } = await (await owner.get('/api/library-curations')).json()
+    const curated = curations.find((c: CurationJobView) => c.status === 'applied').canvasId as string
+    await until(
+      async () => (await (await owner.get(`/api/canvases/${curated}`)).json()).library,
+      (l) => l?.index?.status === 'done',
+    )
+    const source = (await (await owner.get(`/api/canvases/${sourceA}`)).json()) as Canvas
+    const hero = source.frames.find((f) => f.name.startsWith('hero.'))!
+    const checked = await (await owner.post('/api/libraries/check', { frameId: hero.id })).json()
+    expect(checked.duplicates[0]).toMatchObject({ libraryId: curated, reason: 'same-content', name: 'AI hero' })
+    expect((await stranger.post('/api/libraries/check', { frameId: hero.id })).status).toBe(404)
+    /* into a fresh library: the curated one already has it */
+    const fresh = (await (await owner.post('/api/libraries/new', { name: 'Another' })).json()).id as string
+    const refused = await (await owner.post(`/api/libraries/${fresh}/import`, { frameIds: [hero.id] })).json()
+    expect(refused.applied[0]).toMatchObject({ frameId: hero.id, duplicate: true })
+    expect(refused.report.duplicates[0].matches[0]).toMatchObject({ libraryId: curated, reason: 'same-content' })
+    const forced = await (
+      await owner.post(`/api/libraries/${fresh}/import`, { frameIds: [hero.id], force: true })
+    ).json()
+    expect(forced.applied[0].libraryFrameId).toBeTruthy()
+  })
+})

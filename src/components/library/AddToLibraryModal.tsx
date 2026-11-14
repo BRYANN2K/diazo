@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ImportReport, LibraryListEntry } from '../../../shared/library'
 import { api } from '../../lib/api'
 import { useT } from '../../lib/i18n'
+import { navigate } from '../../lib/navigate'
 import { Button } from '../ui/button'
 import { Modal, ModalActions, ModalLede, ModalTitle } from '../ui/modal'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
@@ -76,11 +77,11 @@ export function AddToLibraryModal({
 
   const shown = report?.libraryId === libraryId ? report.report : null
 
-  async function add() {
+  async function add(how: { force?: boolean; asVariantOf?: string } = {}) {
     setBusy(true)
     setError(null)
     try {
-      const r = await api.importToLibrary(libraryId, { frameIds, ...picked })
+      const r = await api.importToLibrary(libraryId, { frameIds, ...picked, ...how })
       const failed = r.applied.filter((a) => a.error)
       if (failed.length) setError(failed.map((a) => a.error).join(' · '))
       else {
@@ -136,6 +137,44 @@ export function AddToLibraryModal({
             </SelectContent>
           </Select>
         )}
+        {shown?.duplicates?.length ? (
+          <div className="flex flex-col gap-2 rounded-card p-3 shadow-ring" data-testid="add-duplicates">
+            <span className="text-label font-medium text-ink">{t('library.duplicateTitle')}</span>
+            {shown.duplicates.map((d) => {
+              const best = d.matches[0]!
+              return (
+                <div key={d.frameId} className="flex flex-col gap-1.5">
+                  <p className="text-copy text-ink-soft">
+                    {d.name} ·{' '}
+                    {t('library.alreadyIn', { library: best.libraryName, category: best.category, name: best.name })}{' '}
+                    <span className="text-caption text-ink-faint">
+                      (
+                      {best.reason === 'same-url'
+                        ? t('library.duplicateReason_same_url')
+                        : best.reason === 'same-content'
+                          ? t('library.duplicateReason_same_content')
+                          : t('library.duplicateReason_similar', { score: Math.round(best.score * 100) })}
+                      )
+                    </span>
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    <Button size="sm" onClick={() => navigate(best.url)}>
+                      {t('library.duplicateOpen')}
+                    </Button>
+                    <Button size="sm" disabled={busy} onClick={() => void add({ force: true })}>
+                      {t('library.duplicateForce')}
+                    </Button>
+                    {best.libraryId === libraryId && (
+                      <Button size="sm" disabled={busy} onClick={() => void add({ asVariantOf: best.itemId })}>
+                        {t('library.duplicateVariant')}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        ) : null}
         {shown && (
           <ul className="flex flex-col gap-1.5 text-copy text-ink-soft" data-testid="add-report">
             {shown.frames.map((f) => (
@@ -163,7 +202,11 @@ export function AddToLibraryModal({
       </div>
       <ModalActions>
         <Button onClick={onClose}>{t('library.cancel')}</Button>
-        <Button variant="primary" disabled={!shown || busy} onClick={() => void add()}>
+        <Button
+          variant="primary"
+          disabled={!shown || busy || (!!shown.duplicates?.length && !shown.frames.length)}
+          onClick={() => void add()}
+        >
           {t('library.add')}
         </Button>
       </ModalActions>
