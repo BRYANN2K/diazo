@@ -3,7 +3,7 @@ import { db } from './db/index.ts'
 import { referenceLibrary } from './db/schema.ts'
 import { canvasesFor } from './workspaces.ts'
 import { store } from './store.ts'
-import { getLibrary } from './libraries.ts'
+import { getLibrary, libraryRole } from './libraries.ts'
 
 /**
  * The reference library: the canvases a user marked "the design system lives
@@ -41,7 +41,12 @@ export async function libraryFor(
   const reachable = new Map(reachableList.map((meta) => [meta.id, meta]))
   const picked = ids.flatMap((id) => {
     const meta = reachable.get(id)
-    return meta ? [{ id: meta.id, name: meta.name, frameCount: meta.frameCount }] : []
+    if (meta) return [{ id: meta.id, name: meta.name, frameCount: meta.frameCount }]
+    /* a public library is read through the library gate, not canvas access */
+    const canvas = store.getCanvas(id)
+    return canvas && libraryRole(userId, canvas)
+      ? [{ id: canvas.id, name: canvas.name, frameCount: canvas.frames.length }]
+      : []
   })
   /* the design libraries of the workspace the work happens in come along
      without being picked */

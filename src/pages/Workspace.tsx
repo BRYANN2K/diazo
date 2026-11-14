@@ -6,6 +6,7 @@ import { api, errorMessage, paywalledWorkspace } from '../lib/api'
 import { authClient } from '../lib/auth'
 import { posthog } from '../lib/posthog'
 import { cachedWorkspace, fetchWorkspace } from '../lib/workspaceCache'
+import { WorkspaceLibraries } from '../components/library/WorkspaceLibraries'
 import { AppRail, railLayout, workspacePanesFor, type WorkspacePane } from '../components/AppRail'
 import { UpgradeModal } from '../components/WorkspaceModals'
 import { Avatar } from '../components/ui/avatar'
@@ -238,6 +239,7 @@ export function Workspace({ workspaceId }: { workspaceId: string }) {
             </Callout>
           )}
 
+          {ws && <WorkspaceLibraries workspaceId={ws.id} />}
           {!ws ? (
             <Skeleton shape="card" className="mt-5 max-w-[1000px]" />
           ) : pane === 'members' ? (

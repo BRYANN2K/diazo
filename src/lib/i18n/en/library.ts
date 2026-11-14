@@ -171,4 +171,16 @@ export const library = {
   rerunRules: 'Re-run the rules',
   keepThisOne: 'Keep this one',
   inboxCount: { one: 'Inbox ({count})', other: 'Inbox ({count})' },
+  visibilityTitle: 'Who can use this library',
+  visibility_private: 'People with access',
+  visibility_workspace: 'Its workspace',
+  visibility_public: 'Everyone here',
+  visibilityFailed: 'Could not change who can use this library.',
+  publicWarning:
+    'Everyone on this instance will be able to search, browse and insert from this library. Much library content is copied from vendors (some of it paid): make sure you may share it.',
+  workspaceLibraries: 'Design libraries',
+  shelfTitle: 'Libraries',
+  use: 'Use',
+  copy: 'Copy',
+  listed: 'Added to your libraries',
 } as const

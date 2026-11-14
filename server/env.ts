@@ -185,6 +185,11 @@ const schema = {
      people curate. Rules, visibility and whether a canvas is a library stay
      people-only whatever this says. */
   AGENT_LIBRARY_WRITES: bool({ default: true }),
+  /* Whether a design library may be made public: usable (searched, browsed,
+     inserted from) by every account on the instance, never opened as a
+     canvas. Off by default: libraries often hold content copied from
+     vendors, some of it paid. */
+  DOOP_PUBLIC_LIBRARIES: bool({ default: false }),
   CHATGPT_OAUTH_ISSUER: origin({ default: 'https://auth.openai.com' }),
   CHATGPT_OAUTH_CLIENT_ID: str({ default: 'app_EMoamEEZ73f0CkXaXp7hrann' }),
   CHATGPT_OAUTH_REDIRECT_URI: str({ default: 'http://localhost:1455/auth/callback' }),

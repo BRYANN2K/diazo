@@ -20,6 +20,7 @@ import * as persist from './db/persist.ts'
 import { store } from './store.ts'
 import { canAccessCanvas, canEditCanvas, canManageCanvas } from './access.ts'
 import { broadcastLibrary } from './actions.ts'
+import { env } from './env.ts'
 
 export interface LibraryRecord {
   canvasId: string
@@ -175,6 +176,20 @@ export function updateLibrary(canvasId: string, patch: LibraryPatch, actor: Acto
     if (!parsed.ok) return { ok: false, status: 400, errors: parsed.errors }
     rules = parsed.rules
   }
+  if (patch.visibility === 'workspace' && !store.getCanvas(canvasId)?.workspaceId) {
+    return {
+      ok: false,
+      status: 400,
+      errors: [{ path: 'visibility', message: 'only a canvas in a workspace can be a workspace library' }],
+    }
+  }
+  if (patch.visibility === 'public' && !env.DOOP_PUBLIC_LIBRARIES) {
+    return {
+      ok: false,
+      status: 400,
+      errors: [{ path: 'visibility', message: 'public libraries are off on this instance (DOOP_PUBLIC_LIBRARIES)' }],
+    }
+  }
   const rulesChanged = !!rules && JSON.stringify(rules) !== JSON.stringify(record.rules)
   if (patch.description !== undefined) record.description = patch.description.slice(0, 2000)
   if (patch.taxonomy) record.taxonomy = patch.taxonomy
@@ -265,10 +280,13 @@ export function wireLibraries(): () => void {
  *  null (no access, or not a library). A library read is not canvas access:
  *  it opens the library routes and tools only. */
 export function libraryRole(userId: string | undefined, canvas: Canvas | undefined): LibraryRole | null {
-  if (!canvas || !getLibrary(canvas.id)) return null
+  const record = canvas && getLibrary(canvas.id)
+  if (!canvas || !record) return null
   if (canManageCanvas(userId, canvas)) return 'manage'
   if (canEditCanvas(userId, canvas)) return 'curate'
   if (canAccessCanvas(userId, canvas)) return 'read'
+  /* the flag is read on every call: turning it off hides public libraries at once */
+  if (record.visibility === 'public' && env.DOOP_PUBLIC_LIBRARIES && userId) return 'read'
   return null
 }
 

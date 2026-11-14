@@ -902,6 +902,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   edit, and share-link visitors the link's level (`none` / `view` / `comment` / `edit`). REST,
   the WebSocket room and MCP gate reads, comments and writes on it separately; spec in
   `.context/specs/share-link-roles.md`.
+- Design libraries add their own gate beside canvas access, never inside it: `libraryRole` in
+  `server/libraries.ts` (manage = `canManageCanvas`, curate = `canEditCanvas`, read =
+  `canAccessCanvas`, plus every signed-in account for a `public` library while
+  `DOOP_PUBLIC_LIBRARIES` is on). A library read opens the library routes and tools only, never
+  `/api/canvases/:id`, the room or the frame tools. Visibility (`private` / `workspace` / `public`)
+  is set from the share dialog by a manager; `workspace` needs the canvas in a workspace.
 
 - Bun 1.3.10 - package manager; lockfile at `bun.lock`, installed with `bun install
 --frozen-lockfile` in CI.

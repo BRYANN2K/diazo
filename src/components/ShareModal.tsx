@@ -18,11 +18,21 @@ import { Modal, ModalTitle } from './ui/modal'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { Textarea } from './ui/textarea'
 import { ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
+import { LibraryVisibilitySection } from './library/LibraryVisibilitySection'
 import { useT, type PlainMessageKey } from '@/lib/i18n'
 
 type ShareableCanvas = Pick<
   Canvas,
-  'id' | 'name' | 'ownerId' | 'linkAccess' | 'memberIds' | 'workspaceId' | 'publishedAt' | 'description' | 'category'
+  | 'id'
+  | 'name'
+  | 'ownerId'
+  | 'linkAccess'
+  | 'memberIds'
+  | 'workspaceId'
+  | 'publishedAt'
+  | 'description'
+  | 'category'
+  | 'library'
 >
 type SharePatch = Partial<
   Pick<ShareableCanvas, 'linkAccess' | 'memberIds' | 'workspaceId' | 'publishedAt' | 'description' | 'category'>
@@ -327,6 +337,14 @@ export function ShareModal({
             {t('panels.shareCopyLink')}
           </Button>
         </div>
+        {canvas.library && (
+          <LibraryVisibilitySection
+            canvasId={canvas.id}
+            library={canvas.library}
+            inWorkspace={!!canvas.workspaceId}
+            canManage={isOwner}
+          />
+        )}
         {isOwner && (
           <CommunityListing canvas={canvas} busy={busy} setBusy={setBusy} setError={setError} onChange={onChange} />
         )}

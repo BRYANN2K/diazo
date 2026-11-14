@@ -6,7 +6,7 @@
  * index, one item's markup from `store.renderableFrame`.
  */
 import express from 'express'
-import type { LibraryItemMeta, LibraryItemPatch, LibraryTaxonomy } from '../shared/library.ts'
+import type { LibraryItemMeta, LibraryItemPatch, LibraryTaxonomy, LibraryVisibility } from '../shared/library.ts'
 import { describeRules, parseLibraryRules, RULE_PRESETS, type RulePresetName } from '../shared/libraryRules.ts'
 import type { LibrarySort, QueryFilters } from '../shared/librarySearch.ts'
 import { canAccessCanvas, canEditCanvas, canManageCanvas } from './access.ts'
@@ -14,7 +14,17 @@ import { countUse, insertItem, InsertError } from './librarySnapshot.ts'
 import { applyTransfer, MAX_IMPORT_FRAMES, runImport } from './libraryImport.ts'
 import { resolveActor } from './actions.ts'
 import { store } from './store.ts'
-import { createLibrary, disableLibrary, getLibrary, libraryAllows, presetFor, updateLibrary } from './libraries.ts'
+import {
+  allLibraries,
+  createLibrary,
+  disableLibrary,
+  getLibrary,
+  libraryAllows,
+  libraryRole,
+  presetFor,
+  updateLibrary,
+} from './libraries.ts'
+import { env } from './env.ts'
 import { itemMeta, libraryItems, previewIndex, reindexLibrary, saveMeta } from './libraryIndex.ts'
 import { entryOf, itemDetail, libraryFor, readableLibraries, searchLibraries, summaryOf } from './libraryQueries.ts'
 import { itemThumb, NoThumbError } from './libraryThumbs.ts'
@@ -71,7 +81,41 @@ const isSort = (v: unknown): v is LibrarySort => v === 'relevance' || v === 'use
 /* ---- libraries ---- */
 
 libraryRouter.get('/', async (req, res) => {
-  res.json({ libraries: await readableLibraries(req.user!.id) })
+  const all = await readableLibraries(req.user!.id)
+  const scope = req.query.scope
+  const libraries =
+    scope === 'mine'
+      ? all.filter((l) => l.role === 'manage')
+      : scope === 'workspace'
+        ? all.filter((l) => l.workspaceId)
+        : scope === 'listed'
+          ? all.filter((l) => l.listed)
+          : all
+  res.json({ libraries })
+})
+
+/** The public libraries of the instance (Community's shelf). */
+libraryRouter.get('/public', (req, res) => {
+  if (!env.DOOP_PUBLIC_LIBRARIES) return res.json({ libraries: [] })
+  const libraries = allLibraries()
+    .filter((r) => r.visibility === 'public')
+    .flatMap((r) => {
+      const canvas = store.getCanvas(r.canvasId)
+      const role = libraryRole(req.user!.id, canvas)
+      return canvas && role ? [entryOf(canvas, role, false)!] : []
+    })
+  res.json({ libraries })
+})
+
+/** A copy of a library the caller may read: the canvas with its rules and curation. */
+libraryRouter.post('/:id/copy', async (req, res) => {
+  const found = libraryFor(req.user!.id, req.params.id)
+  if (!found) return notFound(res)
+  const copy = await store.duplicateCanvas(req.params.id, req.user!.id, req.user!.name, {
+    name: `${found.canvas.name} copy`,
+  })
+  if (!copy) return notFound(res)
+  res.status(201).json({ id: copy.id })
 })
 
 /** The dry run of a conversion or a rules change: counts, nothing written. */
@@ -146,8 +190,9 @@ libraryRouter.patch('/:id', (req, res) => {
   const managing = body.rules !== undefined || body.visibility !== undefined
   const found = libraryFor(req.user!.id, req.params.id, managing ? 'manage' : 'curate')
   if (!found) return notFound(res)
-  if (body.visibility !== undefined && body.visibility !== 'private') {
-    return res.status(400).json({ error: 'only private libraries exist on this instance for now' })
+  const visibilities = ['private', 'workspace', 'public']
+  if (body.visibility !== undefined && !visibilities.includes(body.visibility)) {
+    return res.status(400).json({ error: 'visibility is private, workspace or public' })
   }
   const result = updateLibrary(
     req.params.id,
@@ -155,12 +200,14 @@ libraryRouter.patch('/:id', (req, res) => {
       ...(typeof body.description === 'string' ? { description: body.description } : {}),
       ...(body.rules !== undefined ? { rules: body.rules } : {}),
       ...(body.taxonomy ? { taxonomy: body.taxonomy as LibraryTaxonomy } : {}),
+      ...(body.visibility ? { visibility: body.visibility as LibraryVisibility } : {}),
     },
     actorOf(req),
   )
   if (!result.ok) {
     if (result.status === 404) return notFound(res)
-    return res.status(400).json({ error: 'invalid rules', errors: result.errors })
+    const visibility = result.errors.find((e) => e.path === 'visibility')
+    return res.status(400).json({ error: visibility ? visibility.message : 'invalid rules', errors: result.errors })
   }
   res.json(entryOf(found.canvas, found.role, false))
 })

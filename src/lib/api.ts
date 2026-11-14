@@ -1037,7 +1037,10 @@ export const api = {
   findEverywhere: (q: string, matchCase: boolean) =>
     req<CanvasFindResult>(`/api/find?q=${encodeURIComponent(q)}${matchCase ? '&case=1' : ''}`),
   /* design libraries (shared/library.ts) */
-  listLibraries: () => req<{ libraries: LibraryListEntry[] }>('/api/libraries'),
+  listLibraries: (scope?: 'mine' | 'workspace' | 'listed') =>
+    req<{ libraries: LibraryListEntry[] }>(`/api/libraries${scope ? `?scope=${scope}` : ''}`),
+  publicLibraries: () => req<{ libraries: LibraryListEntry[] }>('/api/libraries/public'),
+  copyLibrary: (libraryId: string) => req<{ id: string }>(`/api/libraries/${libraryId}/copy`, { method: 'POST' }),
   previewLibrary: (canvasId: string, opts: { preset?: RulePresetName; rules?: unknown } = {}) =>
     req<{ preset: RulePresetName; rules: unknown; preview: LibraryPreview }>('/api/libraries/preview', {
       method: 'POST',

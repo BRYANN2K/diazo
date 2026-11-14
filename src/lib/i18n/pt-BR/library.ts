@@ -171,4 +171,16 @@ export const library = {
   rerunRules: 'Rodar as regras de novo',
   keepThisOne: 'Ficar com este',
   inboxCount: { one: 'Caixa de entrada ({count})', other: 'Caixa de entrada ({count})' },
+  visibilityTitle: 'Quem pode usar esta biblioteca',
+  visibility_private: 'Quem tem acesso',
+  visibility_workspace: 'O workspace',
+  visibility_public: 'Todos aqui',
+  visibilityFailed: 'Não foi possível mudar quem pode usar esta biblioteca.',
+  publicWarning:
+    'Todos nesta instância poderão buscar, navegar e inserir desta biblioteca. Muito conteúdo de biblioteca é copiado de fornecedores (parte dele pago): confirme que você pode compartilhá-lo.',
+  workspaceLibraries: 'Bibliotecas de design',
+  shelfTitle: 'Bibliotecas',
+  use: 'Usar',
+  copy: 'Copiar',
+  listed: 'Adicionada às suas bibliotecas',
 } as const

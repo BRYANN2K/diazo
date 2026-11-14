@@ -1839,7 +1839,8 @@ app.put('/api/library', async (req, res) => {
   /* only canvases the user can still open may be designated — the same set
      find_references will be allowed to search */
   const reachable = new Set(workspaces.canvasesFor(req.user!.id).map((meta) => meta.id))
-  const unknown = wanted.find((id) => !reachable.has(id))
+  /* a public design library may be picked without canvas access */
+  const unknown = wanted.find((id) => !reachable.has(id) && !libraries.libraryRole(req.user!.id, store.getCanvas(id)))
   if (unknown) return res.status(400).json({ error: `canvas ${unknown} is not yours to use as a library` })
   await library.setLibraryCanvasIds(req.user!.id, wanted)
   res.json({ canvases: await library.libraryFor(req.user!.id) })
