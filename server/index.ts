@@ -1,4 +1,5 @@
 import * as libraries from './libraries.ts'
+import * as libraryIndex from './libraryIndex.ts'
 import { env } from './env.ts'
 import {
   catalogEntry,
@@ -195,6 +196,9 @@ store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
 await libraries.hydrateLibraries() // canvas.library, before the first canvas is sent
 libraries.wireLibraries()
+libraryIndex.wireIndexer()
+/* full index runs a restart cut off go on in the background */
+void Promise.all(libraryIndex.resumeIndexing(libraries.allLibraries()))
 await hydrateInstanceSettings() // the sign-in policy, read on every signup
 await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use

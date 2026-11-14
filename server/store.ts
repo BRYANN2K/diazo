@@ -44,6 +44,15 @@ type PageCopy = {
 
 const names = (pages: CanvasPageInfo[]) => pages.map((page) => page.name)
 
+/** A frame's content (`write`), place (`move`) or existence (`delete`)
+ *  changed: what a library's index follows. */
+export interface FrameWrite {
+  canvasId: string
+  frameId: string
+  kind: 'write' | 'move' | 'delete'
+}
+type FrameWriteListener = (write: FrameWrite) => void
+
 /** A canvas copied (duplicateCanvas) or deleted. */
 export type CanvasEvent = { kind: 'copied'; from: string; to: string } | { kind: 'deleted'; canvasId: string }
 type CanvasEventListener = (event: CanvasEvent) => void
@@ -73,6 +82,7 @@ class Store {
   /** rooms, agents and streams the store cannot see (wired by index.ts) */
   private inUse: (canvasId: string) => boolean = () => false
   private canvasListeners: CanvasEventListener[] = []
+  private frameListeners: FrameWriteListener[] = []
 
   constructor() {
     /* a missed load still fails, but the canvas is on its way for a retry */
@@ -473,6 +483,7 @@ class Store {
     canvas.frames.push(...frames)
     canvas.frames.sort(byStack)
     for (const frame of frames) this.frameIndex.set(frame.id, canvasId)
+    for (const frame of frames) this.emitFrameWrite(canvasId, frame.id, 'write')
     /* guides placed while the copy was being written stay alongside; the
        copy keeps only as many of its own as the limit still has room for */
     const copied = guides.length > 0
@@ -512,7 +523,15 @@ class Store {
         ...(kept?.background ? { background: kept.background } : {}),
       }
     })
+    const renamed = new Set(
+      merged.filter((page) => current.some((old) => old.id === page.id && old.name !== page.name)).map((p) => p.id),
+    )
     canvas.pages = merged
+    /* a renamed page moves its frames to another category */
+    if (renamed.size)
+      for (const frame of canvas.frames) {
+        if (frame.pageId && renamed.has(frame.pageId)) this.emitFrameWrite(canvasId, frame.id, 'move')
+      }
     /* a deleted page takes its guides with it */
     const kept = (guide: CanvasGuide) => merged.some((page) => page.id === guide.pageId)
     const dropped = (canvas.guides ?? []).filter((guide) => !kept(guide))
@@ -1063,6 +1082,7 @@ class Store {
     this.frameIndex.set(frame.id, canvasId)
     persist.saveFrame(frame, true)
     persist.saveCanvas(c)
+    this.emitFrameWrite(canvasId, frame.id, 'write')
     return frame
   }
 
@@ -1103,6 +1123,10 @@ class Store {
       !opts.annotation &&
       (['html', 'width', 'height'] as const).some((key) => patch[key] !== undefined && patch[key] !== frame[key])
     const c = this.canvases.get(frame.canvasId)!
+    const changed = (keys: readonly (keyof typeof patch)[]) =>
+      keys.some((key) => patch[key] !== undefined && patch[key] !== frame[key])
+    const written = changed(['html', 'name', 'width', 'height'])
+    const moved = changed(['pageId', 'x', 'y'])
     /* a frame moved to another page lands in front there, as Figma does */
     if (patch.pageId !== undefined && patch.pageId !== frame.pageId && patch.z === undefined)
       patch = { ...patch, z: frontOf(pageFrames(c, patch.pageId)) ?? frame.z }
@@ -1118,6 +1142,7 @@ class Store {
     c.updatedAt = frame.updatedAt
     persist.saveFrame(frame) // debounced: streaming appends land as one write per burst
     persist.saveCanvas(c)
+    if (written || moved) this.emitFrameWrite(c.id, frame.id, written ? 'write' : 'move')
     return frame
   }
 
@@ -1159,6 +1184,24 @@ class Store {
     }
   }
 
+  /** Listen for frame writes, moves and deletions (the library indexer). */
+  onFrameWrite(listener: FrameWriteListener): () => void {
+    this.frameListeners.push(listener)
+    return () => {
+      this.frameListeners = this.frameListeners.filter((l) => l !== listener)
+    }
+  }
+
+  private emitFrameWrite(canvasId: string, frameId: string, kind: FrameWrite['kind']) {
+    for (const listener of this.frameListeners) {
+      try {
+        listener({ canvasId, frameId, kind })
+      } catch (error) {
+        console.error('[store] frame listener failed', error)
+      }
+    }
+  }
+
   private emitCanvasEvent(event: CanvasEvent) {
     for (const listener of this.canvasListeners) {
       try {
@@ -1181,6 +1224,7 @@ class Store {
     this.frameIndex.delete(frameId)
     persist.deleteFrame(frameId)
     persist.saveCanvas(c)
+    this.emitFrameWrite(canvasId, frameId, 'delete')
     return frame
   }
 }
