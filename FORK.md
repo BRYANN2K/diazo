@@ -41,6 +41,18 @@ conflits résolus à la main pour préserver l'intention de chaque côté.
 Fonctionnalité propre au fork : **bibliothèques de design** (`.context/specs/design-libraries.md`),
 un canvas devient une bibliothèque indexée en items et variantes, cherchée depuis ⌘F et par MCP.
 
+## Bibliothèques de design : convertir les deux canvases existants
+
+Les canvases vivent sur doop.design ; les copier d'abord sur l'instance du fork (étape 7.5,
+`scripts/pull-library.ts`, lancé à la main et supervisé). Puis, sur l'instance :
+
+1. Ouvrir « Design Library » → Fichier → « Turn into a library… ». Le préréglage `sheets` est
+   détecté ; vérifier le rapport (Ignored, Unreadable, Duplicates), relire les catégories proposées
+   (sections `§` et noms de pages), appliquer. Aucun frame n'est modifié.
+2. Attendre la fin de l'indexation (le compteur `items · variants` de la bibliothèque) ; la passe
+   rendue lit ensuite les feuilles scriptées.
+3. Faire de même pour « Design Library · by function ».
+
 ## PRs abandonnées
 
 | PR   | Raison                                                                                                                                                                                                                                                                                                                                                                                                                                        |

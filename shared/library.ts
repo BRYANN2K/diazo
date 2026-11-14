@@ -267,6 +267,8 @@ export interface LibraryPreview {
   unreadable: { frameId: string; name: string; reason: string }[]
   duplicates: { itemId: string; frameIds: string[] }[]
   categories: { path: string; count: number }[]
+  /** the kinds, sources and categories the frames suggest */
+  taxonomy: LibraryTaxonomy
 }
 
 /** A library in a list: the canvas it is, and what the caller may do. */

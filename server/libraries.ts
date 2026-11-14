@@ -278,6 +278,19 @@ export function libraryAllows(role: LibraryRole | null, need: LibraryRole): bool
   return !!role && RANK[role] >= RANK[need]
 }
 
+/** Delete the libraries disabled more than 30 days ago: their row, items
+ *  and curation (the boot job). Returns the canvases purged. */
+export async function purgeDisabledLibraries(now = Date.now()): Promise<string[]> {
+  const purged: string[] = []
+  for (const record of [...records.values()]) {
+    if (record.disabledAt == null || now - record.disabledAt < DISABLED_KEEP_MS) continue
+    records.delete(record.canvasId)
+    await persist.deleteLibrary(record.canvasId)
+    purged.push(record.canvasId)
+  }
+  return purged
+}
+
 /** For tests: drop every record. */
 export function resetLibrariesForTest(): void {
   records.clear()

@@ -22,7 +22,7 @@ import {
   type RuleFinding,
 } from '../shared/library.ts'
 import { parentIdOf } from '../shared/libraryIds.ts'
-import { sectionCategory, type LibraryRules } from '../shared/libraryRules.ts'
+import { NON_INSERTABLE_KINDS, sectionCategory, type LibraryRules } from '../shared/libraryRules.ts'
 import { buildIndex, type LibraryIndex } from '../shared/librarySearch.ts'
 import { readingOrder } from '../shared/frameOrder.ts'
 import { canvasPages, framePageId } from '../shared/pages.ts'
@@ -686,7 +686,10 @@ export async function previewIndex(
     unreadable: [],
     duplicates: [],
     categories: [],
+    taxonomy: { kinds: [], sources: [], categories: [] },
   }
+  const kinds = new Map<string, number>()
+  const sources = new Map<string, number>()
   const taken = new Map<string, string>()
   const categories = new Map<string, number>()
   for (let at = 0; at < order.length; at += INDEX_BATCH) {
@@ -725,11 +728,25 @@ export async function previewIndex(
           report.duplicates.push({ itemId: item.itemId, frameIds: [owner, frame.id] })
         else taken.set(item.itemId.toLowerCase(), frame.id)
         if (!item.parentId) categories.set(item.category, (categories.get(item.category) ?? 0) + 1)
+        if (item.kind) kinds.set(item.kind, (kinds.get(item.kind) ?? 0) + 1)
+        if (item.source) sources.set(item.source, (sources.get(item.source) ?? 0) + 1)
       }
     }
   }
   report.categories = [...categories]
     .map(([path, count]) => ({ path, count }))
     .sort((a, b) => b.count - a.count || a.path.localeCompare(b.path))
+  /* the section frames name categories too, even before anything sits under them */
+  const paths = new Set([...categories.keys(), ...report.ignored.flatMap((f) => (f.section ? [f.section] : []))])
+  const known = (id: string) => taxonomy.kinds.find((k) => k.id === id)
+  report.taxonomy = {
+    kinds: [...kinds.keys()].sort().map((id) => ({
+      id,
+      label: known(id)?.label ?? rules.categorise.kindMap[id] ?? id,
+      insertable: known(id)?.insertable ?? !NON_INSERTABLE_KINDS.has(id),
+    })),
+    sources: [...sources.keys()].sort().map((id) => taxonomy.sources.find((s) => s.id === id) ?? { id, label: id }),
+    categories: [...paths].sort((a, b) => a.localeCompare(b)).map((path) => ({ path })),
+  }
   return report
 }

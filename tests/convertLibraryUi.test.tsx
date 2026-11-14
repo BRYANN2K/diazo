@@ -5,7 +5,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { LibraryPreview } from '../shared/library'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-/* "Turn into a library": the dry run's counts, then one button. */
+/* "Turn into a library" in three steps: the preset, the report, the
+   proposed categories (editable), then one button. */
 
 const REPORT: LibraryPreview = {
   frames: 5,
@@ -16,17 +17,22 @@ const REPORT: LibraryPreview = {
   unreadable: [{ frameId: 'x', name: 'Broken', reason: 'no id could be read or assigned' }],
   duplicates: [],
   categories: [],
+  taxonomy: {
+    kinds: [{ id: 'bk', label: 'Blocks', insertable: true }],
+    sources: [{ id: 'scb', label: 'scb' }],
+    categories: [{ path: 'Auth/Log in' }, { path: 'Inputs & forms' }],
+  },
 }
 const previewLibrary = vi.fn(async (_canvasId: string, opts: { preset?: string } = {}) => ({
   preset: (opts.preset ?? 'sheets') as 'sheets' | 'blank',
   rules: {},
   preview: opts.preset === 'blank' ? { ...REPORT, variants: 0 } : REPORT,
 }))
-const createLibrary = vi.fn(async () => ({}))
+const createLibrary = vi.fn(async (_canvasId: string, _opts: unknown) => ({}))
 vi.mock('../src/lib/api', () => ({
   api: {
     previewLibrary: (id: string, opts?: { preset?: string }) => previewLibrary(id, opts),
-    createLibrary: (...args: unknown[]) => createLibrary(...(args as [])),
+    createLibrary: (id: string, opts: unknown) => createLibrary(id, opts),
   },
 }))
 
@@ -55,21 +61,32 @@ afterEach(async () => {
   vi.clearAllMocks()
 })
 
+const button = (text: string) => [...document.querySelectorAll('button')].find((b) => b.textContent === text)!
+const click = (text: string) => act(async () => button(text).click())
 const counts = () => document.querySelector('[data-testid="library-preview-counts"]')?.textContent ?? ''
 
-it('shows the dry run, with the detected preset', () => {
+it('shows the dry run with the detected preset first', () => {
   expect(previewLibrary).toHaveBeenCalledWith('c1', {})
+  expect(document.body.textContent).toContain('Step 1 of 3')
   expect(counts()).toContain('3 families')
   expect(counts()).toContain('2 variants')
-  expect(counts()).toContain('1 frame ignored')
-  expect(document.body.textContent).toContain('1 frame could not be read')
   expect(document.body.textContent).toContain('Detected from the frame names')
 })
 
-it('creates the library on confirm with the chosen preset', async () => {
-  const confirm = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Turn into a library')!
-  await act(async () => confirm.click())
-  expect(createLibrary).toHaveBeenCalledWith('c1', { preset: 'sheets' })
+it('walks to the report, then to the categories, and applies them edited', async () => {
+  await click('Next')
+  expect(document.body.textContent).toContain('Step 2 of 3')
+  expect(document.body.textContent).toContain('Unreadable (1)')
+  await click('Next')
+  expect(document.body.textContent).toContain('Step 3 of 3')
+  const fields = document.querySelectorAll<HTMLInputElement>('[data-testid="library-categories"] input')
+  expect([...fields].map((f) => f.value)).toEqual(['Auth/Log in', 'Inputs & forms'])
+  await act(async () => document.querySelector<HTMLButtonElement>('button[aria-label="Remove this category"]')!.click())
+  await click('Turn into a library')
+  expect(createLibrary).toHaveBeenCalledWith('c1', {
+    preset: 'sheets',
+    taxonomy: { ...REPORT.taxonomy, categories: [{ path: 'Inputs & forms' }] },
+  })
   expect(onConverted).toHaveBeenCalled()
   expect(onClose).toHaveBeenCalled()
 })

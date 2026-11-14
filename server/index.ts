@@ -197,6 +197,7 @@ store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
 await libraries.hydrateLibraries() // canvas.library, before the first canvas is sent
 libraries.wireLibraries()
+void libraries.purgeDisabledLibraries().catch((error: unknown) => console.error('[libraries] purge failed', error))
 libraryIndex.wireIndexer()
 /* full index runs a restart cut off go on in the background */
 void Promise.all(libraryIndex.resumeIndexing(libraries.allLibraries()))

@@ -70,6 +70,10 @@ export function fakePersist() {
       const t = table(canvasId)
       for (const [id, row] of t) if (row.frameId === frameId) t.delete(id)
     },
+    deleteLibrary: async (canvasId: string) => {
+      fakeDb.items.delete(canvasId)
+      fakeDb.meta.delete(canvasId)
+    },
     deleteLibraryItems: async (canvasId: string) => {
       fakeDb.items.delete(canvasId)
     },
