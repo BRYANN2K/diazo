@@ -46,6 +46,19 @@ un canvas devient une bibliothèque indexée en items et variantes, cherchée de
 Les canvases vivent sur doop.design ; les copier d'abord sur l'instance du fork (étape 7.5,
 `scripts/pull-library.ts`, lancé à la main et supervisé). Puis, sur l'instance :
 
+```bash
+# clés d'agent (Settings → Agent keys) dans l'environnement seulement, jamais dans un fichier
+export DOOP_FROM_KEY=dpk_…   # compte doop.design qui voit le canvas
+export DOOP_TO_KEY=dpk_…     # compte sur l'instance du fork
+npx tsx scripts/pull-library.ts --from https://doop.design --canvas <id> --to <origine du fork> --dry-run
+npx tsx scripts/pull-library.ts --from https://doop.design --canvas <id> --to <origine du fork>
+```
+
+La source n'est que lue (outils MCP `get_canvas` / `get_frame`, assets `/a/` publics). Le script
+reprend où il s'est arrêté (fichier de progression dans le dossier temporaire de l'OS). Au-delà de
+100 pages il s'arrête : transformer le canvas cible en bibliothèque (étape 1 ci-dessous), puis
+relancer la même commande.
+
 1. Ouvrir « Design Library » → Fichier → « Turn into a library… ». Le préréglage `sheets` est
    détecté ; vérifier le rapport (Ignored, Unreadable, Duplicates), relire les catégories proposées
    (sections `§` et noms de pages), appliquer. Aucun frame n'est modifié.

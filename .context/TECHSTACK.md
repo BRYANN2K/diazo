@@ -835,6 +835,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `find_in_canvas` without `canvas_id` answer a library from its index (`findInLibrary` in
   `server/libraryQueries.ts`: its items as `name` hits carrying `item`), so a search across canvases
   never loads a library's frame HTML; other canvases are searched as before (`canvasFindEverywhere.test.ts`).
+  `scripts/pull-library.ts` copies a library canvas between two instances over their `/mcp` (agent
+  keys from `DOOP_FROM_KEY` / `DOOP_TO_KEY`, the source only read, `/a/` assets re-uploaded,
+  resumable; `scripts/README.md`, `pullLibrary.test.ts`).
   Tests: `library*.test.ts`,
   `librariesHttp.test.ts`, `findLibrary*.test.ts*`, `findRows.test.ts`, `convertLibraryUi.test.tsx`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
