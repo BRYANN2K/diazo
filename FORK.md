@@ -114,6 +114,29 @@ scp doop-image.tar.gz <vps>:/tmp/
 ssh <vps> 'sudo k3s ctr -n k8s.io images import /tmp/doop-image.tar.gz'
 ```
 
+## Install locale (Mac, Apple `container`)
+
+Deux façons de faire tourner doop : **local** (une personne, un Mac) et
+**hébergé** (k3s + Tailscale ci-dessus, ou `docker compose up`).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BRYANN2K/doop/bryann2k/main/scripts/install-local.sh | sh
+```
+
+- `scripts/install-local.sh` (POSIX sh) : vérifie macOS + Apple silicon +
+  `container`, lance `container system start`, crée `~/.doop/` (`doop.env` en
+  600 avec `BETTER_AUTH_SECRET` et `SECRETS_ENCRYPTION_KEYS` générés sur le Mac,
+  `data/`), tire l'image arm64, lance **un seul** conteneur sur
+  `127.0.0.1:4400` avec `~/.doop/data` monté sur `/app/data`.
+- Pas de `DATABASE_URL` : le serveur prend PGlite (`/app/data/pg`), les uploads
+  vont dans `/app/data/assets`. Aucun changement de code nécessaire.
+- Relancer la commande = mise à jour (pull + recréation), données et secrets
+  gardés. `~/.doop/bin/doop-local start|stop|restart|status|logs|update|uninstall`.
+- Sans image arm64 publiée, le script prend l'amd64 sous Rosetta ; `--build`
+  construit l'image sur le Mac depuis les sources.
+- Testé sans conteneur par `tests/installLocal.test.ts` (stubs de `container`,
+  `uname`, `curl`).
+
 ## Live instance (2026-11-12)
 
 - URL (tailnet only): https://bryann2k-infra-prod.tail35c61f.ts.net:8850

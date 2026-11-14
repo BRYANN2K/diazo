@@ -117,7 +117,10 @@ to upstream's.
 - **Drift review** — compare a frame with a live URL: pixel score, drift cards, a compare modal
   and a CI webhook. Agents call `compare_with_url`; the desktop app fetches local URLs
   (loopback GET/HEAD only).
-- **Self-hosting** — Docker image `ghcr.io/bryann2k/doop:bryann2k-main` built on every push, k3s
+- **Local install on a Mac** — one `curl … | sh` runs doop in a single Apple `container` on
+  `127.0.0.1:4400`, with PGlite and uploads in `~/.doop/data` and secrets generated on the Mac
+  ([Run doop](#local-mac-lightweight)).
+- **Self-hosting** — Docker image `ghcr.io/bryann2k/doop:bryann2k-main` (amd64 + arm64) built on every push, k3s
   manifests in `deploy/k3s/` with a persistent volume for uploads, exposed through Tailscale
   Serve only (no ingress, no Funnel).
 
@@ -146,10 +149,59 @@ No agent of your own? The built-in [Doop Agent](#the-doop-agent) runs on the mod
 connect: a ChatGPT subscription, or an OpenAI, Claude, Gemini, DeepSeek, Kimi or OpenRouter key.
 OpenRouter brings Qwen, GLM, MiniMax and more ([details](#past-the-free-tasks-connect-your-own-chatgpt)).
 
-## Quickstart
+## Run doop
+
+Two ways, depending on who uses it.
+
+| Option                                             | For                                  | Database                    | Reached at                     |
+| -------------------------------------------------- | ------------------------------------ | --------------------------- | ------------------------------ |
+| [Local (Mac, lightweight)](#local-mac-lightweight) | One person on one Mac                | Embedded PGlite, one volume | `http://localhost:4400` only   |
+| [Hosted](#hosted)                                  | A team, agents that run all the time | Postgres in its own service | Your server (Tailscale, a URL) |
+
+### Local (Mac, lightweight)
+
+One command on a Mac with Apple silicon and macOS 26, with Apple's
+[`container`](https://github.com/apple/container/releases/latest) installed:
 
 ```bash
-git clone https://github.com/kgoedecke/doop && cd doop
+curl -fsSL https://raw.githubusercontent.com/BRYANN2K/doop/bryann2k/main/scripts/install-local.sh | sh
+```
+
+What it does ([`scripts/install-local.sh`](scripts/install-local.sh)):
+
+- Checks the Mac and `container`, then starts `container`'s services.
+- Creates `~/.doop/`: `doop.env` with a `BETTER_AUTH_SECRET` and a `SECRETS_ENCRYPTION_KEYS` key
+  generated on your Mac (mode 600), and `data/` for the database and uploads.
+- Pulls `ghcr.io/bryann2k/doop:bryann2k-main` (arm64, native). If the registry has only the amd64
+  build, it runs that one under Rosetta. `--build` builds the image from source on the Mac instead.
+- Runs one container on `127.0.0.1:4400` only, with `~/.doop/data` mounted at `/app/data` and no
+  `DATABASE_URL`, so the server uses its embedded Postgres (PGlite).
+- Waits for `/healthz` and prints the URL. The MCP endpoint is `http://localhost:4400/mcp`.
+
+Run the same command again to update: it pulls the new image and recreates the container, and
+keeps the data and the secrets. It also installs `~/.doop/bin/doop-local`, with `start`, `stop`,
+`restart`, `status`, `logs`, `update` and `uninstall` (which asks before deleting `~/.doop`).
+`container` has no restart policy, so run `doop-local start` after a reboot. `DOOP_PORT=4500`
+picks another port.
+
+### Hosted
+
+For a team, run the production image next to a real Postgres:
+
+```bash
+BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up -d   # app + Postgres on :4400
+```
+
+This fork's own instance runs on k3s (Postgres StatefulSet, `ClusterIP` service) and is exposed
+through Tailscale Serve only: manifests in `deploy/k3s/`, steps in [FORK.md](FORK.md). For
+Railway, Fly or any other container host, see [Deploy](#deploy).
+
+Prefer not to run anything? **[doop.design](https://doop.design)** is upstream's hosted version.
+
+## Develop from source
+
+```bash
+git clone https://github.com/BRYANN2K/doop && cd doop
 bun install
 bun run dev
 ```
@@ -171,16 +223,8 @@ The built-in [Doop Agent](#the-doop-agent) runs once a user connects a model acc
 (or on the server's `ANTHROPIC_API_KEY` if you raise `RESIDENT_TASK_LIMIT`) — agents you connect
 yourself over MCP need no key.
 
-Or self-host the production build with Docker:
-
-```bash
-BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up -d   # app + Postgres on :4400
-```
-
 Production build without Docker: `bun run build && bun run start` (single server on :4400 serving
 everything). Set `DATABASE_URL` to use a real Postgres — same code path as PGlite.
-
-Prefer not to run anything? **[doop.design](https://doop.design)** is the hosted version.
 
 Once you sign in, Home is where you start: describe what you want and Doop makes a canvas with
 drafts queued for the Doop Agent, or pick up one of your canvases, workspaces and connected agents.
