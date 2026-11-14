@@ -15,6 +15,7 @@ import {
 import { open, seal } from '../secretBox.ts'
 import type { CanvasGuide, CanvasPageInfo, ChatPlan, FrameApproval } from '../../shared/types.ts'
 import type { FrameLint } from '../../shared/slopRules.ts'
+import type { FrameChecks } from '../../shared/frameChecks.ts'
 import type { AutomationRunState, AutomationTrigger, Schedule, Step } from '../../shared/automations.ts'
 import type {
   ComponentCode,
@@ -200,6 +201,8 @@ export const frames = pgTable(
     approval: jsonb('approval').$type<FrameApproval>(),
     /** latest anti-slop lint (shared/slopRules.ts); null = never linted */
     lint: jsonb('lint').$type<FrameLint>(),
+    /** latest responsive + accessibility checks (shared/frameChecks.ts); null = never checked */
+    checks: jsonb('checks').$type<FrameChecks>(),
   },
   (t) => [index('frames_canvas_idx').on(t.canvasId)],
 )

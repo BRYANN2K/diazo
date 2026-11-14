@@ -122,6 +122,10 @@ to upstream's.
 - **Anti-slop lint** — a rules engine checks every frame (client iframe or server renderer), a
   badge on the frame and a Quality section in the Inspector show the result, and the resident
   agent fixes lint errors before finishing. Agents call `lint_frame`.
+- **Frame checks** — the server renderer lays each frame out at 375, 768 and 1440px (horizontal
+  overflow, clipped text, tap targets under 44px) and walks it with the Tab key (WCAG AA text
+  contrast, visible focus, tab order). An A11y badge on the frame and the Inspector's Quality
+  section show the result, stored on the frame. Agents call `check_frame`.
 - **Handoff to Stip** — a frame marked ready for dev builds a Stip change pack, previewed in the
   Inspector and plan cards, then written into the linked repo by the desktop app's single write
   command (`repo_write_change`). Agents call `create_handoff`.

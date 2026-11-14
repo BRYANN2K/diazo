@@ -23,6 +23,7 @@ import { ui } from './ui'
 import { components } from './components'
 import { actions } from './actions'
 import { lint } from './lint'
+import { checks } from './checks'
 import { handoff } from './handoff'
 
 export const ptBR: Catalog = {
@@ -50,5 +51,6 @@ export const ptBR: Catalog = {
   components,
   actions,
   lint,
+  checks,
   handoff,
 }

@@ -537,6 +537,7 @@ async function writeFrameRow(f: Frame) {
     rotation: f.rotation ?? null,
     approval: f.approval ?? null,
     lint: f.lint ?? null,
+    checks: f.checks ?? null,
   }
   const { id, createdAt, ...set } = row
   await db.insert(t.frames).values(row).onConflictDoUpdate({ target: t.frames.id, set })
@@ -598,6 +599,7 @@ const frameMetaColumns = {
   rotation: t.frames.rotation,
   approval: t.frames.approval,
   lint: t.frames.lint,
+  checks: t.frames.checks,
 }
 
 /* Frame design history: one row per burst boundary (see actions.ts), newest
@@ -1151,6 +1153,7 @@ export async function hydrate(): Promise<Hydrated> {
       z: f.z ?? undefined,
       rotation: f.rotation ?? undefined,
       lint: f.lint ?? undefined,
+      checks: f.checks ?? undefined,
     } as Frame
     unloadHtml(frame)
     byId.get(f.canvasId)?.frames.push(frame)
