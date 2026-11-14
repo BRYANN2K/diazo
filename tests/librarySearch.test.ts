@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { EMPTY_TAXONOMY, type LibraryItem } from '../shared/library'
-import { buildIndex, idTokens, parseQuery, searchIndex, tokenize } from '../shared/librarySearch'
+import { buildIndex, idTokens, mergeSynonyms, parseQuery, searchIndex, tokenize } from '../shared/librarySearch'
 import { syntheticItems } from './libraryFixtures'
 
 let n = 0
@@ -169,8 +169,27 @@ describe('searchIndex', () => {
   })
 
   it('widens the query with a synonym', () => {
-    expect(ids(searchIndex(index, 'login'))).not.toContain('cp.scb-passkey')
-    expect(ids(searchIndex(index, 'login', { synonyms: { login: ['sign in'] } }))).toContain('cp.scb-passkey')
+    expect(ids(searchIndex(index, 'mention'))).not.toContain('cp.scb-passkey')
+    expect(ids(searchIndex(index, 'mention', { synonyms: { mention: ['sign in'] } }))).toContain('cp.scb-passkey')
+  })
+
+  it('applies the default synonyms, which a library can drop with an empty list', () => {
+    expect(ids(searchIndex(index, 'login'))).toContain('cp.scb-passkey')
+    expect(ids(searchIndex(index, 'login', { synonyms: { login: [] } }))).not.toContain('cp.scb-passkey')
+    expect(mergeSynonyms({ login: [] }).login).toBeUndefined()
+    expect(mergeSynonyms({ modal: ['sheet'] }).modal).toEqual(['sheet'])
+  })
+
+  it('orders equal text by use, never above an exact id', () => {
+    const cards = [
+      item('cp.a-card', { label: 'Plain card' }),
+      item('cp.b-card', { label: 'Plain card', useCount: 40 }),
+      item('cp.c-card', { label: 'Plain card', useCount: 3 }),
+    ]
+    const idx = buildIndex(cards, EMPTY_TAXONOMY)
+    expect(ids(searchIndex(idx, 'plain card'))).toEqual(['cp.b-card', 'cp.c-card', 'cp.a-card'])
+    const heavy = buildIndex([...cards, item('cp.x', { label: 'Plain card', useCount: 100_000 })], EMPTY_TAXONOMY)
+    expect(ids(searchIndex(heavy, 'cp.a-card'))[0]).toBe('cp.a-card')
   })
 
   it('browses with an empty query, families in order', () => {

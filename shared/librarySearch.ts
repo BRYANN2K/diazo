@@ -274,11 +274,21 @@ function buildClauses(
     const alternatives: string[][] = [[word]]
     for (const s of synonyms[word] ?? []) alternatives.push(tokenize(s))
     for (const s of reverse.get(word) ?? []) alternatives.push(tokenize(s))
+    /* the word itself first; a synonym counts for less, and a several-word
+       one as much as one word, so it widens without outranking */
     return alternatives
       .filter((alt) => alt.length)
-      .map((alt) => alt.map((tok) => lookupsFor(index, tok, prefix && tok === word, fuzzy)))
+      .map((alt, a) => {
+        const weight = a === 0 ? 1 : SYNONYM_WEIGHT / alt.length
+        return alt.map((tok) =>
+          lookupsFor(index, tok, prefix && tok === word, fuzzy).map((l) => ({ ...l, factor: l.factor * weight })),
+        )
+      })
   })
 }
+
+/** how much a synonym's match counts against the word's own */
+const SYNONYM_WEIGHT = 0.6
 
 /** The docs a clause matches, and their score for it. */
 function evalClause(index: LibraryIndex, clause: Clause): Map<number, number> {
@@ -372,6 +382,47 @@ export interface IndexResult {
 
 export type LibrarySort = 'relevance' | 'used' | 'newest'
 
+/** Common UI words people search by another name. Every library gets them;
+ *  its own `search.synonyms` win key by key, and an empty list there drops
+ *  a default ("login": [] stops "login" finding "sign in"). */
+export const DEFAULT_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
+  login: ['sign in', 'signin', 'log in'],
+  signup: ['sign up', 'register'],
+  logout: ['sign out', 'log out'],
+  modal: ['dialog', 'popup'],
+  dialog: ['modal'],
+  dropdown: ['select', 'menu'],
+  toast: ['snackbar', 'notification'],
+  tooltip: ['hint', 'popover'],
+  navbar: ['navigation', 'header', 'nav'],
+  sidebar: ['drawer', 'side nav'],
+  avatar: ['profile picture'],
+  otp: ['one time password', 'verification code', 'pin'],
+  checkbox: ['check box', 'tick'],
+  toggle: ['switch'],
+  switch: ['toggle'],
+  spinner: ['loader', 'loading'],
+  card: ['tile'],
+  tabs: ['segmented'],
+  badge: ['chip', 'pill'],
+  search: ['find', 'lookup'],
+  pricing: ['plans', 'price'],
+  cta: ['call to action'],
+  footer: ['bottom bar'],
+}
+
+/** The defaults with a library's own groups over them. */
+export function mergeSynonyms(own: Record<string, string[]> = {}): Record<string, string[]> {
+  const out: Record<string, string[]> = {}
+  for (const [key, values] of Object.entries(DEFAULT_SYNONYMS)) out[key] = [...values]
+  for (const [key, values] of Object.entries(own)) {
+    const k = key.toLowerCase().trim()
+    if (values.length) out[k] = values
+    else delete out[k]
+  }
+  return out
+}
+
 export interface SearchOptions {
   limit?: number
   cursor?: string
@@ -439,7 +490,7 @@ export function searchIndex(index: LibraryIndex, query: string, opts: SearchOpti
   const parsed = parseQuery(query)
   const filters = mergeFilters(parsed.filters, opts.filters)
   const includeDrafts = !!opts.includeDrafts
-  const synonyms = opts.synonyms ?? {}
+  const synonyms = mergeSynonyms(opts.synonyms)
   const tokens = parsed.terms.flatMap(tokenize)
 
   /* doc → text score; null means "browse": every doc that passes */
