@@ -2,6 +2,7 @@ import * as libraries from './libraries.ts'
 import * as libraryIndex from './libraryIndex.ts'
 import { libraryRouter } from './libraryRoutes.ts'
 import { wireLibraryDescribe } from './libraryDescribe.ts'
+import { hydrateCurations, resumeCurations } from './libraryCuration.ts'
 import { env } from './env.ts'
 import {
   catalogEntry,
@@ -204,6 +205,8 @@ libraryIndex.wireIndexer()
 wireLibraryDescribe() // AI descriptions, only on libraries that turned them on
 /* full index runs a restart cut off go on in the background */
 void Promise.all(libraryIndex.resumeIndexing(libraries.allLibraries()))
+await hydrateCurations() // AI library curations; the ones a restart cut off go on
+resumeCurations()
 await hydrateInstanceSettings() // the sign-in policy, read on every signup
 await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use

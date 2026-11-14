@@ -485,6 +485,24 @@ export async function pickModel(payerId?: string, pick?: RunnerPick): Promise<Ag
   return serverTiers[serverProvider()]()
 }
 
+/**
+ * The models a background library job runs on (server/libraryCuration.ts),
+ * always on the payer's OWN connected account, never the server tier: such
+ * a job makes a hundred calls nobody watches, so it must not spend the free
+ * tasks. `main` is the account's configured model (judgement: proposing a
+ * category tree); `bulk` its small tier where it has one (filing thousands of
+ * items). The person's default connection is used when it runs turns, else
+ * the first account that is on (the Claude Plan on the desktop runs whole
+ * harness tasks only). Null when they have no account that can.
+ */
+export async function accountTurnModels(payerId: string): Promise<{ main: AgentModel; bulk: AgentModel } | null> {
+  const connections = await readConnections(payerId)
+  const account = usableAccount(connections, connections.default) ?? connections.accounts.find((a) => a.enabled) ?? null
+  if (!account) return null
+  const main = byoModel(account)
+  return { main, bulk: accountDescriber(account) ?? main }
+}
+
 /* ---------------------------------------------------------------- */
 /* image descriptions: a small tier, never the design model          */
 /* ---------------------------------------------------------------- */

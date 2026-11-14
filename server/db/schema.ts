@@ -28,6 +28,7 @@ import type {
   LibraryVisibility,
   RuleFinding,
 } from '../../shared/library.ts'
+import type { CurationJob } from '../../shared/libraryCuration.ts'
 import type { AutomationRunState, AutomationTrigger, Schedule, Step } from '../../shared/automations.ts'
 import type {
   ComponentCode,
@@ -1309,4 +1310,20 @@ export const libraryItemMeta = pgTable(
     updatedBy: text('updated_by'),
   },
   (t) => [primaryKey({ columns: [t.canvasId, t.itemId] })],
+)
+
+/** AI curation jobs (server/libraryCuration.ts): several source canvases
+ *  read into one proposed library, reviewed, then applied to a new canvas.
+ *  The whole job (progress, plan, apply state) is one JSON document. */
+export const libraryCurations = pgTable(
+  'library_curations',
+  {
+    id: text('id').primaryKey(),
+    ownerId: text('owner_id').notNull(),
+    status: text('status').notNull(),
+    job: jsonb('job').$type<CurationJob>().notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('library_curations_owner_idx').on(t.ownerId)],
 )
