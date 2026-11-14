@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import { skillSlug } from '../shared/skills.ts'
 import { DRIFT_SEVERITIES, isDriftSeverity } from '../shared/drift.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import type Anthropic from '@anthropic-ai/sdk'
@@ -770,6 +771,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             },
           ]
         : []
+      /* canvas skills: the list to pick from, plus the ones the work names
+         as /name already loaded; it follows the asks, so it is not cached */
+      const skillsText = actions.skillsBrief(canvasId, workText)
+      const skillsBlock = skillsText ? [{ text: skillsText }] : []
       /* the canvas's custom fonts: which families exist, and that naming one
          is enough (the server adds the @font-face) */
       const canvas = store.getCanvas(canvasId)
@@ -839,6 +844,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           system: [
             systemFor(role),
             ...guidelinesBlock.map((b) => b.text),
+            ...skillsBlock.map((b) => b.text),
             ...fontsBlock.map((b) => b.text),
             ...tokensBlock.map((b) => b.text),
             ...componentsBlock.map((b) => b.text),
@@ -886,6 +892,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                 system: [
                   { text: systemFor(role), cache: true },
                   ...guidelinesBlock,
+                  ...skillsBlock,
                   ...fontsBlock,
                   ...tokensBlock,
                   ...componentsBlock,
@@ -1152,6 +1159,7 @@ export const CHAT_READ_TOOL_NAMES = new Set([
   'get_frame_html',
   'screenshot_frame',
   'get_tokens',
+  'get_skill',
   'get_prototype',
   'get_reference',
   'view_website',
@@ -1161,7 +1169,7 @@ export const CHAT_READ_TOOL_NAMES = new Set([
 const CHAT_SYSTEM = `You are a resident agent of the Doop canvas — a multiplayer design tool where humans and AI agents design HTML frames together — answering in the canvas CHAT, not editing. Humans talk the next design over with you here; the canvas only changes after an editor presses "Go design" on a plan card, which queues one board card per screen.
 
 Rules:
-- You cannot change the canvas from chat: only read tools exist here. Look before you speak — find_in_canvas, inspect_frame, get_frame_html, screenshot_frame, get_tokens, get_prototype, get_reference, view_website, search_inspiration, and the repo_* tools when the asker linked a project.
+- You cannot change the canvas from chat: only read tools exist here. Look before you speak — find_in_canvas, inspect_frame, get_frame_html, screenshot_frame, get_tokens, get_skill, get_prototype, get_reference, view_website, search_inspiration, and the repo_* tools when the asker linked a project.
 - Answer plain questions in your final message — it is posted to the thread. Keep it short: a chat bubble, not a document.
 - When the ask is design work — new screens, a redesign, a flow — investigate first, then end with ONE propose_plan call. The plan must stand on its own: what it is for, the screens to create with real sizes and what each shows, and the canvas or project pieces to reuse (token names, component names, file paths). When a reference library is listed in context, search it with find_references before planning: every screen names the library references it will reuse (canvas_id, frame_id, a label and why), and proposing none should mean the library genuinely had nothing close — an approved library frame wins over improvising one. Anything genuinely undecided goes into open_questions — the humans answer in chat before pressing Go design.
 - When you cannot produce a plan or an answer without a decision only a human can make, ask_in_chat one focused question and stop.
@@ -1580,9 +1588,11 @@ async function runChat(
           },
         ]
       : []
+    const skillsText = actions.skillsBrief(canvasId, kickoff)
     const system = [
       { text: `${CHAT_SYSTEM}\n\nYour role on this canvas is ${role.name}. ${role.brief}`, cache: true },
       ...guidelinesBlock,
+      ...(skillsText ? [{ text: skillsText }] : []),
       ...tokensBlock,
       ...componentsBlock,
       ...repoBlock,
@@ -2175,6 +2185,32 @@ const TOOLS: Anthropic.Tool[] = [
           description:
             'Pretty display name shown to humans, e.g. "Pipefile design system"; omit to keep the current one',
         },
+      },
+      required: ['name', 'markdown'],
+    },
+  },
+  {
+    name: 'get_skill',
+    description:
+      "Read one of this canvas's skills in full: instructions for a kind of task here (the list and when to use each are in the # Canvas skills block). Load the matching one before you start, and follow it.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Skill name from the # Canvas skills block, e.g. "pricing-page"' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'set_skill',
+    description:
+      'Create, replace or delete a named skill on this canvas: instructions agents load when their task matches the description. Use it when a person asks you to save how something is done here. An empty markdown deletes it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Skill slug, e.g. "pricing-page" (a-z, 0-9, hyphens)' },
+        description: { type: 'string', description: 'One line saying when to use it; required for a new skill' },
+        markdown: { type: 'string', description: 'The full instructions; empty string deletes the skill' },
       },
       required: ['name', 'markdown'],
     },
@@ -3150,6 +3186,46 @@ export async function execTool(
             ? `saved design guide "${actions.guidelineTitle(doc)}" (${doc.name}, ${doc.markdown.length} chars) — every actor on this canvas now inherits it`
             : `deleted design guide ${raw.name.trim().toLowerCase()}`,
         )
+      }
+      case 'get_skill': {
+        const raw = block.input as { name?: unknown }
+        const name = typeof raw.name === 'string' ? raw.name.trim() : ''
+        if (!name) return fail('name must be a skill name')
+        const skills = store.getSkills(canvasId)
+        const skill = skills.find((x) => x.name === skillSlug(name.replace(/^\//, '')))
+        if (!skill)
+          return fail(
+            skills.length
+              ? `no skill named “${raw.name}” — this canvas has: ${skills.map((x) => x.name).join(', ')}`
+              : 'no skills on this canvas yet',
+          )
+        return ok(`# /${skill.name}\n\n${skill.description}\n\n${skill.markdown}`)
+      }
+      case 'set_skill': {
+        if (!env.AGENT_GUIDELINE_WRITES)
+          return fail(
+            'skills on this instance are written by people (AGENT_GUIDELINE_WRITES=false); propose the skill in a comment instead',
+          )
+        const raw = block.input as { name?: unknown; description?: unknown; markdown?: unknown }
+        if (typeof raw.name !== 'string' || !raw.name.trim()) return fail('name must be a non-empty slug')
+        if (typeof raw.markdown !== 'string') return fail('markdown must be a string (empty string deletes the skill)')
+        if (raw.description !== undefined && typeof raw.description !== 'string')
+          return fail('description must be a string')
+        try {
+          const skill = actions.setSkill(
+            canvasId,
+            {
+              name: raw.name,
+              markdown: raw.markdown,
+              ...(raw.description !== undefined ? { description: raw.description } : {}),
+            },
+            actor,
+          )
+          if (skill === undefined) return fail('canvas not found')
+          return ok(skill ? `saved the skill /${skill.name} (${skill.markdown.length} chars)` : 'deleted the skill')
+        } catch (e) {
+          return fail(e instanceof Error ? e.message : 'invalid skill')
+        }
       }
       case 'get_tokens': {
         const raw = block.input as { types?: unknown; format?: unknown }
