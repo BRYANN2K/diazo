@@ -1,3 +1,4 @@
+import type { LibraryInfo } from '../shared/library.ts'
 import type { CanvasSkill } from '../shared/skills.ts'
 import { nanoid } from 'nanoid'
 import { canvasPages, copyPageName, pageFrames, samePages } from '../shared/pages.ts'
@@ -43,6 +44,10 @@ type PageCopy = {
 
 const names = (pages: CanvasPageInfo[]) => pages.map((page) => page.name)
 
+/** A canvas copied (duplicateCanvas) or deleted. */
+export type CanvasEvent = { kind: 'copied'; from: string; to: string } | { kind: 'deleted'; canvasId: string }
+type CanvasEventListener = (event: CanvasEvent) => void
+
 /**
  * In-memory canvas/frame state — the hot path for reads, reveals and
  * broadcasts. Every committed mutation is mirrored to the database via
@@ -67,6 +72,7 @@ class Store {
   private holds = new Map<string, number>()
   /** rooms, agents and streams the store cannot see (wired by index.ts) */
   private inUse: (canvasId: string) => boolean = () => false
+  private canvasListeners: CanvasEventListener[] = []
 
   constructor() {
     /* a missed load still fails, but the canvas is on its way for a retry */
@@ -391,6 +397,7 @@ class Store {
     this.canvases.set(canvas.id, canvas)
     this.loaded.set(canvas.id, Date.now())
     for (const frame of frames) this.frameIndex.set(frame.id, canvas.id)
+    this.emitCanvasEvent({ kind: 'copied', from: id, to: canvas.id })
     return canvas
   }
 
@@ -581,6 +588,7 @@ class Store {
     this.canvases.delete(id)
     this.loaded.delete(id)
     persist.deleteCanvas(id)
+    this.emitCanvasEvent({ kind: 'deleted', canvasId: id })
     return c
   }
 
@@ -1131,6 +1139,34 @@ class Store {
     frame.checks = checks
     persist.saveFrame(frame)
     return frame
+  }
+
+  /** Mirror a library's state onto its canvas (server/libraries.ts); null
+   *  when the canvas stops being one. */
+  setLibrary(canvasId: string, info: LibraryInfo | null): void {
+    const c = this.canvases.get(canvasId)
+    if (!c) return
+    if (info) c.library = info
+    else delete c.library
+  }
+
+  /** Listen for canvases copied or deleted, for what lives beside a canvas
+   *  (a library's rows). */
+  onCanvasEvent(listener: CanvasEventListener): () => void {
+    this.canvasListeners.push(listener)
+    return () => {
+      this.canvasListeners = this.canvasListeners.filter((l) => l !== listener)
+    }
+  }
+
+  private emitCanvasEvent(event: CanvasEvent) {
+    for (const listener of this.canvasListeners) {
+      try {
+        listener(event)
+      } catch (error) {
+        console.error('[store] canvas listener failed', error)
+      }
+    }
   }
 
   deleteFrame(frameId: string): Frame | undefined {

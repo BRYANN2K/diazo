@@ -1,3 +1,4 @@
+import type { LibraryInfo } from '../shared/library.ts'
 import { nanoid } from 'nanoid'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import { prepareChunk, prepareFrameHtml, referencesComponent } from './components.ts'
@@ -2162,6 +2163,11 @@ export function logComponent(canvasId: string, actor: Actor, line: string) {
 
 export function broadcastComponent(canvasId: string, component: ComponentDef, actor: Actor) {
   broadcast(canvasId, { type: 'component', id: component.id, component, actor })
+}
+
+/** A library started, changed or stopped (server/libraries.ts). */
+export function broadcastLibrary(canvasId: string, library: LibraryInfo | null, actor: Actor) {
+  broadcast(canvasId, { type: 'library', library, actor })
 }
 
 export function broadcastComponentDeleted(canvasId: string, id: string, actor: Actor) {

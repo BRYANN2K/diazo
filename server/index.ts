@@ -1,3 +1,4 @@
+import * as libraries from './libraries.ts'
 import { env } from './env.ts'
 import {
   catalogEntry,
@@ -192,6 +193,8 @@ if (data.canvases.length === 0 && (await persist.importLegacyJson())) {
 }
 store.init(data.canvases)
 await workspaces.hydrateWorkspaces() // before the first request: canvasRole reads membership
+await libraries.hydrateLibraries() // canvas.library, before the first canvas is sent
+libraries.wireLibraries()
 await hydrateInstanceSettings() // the sign-in policy, read on every signup
 await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use

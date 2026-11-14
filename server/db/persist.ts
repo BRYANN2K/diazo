@@ -11,6 +11,13 @@ import { storedLinkAccess } from '../../shared/canvasRole.ts'
 import type { ComponentDef } from '../../shared/components.ts'
 import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
 import type { CanvasSkill } from '../../shared/skills.ts'
+import type {
+  LibraryIndexState,
+  LibraryItem,
+  LibraryItemMeta,
+  LibraryTaxonomy,
+  LibraryVisibility,
+} from '../../shared/library.ts'
 import { parseRunnerPick } from '../../shared/agentRunner.ts'
 import { cleanPlanReferences } from '../../shared/chat.ts'
 import { byStack } from '../../shared/frameStack.ts'
@@ -814,6 +821,7 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.activity).where(eq(t.activity.canvasId, canvasId)))
   swallow(db.delete(t.guidelines).where(eq(t.guidelines.canvasId, canvasId)))
   swallow(db.delete(t.canvasSkills).where(eq(t.canvasSkills.canvasId, canvasId)))
+  void deleteLibrary(canvasId)
   swallow(db.delete(t.components).where(eq(t.components.canvasId, canvasId)))
   swallow(db.delete(t.guidelineVersions).where(eq(t.guidelineVersions.canvasId, canvasId)))
   swallow(
@@ -1494,4 +1502,171 @@ export async function importLegacyJson(): Promise<Canvas[] | null> {
   fs.renameSync(file, `${file}.imported`)
   console.log(`[db] imported ${parsed.length} canvas(es) from legacy store.json`)
   return parsed
+}
+
+/* ---- design libraries (server/libraries.ts, server/libraryIndex.ts) ---- */
+
+/** A `libraries` row with the index's counts, as hydrated. */
+export interface StoredLibrary {
+  canvasId: string
+  description: string
+  rules: unknown
+  taxonomy: LibraryTaxonomy
+  visibility: LibraryVisibility
+  indexState: LibraryIndexState | null
+  rulesVersion: number
+  disabledAt: number | null
+  createdAt: number
+  updatedAt: number
+  updatedBy: string | null
+  counts: { items: number; variants: number }
+}
+
+/* library writes run in order per canvas: an upsert, then a delete, must
+   not land the other way round on a pooled connection */
+const libraryWrites = new Map<string, Promise<unknown>>()
+
+function libraryWrite<T>(canvasId: string, write: () => Promise<T>): Promise<T> {
+  const previous = libraryWrites.get(canvasId) ?? Promise.resolve()
+  const next = previous.then(write, write)
+  const settled = next.catch(() => {})
+  libraryWrites.set(canvasId, settled)
+  void settled.then(() => {
+    if (libraryWrites.get(canvasId) === settled) libraryWrites.delete(canvasId)
+  })
+  return next
+}
+
+/** Every write queued for a library has landed. */
+export function libraryWritesSettled(canvasId: string): Promise<unknown> {
+  return libraryWrites.get(canvasId) ?? Promise.resolve()
+}
+
+export async function loadLibraries(): Promise<StoredLibrary[]> {
+  const [rows, counts] = await Promise.all([
+    db.select().from(t.libraries),
+    db
+      .select({
+        canvasId: t.libraryItems.canvasId,
+        items: sql<number>`count(*) filter (where ${t.libraryItems.parentId} is null)`,
+        variants: sql<number>`count(*) filter (where ${t.libraryItems.parentId} is not null)`,
+      })
+      .from(t.libraryItems)
+      .groupBy(t.libraryItems.canvasId),
+  ])
+  const byCanvas = new Map(counts.map((c) => [c.canvasId, { items: Number(c.items), variants: Number(c.variants) }]))
+  return rows.map((row) => ({
+    ...row,
+    indexState: row.indexState ?? null,
+    counts: byCanvas.get(row.canvasId) ?? { items: 0, variants: 0 },
+  }))
+}
+
+export function saveLibrary(record: Omit<StoredLibrary, 'counts'>): Promise<void> {
+  const row = {
+    canvasId: record.canvasId,
+    description: record.description,
+    rules: record.rules,
+    taxonomy: record.taxonomy,
+    visibility: record.visibility,
+    indexState: record.indexState,
+    rulesVersion: record.rulesVersion,
+    disabledAt: record.disabledAt,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    updatedBy: record.updatedBy,
+  }
+  const done = libraryWrite(record.canvasId, async () => {
+    await db.insert(t.libraries).values(row).onConflictDoUpdate({ target: t.libraries.canvasId, set: row })
+  })
+  swallow(done)
+  return done.catch(() => {})
+}
+
+/** Drop a library's rows: the row, its items and its curation. */
+export function deleteLibrary(canvasId: string): Promise<void> {
+  const done = libraryWrite(canvasId, async () => {
+    await db.delete(t.libraryItems).where(eq(t.libraryItems.canvasId, canvasId))
+    await db.delete(t.libraryItemMeta).where(eq(t.libraryItemMeta.canvasId, canvasId))
+    await db.delete(t.libraries).where(eq(t.libraries.canvasId, canvasId))
+  })
+  swallow(done)
+  return done.catch(() => {})
+}
+
+function itemRow(item: LibraryItem) {
+  const { useCount: _useCount, ...row } = item
+  return row
+}
+
+/** Replace the items one frame yields. */
+export function replaceFrameItems(canvasId: string, frameId: string, items: LibraryItem[]): Promise<void> {
+  return libraryWrite(canvasId, async () => {
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(t.libraryItems)
+        .where(and(eq(t.libraryItems.canvasId, canvasId), eq(t.libraryItems.frameId, frameId)))
+      /* an id moved from another frame takes its place */
+      if (items.length) {
+        await tx.delete(t.libraryItems).where(
+          and(
+            eq(t.libraryItems.canvasId, canvasId),
+            inArray(
+              t.libraryItems.itemId,
+              items.map((i) => i.itemId),
+            ),
+          ),
+        )
+        await tx.insert(t.libraryItems).values(items.map(itemRow))
+      }
+    })
+  })
+}
+
+export function deleteItemsOfFrame(canvasId: string, frameId: string): Promise<void> {
+  return libraryWrite(canvasId, async () => {
+    await db
+      .delete(t.libraryItems)
+      .where(and(eq(t.libraryItems.canvasId, canvasId), eq(t.libraryItems.frameId, frameId)))
+  })
+}
+
+/** Drop the whole projection of a library (a disable, a full rebuild). */
+export function deleteLibraryItems(canvasId: string): Promise<void> {
+  return libraryWrite(canvasId, async () => {
+    await db.delete(t.libraryItems).where(eq(t.libraryItems.canvasId, canvasId))
+  })
+}
+
+export async function loadLibraryItems(canvasId: string): Promise<LibraryItem[]> {
+  await libraryWritesSettled(canvasId)
+  const rows = await db.select().from(t.libraryItems).where(eq(t.libraryItems.canvasId, canvasId))
+  return rows.map((row) => ({ ...row }))
+}
+
+export function saveItemMeta(meta: LibraryItemMeta): Promise<void> {
+  const { canvasId, itemId, ...set } = meta
+  return libraryWrite(canvasId, async () => {
+    await db
+      .insert(t.libraryItemMeta)
+      .values(meta)
+      .onConflictDoUpdate({ target: [t.libraryItemMeta.canvasId, t.libraryItemMeta.itemId], set })
+  })
+}
+
+export async function loadItemMeta(canvasId: string): Promise<LibraryItemMeta[]> {
+  await libraryWritesSettled(canvasId)
+  return db.select().from(t.libraryItemMeta).where(eq(t.libraryItemMeta.canvasId, canvasId))
+}
+
+/** A duplicated library keeps what people curated. */
+export async function copyItemMeta(fromCanvasId: string, toCanvasId: string): Promise<void> {
+  const rows = await loadItemMeta(fromCanvasId)
+  if (!rows.length) return
+  await libraryWrite(toCanvasId, async () => {
+    await db
+      .insert(t.libraryItemMeta)
+      .values(rows.map((row) => ({ ...row, canvasId: toCanvasId })))
+      .onConflictDoNothing()
+  })
 }
