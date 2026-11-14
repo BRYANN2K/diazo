@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { Client, startServer, type Server } from './harness.ts'
 import type { CurationJobView, CurationPlanView } from '../shared/libraryCuration'
+import type { Canvas } from '../shared/types'
 
 /**
  * AI library curation against the REAL server (see ./harness.ts), with the
@@ -209,5 +210,42 @@ describe('curating through the API', () => {
     const after = (await (await owner.get(`/api/library-curations/${jobId}/plan`)).json()) as CurationPlanView
     expect(after.tree[1]!.children[0]!.name).toBe('Pricing')
     expect((await owner.patch(`/api/library-curations/${jobId}/plan`, { edits: [{ op: 'explode' }] })).status).toBe(400)
+  })
+  it('applies the plan to a new canvas and library, leaving the sources as they were', async () => {
+    const before = await Promise.all(
+      [sourceA, sourceB].map(async (id) => (await (await owner.get(`/api/canvases/${id}`)).json()) as Canvas),
+    )
+    expect((await stranger.post(`/api/library-curations/${jobId}/apply`, {})).status).toBe(404)
+    const started = await owner.post(`/api/library-curations/${jobId}/apply`, {})
+    expect(started.status).toBe(202)
+    const done = await until(
+      async () => (await (await owner.get(`/api/library-curations/${jobId}`)).json()) as CurationJobView,
+      (j) => j.status === 'applied' || j.status === 'failed',
+    )
+    expect(done).toMatchObject({ status: 'applied', error: null })
+    const canvas = (await (await owner.get(`/api/canvases/${done.canvasId}`)).json()) as Canvas
+    expect(canvas.name).toBe('Design Library (curated)')
+    expect(canvas.pages!.map((p) => p.name)).toEqual(['Heroes/AI products', 'Marketing sections/Pricing'])
+    expect(canvas.frames.map((f) => f.name).sort()).toEqual([
+      'bk.x-faq — Questions',
+      'bk.x-pricing — Pricing',
+      'hero.x-ai — AI hero',
+    ])
+    const library = await until(
+      async () => (await (await owner.get(`/api/canvases/${done.canvasId}`)).json()).library,
+      (l) => l?.index?.status === 'done',
+    )
+    expect(library).toMatchObject({ items: 3 })
+    const search = await (
+      await owner.get(`/api/libraries/${done.canvasId}/items?category=Marketing%20sections/Pricing`)
+    ).json()
+    expect(search.total).toBe(2)
+    const after = await Promise.all(
+      [sourceA, sourceB].map(async (id) => (await (await owner.get(`/api/canvases/${id}`)).json()) as Canvas),
+    )
+    const shape = (cs: Canvas[]) =>
+      cs.map((c) => ({ pages: c.pages, frames: c.frames.map((f) => [f.id, f.name, f.updatedAt, f.html]) }))
+    expect(shape(after)).toEqual(shape(before))
+    expect(after.every((c) => !c.library)).toBe(true)
   })
 })

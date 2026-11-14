@@ -28,6 +28,7 @@ import {
   retryCuration,
   startCuration,
 } from './libraryCuration.ts'
+import { applyCuration } from './libraryCurationApply.ts'
 
 export const curationRouter = express.Router()
 
@@ -144,6 +145,24 @@ curationRouter.post('/:id/cancel', async (req, res) => {
   if (!job) return res.status(404).json({ error: 'curation not found' })
   try {
     res.json(jobView(await cancelCuration(job.id)))
+  } catch (error) {
+    answerError(res, error)
+  }
+})
+
+/** Write the plan: a new canvas with a page per category, the kept frames
+ *  copied onto it, then a library over it. Returns at once (202); the job's
+ *  progress follows the copy, `canvasId` names the new canvas. */
+curationRouter.post('/:id/apply', async (req, res) => {
+  const job = mine(req)
+  if (!job) return res.status(404).json({ error: 'curation not found' })
+  try {
+    const applying = await applyCuration(
+      job.id,
+      { id: req.user!.id, name: req.user!.name },
+      { includeUnclassified: req.body?.includeUnclassified !== false },
+    )
+    res.status(202).json(jobView(applying))
   } catch (error) {
     answerError(res, error)
   }

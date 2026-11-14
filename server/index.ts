@@ -4,6 +4,7 @@ import { libraryRouter } from './libraryRoutes.ts'
 import { curationRouter } from './libraryCurationRoutes.ts'
 import { wireLibraryDescribe } from './libraryDescribe.ts'
 import { hydrateCurations, resumeCurations } from './libraryCuration.ts'
+import { resumeApplies } from './libraryCurationApply.ts'
 import { env } from './env.ts'
 import {
   catalogEntry,
@@ -208,6 +209,7 @@ wireLibraryDescribe() // AI descriptions, only on libraries that turned them on
 void Promise.all(libraryIndex.resumeIndexing(libraries.allLibraries()))
 await hydrateCurations() // AI library curations; the ones a restart cut off go on
 resumeCurations()
+resumeApplies()
 await hydrateInstanceSettings() // the sign-in policy, read on every signup
 await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use
