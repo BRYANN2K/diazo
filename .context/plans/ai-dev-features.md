@@ -5,7 +5,7 @@ to Stip, 5 live frames, 6 drift review, 8 library-first plan, 9 anti-slop lint. 
 Bryan's go.
 
 Rules for every feature: one `feat/*` branch, one commit per step, `bun run typecheck && bun run lint && bun run
-test` before each commit, the README's "This fork" section updated, no push, no deploy.
+test` before each commit, `docs/FEATURES.md` updated, no push, no deploy.
 
 ## Order and dependencies
 

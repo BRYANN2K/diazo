@@ -16,7 +16,8 @@ status, and an activity feed in realtime over one WebSocket room per canvas.
 - Work on `bryann2k/main` (or a `feat/*` branch merged into it). Never push to `upstream`
   (`kgoedecke/doop`); `origin` is `BRYANN2K/doop`.
 - Read `FORK.md` first: merged and dropped upstream PRs, the resync recipe, the k3s deploy.
-- The fork's own features are listed in the README section "This fork". Update it when you add one.
+- The fork's own features are listed in `docs/FEATURES.md` (the README's "What it does" sums them
+  up). Update it when you add one. The project is presented as **redoop**.
 - The instance is Tailscale only (`tailscale serve`, k3s `ClusterIP`). Never add an ingress,
   cloudflared or Funnel.
 - Never write secrets into the repo or to disk; `doop-secrets` lives in the cluster only.
