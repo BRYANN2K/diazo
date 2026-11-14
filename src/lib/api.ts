@@ -475,6 +475,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ brief, picks, pageId }),
     }),
+  pickDuel: (canvasId: string, duelId: string, frameId: string) =>
+    req<DuelView>(`/api/canvases/${canvasId}/duels/${duelId}/pick`, {
+      method: 'POST',
+      body: JSON.stringify({ frameId }),
+    }),
   listDuels: (canvasId: string) => req<DuelView[]>(`/api/canvases/${canvasId}/duels`),
   rollbackRun: (canvasId: string, runId: string, force = false) =>
     req<RollbackResult>(`/api/canvases/${canvasId}/runs/${runId}/rollback`, {

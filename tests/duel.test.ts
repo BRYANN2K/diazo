@@ -16,7 +16,8 @@ vi.mock('../server/resident.ts', () => ({ onFeedback: () => {} }))
 vi.mock('../server/distill.ts', () => ({ onDecision: () => {} }))
 
 const { duelProblem } = await import('../shared/duel.ts')
-const { DUEL_FRAME, DuelInputError, duelDeps, duelView, pickLabel, startDuel } = await import('../server/duels.ts')
+const { DUEL_FRAME, DuelInputError, duelDeps, duelView, pickDuel, pickLabel, startDuel } =
+  await import('../server/duels.ts')
 const { store } = await import('../server/store.ts')
 const actions = await import('../server/actions.ts')
 
@@ -115,5 +116,30 @@ describe('duelView', () => {
     })
     expect(view.results[1]).toMatchObject({ status: 'failed', exists: true })
     expect(view.results[1]!.runId).toBeUndefined()
+  })
+})
+
+describe('pickDuel', () => {
+  it('saves the kept entry as a canvas decision and archives the others', async () => {
+    store.init([structuredClone(CANVAS)])
+    let row: Record<string, unknown> = {}
+    vi.spyOn(duelDeps, 'insert').mockImplementation(async (r) => {
+      row = { pickedFrameId: null, decidedAt: null, ...r }
+    })
+    vi.spyOn(duelDeps, 'get').mockImplementation((async () => [row]) as never)
+    const update = vi.spyOn(duelDeps, 'update').mockResolvedValue()
+    const duel = await startDuel({ canvasId: 'c1', brief: 'Hero', picks: [gpt, claude], actor: human, userId: 'u1' })
+    const [a, b] = duel.entries
+    const view = await pickDuel('c1', duel.id, b!.frameId, human)
+    expect(view?.pickedFrameId).toBe(b!.frameId)
+    expect(update).toHaveBeenCalledWith(duel.id, expect.objectContaining({ pickedFrameId: b!.frameId }))
+    const [decision] = actions.getDecisions('c1')
+    expect(decision).toMatchObject({ source: 'duel', frameId: b!.frameId })
+    expect(decision!.text).toContain('kept Claude API · claude-sonnet-4-6 over OpenAI · gpt-5')
+    expect(store.getFrame(a!.frameId)).toMatchObject({ hidden: true, name: 'Duel A · OpenAI · gpt-5 (archived)' })
+    expect(store.getFrame(b!.frameId)?.hidden).toBeFalsy()
+    /* decided once */
+    row = { ...row, pickedFrameId: b!.frameId }
+    await expect(pickDuel('c1', duel.id, a!.frameId, human)).rejects.toBeInstanceOf(DuelInputError)
   })
 })

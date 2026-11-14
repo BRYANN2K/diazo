@@ -183,3 +183,36 @@ export async function getDuel(canvasId: string, id: string): Promise<ModelDuel |
   const [row] = await duelDeps.get(canvasId, id)
   return row ? toDuel(row) : undefined
 }
+
+/**
+ * Keep one entry: the pick lands in Memory as a canvas decision (which
+ * model, against which others, for which brief), and the other entries are
+ * archived — hidden and renamed, never deleted, so their history and runs
+ * stay inspectable.
+ */
+export async function pickDuel(
+  canvasId: string,
+  duelId: string,
+  frameId: string,
+  actor: Actor,
+): Promise<DuelView | undefined> {
+  const duel = await getDuel(canvasId, duelId)
+  if (!duel) return undefined
+  if (duel.pickedFrameId) throw new DuelInputError('this duel is already decided')
+  const kept = duel.entries.find((e) => e.frameId === frameId)
+  if (!kept || !store.getFrame(frameId)) throw new DuelInputError('that frame is not an entry of this duel')
+  const others = duel.entries.filter((e) => e !== kept)
+  actions.recordDuelDecision(
+    canvasId,
+    `Model duel “${duel.brief}”: kept ${kept.label} over ${others.map((e) => e.label).join(', ')}.`,
+    frameId,
+    actor,
+  )
+  for (const other of others) {
+    const frame = store.getFrame(other.frameId)
+    if (frame && !frame.hidden) actions.updateFrame(frame.id, { hidden: true, name: `${frame.name} (archived)` }, actor)
+  }
+  const decided: ModelDuel = { ...duel, pickedFrameId: frameId, decidedAt: Date.now() }
+  await duelDeps.update(duel.id, { pickedFrameId: frameId, decidedAt: decided.decidedAt })
+  return duelView(decided)
+}

@@ -17,4 +17,7 @@ export const duel = {
   statusQueued: 'Na fila',
   statusRunning: 'Desenhando…',
   statusFailed: 'Falhou',
+  keep: 'Ficar com este',
+  kept: '{label} escolhido: salvo na Memória, as outras entradas arquivadas',
+  pickFailed: 'Não foi possível escolher esta entrada.',
 } as const

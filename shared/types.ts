@@ -309,7 +309,7 @@ export interface DesignDecision {
   summary?: string
   /** where the decision came from: task feedback, an @agent element comment,
    *  or the human's own conversation with a connected agent (save_decision) */
-  source: 'feedback' | 'comment' | 'chat'
+  source: 'feedback' | 'comment' | 'chat' | 'duel'
   frameId?: string
   /** the human who gave the feedback */
   from: string

@@ -17,4 +17,7 @@ export const duel = {
   statusQueued: 'Queued',
   statusRunning: 'Designing…',
   statusFailed: 'Failed',
+  keep: 'Keep this one',
+  kept: 'Kept {label}: saved to Memory, the other entries archived',
+  pickFailed: 'Could not keep this entry.',
 } as const

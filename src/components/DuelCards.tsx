@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { formatCost } from '../../shared/agentRuns'
-import type { DuelView } from '../../shared/duel'
-import { api } from '../lib/api'
+import type { DuelEntryResult, DuelView } from '../../shared/duel'
+import { api, errorMessage } from '../lib/api'
 import { useStore } from '../lib/store'
 import { useT } from '../lib/i18n'
 import { FramePreview } from './FramePreview'
 import { Badge } from './ui/badge'
+import { Button } from './ui/button'
 import { ListSection } from './ui/list'
 
 function elapsed(ms: number | undefined): string {
@@ -39,14 +40,40 @@ export function DuelCards({ canvasId }: { canvasId: string }) {
     <section aria-label={t('duel.cardsTitle')} className="flex flex-none flex-col pb-1">
       <ListSection>{t('duel.cardsTitle')}</ListSection>
       {open.map((duel) => (
-        <DuelCard key={duel.id} duel={duel} />
+        <DuelCard
+          key={duel.id}
+          canvasId={canvasId}
+          duel={duel}
+          onPicked={(next) => setDuels((list) => list.map((d) => (d.id === next.id ? next : d)))}
+        />
       ))}
     </section>
   )
 }
 
-function DuelCard({ duel }: { duel: DuelView }) {
+function DuelCard({
+  canvasId,
+  duel,
+  onPicked,
+}: {
+  canvasId: string
+  duel: DuelView
+  onPicked: (duel: DuelView) => void
+}) {
   const t = useT()
+  const [busy, setBusy] = useState(false)
+  const allSettled = duel.results.every((r) => r.status === 'done' || r.status === 'failed')
+
+  async function keep(entry: DuelEntryResult) {
+    setBusy(true)
+    try {
+      onPicked(await api.pickDuel(canvasId, duel.id, entry.frameId))
+      useStore.getState().pushNotice(t('duel.kept', { label: entry.label }))
+    } catch (err) {
+      useStore.getState().pushNotice(errorMessage(err, t('duel.pickFailed')))
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="mx-3 mb-2 rounded-card border border-border p-2">
@@ -67,7 +94,16 @@ function DuelCard({ duel }: { duel: DuelView }) {
                 .filter(Boolean)
                 .join(' · ')}
             </span>
-            {entry.status !== 'done' && (
+            {entry.status === 'done' ? (
+              <Button
+                variant="default"
+                size="sm"
+                disabled={busy || !allSettled || !entry.exists}
+                onClick={() => void keep(entry)}
+              >
+                {t('duel.keep')}
+              </Button>
+            ) : (
               <Badge tone="outline">
                 {entry.status === 'failed'
                   ? t('duel.statusFailed')
