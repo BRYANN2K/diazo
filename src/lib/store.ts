@@ -112,7 +112,7 @@ interface State {
   /** the Layers rail is showing (desktop); the choice sticks across visits */
   layersOpen: boolean
   /** which face the Layers panel shows: the layer tree, or the design tokens */
-  layersTab: 'layers' | 'components' | 'tokens'
+  layersTab: 'layers' | 'components' | 'tokens' | 'library'
   /** ⌘. — every panel and toolbar is off screen, leaving only the canvas.
    *  A plain overlay flag: the panels' own open/closed state is untouched
    *  underneath, so toggling back shows exactly what was open before */
@@ -278,7 +278,7 @@ interface State {
   pickElements(frameId: string, selectors: string[]): void
   setElementPanelOpen(v: boolean): void
   setLayersOpen(v: boolean): void
-  setLayersTab(tab: 'layers' | 'components' | 'tokens'): void
+  setLayersTab(tab: 'layers' | 'components' | 'tokens' | 'library'): void
   toggleUiHidden(): void
   setPrototypeMode(on: boolean): void
   setViewport(v: Viewport): void

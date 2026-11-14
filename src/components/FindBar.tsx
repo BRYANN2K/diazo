@@ -20,7 +20,13 @@ import {
 import type { CanvasFindHit } from '../../shared/canvasFind'
 import type { LibraryItemSummary, LibrarySearchResult } from '../../shared/library'
 import { focusOf, groupByFrame, resultRows, rowDomId, rowItem, rowKey, type ResultRow } from '../lib/findRows'
-import { itemCanvasUrl, libraryFocus, libraryRows } from '../lib/findLibrary'
+import {
+  itemCanvasUrl,
+  libraryFocus,
+  libraryRows,
+  personHasLibraries,
+  resetHasLibrariesForTest,
+} from '../lib/findLibrary'
 import { textFocus } from '../lib/findPreviewRuntime'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
@@ -69,20 +75,8 @@ const SCOPES: Scope[] = ['page', 'canvas', 'all', 'library']
 /** How long typing settles before the library index is asked. */
 const LIBRARY_FIND_DEBOUNCE_MS = 120
 
-/* whether this person has any library, asked once per page load */
-let hasLibraries: Promise<boolean> | null = null
-function personHasLibraries(): Promise<boolean> {
-  hasLibraries ??= api
-    .listLibraries()
-    .then((r) => r.libraries.length > 0)
-    .catch(() => false)
-  return hasLibraries
-}
-
 /** For tests: forget whether this person has libraries. */
-export function resetFindLibrariesForTest(): void {
-  hasLibraries = null
-}
+export const resetFindLibrariesForTest = resetHasLibrariesForTest
 
 /** How long the pointer rests on a row before the preview follows it, so
  *  sweeping across the list does not flicker the preview. */

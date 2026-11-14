@@ -814,6 +814,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   preview runtime and snapshot (`shared/findPreviewRuntime.ts`, `shared/librarySnapshot.ts`) in the
   headless browser, or, without one, reads the element by parse5 and keeps the frame's `<style>`
   blocks whole under the scope (`fidelity: 'static'`). Either is one ordinary design write.
+  The gallery (`/libraries`, `/l/<id>`, `/l/<id>/i/<item>`: `src/pages/Libraries.tsx`,
+  `src/pages/LibraryPage.tsx`, `src/components/library/*`, view in the URL via `src/lib/libraryQuery.ts`,
+  a windowed grid through `src/hooks/use-windowed-grid.ts`) and the Layers panel's Library tab
+  (`LibraryPanel.tsx`, shown once the person has a library; its pick is kept per browser under
+  `doop:library-panel`).
   REST under `/api/libraries` (`server/libraryRoutes.ts`, 30 searches per 10 s per account; never
   `store.load`); agent tools in `server/libraryTools.ts`, registered for MCP and the resident agent
   under the same names. ⌘F's Library scope (`src/lib/findLibrary.ts`, `src/lib/findRows.ts`,

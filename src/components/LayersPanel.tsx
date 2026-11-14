@@ -51,6 +51,8 @@ import { cn } from '@/lib/utils'
 import { AgentIcon } from './AgentIcon'
 import { LayerKindIcon } from './LayerKindIcon'
 import { ComponentsPanel } from './ComponentsPanel'
+import { LibraryPanel } from './library/LibraryPanel'
+import { useHasLibraries } from '../lib/findLibrary'
 import { FrameContextMenu } from './FrameContextMenu'
 import { FrameApprovalBadge } from './FrameApproval'
 import {
@@ -81,6 +83,7 @@ import {
   LayersIcon,
   ComponentIcon,
   BracesIcon,
+  LibraryIcon,
   LockIcon,
   LockOpenIcon,
   PanelCollapseIcon,
@@ -239,6 +242,7 @@ export function LayersPanel({
      tokens; in the store so the collapsed rail can open straight onto one */
   const tab = useStore((s) => s.layersTab)
   const setTab = useStore((s) => s.setLayersTab)
+  const hasLibraries = useHasLibraries()
   /* view and comment links browse the tree; nothing in it moves or changes */
   const readOnly = useStore((s) => !canEditOpenCanvas(s))
   const pageCanvas = usePageCanvas()
@@ -553,6 +557,11 @@ export function LayersPanel({
             <PanelIconTab value="tokens" icon={<BracesIcon />} title={t('panels.layersTabTokens')}>
               {t('panels.layersTabTokens')}
             </PanelIconTab>
+            {hasLibraries && (
+              <PanelIconTab value="library" icon={<LibraryIcon />} title={t('library.panelTab')}>
+                {t('library.panelTab')}
+              </PanelIconTab>
+            )}
           </PanelTabs>
           {surface === 'inline' ? (
             <PanelClose label={t('common.close')} onClick={onClose} />
@@ -572,6 +581,7 @@ export function LayersPanel({
         </PanelHeader>
       </PanelTabsRoot>
       {tab === 'components' && <ComponentsPanel />}
+      {tab === 'library' && hasLibraries && <LibraryPanel />}
       {tab === 'tokens' && (
         <PanelBody className="flex flex-col pb-2">
           <TokensSection />

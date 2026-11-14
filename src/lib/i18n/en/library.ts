@@ -98,4 +98,6 @@ export const library = {
   pickFramePlaceholder: 'Pick a frame',
   insert: 'Insert',
   openLibraries: 'Open the design libraries',
+  panelTab: 'Library',
+  panelLibrary: 'Library',
 } as const

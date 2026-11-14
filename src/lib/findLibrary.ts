@@ -7,6 +7,43 @@ import type { LibraryItemSummary, LibrarySearchResult } from '../../shared/libra
 import { NON_INSERTABLE_KINDS } from '../../shared/libraryRules'
 import { rowItem, type FrameGroup, type ResultRow } from './findRows'
 import type { ItemFocus } from './findPreviewRuntime'
+import { useEffect, useState } from 'react'
+import { api } from './api'
+import { useStore } from './store'
+
+/* whether this person has any library, asked once per page load */
+let hasLibraries: Promise<boolean> | null = null
+
+/** Does this person have a design library? Asked once per page load. */
+export function personHasLibraries(): Promise<boolean> {
+  /* through a resolved promise: an api without the call (a test's mock) is a "no" */
+  hasLibraries ??= Promise.resolve()
+    .then(() => api.listLibraries())
+    .then((r) => r.libraries.length > 0)
+    .catch(() => false)
+  return hasLibraries
+}
+
+/** For tests: forget whether this person has libraries. */
+export function resetHasLibrariesForTest(): void {
+  hasLibraries = null
+}
+
+/** True once this person is known to have a library (or the canvas is one). */
+export function useHasLibraries(): boolean {
+  const isLibrary = useStore((s) => !!s.canvas?.library)
+  const [has, setHas] = useState(false)
+  useEffect(() => {
+    let stale = false
+    void personHasLibraries().then((yes) => {
+      if (!stale) setHas(yes)
+    })
+    return () => {
+      stale = true
+    }
+  }, [])
+  return isLibrary || has
+}
 
 /** Family groups, best first, each with its matched variants. */
 export function libraryRows(result: LibrarySearchResult): FrameGroup[] {
