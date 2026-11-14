@@ -34,6 +34,9 @@ permissions:
 
 jobs:
   release-please:
+    # Upstream's versioning: the redoop fork (BRYANN2K/redoop) merges with
+    # "Merge branch" commits and cuts no releases, so the job runs upstream only.
+    if: github.repository == 'kgoedecke/doop'
     runs-on: ubuntu-latest
     concurrency:
       group: release-please

@@ -117,6 +117,24 @@ bun install && bun run typecheck && bun run lint && bun run test
 git push origin main   # jamais vers upstream
 ```
 
+## Workflows GitHub Actions
+
+Sur `main` (et les PR) du fork tournent : **CI** (typecheck, lint, build, tests
+en 4 shards), **docker** (l'image ci-dessous), **Desktop** et **iOS** (builds de
+validation, seulement quand `desktop/` ou `ios/` change ; rien n'est publié).
+
+Gardés par `if: github.repository == 'kgoedecke/doop'`, donc inactifs ici :
+
+- **Release Please** : le versioning d'upstream. Le fork merge avec des commits
+  « Merge branch … » et ne coupe pas de release ; il échouait et créait des
+  branches `release-please--*`.
+- **CLA** : le CLA est celui d'upstream ; il aurait réclamé une signature sur
+  nos propres PR.
+
+`desktop-release.yml` et `ios-release.yml` ne partent que sur un tag
+(`desktop-v*`, `ios-v*`) ou à la main, et demandent les secrets de signature
+d'upstream : ne pas pousser ces tags dans le fork.
+
 ## Image Docker
 
 Buildée en CI (`.github/workflows/docker.yml`) et publiée sur

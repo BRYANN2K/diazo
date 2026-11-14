@@ -14,6 +14,9 @@ permissions:
 
 jobs:
   cla-assistant:
+    # The CLA is upstream's (kgoedecke/doop); the redoop fork takes no outside
+    # contributions under it, so the check runs upstream only.
+    if: github.repository == 'kgoedecke/doop'
     runs-on: ubuntu-latest
     steps:
       - name: CLA assistant
