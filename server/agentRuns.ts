@@ -42,6 +42,7 @@ export const agentRunDeps = {
   insert: async (row: typeof agentRuns.$inferInsert) => {
     await db.insert(agentRuns).values(row)
   },
+  selectOne: (id: string) => db.select().from(agentRuns).where(eq(agentRuns.id, id)).limit(1),
   select: (canvasId: string, limit: number) =>
     db.select().from(agentRuns).where(eq(agentRuns.canvasId, canvasId)).orderBy(desc(agentRuns.startedAt)).limit(limit),
 }
@@ -142,6 +143,11 @@ function toRecord(row: typeof agentRuns.$inferSelect): AgentRunRecord {
     startedAt: row.startedAt,
     endedAt: row.endedAt,
   }
+}
+
+export async function getRun(id: string): Promise<AgentRunRecord | undefined> {
+  const [row] = await agentRunDeps.selectOne(id)
+  return row ? toRecord(row) : undefined
 }
 
 export async function listRuns(canvasId: string, limit = USAGE_RUN_LIMIT): Promise<AgentRunRecord[]> {

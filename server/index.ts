@@ -40,6 +40,7 @@ import { localDriftRouter } from './driftBridge.ts'
 import { compareFrameWithUrl, driftErrorMessage, getComparison, listComparisons } from './drift.ts'
 import { classifyDriftUrl } from '../shared/drift.ts'
 import { usageReport } from './agentRuns.ts'
+import { runTimeline } from './runReplay.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
@@ -3017,6 +3018,15 @@ app.get('/api/canvases/:id/find', (req, res) => {
 app.get('/api/canvases/:id/usage', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   res.json(await usageReport(req.params.id))
+})
+
+/* run replay (server/runReplay.ts): one resident run's activity and the
+   before/after of every frame it touched */
+app.get('/api/canvases/:id/runs/:runId', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  const timeline = await runTimeline(req.params.id, req.params.runId)
+  if (!timeline) return res.status(404).json({ error: 'No such run on this canvas' })
+  res.json(timeline)
 })
 
 app.get('/api/canvases/:id/chat', (req, res) => {

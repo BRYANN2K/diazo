@@ -693,6 +693,31 @@ export async function listFrameVersions(frameId: string): Promise<FrameVersionIn
   }))
 }
 
+/** The frames a run's writes filed versions of (run replay). */
+export async function listRunFrameIds(runId: string): Promise<{ frameId: string; canvasId: string }[]> {
+  await pendingVersionWrites(() => true)
+  return db
+    .selectDistinct({ frameId: t.frameVersions.frameId, canvasId: t.frameVersions.canvasId })
+    .from(t.frameVersions)
+    .where(eq(t.frameVersions.runId, runId))
+}
+
+/** A run's activity lines, oldest first, with the canvas each was on. */
+export async function listRunActivity(runId: string): Promise<(ActivityItem & { canvasId: string })[]> {
+  const rows = await db.select().from(t.activity).where(eq(t.activity.runId, runId)).orderBy(t.activity.at)
+  return rows.map((row) => ({
+    id: row.id,
+    canvasId: row.canvasId,
+    actorName: row.actorName,
+    actorKind: row.actorKind as ActivityItem['actorKind'],
+    actorColor: row.actorColor,
+    message: row.message,
+    ...(row.frameId ? { frameId: row.frameId } : {}),
+    at: row.at,
+    runId,
+  }))
+}
+
 /** One version in full; undefined when the id is unknown OR belongs to
  *  another frame, so a caller can never read across frames by id alone. */
 export async function getFrameVersion(frameId: string, versionId: string): Promise<FrameVersion | undefined> {

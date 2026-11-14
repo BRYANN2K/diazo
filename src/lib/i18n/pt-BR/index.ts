@@ -25,6 +25,7 @@ import { actions } from './actions'
 import { lint } from './lint'
 import { handoff } from './handoff'
 import { usage } from './usage'
+import { replay } from './replay'
 
 export const ptBR: Catalog = {
   common,
@@ -53,4 +54,5 @@ export const ptBR: Catalog = {
   lint,
   handoff,
   usage,
+  replay,
 }

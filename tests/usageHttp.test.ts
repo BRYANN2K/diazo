@@ -49,3 +49,8 @@ it('answers get_usage over MCP with the same report', async () => {
   const report = JSON.parse(first!.text) as UsageReport
   expect(report).toMatchObject({ runs: [], byModel: [], total: { runs: 0 } })
 })
+
+it('answers 404 for a run that left nothing on the canvas, after querying the run tables', async () => {
+  expect((await owner.get(`/api/canvases/${canvasId}/runs/no-such-run`)).status).toBe(404)
+  expect((await stranger.get(`/api/canvases/${canvasId}/runs/no-such-run`)).ok).toBe(false)
+})

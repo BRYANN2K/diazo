@@ -3,7 +3,8 @@ import { formatCost, formatTokens, type AgentRunRecord, type UsageReport } from 
 import { api, errorMessage } from '../lib/api'
 import { timeAgo } from '../lib/time'
 import { useT } from '../lib/i18n'
-import { ListHint, ListItem, ListMeta, ListSection, ListSummary, ListTitle } from './ui/list'
+import { ListHint, ListItem, ListMeta, ListRow, ListSection, ListSummary, ListTitle } from './ui/list'
+import { RunReplayModal } from './RunReplayModal'
 import { PanelBody } from './ui/panel'
 import { Button } from './ui/button'
 import { SyncIcon } from './ui/icons'
@@ -23,6 +24,7 @@ export function UsagePanel({ canvasId }: { canvasId: string }) {
   const [report, setReport] = useState<UsageReport | null>(null)
   const [error, setError] = useState('')
   const [nonce, setNonce] = useState(0)
+  const [openRun, setOpenRun] = useState<string | null>(null)
 
   useEffect(() => {
     let live = true
@@ -84,13 +86,14 @@ export function UsagePanel({ canvasId }: { canvasId: string }) {
       ))}
       <ListSection>{t('usage.runs')}</ListSection>
       {report.runs.map((run) => (
-        <RunRow key={run.id} run={run} />
+        <RunRow key={run.id} run={run} onOpen={() => setOpenRun(run.id)} />
       ))}
+      {openRun && <RunReplayModal canvasId={canvasId} runId={openRun} onClose={() => setOpenRun(null)} />}
     </PanelBody>
   )
 }
 
-function RunRow({ run }: { run: AgentRunRecord }) {
+function RunRow({ run, onOpen }: { run: AgentRunRecord; onOpen: () => void }) {
   const t = useT()
   const outcome =
     run.outcome === 'done'
@@ -99,7 +102,7 @@ function RunRow({ run }: { run: AgentRunRecord }) {
         ? t('usage.outcomeStopped')
         : t('usage.outcomeFailed')
   return (
-    <ListItem>
+    <ListRow onClick={onOpen} title={t('replay.openRun')}>
       <ListTitle className="truncate">
         {run.agent}
         {run.kind === 'chat' && ` · ${t('usage.kindChat')}`}
@@ -117,6 +120,6 @@ function RunRow({ run }: { run: AgentRunRecord }) {
           timeAgo(run.startedAt),
         ].join(' · ')}
       </ListMeta>
-    </ListItem>
+    </ListRow>
   )
 }
