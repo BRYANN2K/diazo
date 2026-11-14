@@ -21,6 +21,7 @@ import { SearchField } from './ui/search-field'
 import { FramePreview } from './FramePreview'
 import { FindPreview } from './FindPreview'
 import { useFindDrag } from './FindDrag'
+import { useInsertedBox } from '../lib/insertedBox'
 
 interface Hit {
   frame: Frame
@@ -365,6 +366,7 @@ export function FindBar({
         done.approvalWithdrawn ? t('actions.findApprovalWithdrawn') : '',
       ]
       notice(parts.filter(Boolean).join(' · '))
+      useInsertedBox.getState().open(done)
     } catch {
       notice(t('actions.findInsertFailed', { ref }))
     } finally {

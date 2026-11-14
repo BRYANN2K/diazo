@@ -7,8 +7,8 @@
 import type { Frame } from '../../shared/types'
 import { isCanvasElement } from './drawing'
 import { canEditOpenCanvas, pickedSelectors, useStore } from './store'
-import { freshElementId, insertElements, placeElement, type DropTarget } from './layers'
-import { ELEMENT_ID_ATTR } from '../../shared/elementId'
+import { freshElementId, insertElements, placeElement, removeElements, type DropTarget } from './layers'
+import { ELEMENT_ID_ATTR, elementIdSelector } from '../../shared/elementId'
 import type { LibrarySnapshot } from './findPreviewRuntime'
 import { snapshotLibraryItem } from './findSnapshot'
 import { saveFrameHtml } from './layerEdits'
@@ -146,7 +146,7 @@ export function insertLibraryBlock(
   html: string,
   at: DropTarget | string | null,
   block: string,
-): { html: string; selector: string } | null {
+): { html: string; selector: string; elementId: string } | null {
   const inserted = placeBlock(html, at, block) ?? (at ? placeBlock(html, null, block) : null)
   if (!inserted) return null
   const selector = inserted.selector
@@ -163,13 +163,19 @@ export function insertLibraryBlock(
     el.setAttribute(ELEMENT_ID_ATTR, id)
     taken += ` ${ELEMENT_ID_ATTR}="${id}"`
   }
-  return { html: '<!doctype html>\n' + doc.documentElement.outerHTML, selector }
+  return {
+    html: '<!doctype html>\n' + doc.documentElement.outerHTML,
+    selector,
+    elementId: root.getAttribute(ELEMENT_ID_ATTR) ?? '',
+  }
 }
 
 /** What an insert did, for the notice and the box that follows it. */
 export interface InsertedItem {
   frameId: string
   selector: string
+  /** the block's own `data-doop-id`, which finds it after later edits */
+  elementId: string
   ref: string
   /** false: the item was not found in its sheet and the whole document was copied */
   found: boolean
@@ -204,10 +210,34 @@ export async function insertLibraryItem(opts: {
   return {
     frameId: frame.id,
     selector: done.selector,
+    elementId: done.elementId,
     ref,
     found: snap.found,
     scripted: snap.scripted,
     approvalWithdrawn: frame.approval?.status === 'ready_for_dev',
     before: frame.html,
   }
+}
+
+/** Take an inserted block out again (the box's Undo), found by its own id so
+ *  edits made since keep their place. One undo step, like the insert. */
+export function removeInsertedBlock(item: Pick<InsertedItem, 'frameId' | 'elementId'>): boolean {
+  const frame = useStore.getState().canvas?.frames.find((f) => f.id === item.frameId)
+  if (!frame || frame.locked || !item.elementId) return false
+  const html = removeElements(frame.html, [elementIdSelector(item.elementId)])
+  if (!html) return false
+  saveFrameHtml(frame, html)
+  useStore.getState().pickElement(null)
+  return true
+}
+
+/** The chat line Adapter sends: the block named by its reference and its
+ *  element link, the instruction, and the structure to keep. */
+export function adaptRequest(
+  item: Pick<InsertedItem, 'ref' | 'frameId' | 'elementId'>,
+  opts: { canvasId: string; frameName: string; instruction: string; fallback: string },
+): string {
+  const instruction = opts.instruction.trim() || opts.fallback
+  const link = `/c/${opts.canvasId}?frame=${item.frameId}&element=${item.elementId}`
+  return `Adapt [${REF_ATTR}=${item.ref}] in the frame “${opts.frameName}” (${link}): ${instruction}; keep the structure.`
 }

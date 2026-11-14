@@ -58,6 +58,7 @@ import { CommandPalette } from '../components/CommandPalette'
 import { MainMenu } from '../components/MainMenu'
 import { ShortcutsSheet } from '../components/ShortcutsSheet'
 import { FindBar } from '../components/FindBar'
+import { InsertedBlockBox } from '../components/InsertedBlockBox'
 import { LinkDialog } from '../components/LinkDialog'
 import { FrameHistoryModal } from '../components/FrameHistoryModal'
 import { getIdentity, setName } from '../lib/identity'
@@ -987,6 +988,7 @@ export function CanvasPage({
           bar, so every panel offset stays measured from there */}
       <div className="absolute inset-0 overflow-hidden" style={chromeVars}>
         {find && !presenting && !uiHidden && <FindBar mode={find} step={findStep} onClose={() => setFind(null)} />}
+        {!presenting && !uiHidden && <InsertedBlockBox />}
         <Stage onAddFrame={addFrame} insets={stageInsets} bounds={stageBounds} docked={docked} />
         <div
           className={cn(
