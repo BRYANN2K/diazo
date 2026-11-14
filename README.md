@@ -121,6 +121,9 @@ to upstream's.
   repo (`code_links`). The Inspector's Code row suggests the file from `repo_search` /
   `repo_list`; `get_component`, `get_frame` and the Stip pack (`code-links.json`) carry the
   mapping. Agents call `set_code_link` and `suggest_code_links`. Read-only on the repo.
+- **Token sync with the repo** — the Tokens panel reads the linked repo's CSS variables
+  (`:root`, `@theme`, dark blocks as a theme) and Tailwind v3 theme, parsed without running them,
+  shows the diff, and applies the ticked values in doop.
 - **Self-hosting** — Docker image `ghcr.io/bryann2k/doop:bryann2k-main` built on every push, k3s
   manifests in `deploy/k3s/` with a persistent volume for uploads, exposed through Tailscale
   Serve only (no ingress, no Funnel).

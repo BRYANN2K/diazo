@@ -90,4 +90,20 @@ describe('POST /api/canvases/:id/token-sync', () => {
       ['doop-only', '--color-extra'],
     ])
   })
+
+  it('takes approved repo values into the canvas, creating and editing tokens', async () => {
+    const res = await owner.post(`/api/canvases/${canvasId}/token-sync/apply`, {
+      tokens: [
+        { name: '--color-brand', type: 'color', value: '#0a7cff', themes: { dark: '#66b2ff' } },
+        { name: '--radius-md', type: 'radius', value: '8px' },
+      ],
+    })
+    expect(res.status).toBe(200)
+    const { results, tokens } = await res.json()
+    expect(results.map((r: { result: string }) => r.result).sort()).toEqual(['created', 'updated'])
+    const byName = Object.fromEntries(tokens.map((t: { name: string }) => [t.name, t]))
+    expect(byName['--color-brand']).toMatchObject({ value: '#0a7cff', themes: { dark: '#66b2ff' } })
+    expect(byName['--radius-md']).toMatchObject({ type: 'radius', value: '8px' })
+    expect((await owner.post(`/api/canvases/${canvasId}/token-sync/apply`, { tokens: [] })).status).toBe(400)
+  })
 })

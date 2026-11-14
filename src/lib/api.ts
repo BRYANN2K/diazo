@@ -8,6 +8,7 @@ import type { HandoffFile, HandoffPack, HandoffWriteResult } from '../../shared/
 import type { DriftComparison, DriftFetchRequest, DriftFetchResult } from '../../shared/drift'
 import type { CodeLink, CodeLinkInput, CodeLinkKind } from '../../shared/codeLinks'
 import type { CodeSuggestion } from '../../shared/codeSuggest'
+import type { TokenDiff } from '../../shared/tokenSync'
 import type { ImageDescriptionMode, ImageDescriptionPreference } from '../../shared/imageDescriptions'
 import type { AgentRunners, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
 import type { CanvasFindResult } from '../../shared/canvasFind'
@@ -91,7 +92,14 @@ export interface InstanceChangeInput {
   detach?: boolean
 }
 import type { CustomFont } from '../../shared/fonts'
-import type { DesignToken, DesignTokenInput, ThemeRename, TokenEdit, TokenResult } from '../../shared/designTokens'
+import type {
+  DesignToken,
+  DesignTokenInput,
+  ThemeRename,
+  TokenEdit,
+  TokenResult,
+  TokenType,
+} from '../../shared/designTokens'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
 
@@ -476,6 +484,17 @@ export const api = {
       `/api/canvases/${canvasId}/code-links/suggest`,
       { method: 'POST', body: JSON.stringify({ targetKind, targetId }) },
     ),
+  /* token sync with the linked repo: diff, then take approved repo values in */
+  previewTokenSync: (canvasId: string) =>
+    req<TokenDiff & { repo: string; truncated: boolean }>(`/api/canvases/${canvasId}/token-sync`, { method: 'POST' }),
+  applyTokenSync: (
+    canvasId: string,
+    tokens: { name: string; type: TokenType; value: string; themes?: Record<string, string> }[],
+  ) =>
+    req<{ results: TokenResult[] }>(`/api/canvases/${canvasId}/token-sync/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ tokens }),
+    }),
   /* drift review: compare a frame with the page shipped at a URL */
   compareDrift: (frameId: string, url: string) =>
     req<{ comparison: DriftComparison; shippedFrame: Frame }>(`/api/frames/${frameId}/drift`, {

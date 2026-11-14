@@ -32,6 +32,7 @@ import { Input } from './ui/input'
 import { ListHint } from './ui/list'
 import { Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/modal'
 import { sectionHeading } from './PagesPanel'
+import { TokenSyncModal } from './TokenSyncModal'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,6 +56,7 @@ import {
   RulerIcon,
   SpaceIcon,
   SquareDashedIcon,
+  SyncIcon,
   TextIcon,
   TextSizeIcon,
   VerticalPaddingIcon,
@@ -147,6 +149,7 @@ export function TokensSection() {
   const [themeError, setThemeError] = useState<string | null>(null)
   /** the type groups folded shut */
   const [folded, setFolded] = useState<Set<TokenType>>(() => new Set())
+  const [syncOpen, setSyncOpen] = useState(false)
   const t = useT()
   if (!canvasId) return null
 
@@ -226,32 +229,45 @@ export function TokensSection() {
       <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
         <span className={sectionHeading}>{t('panels.tokensTitle')}</span>
         {!readOnly && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="bare"
-                size="icon-sm"
-                className={sectionBtn}
-                aria-label={t('panels.tokensNew')}
-                title={t('panels.tokensNew')}
-              >
-                <PlusIcon className="size-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent width="sm">
-              {TOKEN_GROUPS.map((group, i) => (
-                <div key={group.join()}>
-                  {i > 0 && <DropdownMenuSeparator />}
-                  {group.map((type) => (
-                    <DropdownMenuItem key={type} onSelect={() => setOpen({ create: type })}>
-                      {t(TOKEN_TYPE_LABEL[type])}
-                    </DropdownMenuItem>
-                  ))}
-                </div>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <span className="flex items-center">
+            <Button
+              variant="bare"
+              size="icon-sm"
+              className={sectionBtn}
+              aria-label={t('panels.tokenSyncAction')}
+              title={t('panels.tokenSyncAction')}
+              onClick={() => setSyncOpen(true)}
+            >
+              <SyncIcon className="size-3.5" />
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="bare"
+                  size="icon-sm"
+                  className={sectionBtn}
+                  aria-label={t('panels.tokensNew')}
+                  title={t('panels.tokensNew')}
+                >
+                  <PlusIcon className="size-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent width="sm">
+                {TOKEN_GROUPS.map((group, i) => (
+                  <div key={group.join()}>
+                    {i > 0 && <DropdownMenuSeparator />}
+                    {group.map((type) => (
+                      <DropdownMenuItem key={type} onSelect={() => setOpen({ create: type })}>
+                        {t(TOKEN_TYPE_LABEL[type])}
+                      </DropdownMenuItem>
+                    ))}
+                  </div>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </span>
         )}
+        {syncOpen && <TokenSyncModal canvasId={canvasId} onClose={() => setSyncOpen(false)} />}
       </div>
       {sorted.length === 0 && <ListHint>{t('panels.tokensHint')}</ListHint>}
       <div className="px-2 pb-1">

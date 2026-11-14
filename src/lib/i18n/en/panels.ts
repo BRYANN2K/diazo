@@ -386,4 +386,23 @@ export const panels = {
   protoNothing: 'Nothing to play yet',
   protoNothingText: 'This page of the canvas has no frames.',
   protoOpenCanvas: 'Open the canvas',
+
+  // token sync with the linked repo
+  tokenSyncAction: 'Sync with repo',
+  tokenSyncEyebrow: 'Token sync',
+  tokenSyncTitle: 'Sync tokens with the linked repo',
+  tokenSyncReading: 'Reading the repo’s style files…',
+  tokenSyncFailed: 'Could not sync the tokens',
+  tokenSyncLede: '{repo} · style files read: {files} · tokens already matching: {same}',
+  tokenSyncInSync: 'The canvas and the repo already agree.',
+  tokenSyncKind_change: 'changed',
+  tokenSyncKind_add: 'new in repo',
+  tokenSyncKind_doopOnly: 'doop only',
+  tokenSyncDoop: 'doop',
+  tokenSyncRepo: 'repo',
+  tokenSyncDoopOnly: 'Only on this canvas:',
+  tokenSyncTruncated: 'The repo is large: only part of it was read.',
+  tokenSyncApply: { one: 'Apply {count} in doop', other: 'Apply {count} in doop' },
+  tokenSyncApplying: 'Applying…',
+  tokenSyncApplied: { one: '{count} token updated in doop.', other: '{count} tokens updated in doop.' },
 } as const

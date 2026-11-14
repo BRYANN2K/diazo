@@ -391,4 +391,23 @@ export const panels: Catalog['panels'] = {
   protoNothing: 'Nada para reproduzir ainda',
   protoNothingText: 'Esta página do canvas não tem frames.',
   protoOpenCanvas: 'Abrir o canvas',
+
+  // sincronização de tokens com o repositório vinculado
+  tokenSyncAction: 'Sincronizar com o repositório',
+  tokenSyncEyebrow: 'Sincronização de tokens',
+  tokenSyncTitle: 'Sincronizar tokens com o repositório vinculado',
+  tokenSyncReading: 'Lendo os arquivos de estilo do repositório…',
+  tokenSyncFailed: 'Não foi possível sincronizar os tokens',
+  tokenSyncLede: '{repo} · arquivos de estilo lidos: {files} · tokens já iguais: {same}',
+  tokenSyncInSync: 'O canvas e o repositório já estão de acordo.',
+  tokenSyncKind_change: 'alterado',
+  tokenSyncKind_add: 'novo no repositório',
+  tokenSyncKind_doopOnly: 'só no doop',
+  tokenSyncDoop: 'doop',
+  tokenSyncRepo: 'repositório',
+  tokenSyncDoopOnly: 'Só neste canvas:',
+  tokenSyncTruncated: 'O repositório é grande: só uma parte foi lida.',
+  tokenSyncApply: { one: 'Aplicar {count} no doop', other: 'Aplicar {count} no doop' },
+  tokenSyncApplying: 'Aplicando…',
+  tokenSyncApplied: { one: '{count} token atualizado no doop.', other: '{count} tokens atualizados no doop.' },
 }

@@ -31,7 +31,7 @@ import { deleteLink, linkFor, localRepo, localRepoRouter, putLink, repoToolCall 
 import { buildHandoffPack, HandoffError } from './handoff.ts'
 import { CodeLinkError, deleteCodeLink, listCodeLinks, putCodeLink } from './codeLinks.ts'
 import { suggestCodeLinks } from './codeSuggest.ts'
-import { previewTokenSync, TokenSyncError } from './tokenSync.ts'
+import { applyRepoTokens, previewTokenSync, TokenSyncError } from './tokenSync.ts'
 import {
   CODE_LINK_KINDS,
   CODE_LINK_MAX_EXPORT,
@@ -76,7 +76,7 @@ import { fontsRouter } from './fontRoutes.ts'
 import { AvatarInputError, clearAvatar, setAvatar } from './avatars.ts'
 import { MAX_AVATAR_BYTES, avatarUrl } from '../shared/avatar.ts'
 import { fontsForCanvas, hydrateFonts } from './fonts.ts'
-import { tokensCss, tokensMarkdown, tokensTailwind } from '../shared/designTokens.ts'
+import { MAX_TOKEN_VALUE, TOKEN_TYPES, tokensCss, tokensMarkdown, tokensTailwind } from '../shared/designTokens.ts'
 import {
   canEditCanvas,
   canManageCanvas,
@@ -1325,6 +1325,30 @@ app.post('/api/canvases/:id/token-sync', async (req, res) => {
     if (e instanceof TokenSyncError) return res.status(e.status).json({ error: e.message })
     throw e
   }
+})
+
+const approvedTokens = z.object({
+  tokens: z
+    .array(
+      z.object({
+        name: z.string().max(200),
+        type: z.enum(TOKEN_TYPES),
+        value: z.string().max(MAX_TOKEN_VALUE),
+        themes: z.record(z.string().max(MAX_TOKEN_VALUE)).optional(),
+      }),
+    )
+    .min(1)
+    .max(200),
+})
+
+/* the person ticked these repo values in the sync modal: take them in */
+app.post('/api/canvases/:id/token-sync/apply', (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'edit')
+  if (!c) return
+  const parsed = approvedTokens.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid tokens' })
+  const results = applyRepoTokens(c.id, parsed.data.tokens, userActor(req))
+  res.json({ results, tokens: store.getTokens(c.id) })
 })
 
 app.use('/api/admin', adminRouter)

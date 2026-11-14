@@ -1,5 +1,8 @@
 import { linkFor, localRepo, repoToolCall } from './localRepo.ts'
 import { store } from './store.ts'
+import * as actions from './actions.ts'
+import type { TokenEdit, TokenResult, TokenType } from '../shared/designTokens.ts'
+import type { Actor } from '../shared/types.ts'
 import type { RepoLink, RepoListResult, RepoReadResult } from '../shared/localRepo.ts'
 import { REPO_MAX_DEPTH } from '../shared/localRepo.ts'
 import {
@@ -108,4 +111,35 @@ export async function previewTokenSync(userId: string, canvasId: string): Promis
     repo: read.repo,
     truncated: read.truncated,
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* repo → doop, after approval                                         */
+/* ------------------------------------------------------------------ */
+
+export interface ApprovedToken {
+  name: string
+  type: TokenType
+  value: string
+  themes?: Record<string, string>
+}
+
+/**
+ * Take the approved repo values into the canvas: an existing token is
+ * edited, a new one created, through the ordinary token actions — so every
+ * frame that names a token re-renders, and each change is attributed.
+ */
+export function applyRepoTokens(canvasId: string, approved: readonly ApprovedToken[], actor: Actor): TokenResult[] {
+  const existing = new Set(store.getTokens(canvasId).map((t) => t.name))
+  const edits: TokenEdit[] = []
+  const creates: ApprovedToken[] = []
+  for (const token of approved) {
+    if (existing.has(token.name))
+      edits.push({ name: token.name, value: token.value, ...(token.themes ? { themes: token.themes } : {}) })
+    else creates.push(token)
+  }
+  const results: TokenResult[] = []
+  if (edits.length) results.push(...(actions.setTokens(canvasId, edits, actor) ?? []))
+  if (creates.length) results.push(...(actions.createTokens(canvasId, creates, actor) ?? []))
+  return results
 }
