@@ -132,6 +132,7 @@ export interface LibrarySearchQuery {
   tag?: string[]
   source?: string[]
   status?: 'draft'
+  sort?: 'relevance' | 'used' | 'newest'
   limit?: number
   cursor?: string
 }
@@ -146,6 +147,7 @@ function libraryParams(query: LibrarySearchQuery): string {
     if (values.length) params.set(key, values.join(','))
   }
   if (query.status) params.set('status', query.status)
+  if (query.sort) params.set('sort', query.sort)
   if (query.limit) params.set('limit', String(query.limit))
   if (query.cursor) params.set('cursor', query.cursor)
   return params.toString()

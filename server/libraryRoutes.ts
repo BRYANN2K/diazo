@@ -8,7 +8,7 @@
 import express from 'express'
 import type { LibraryItemMeta, LibraryItemPatch, LibraryTaxonomy } from '../shared/library.ts'
 import { describeRules, parseLibraryRules, RULE_PRESETS, type RulePresetName } from '../shared/libraryRules.ts'
-import type { QueryFilters } from '../shared/librarySearch.ts'
+import type { LibrarySort, QueryFilters } from '../shared/librarySearch.ts'
 import { canEditCanvas, canManageCanvas } from './access.ts'
 import { countUse, insertItem, InsertError } from './librarySnapshot.ts'
 import { applyTransfer } from './libraryImport.ts'
@@ -66,6 +66,7 @@ function filtersOf(query: express.Request['query']): QueryFilters {
 }
 
 const isPreset = (v: unknown): v is RulePresetName => v === 'blank' || v === 'sheets'
+const isSort = (v: unknown): v is LibrarySort => v === 'relevance' || v === 'used' || v === 'newest'
 
 /* ---- libraries ---- */
 
@@ -204,6 +205,7 @@ libraryRouter.get('/:id/items', async (req, res) => {
     query: String(req.query.q ?? ''),
     filters: filtersOf(req.query),
     includeDrafts: req.query.status === 'draft' && libraryAllows(found.role, 'curate'),
+    ...(isSort(req.query.sort) ? { sort: req.query.sort } : {}),
     limit: Number(req.query.limit) || 60,
     cursor: typeof req.query.cursor === 'string' ? req.query.cursor : undefined,
   })

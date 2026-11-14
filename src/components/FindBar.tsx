@@ -646,6 +646,23 @@ export function FindBar({
           )}
         </>
       )}
+      {scope === 'library' && groups.length > 0 && (
+        <Button
+          size="inline"
+          className="self-start px-1"
+          onClick={() => {
+            const lib = (pointedRow?.group ?? groups[Math.max(active, 0)])?.libraryId
+            const from = useStore.getState().canvas?.id
+            const frame = useStore.getState().selectedId
+            const params = new URLSearchParams({ q: query.trim() })
+            if (from && from !== lib) params.set('from', from)
+            if (from && from !== lib && frame) params.set('frame', frame)
+            if (lib) navigate(`/l/${lib}?${params}`)
+          }}
+        >
+          {t('library.openInGallery')}
+        </Button>
+      )}
       {scope === 'page' && hits.length > 0 && (
         <ul className="max-h-56 overflow-y-auto" aria-label={t('actions.findLabel')}>
           {hits.slice(0, 200).map((hit, i) => (

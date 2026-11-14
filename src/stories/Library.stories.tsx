@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import type { LibraryItemSummary, LibraryListEntry } from '../../shared/library'
 import { LibraryTile } from '@/components/library/LibraryTile'
 import { ItemThumb } from '@/components/library/ItemThumb'
+import { LibraryItemTile } from '@/components/library/LibraryItemTile'
+import { LibraryFacets } from '@/components/library/LibraryFacets'
 
 const item = (id: string): LibraryItemSummary => ({
   id,
@@ -50,6 +52,44 @@ export const Thumb: StoryObj = {
   render: () => (
     <div className="h-40 w-60 overflow-hidden rounded-card bg-sub">
       <ItemThumb item={item('cp.scb-otp-input')} />
+    </div>
+  ),
+}
+
+/** One family in the gallery, with its variant count and, for a curator, its status. */
+export const ItemTile: StoryObj = {
+  render: () => (
+    <div className="w-60 p-6">
+      <LibraryItemTile
+        item={{ ...item('cp.scb-otp-input'), status: 'draft' }}
+        variantCount={6}
+        curator
+        live={false}
+        onHover={() => {}}
+        onOpen={() => {}}
+      />
+    </div>
+  ),
+}
+
+/** The gallery's filters: kinds, then categories with their counts. */
+export const Facets: StoryObj = {
+  render: () => (
+    <div className="p-6">
+      <LibraryFacets
+        kinds={[
+          { value: 'cp', label: 'Components', count: 1738 },
+          { value: 'bk', label: 'Blocks', count: 652 },
+        ]}
+        categories={[
+          { value: 'Inputs & forms', label: 'Inputs & forms', count: 210 },
+          { value: 'Auth', label: 'Auth', count: 48 },
+        ]}
+        kind=""
+        category="Auth"
+        onKind={() => {}}
+        onCategory={() => {}}
+      />
     </div>
   ),
 }
