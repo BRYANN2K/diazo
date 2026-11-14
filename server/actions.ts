@@ -193,6 +193,7 @@ function logActivity(canvasId: string, actor: Actor, message: string, frameId?: 
     message,
     frameId,
     at: Date.now(),
+    ...(actor.runId ? { runId: actor.runId } : {}),
   }
   const list = activityLog.get(canvasId) ?? []
   list.unshift(item)
@@ -1882,6 +1883,7 @@ function noteHtmlChange(prior: PriorState, actor: Actor, tweak: boolean) {
     open !== undefined &&
     open.actor.name === actor.name &&
     open.actor.kind === actor.kind &&
+    open.actor.runId === actor.runId &&
     now - open.lastAt < BURST_IDLE_MS
   bursts.set(prior.id, { actor, lastAt: now })
   if (joins || !prior.html) return
@@ -1899,6 +1901,7 @@ function noteHtmlChange(prior: PriorState, actor: Actor, tweak: boolean) {
     savedBy: open?.actor.name ?? prior.updatedBy,
     savedByKind: open?.actor.kind,
     htmlBytes: prior.html.length,
+    ...(actor.runId ? { runId: actor.runId } : {}),
   })
 }
 

@@ -3,6 +3,8 @@ import { useStore } from './store'
 import type { InstanceSettings, InstanceSettingsPatch } from '../../shared/instanceSettings'
 import { beginFrameSave } from './frameSaves'
 import type { StackWrite } from '../../shared/frameStack'
+import type { UsageReport } from '../../shared/agentRuns'
+import type { RollbackResult, RunTimeline } from '../../shared/runReplay'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type { RepoLink, RepoLinkStatus, RepoRequest, RepoResult } from '../../shared/localRepo'
 import type { HandoffFile, HandoffPack, HandoffWriteResult } from '../../shared/handoff'
@@ -469,6 +471,13 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ url }),
     }),
+  rollbackRun: (canvasId: string, runId: string, force = false) =>
+    req<RollbackResult>(`/api/canvases/${canvasId}/runs/${runId}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    }),
+  runTimeline: (canvasId: string, runId: string) => req<RunTimeline>(`/api/canvases/${canvasId}/runs/${runId}`),
+  getUsage: (canvasId: string) => req<UsageReport>(`/api/canvases/${canvasId}/usage`),
   listDrift: (frameId: string) => req<DriftComparison[]>(`/api/frames/${frameId}/drift`),
   analyzeDrift: (frameId: string, driftId: string) =>
     req<AgentTask>(`/api/frames/${frameId}/drift/${driftId}/analyze`, { method: 'POST' }),

@@ -9,7 +9,7 @@ import type { Canvas } from '../shared/types.ts'
 vi.mock('../server/db/persist.ts', () => ({
   saveFrame: () => {},
   saveCanvas: () => {},
-  saveActivity: () => {},
+  saveActivity: vi.fn(),
   saveTask: () => {},
   saveFrameVersion: vi.fn(),
 }))
@@ -55,5 +55,27 @@ describe('frame history bursts', () => {
     const human = actions.resolveActor({ name: 'Vera', kind: 'user' })
     actions.updateFrame(frame.id, { html: doc('<h1>One!</h1>') }, human)
     expect(filed()).toEqual([doc('<h1>One</h1>')])
+  })
+
+  it('tags what a resident run replaced with its run id, and never folds two runs into one burst', () => {
+    const frame = actions.createFrame(CANVAS.id, { name: 'hero', html: doc('<h1>One</h1>') }, agent)!
+    const runA = { ...agent, runId: 'run-a' }
+    const runB = { ...agent, runId: 'run-b' }
+    actions.updateFrame(frame.id, { html: doc('<h1>One!</h1>') }, runA)
+    actions.updateFrame(frame.id, { html: doc('<h1>One!!</h1>') }, runA)
+    actions.updateFrame(frame.id, { html: doc('<h1>One!!!</h1>') }, runB)
+    const versions = vi.mocked(persist.saveFrameVersion).mock.calls.map(([v]) => [v.html, v.runId])
+    expect(versions).toEqual([
+      [doc('<h1>One</h1>'), 'run-a'],
+      [doc('<h1>One!!</h1>'), 'run-b'],
+    ])
+  })
+
+  it('tags the run’s activity lines', () => {
+    actions.createFrame(CANVAS.id, { name: 'by run', html: doc('<p>x</p>') }, { ...agent, runId: 'run-c' })
+    expect(vi.mocked(persist.saveActivity).mock.calls.at(-1)?.[1]).toMatchObject({
+      runId: 'run-c',
+      frameId: expect.any(String),
+    })
   })
 })

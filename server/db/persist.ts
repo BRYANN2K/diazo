@@ -635,12 +635,24 @@ async function appendFrameVersion(version: FrameVersion) {
      snapshot the same state twice — the newest row already holds it. Size
      counts: the same document at another frame size is a state of its own */
   const [latest] = await db
-    .select({ html: t.frameVersions.html, width: t.frameVersions.width, height: t.frameVersions.height })
+    .select({
+      html: t.frameVersions.html,
+      width: t.frameVersions.width,
+      height: t.frameVersions.height,
+      runId: t.frameVersions.runId,
+    })
     .from(t.frameVersions)
     .where(eq(t.frameVersions.frameId, version.frameId))
     .orderBy(desc(t.frameVersions.savedAt))
     .limit(1)
-  if (latest && latest.html === version.html && latest.width === version.width && latest.height === version.height)
+  /* a run's first write still files its row: it is that run's "before" */
+  if (
+    latest &&
+    latest.html === version.html &&
+    latest.width === version.width &&
+    latest.height === version.height &&
+    (latest.runId ?? undefined) === version.runId
+  )
     return
   await db.insert(t.frameVersions).values({
     id: version.id,
@@ -652,6 +664,7 @@ async function appendFrameVersion(version: FrameVersion) {
     savedAt: version.savedAt,
     savedBy: version.savedBy,
     savedByKind: version.savedByKind ?? null,
+    runId: version.runId ?? null,
   })
   const excess = await db
     .select({ id: t.frameVersions.id })
@@ -689,6 +702,7 @@ export async function listFrameVersions(frameId: string): Promise<FrameVersionIn
       savedAt: t.frameVersions.savedAt,
       savedBy: t.frameVersions.savedBy,
       savedByKind: t.frameVersions.savedByKind,
+      runId: t.frameVersions.runId,
       htmlBytes: sql<number>`length(${t.frameVersions.html})`,
     })
     .from(t.frameVersions)
@@ -704,6 +718,32 @@ export async function listFrameVersions(frameId: string): Promise<FrameVersionIn
     savedBy: row.savedBy,
     savedByKind: frameVersionKind(row.savedByKind),
     htmlBytes: Number(row.htmlBytes),
+    ...(row.runId ? { runId: row.runId } : {}),
+  }))
+}
+
+/** The frames a run's writes filed versions of (run replay). */
+export async function listRunFrameIds(runId: string): Promise<{ frameId: string; canvasId: string }[]> {
+  await pendingVersionWrites(() => true)
+  return db
+    .selectDistinct({ frameId: t.frameVersions.frameId, canvasId: t.frameVersions.canvasId })
+    .from(t.frameVersions)
+    .where(eq(t.frameVersions.runId, runId))
+}
+
+/** A run's activity lines, oldest first, with the canvas each was on. */
+export async function listRunActivity(runId: string): Promise<(ActivityItem & { canvasId: string })[]> {
+  const rows = await db.select().from(t.activity).where(eq(t.activity.runId, runId)).orderBy(t.activity.at)
+  return rows.map((row) => ({
+    id: row.id,
+    canvasId: row.canvasId,
+    actorName: row.actorName,
+    actorKind: row.actorKind as ActivityItem['actorKind'],
+    actorColor: row.actorColor,
+    message: row.message,
+    ...(row.frameId ? { frameId: row.frameId } : {}),
+    at: row.at,
+    runId,
   }))
 }
 
@@ -727,6 +767,7 @@ export async function getFrameVersion(frameId: string, versionId: string): Promi
     savedByKind: frameVersionKind(row.savedByKind),
     htmlBytes: row.html.length,
     html: row.html,
+    ...(row.runId ? { runId: row.runId } : {}),
   }
 }
 
@@ -776,6 +817,7 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.memoryReferences).where(eq(t.memoryReferences.canvasId, canvasId)))
   swallow(db.delete(t.decisions).where(eq(t.decisions.canvasId, canvasId)))
   swallow(db.delete(t.memoryProposals).where(eq(t.memoryProposals.canvasId, canvasId)))
+  swallow(db.delete(t.agentRuns).where(eq(t.agentRuns.canvasId, canvasId)))
   swallow(db.delete(t.canvasMembers).where(eq(t.canvasMembers.canvasId, canvasId)))
   swallow(db.delete(t.canvases).where(eq(t.canvases.id, canvasId)))
 }
@@ -1043,6 +1085,7 @@ export function saveActivity(canvasId: string, item: ActivityItem) {
       message: item.message,
       frameId: item.frameId ?? null,
       at: item.at,
+      runId: item.runId ?? null,
     }),
   )
 }
@@ -1375,6 +1418,7 @@ export async function hydrate(): Promise<Hydrated> {
       message: row.message,
       frameId: row.frameId ?? undefined,
       at: row.at,
+      ...(row.runId ? { runId: row.runId } : {}),
     })
     activity.set(row.canvasId, list)
   }

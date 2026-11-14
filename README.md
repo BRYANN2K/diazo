@@ -143,6 +143,12 @@ to upstream's.
 - **Local install on a Mac** — one `curl … | sh` runs doop in a single Apple `container` on
   `127.0.0.1:4400`, with PGlite and uploads in `~/.doop/data` and secrets generated on the Mac
   ([Run doop](#local-mac-lightweight)).
+- **Usage meter** — every model transport reports its tokens, each resident run lands in an
+  `agent_runs` ledger with its time and cost (the provider's figure, else a per-model price
+  table), and a Usage tab shows the totals per run and per model. Agents call `get_usage`.
+- **Run replay** — every frame version and activity line a resident run writes carries its run
+  id: open a run from the Usage tab to see its timeline and each frame before and after, then roll
+  the whole run back in one undo step (frames edited since need a confirmation).
 - **Self-hosting** — Docker image `ghcr.io/bryann2k/doop:bryann2k-main` (amd64 + arm64) built on every push, k3s
   manifests in `deploy/k3s/` with a persistent volume for uploads, exposed through Tailscale
   Serve only (no ingress, no Funnel).

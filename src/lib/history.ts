@@ -475,6 +475,23 @@ export function deleteFrameTracked(frame: Frame) {
   deleteFramesTracked([frame])
 }
 
+/** A change the server already made to several frames (a run rollback):
+ *  recorded, not re-issued, as one undo step — the restores as updates back
+ *  to what they replaced, the removed frames as deletions to recreate. */
+export function recordServerChange(restored: { frame: Frame; replaced: Patch }[], deleted: Frame[]) {
+  const entries: Entry[] = [
+    ...restored
+      .map(({ frame, replaced }) =>
+        updateEntry(frame.id, replaced, { html: frame.html, width: frame.width, height: frame.height }),
+      )
+      .filter((e): e is UpdateEntry => !!e),
+    ...deleted.map((f): Entry => ({ type: 'delete', frameId: f.id, snapshot: snapshot(f) })),
+  ]
+  const [first, ...rest] = entries
+  if (!first) return
+  push(rest.length ? { type: 'group', entries } : first)
+}
+
 /** Delete several frames as one undo step. */
 export function deleteFramesTracked(frames: Frame[]) {
   const entries: Entry[] = frames.map((f) => ({ type: 'delete', frameId: f.id, snapshot: snapshot(f) }))

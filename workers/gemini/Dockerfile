@@ -13,7 +13,7 @@ RUN npm install --global @google/gemini-cli@0.61.0 \
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json ./
-COPY shared/geminiCloud.ts ./shared/
+COPY shared/geminiCloud.ts shared/usage.ts ./shared/
 COPY server/geminiCloudRuns.ts server/geminiCloudWorker.ts server/geminiCloudWorkerMain.ts ./server/
 USER node
 ENV PORT=4401

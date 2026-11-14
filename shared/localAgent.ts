@@ -1,3 +1,5 @@
+import type { TokenUsage } from './usage.ts'
+
 /**
  * The Claude Code run on the user's own desktop. Claude Code has no model
  * list to ask for, but `--model` takes an alias that always resolves to the
@@ -75,4 +77,12 @@ export interface LocalAgentJob {
 export interface LocalAgentResult {
   success: boolean
   text: string
+  /** what the run consumed, per model, for the usage meter */
+  usage?: TokenUsage[]
+}
+
+/** What the desktop shell's `claude_run` returns: the result, plus the CLI's
+ *  raw usage figures from its final event (absent from older shells). */
+export interface ClaudeRunOutput extends LocalAgentResult {
+  cliUsage?: unknown
 }

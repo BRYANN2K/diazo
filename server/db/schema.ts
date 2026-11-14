@@ -227,8 +227,14 @@ export const frameVersions = pgTable(
     /** 'user' | 'agent'; null when the author's kind was not known (a state
      *  authored before the server last booted) */
     savedByKind: text('saved_by_kind'),
+    /** the resident run whose write filed (replaced) this state */
+    runId: text('run_id'),
   },
-  (t) => [index('frame_versions_frame_idx').on(t.frameId), index('frame_versions_canvas_idx').on(t.canvasId)],
+  (t) => [
+    index('frame_versions_frame_idx').on(t.frameId),
+    index('frame_versions_canvas_idx').on(t.canvasId),
+    index('frame_versions_run_idx').on(t.runId),
+  ],
 )
 
 /** Design-sync keys: the write-only capability behind the /ingest endpoint.
@@ -704,8 +710,10 @@ export const activity = pgTable(
     message: text('message').notNull(),
     frameId: text('frame_id'),
     at: bigint('at', { mode: 'number' }).notNull(),
+    /** the resident run that did it */
+    runId: text('run_id'),
   },
-  (t) => [index('activity_canvas_idx').on(t.canvasId)],
+  (t) => [index('activity_canvas_idx').on(t.canvasId), index('activity_run_idx').on(t.runId)],
 )
 
 /* free-tier metering: how many resident-team tasks each user has initiated */
@@ -1131,6 +1139,35 @@ export const builtHooks = pgTable('built_hooks', {
   createdBy: text('created_by').notNull(),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
 })
+/** The usage meter's ledger (server/agentRuns.ts): one row per resident run,
+ *  written once when it ends. `models` holds the per-model TokenUsage list;
+ *  the token columns are its totals, and the cost was priced at write time
+ *  (null = some model had no provider figure and no price row). */
+export const agentRuns = pgTable(
+  'agent_runs',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    /** 'design' | 'chat' */
+    kind: text('kind').notNull(),
+    agent: text('agent').notNull(),
+    label: text('label').notNull(),
+    provider: text('provider').notNull(),
+    payerId: text('payer_id'),
+    models: jsonb('models').notNull(),
+    inputTokens: integer('input_tokens').notNull(),
+    outputTokens: integer('output_tokens').notNull(),
+    cacheReadTokens: integer('cache_read_tokens').notNull(),
+    cacheWriteTokens: integer('cache_write_tokens').notNull(),
+    costUsd: doublePrecision('cost_usd'),
+    costEstimated: boolean('cost_estimated').notNull(),
+    /** 'done' | 'failed' | 'stopped' */
+    outcome: text('outcome').notNull(),
+    startedAt: bigint('started_at', { mode: 'number' }).notNull(),
+    endedAt: bigint('ended_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('agent_runs_canvas_idx').on(t.canvasId, t.startedAt)],
+)
 
 /** The instance's sign-in policy (shared/instanceSettings.ts): one row, id
  *  'instance', written by admins in Admin → Sign-in and read into memory at

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { tokenUsageListSchema } from './usage.ts'
 
 export const GEMINI_CLOUD_TIMEOUT_MS = 30 * 60_000
 
@@ -14,6 +15,7 @@ export type GeminiCloudJob = z.infer<typeof geminiCloudJobSchema>
 export const geminiCloudResultSchema = z.object({
   success: z.boolean(),
   text: z.string().max(100_000),
+  usage: tokenUsageListSchema.optional(),
 })
 
 export function httpOrigin(value: string): string {

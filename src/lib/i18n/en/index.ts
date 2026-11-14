@@ -25,6 +25,8 @@ import { lint } from './lint'
 import { checks } from './checks'
 import { handoff } from './handoff'
 import { built } from './built'
+import { usage } from './usage'
+import { replay } from './replay'
 
 /** The source catalog, one namespace per area of the app. */
 export const en = {
@@ -55,4 +57,6 @@ export const en = {
   checks,
   handoff,
   built,
+  usage,
+  replay,
 }

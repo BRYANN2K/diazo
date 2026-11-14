@@ -82,6 +82,10 @@ export interface FrameVersionInfo {
   savedByKind?: ActorKind
   savedAt: number
   htmlBytes: number
+  /** the resident run whose write filed this state, i.e. the run that
+   *  replaced it (agent_runs.id); its oldest row on a frame is the frame
+   *  as it was before that run */
+  runId?: string
 }
 
 export interface FrameVersion extends FrameVersionInfo {
@@ -369,6 +373,9 @@ export interface Actor {
   clientId?: string
   /** for agents: display name of the user whose OAuth token authorized it */
   owner?: string
+  /** a resident agent's run (agent_runs.id): what it writes is tagged with
+   *  it, for the run's replay and rollback */
+  runId?: string
 }
 
 export interface Presence {
@@ -572,6 +579,8 @@ export interface ActivityItem {
   message: string
   frameId?: string
   at: number
+  /** the resident run that did it (agent_runs.id) */
+  runId?: string
 }
 
 /* ---- canvas chat ---- */

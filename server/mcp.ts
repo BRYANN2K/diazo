@@ -37,6 +37,7 @@ import { isAgentKeySecret, verifyAgentKey } from './agentKeys.ts'
 import * as workspaces from './workspaces.ts'
 import { auth, getUserName, isBanned } from './auth.ts'
 import { compareFrameWithUrl } from './drift.ts'
+import { USAGE_RUN_LIMIT, usageReport } from './agentRuns.ts'
 import { capture, captureThrottled } from './analytics.ts'
 import { renderFrame } from './screenshot.ts'
 import { lintAndStore } from './lint.ts'
@@ -905,6 +906,34 @@ export function buildMcpServer(
       }
       if (agent_name) actions.markGuidelinesSeen(canvas_id, actorFrom(agent_name).name)
       return withFeedbackNotice(text(doc.markdown), canvas_id, agent_name ? actorFrom(agent_name) : undefined)
+    },
+  )
+
+  server.registerTool(
+    'get_usage',
+    {
+      title: 'Read the canvas usage meter',
+      description:
+        "What the resident agent runs on this canvas consumed: tokens, time and cost per run and per model, newest run first. Cost is the provider's own figure when it reports one (OpenRouter, the Claude CLI), else an estimate from list prices (costEstimated), and absent when the model has no price. Use it to answer what design work on a canvas cost, or to compare models.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(USAGE_RUN_LIMIT)
+          .optional()
+          .describe(`How many recent runs to list (default 20); the totals cover the last ${USAGE_RUN_LIMIT}`),
+        agent_name: agentName.optional(),
+      },
+    },
+    async ({ canvas_id, limit, agent_name }) => {
+      /* what editors spend, so editors read it — same as the Usage tab */
+      if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      const report = await usageReport(canvas_id)
+      const body = { ...report, runs: report.runs.slice(0, limit ?? 20) }
+      return withFeedbackNotice(text(JSON.stringify(body)), canvas_id, agent_name ? actorFrom(agent_name) : undefined)
     },
   )
 

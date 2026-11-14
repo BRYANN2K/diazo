@@ -41,6 +41,8 @@ import * as built from './built.ts'
 import { BUILT_BODY_LIMIT, handleBuiltDelivery } from './builtRoutes.ts'
 import { compareFrameWithUrl, driftErrorMessage, getComparison, listComparisons } from './drift.ts'
 import { classifyDriftUrl } from '../shared/drift.ts'
+import { usageReport } from './agentRuns.ts'
+import { RollbackConflictError, rollbackRun, runTimeline } from './runReplay.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
@@ -3128,6 +3130,44 @@ app.get('/api/canvases/:id/find', (req, res) => {
   if (!canvas) return
   const q = String(req.query.q ?? '').slice(0, 200)
   res.json(findInCanvas(canvas, q, { matchCase: req.query.case === '1' }))
+})
+
+/* the usage meter (server/agentRuns.ts): every resident run's tokens, time
+   and cost on this canvas — what editors spend, so editors read it */
+app.get('/api/canvases/:id/usage', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  res.json(await usageReport(req.params.id))
+})
+
+/* run replay (server/runReplay.ts): one resident run's activity and the
+   before/after of every frame it touched */
+/* roll a whole run back: 409 with the frames edited since, unless the body
+   says { force: true } */
+app.post('/api/canvases/:id/runs/:runId/rollback', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  try {
+    const result = await rollbackRun(req.params.id, req.params.runId, userActor(req), {
+      force: req.body?.force === true,
+    })
+    if (!result) return res.status(404).json({ error: 'No such run on this canvas' })
+    res.json(result)
+  } catch (err) {
+    if (!(err instanceof RollbackConflictError)) {
+      console.error('[replay] rollback failed', err)
+      return res.status(500).json({ error: 'The rollback failed' })
+    }
+    res.status(409).json({
+      error: 'Some frames were edited since this run',
+      conflicts: err.frames.map((f) => ({ frameId: f.frameId, name: f.name })),
+    })
+  }
+})
+
+app.get('/api/canvases/:id/runs/:runId', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  const timeline = await runTimeline(req.params.id, req.params.runId)
+  if (!timeline) return res.status(404).json({ error: 'No such run on this canvas' })
+  res.json(timeline)
 })
 
 app.get('/api/canvases/:id/chat', (req, res) => {
