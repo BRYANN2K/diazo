@@ -10,6 +10,7 @@ import type { CodeLink, CodeLinkInput, CodeLinkKind } from '../../shared/codeLin
 import type { CodeSuggestion } from '../../shared/codeSuggest'
 import type { TokenDiff } from '../../shared/tokenSync'
 import type { PatchSummary } from '../../shared/patch'
+import type { FrameCodeInput, FrameCodePreview } from '../../shared/frameCode'
 import type { ImageDescriptionMode, ImageDescriptionPreference } from '../../shared/imageDescriptions'
 import type { AgentRunners, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
 import type { CanvasFindResult } from '../../shared/canvasFind'
@@ -509,6 +510,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ names, patch }),
     }),
+  /* frame → code: the generated component as a patch against the linked repo */
+  previewFrameCode: (frameId: string, input: FrameCodeInput) =>
+    req<FrameCodePreview>(`/api/frames/${frameId}/code/preview`, { method: 'POST', body: JSON.stringify(input) }),
   /* drift review: compare a frame with the page shipped at a URL */
   compareDrift: (frameId: string, url: string) =>
     req<{ comparison: DriftComparison; shippedFrame: Frame }>(`/api/frames/${frameId}/drift`, {

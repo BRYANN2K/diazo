@@ -4,6 +4,13 @@ import { CSS_ATTR, INSTANCE_ATTR } from '../shared/components.ts'
 import { TOKEN_BLOCK_ATTR, type DesignToken } from '../shared/designTokens.ts'
 import { codePathProblem, normalizeCodePath, type CodeLink } from '../shared/codeLinks.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
+import {
+  FRAME_CODE_FRAMEWORKS,
+  type FrameCode,
+  type FrameCodeFile,
+  type FrameCodeFramework,
+  type FrameCodeInput as FrameCodeOptions,
+} from '../shared/frameCode.ts'
 
 /* Frame → code (feat/frame-to-code): a frame's HTML becomes one React or
  * Astro component in the linked repo's own terms — raw values that equal a
@@ -12,36 +19,8 @@ import type { Canvas, Frame } from '../shared/types.ts'
  * file. Deterministic: the same frame, tokens and mapping always give the
  * same files, so the write route can rebuild what the preview showed. */
 
-export const FRAME_CODE_FRAMEWORKS = ['react', 'astro'] as const
-export type FrameCodeFramework = (typeof FRAME_CODE_FRAMEWORKS)[number]
-
-export interface FrameCodeOptions {
-  framework: FrameCodeFramework
-  /** repo-relative output file; defaults to the frame's mapping or src/components/<Name> */
-  path?: string
-  /** the component's export name; defaults to the frame name, PascalCased */
-  name?: string
-}
-
-export interface FrameCodeFile {
-  path: string
-  text: string
-}
-
-export interface FrameCode {
-  framework: FrameCodeFramework
-  name: string
-  /** the component file first; React adds a sibling stylesheet */
-  files: FrameCodeFile[]
-  /** components imported through their mapping */
-  imports: { component: string; name: string; from: string }[]
-  /** components the frame uses that have no mapping — inlined as markup */
-  unmapped: string[]
-  /** tokens the output names */
-  tokens: string[]
-  /** scripts the frame carried, left out of the component */
-  droppedScripts: number
-}
+export { FRAME_CODE_FRAMEWORKS }
+export type { FrameCode, FrameCodeFile, FrameCodeFramework, FrameCodeOptions }
 
 export class FrameCodeError extends Error {}
 

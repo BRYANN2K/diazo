@@ -13,6 +13,7 @@ import { FrameHistoryModal } from './FrameHistoryModal'
 import { FrameApprovalControl } from './FrameApproval'
 import { HandoffModal } from './HandoffModal'
 import { CodeLinkSection } from './CodeLinkSection'
+import { FrameCodeModal } from './FrameCodeModal'
 import { cn } from '@/lib/utils'
 import { Panel, PanelClose, PanelHeader, type PanelSurface } from './ui/panel'
 import { Collapsible, CollapsibleContent } from './ui/collapsible'
@@ -68,6 +69,7 @@ export function Inspector({
   const exportScale = fitExportScale(frame, exportSettings.scale)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [handoffOpen, setHandoffOpen] = useState(false)
+  const [codeOpen, setCodeOpen] = useState(false)
   const [htmlCopy, setHtmlCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const queuedSave = useRef<{ timer: number; finish: () => void } | null>(null)
@@ -245,6 +247,16 @@ export function Inspector({
             >
               <ArrowRightIcon className="size-3.5" />
               {t('handoff.action')}
+            </Button>
+          )}
+          {canEdit && (
+            <Button
+              variant="bare"
+              className={cn(fillBtn, 'mt-1.5 w-full gap-1.5')}
+              title={t('inspector.frameCodeActionTitle')}
+              onClick={() => setCodeOpen(true)}
+            >
+              {t('inspector.frameCodeAction')}
             </Button>
           )}
         </InspectorGroup>
@@ -439,6 +451,7 @@ export function Inspector({
           </Button>
         </span>
       </footer>
+      {codeOpen && <FrameCodeModal frameId={frame.id} onClose={() => setCodeOpen(false)} />}
       {historyOpen && <FrameHistoryModal frame={frame} onClose={() => setHistoryOpen(false)} />}
       {handoffOpen && (
         <HandoffModal

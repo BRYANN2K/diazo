@@ -287,4 +287,21 @@ export const inspector = {
   codeLinkNoSuggestions: 'No likely file in {repo}',
   codeLinkUse: 'Use',
   codeLinkFailed: 'Could not save the mapping',
+
+  // frame → code export
+  frameCodeAction: 'Export as code',
+  frameCodeActionTitle: 'Turn this frame into a React or Astro component in the linked repo',
+  frameCodeEyebrow: 'Frame → code',
+  frameCodeTitle: 'Export this frame as a component',
+  frameCodePath: 'Output file',
+  frameCodeRefresh: 'Preview',
+  frameCodeBuilding: 'Building the component…',
+  frameCodeFailed: 'Could not build the component',
+  frameCodeLede: 'Changes for {repo}: {files}.',
+  frameCodeSame: '{repo} already holds exactly this component.',
+  frameCodeDiff: 'Diff',
+  frameCodeImports: 'Imported through the mapping: {list}',
+  frameCodeUnmapped: 'Not mapped yet, inlined as markup: {list}',
+  frameCodeTokens: 'Tokens used: {list}',
+  frameCodeScripts: { one: '{count} script left out', other: '{count} scripts left out' },
 } as const

@@ -34,6 +34,8 @@ import { suggestCodeLinks } from './codeSuggest.ts'
 import { applyRepoTokens, previewTokenPatch, previewTokenSync, TokenSyncError } from './tokenSync.ts'
 import { applyRepoPatch, checkPatch, RepoPatchError } from './repoPatch.ts'
 import { PATCH_MAX_BYTES } from '../shared/patch.ts'
+import { FRAME_CODE_FRAMEWORKS, FrameCodeError } from './frameToCode.ts'
+import { frameCodePatch } from './frameCodePatch.ts'
 import {
   CODE_LINK_KINDS,
   CODE_LINK_MAX_EXPORT,
@@ -1390,6 +1392,34 @@ app.post('/api/canvases/:id/token-sync/write', async (req, res) => {
     if (e instanceof TokenSyncError || e instanceof RepoPatchError)
       return res.status(e.status).json({ error: e.message })
     throw e
+  }
+})
+
+/* ---- frame → code: the generated component as a patch against what the
+   linked repo holds at its paths — previewed here, written only through
+   the desktop app's repo_apply_patch dialog */
+
+const frameCodeBody = z.object({
+  framework: z.enum(FRAME_CODE_FRAMEWORKS),
+  path: z.string().max(CODE_LINK_MAX_PATH).optional(),
+  name: z.string().max(100).optional(),
+})
+
+function frameCodeError(res: express.Response, e: unknown) {
+  if (e instanceof RepoPatchError) return res.status(e.status).json({ error: e.message })
+  if (e instanceof FrameCodeError) return res.status(400).json({ error: e.message })
+  throw e
+}
+
+app.post('/api/frames/:id/code/preview', async (req, res) => {
+  const frame = requireFrame(req, res, req.params.id, 'edit')
+  if (!frame) return
+  const parsed = frameCodeBody.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid export request' })
+  try {
+    res.json(await frameCodePatch(req.user!.id, frame, parsed.data))
+  } catch (e) {
+    frameCodeError(res, e)
   }
 })
 
