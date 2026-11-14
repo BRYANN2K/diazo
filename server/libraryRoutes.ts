@@ -35,7 +35,7 @@ import { env } from './env.ts'
 import { itemMeta, libraryItems, previewIndex, reindexLibrary, saveMeta } from './libraryIndex.ts'
 import { settleSuggestion } from './libraryDescribe.ts'
 import { entryOf, itemDetail, libraryFor, readableLibraries, searchLibraries, summaryOf } from './libraryQueries.ts'
-import { itemThumb, NoThumbError, thumbTag } from './libraryThumbs.ts'
+import { NoThumbError, requestThumb, thumbTag, ThumbsBusyError } from './libraryThumbs.ts'
 import { RendererBusyError } from './renderBrowser.ts'
 import { cleanCategoryPaths, CurationError, suggestCategories } from './libraryCuration.ts'
 
@@ -425,14 +425,15 @@ libraryRouter.get('/:id/items/:itemId/thumb.jpg', async (req, res) => {
   const out = await itemDetail(found.canvas, req.params.itemId, found.role)
   if (!out) return res.status(404).json({ error: 'item not found' })
   try {
-    const jpeg = await itemThumb(out.item)
+    const jpeg = await requestThumb(out.item)
     const current = req.query.v === thumbTag(out.item)
     res.set('Content-Type', 'image/jpeg')
     res.set('Cache-Control', current ? 'private, max-age=31536000, immutable' : 'private, max-age=60')
     res.send(jpeg)
   } catch (error) {
     if (error instanceof RendererBusyError) {
-      res.set('Retry-After', '10')
+      res.set('Retry-After', error instanceof ThumbsBusyError ? String(error.retryAfterS) : '10')
+      res.set('Cache-Control', 'no-store')
       return res.status(503).json({ error: error.message })
     }
     if (error instanceof NoThumbError) return res.status(404).json({ error: error.message })

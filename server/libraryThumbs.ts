@@ -14,8 +14,8 @@ import { createHash } from 'node:crypto'
 import type { Frame } from '../shared/types.ts'
 import type { ItemBox, LibraryItem } from '../shared/library.ts'
 import { getObject, hasObject, putObject } from './storage.ts'
-import { renderFrame } from './screenshot.ts'
-import type { RenderPriority } from './renderBrowser.ts'
+import { backgroundConcurrency, renderFrame } from './screenshot.ts'
+import { RendererBusyError, type RenderPriority } from './renderBrowser.ts'
 import { store } from './store.ts'
 
 export const THUMB_MARGIN = 12
@@ -161,5 +161,43 @@ export async function itemThumb(
   if (running) return running
   const cached = await deps.get(key)
   if (cached) return cached
-  return renderThumbs([item], opts.priority ?? 'background', deps)[0]!
+  return inflight.get(key) ?? renderThumbs([item], opts.priority ?? 'background', deps)[0]!
+}
+
+/** The gallery asked faster than the renderer draws: try again shortly. */
+export class ThumbsBusyError extends RendererBusyError {
+  readonly retryAfterS = 2
+}
+
+/** Thumbnails a person is waiting for, rendered at once at most: the rest
+ *  of the pages stay for agents and screenshots. */
+export const GALLERY_RENDERS = Math.max(1, backgroundConcurrency)
+let galleryRenders = 0
+
+/**
+ * A thumbnail a person is looking at (the gallery route): stored, or being
+ * rendered already (the prewarm's render is awaited, not repeated), or
+ * rendered now at interactive priority, ahead of the prewarm, as long as
+ * fewer than `limit` of these render; past that a ThumbsBusyError, which
+ * the route answers with a short Retry-After.
+ */
+export async function requestThumb(
+  item: LibraryItem,
+  deps: ThumbDeps = serverThumbDeps,
+  limit = GALLERY_RENDERS,
+): Promise<Buffer> {
+  const key = thumbKey(item.canvasId, item)
+  const running = inflight.get(key)
+  if (running) return running
+  const cached = await deps.get(key)
+  if (cached) return cached
+  const started = inflight.get(key)
+  if (started) return started
+  if (galleryRenders >= limit) throw new ThumbsBusyError(`${galleryRenders} gallery thumbnails rendering`)
+  galleryRenders++
+  try {
+    return await renderThumbs([item], 'interactive', deps)[0]!
+  } finally {
+    galleryRenders--
+  }
 }
