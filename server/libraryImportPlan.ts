@@ -408,3 +408,26 @@ export function markDraft(html: string): string {
   const marked = findElement(doc, (el) => attr(el, 'data-doop-item') !== undefined) ?? bodyOf(doc)
   return marked ? addAttributes(html, [{ el: marked, attrs: [['data-doop-status', 'draft']] }]) : html
 }
+
+/** A category asked for at import, written where the indexer reads it
+ *  (`data-doop-category` on the item, else the body): without it the page
+ *  rule would give the item its top category only. A marker already there
+ *  is replaced. */
+export function markCategory(html: string, category: string): string {
+  const doc = parseHtml(html)
+  const marked = findElement(doc, (el) => attr(el, 'data-doop-item') !== undefined) ?? bodyOf(doc)
+  if (!marked) return html
+  const current = attr(marked, 'data-doop-category')
+  if (current === category) return html
+  if (current !== undefined) {
+    return html.replace(
+      /(\sdata-doop-category=")[^"]*(")/,
+      (_m, a: string, b: string) => `${a}${escapeAttr(category)}${b}`,
+    )
+  }
+  return addAttributes(html, [{ el: marked, attrs: [['data-doop-category', category]] }])
+}
+
+function escapeAttr(value: string): string {
+  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+}

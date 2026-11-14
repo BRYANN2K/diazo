@@ -36,6 +36,7 @@ import { settleSuggestion } from './libraryDescribe.ts'
 import { entryOf, itemDetail, libraryFor, readableLibraries, searchLibraries, summaryOf } from './libraryQueries.ts'
 import { itemThumb, NoThumbError } from './libraryThumbs.ts'
 import { RendererBusyError } from './renderBrowser.ts'
+import { cleanCategoryPaths, CurationError, suggestCategories } from './libraryCuration.ts'
 
 export const libraryRouter = express.Router()
 
@@ -177,6 +178,47 @@ libraryRouter.post('/', (req, res) => {
   )
   if (!record) return notFound(res)
   res.status(201).json(entryOf(canvas, 'manage', false))
+})
+
+/** A library from scratch: a new canvas owned by the caller and its library
+ *  row in one go, with the categories typed or suggested. Imports land on
+ *  the page of their category. */
+libraryRouter.post('/new', (req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 120) : ''
+  if (!name) return res.status(400).json({ error: 'a library needs a name' })
+  const description = typeof req.body?.description === 'string' ? req.body.description.trim().slice(0, 2000) : ''
+  const categories = cleanCategoryPaths(req.body?.categories)
+  const canvas = store.createCanvas(name, req.user!.id)
+  const rules = structuredClone(RULE_PRESETS.blank)
+  rules.placement = { ...rules.placement, page: 'category' }
+  const record = createLibrary(
+    canvas.id,
+    {
+      rules,
+      description,
+      taxonomy: { kinds: [], sources: [], categories: categories.map((path) => ({ path })) },
+    },
+    actorOf(req),
+  )
+  if (!record) return notFound(res)
+  res.status(201).json(entryOf(canvas, 'manage', false))
+})
+
+/** Starting categories for an empty library, from a one-line brief, on the
+ *  caller's own model account. */
+libraryRouter.post('/suggest-categories', async (req, res) => {
+  const brief = typeof req.body?.brief === 'string' ? req.body.brief.trim() : ''
+  if (!brief) return res.status(400).json({ error: 'say in one line what the library is for' })
+  if (importLimited(req.user!.id)) {
+    res.setHeader('Retry-After', '60')
+    return res.status(429).json({ error: 'too many requests; wait a minute' })
+  }
+  try {
+    res.json({ categories: await suggestCategories(req.user!.id, brief) })
+  } catch (error) {
+    if (error instanceof CurationError) return res.status(error.status).json({ error: error.message })
+    throw error
+  }
 })
 
 /** Search every library the caller may use, or the ones `lib` names. */

@@ -1055,6 +1055,13 @@ export const api = {
     }),
   createLibrary: (canvasId: string, opts: { preset?: RulePresetName; taxonomy?: LibraryTaxonomy } = {}) =>
     req<LibraryListEntry>('/api/libraries', { method: 'POST', body: JSON.stringify({ canvasId, ...opts }) }),
+  newLibrary: (input: { name: string; description?: string; categories?: string[] }) =>
+    req<LibraryListEntry>('/api/libraries/new', { method: 'POST', body: JSON.stringify(input) }),
+  suggestLibraryCategories: (brief: string) =>
+    req<{ categories: string[] }>('/api/libraries/suggest-categories', {
+      method: 'POST',
+      body: JSON.stringify({ brief }),
+    }),
   getLibraryDetail: (libraryId: string) => req<LibraryDetail>(`/api/libraries/${libraryId}`),
   updateLibrary: (
     libraryId: string,

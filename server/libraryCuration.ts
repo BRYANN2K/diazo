@@ -434,6 +434,56 @@ export function heuristicPlan(entries: CurationEntry[]): Pick<CurationPlan, 'tre
 }
 
 /* ---------------------------------------------------------------- */
+/* starting categories for an empty library                         */
+/* ---------------------------------------------------------------- */
+
+const SUGGEST_SYSTEM = `You plan the category tree of a NEW, empty design library from one line saying what it is for. Same rules as for any library a designer browses:
+- at most 3 levels; 4 to 10 top-level categories; 12 to 50 categories without children in total;
+- short human names, 1 to 4 words, sentence case; no numbers, no letter ranges, no "Misc" or "Other";
+- group by what a thing is (Components, Sections, Screens, Motion…), then by what helps choosing.
+
+Answer with JSON only, no prose: {"categories":[{"name":"Components","children":[{"name":"Buttons"}]}]}`
+
+/** Category paths for an empty library, proposed by the person's own
+ *  model from a one-line brief (one call, one retry). */
+export async function suggestCategories(ownerId: string, brief: string): Promise<string[]> {
+  const models = await resolveModels(ownerId)
+  if (!models) {
+    throw new CurationError(
+      'connect a model account in Settings → Doop Agent first: suggestions run on your own account',
+      409,
+    )
+  }
+  const user = `What the library is for: ${one(brief).slice(0, 400)}`
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const { text } = await models.main.complete({ system: SUGGEST_SYSTEM, user, maxTokens: 2000 })
+      return flattenTree(parseTree(text, 60)).map((f) => f.path)
+    } catch (error) {
+      if (error instanceof ModelAuthError) throw new CurationError(error.message, 409)
+    }
+  }
+  throw new CurationError('the model could not suggest categories; type a few instead', 409)
+}
+
+/** Category paths typed by a person, cleaned like the model's: each level
+ *  tidied, at most three levels, duplicates folded, parents listed too. */
+export function cleanCategoryPaths(raw: unknown, max = 200): string[] {
+  const list = Array.isArray(raw) ? raw : typeof raw === 'string' ? raw.split('\n') : []
+  const out = new Map<string, string>()
+  for (const line of list) {
+    if (typeof line !== 'string') continue
+    const parts = line.split('/').map(cleanCategoryName).filter(Boolean).slice(0, 3)
+    for (let depth = 1; depth <= parts.length; depth++) {
+      const path = parts.slice(0, depth).join('/')
+      if (!out.has(path.toLowerCase())) out.set(path.toLowerCase(), path)
+    }
+    if (out.size >= max) break
+  }
+  return [...out.values()].slice(0, max)
+}
+
+/* ---------------------------------------------------------------- */
 /* jobs                                                              */
 /* ---------------------------------------------------------------- */
 

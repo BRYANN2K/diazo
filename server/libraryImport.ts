@@ -13,7 +13,7 @@ import * as actions from './actions.ts'
 import { store } from './store.ts'
 import { lintFrame } from './lint.ts'
 import { updateFrameMeta } from './pageTools.ts'
-import { markDraft, planImport, stageLint, type ImportFrame } from './libraryImportPlan.ts'
+import { markCategory, markDraft, planImport, stageLint, type ImportFrame } from './libraryImportPlan.ts'
 import { sectionCategory } from '../shared/libraryRules.ts'
 import { readingOrder } from '../shared/frameOrder.ts'
 
@@ -203,6 +203,7 @@ export async function runImport(req: ImportRequest): Promise<ImportOutcome> {
       const source = sources.find((s) => s.frameId === f.frameId)!
       let html = f.changes.html ?? source.html
       if (f.item?.status === 'draft') html = markDraft(html)
+      if (req.category && f.item) html = markCategory(html, f.item.category)
       if (origin.get(f.frameId) !== req.libraryId) {
         const copy = actions.createFrame(
           req.libraryId,

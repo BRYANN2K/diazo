@@ -30,6 +30,8 @@ const TREE = {
 
 function answer(system: string, user: string): string {
   if (system.includes('Propose ONE category tree')) return JSON.stringify(TREE)
+  if (system.includes('NEW, empty design library'))
+    return JSON.stringify({ categories: [{ name: 'Components', children: [{ name: 'Buttons' }] }, { name: 'Heroes' }] })
   const idOf = (path: string) => new RegExp(`^(c\\d+) ${path}$`, 'm').exec(system)?.[1] ?? 'none'
   const a: Record<string, string> = {}
   for (const line of user.split('\n')) {
@@ -247,5 +249,58 @@ describe('curating through the API', () => {
       cs.map((c) => ({ pages: c.pages, frames: c.frames.map((f) => [f.id, f.name, f.updatedAt, f.html]) }))
     expect(shape(after)).toEqual(shape(before))
     expect(after.every((c) => !c.library)).toBe(true)
+  })
+})
+
+describe('a library from scratch', () => {
+  it('suggests starting categories on the owner account, and refuses without one', async () => {
+    const r = await owner.post('/api/libraries/suggest-categories', { brief: 'Marketing sites for AI start-ups' })
+    expect(r.status).toBe(200)
+    expect((await r.json()).categories).toEqual(['Components', 'Components/Buttons', 'Heroes'])
+    expect((await bare.post('/api/libraries/suggest-categories', { brief: 'x' })).status).toBe(409)
+    expect((await owner.post('/api/libraries/suggest-categories', {})).status).toBe(400)
+  })
+
+  it('creates an empty library that indexes, lists and searches, then takes a frame into a category', async () => {
+    expect((await owner.post('/api/libraries/new', { name: '  ' })).status).toBe(400)
+    const created = await owner.post('/api/libraries/new', {
+      name: 'Fresh library',
+      description: 'For AI start-ups',
+      categories: ['Components/Buttons', '01 Heroes'],
+    })
+    expect(created.status).toBe(201)
+    const id = (await created.json()).id as string
+    const library = await until(
+      async () => (await (await owner.get(`/api/canvases/${id}`)).json()).library,
+      (l) => l?.index?.status === 'done',
+    )
+    expect(library).toMatchObject({ items: 0, variants: 0, description: 'For AI start-ups' })
+    const detail = await (await owner.get(`/api/libraries/${id}`)).json()
+    expect(detail.taxonomy.categories.map((c: { path: string }) => c.path)).toEqual([
+      'Components',
+      'Components/Buttons',
+      'Heroes',
+    ])
+    const list = await (await owner.get('/api/libraries')).json()
+    expect(list.libraries.map((l: { id: string }) => l.id)).toContain(id)
+    expect((await (await owner.get(`/api/libraries/${id}/items`)).json()).total).toBe(0)
+    expect((await stranger.get(`/api/libraries/${id}`)).status).toBe(404)
+    /* Add to library… from a frame of another canvas, into a chosen category */
+    const other = (await (await owner.post('/api/canvases', { name: 'Work' })).json()).id as string
+    const frameId = await addFrame(owner, other, 'Buy button', '<button>Buy now</button>', 0)
+    const imported = await owner.post(`/api/libraries/${id}/import`, {
+      frameIds: [frameId],
+      category: 'Components/Buttons',
+    })
+    expect(imported.status).toBe(200)
+    const items = await until(
+      async () =>
+        (await (await owner.get(`/api/libraries/${id}/items`)).json()) as {
+          total: number
+          hits: { item: { category: string } }[]
+        },
+      (r) => r.total === 1,
+    )
+    expect(items.hits[0]!.item.category).toBe('Components/Buttons')
   })
 })
