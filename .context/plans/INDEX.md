@@ -14,4 +14,5 @@ lists every file in this folder.
   link): one `feat/*` branch each, and what depends on what.
 - [design-libraries.md](design-libraries.md) - Nine phases, 40 test-first steps on `feat/design-libraries`:
   convert + index + ⌘F as the first slice, then rendered extraction, the gallery, import rules, agent tools,
-  sharing, migration and scale, with the executor rules, dependencies and risk register.
+  sharing, migration and scale, with the executor rules, dependencies and risk register. Built; its
+  "Deviations" section lists what changed.

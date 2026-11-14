@@ -36,7 +36,13 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   A block inserted from a library shows "From library" in the element panel, with Update when its
   item has a newer revision (a fresh copy in its place, one undo step, after a confirmation).
   Agents call `list_libraries`, `get_library`, `search_library`, `get_library_item` (with the item as
-  a scoped block) and `insert_library_item`, which places the copy for them.
+  a scoped block) and `insert_library_item`, which places the copy for them; `import_to_library` and
+  `set_library_item` write to one while `AGENT_LIBRARY_WRITES` is on (the default).
+  An item whose frame holds a component goes in as a linked instance ("Promote to component" makes
+  one). ⌘F everywhere answers libraries from their index, without loading them. Search knows common
+  UI synonyms ("login" finds "sign in") and ranks what is used most first. A library can let a
+  model describe and tag its thin items (off by default, 200 a day, suggestions wait in the inbox).
+  `scripts/pull-library.ts` copies a library from another Doop (see FORK.md).
 - **Reference library** — store design-library items as references, find them with
   `find_references`, and attach them to plan cards (thumbnails, remove button, Settings card). Up to
   20 canvases; the workspace's design libraries come along without being picked. On a design
