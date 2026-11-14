@@ -117,6 +117,11 @@ to upstream's.
 - **Drift review** — compare a frame with a live URL: pixel score, drift cards, a compare modal
   and a CI webhook. Agents call `compare_with_url`; the desktop app fetches local URLs
   (loopback GET/HEAD only).
+- **Built page** — a signed preview-deploy webhook per canvas (Import → Preview deploys, secret
+  shown once). Each route the deploy lists is captured onto a "Built" page beside a snapshot of
+  its designed frame (matched by route mapping or name), scored as a drift comparison, and
+  rewritten in place on the next delivery. Payload and CI recipe in
+  [docs/built-page.md](docs/built-page.md).
 - **Self-hosting** — Docker image `ghcr.io/bryann2k/doop:bryann2k-main` built on every push, k3s
   manifests in `deploy/k3s/` with a persistent volume for uploads, exposed through Tailscale
   Serve only (no ingress, no Funnel).

@@ -107,3 +107,9 @@ RFC 1918 / unique-local ranges, checked at registration and again at every
 delivery (DNS answers can change). A self-host whose n8n or Mattermost lives on
 the same Docker network opts in by setting `WEBHOOK_ALLOW_PRIVATE_URLS=true` on
 the doop server.
+
+## Inbound: preview deploys
+
+The same signature scheme also works the other way: a canvas's deploy hook
+accepts signed deliveries from your CI and captures each shipped route onto
+its Built page. See [built-page.md](built-page.md).
