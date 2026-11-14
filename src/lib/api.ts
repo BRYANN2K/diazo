@@ -25,11 +25,13 @@ import type {
   LibraryDetail,
   LibraryItemDetail,
   LibraryItemPatch,
+  LibraryItemSummary,
   LibraryListEntry,
   LibraryPreview,
   LibrarySearchResult,
   LibraryTaxonomy,
   LibraryVisibility,
+  RuleFinding,
 } from '../../shared/library'
 import type { RulePresetName } from '../../shared/libraryRules'
 import type { CustomProviderConfig, CustomProviderKind } from '../../shared/customProvider'
@@ -1090,6 +1092,15 @@ export const api = {
     }),
   libraryItemUsed: (libraryId: string, itemId: string) =>
     req(`/api/libraries/${libraryId}/items/${encodeURIComponent(itemId)}/used`, { method: 'POST' }),
+  libraryInbox: (libraryId: string) =>
+    req<{ drafts: number; items: (LibraryItemSummary & { findings: RuleFinding[] })[] }>(
+      `/api/libraries/${libraryId}/inbox`,
+    ),
+  setLibraryItemsStatus: (libraryId: string, itemIds: string[], status: 'active' | 'deprecated' | 'hidden') =>
+    req<{ changed: number }>(`/api/libraries/${libraryId}/items/batch`, {
+      method: 'POST',
+      body: JSON.stringify({ itemIds, status }),
+    }),
   setLibraryItemMeta: (libraryId: string, itemId: string, patch: LibraryItemPatch) =>
     req<LibraryItemDetail>(`/api/libraries/${libraryId}/items/${encodeURIComponent(itemId)}`, {
       method: 'PATCH',

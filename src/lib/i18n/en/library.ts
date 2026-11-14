@@ -165,4 +165,10 @@ export const library = {
   menu: 'Library menu',
   settings: 'Settings',
   inbox: 'Inbox',
+  inboxEmpty: 'Nothing to review: no rule flagged an item.',
+  accept: 'Accept',
+  hide: 'Hide',
+  rerunRules: 'Re-run the rules',
+  keepThisOne: 'Keep this one',
+  inboxCount: { one: 'Inbox ({count})', other: 'Inbox ({count})' },
 } as const

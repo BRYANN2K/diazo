@@ -165,4 +165,10 @@ export const library = {
   menu: 'Menu da biblioteca',
   settings: 'Configurações',
   inbox: 'Caixa de entrada',
+  inboxEmpty: 'Nada a revisar: nenhuma regra sinalizou um item.',
+  accept: 'Aceitar',
+  hide: 'Ocultar',
+  rerunRules: 'Rodar as regras de novo',
+  keepThisOne: 'Ficar com este',
+  inboxCount: { one: 'Caixa de entrada ({count})', other: 'Caixa de entrada ({count})' },
 } as const

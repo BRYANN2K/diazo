@@ -27,6 +27,8 @@ import {
 } from '../components/ui/dropdown-menu'
 import { Sheet, SheetContent, SheetTitle } from '../components/ui/sheet'
 import { LibrarySettings } from '../components/library/LibrarySettings'
+import { LibraryInbox } from '../components/library/LibraryInbox'
+import { Badge } from '../components/ui/badge'
 import { Kbd } from '../components/ui/kbd'
 import { SearchField } from '../components/ui/search-field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
@@ -59,6 +61,7 @@ export function LibraryPage({ libraryId, itemId }: { libraryId: string; itemId: 
   } | null>(null)
   const [live, setLive] = useState<string | null>(null)
   const [panel, setPanel] = useState<'settings' | 'inbox' | null>(null)
+  const [drafts, setDrafts] = useState(0)
   const guard = useRef(staleGuard())
   const asked = useRef(new Set<string>())
   const searchRef = useRef<HTMLInputElement>(null)
@@ -139,6 +142,19 @@ export function LibraryPage({ libraryId, itemId }: { libraryId: string; itemId: 
 
   const set = (patch: Partial<GalleryQuery>) => setQuery((q) => ({ ...q, ...patch }))
   const curator = !!detail && detail.role !== 'read'
+  useEffect(() => {
+    if (!curator) return
+    let stale = false
+    api
+      .libraryInbox(libraryId)
+      .then((r) => {
+        if (!stale) setDrafts(r.drafts)
+      })
+      .catch(() => {})
+    return () => {
+      stale = true
+    }
+  }, [curator, libraryId, panel])
   const itemPath = (id: string) => `/l/${libraryId}/i/${encodeURIComponent(id)}${location.search}`
 
   return (
@@ -172,13 +188,22 @@ export function LibraryPage({ libraryId, itemId }: { libraryId: string; itemId: 
           {curator && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <MenuButton aria-label={t('library.menu')}>{t('library.menu')}</MenuButton>
+                <MenuButton aria-label={t('library.menu')}>
+                  {t('library.menu')}
+                  {drafts > 0 && (
+                    <Badge tone="accent" data-testid="inbox-badge">
+                      {drafts}
+                    </Badge>
+                  )}
+                </MenuButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent width="md" align="end">
                 {detail?.role === 'manage' && (
                   <DropdownMenuItem onSelect={() => setPanel('settings')}>{t('library.settings')}</DropdownMenuItem>
                 )}
-                <DropdownMenuItem onSelect={() => setPanel('inbox')}>{t('library.inbox')}</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setPanel('inbox')}>
+                  {drafts ? t('library.inboxCount', { count: drafts }) : t('library.inbox')}
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void api.reindexLibrary(libraryId)}>
                   {t('library.reindex')}
                 </DropdownMenuItem>
@@ -221,7 +246,7 @@ export function LibraryPage({ libraryId, itemId }: { libraryId: string; itemId: 
                 {panel === 'settings' ? (
                   <LibrarySettings detail={detail} onChanged={() => void fetchPage().catch(() => {})} />
                 ) : (
-                  <span data-inbox />
+                  <LibraryInbox libraryId={libraryId} onChanged={() => void fetchPage().catch(() => {})} />
                 )}
               </SheetContent>
             </Sheet>

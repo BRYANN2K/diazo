@@ -15,8 +15,8 @@ import { applyTransfer, MAX_IMPORT_FRAMES, runImport } from './libraryImport.ts'
 import { resolveActor } from './actions.ts'
 import { store } from './store.ts'
 import { createLibrary, disableLibrary, getLibrary, libraryAllows, presetFor, updateLibrary } from './libraries.ts'
-import { itemMeta, previewIndex, reindexLibrary, saveMeta } from './libraryIndex.ts'
-import { entryOf, itemDetail, libraryFor, readableLibraries, searchLibraries } from './libraryQueries.ts'
+import { itemMeta, libraryItems, previewIndex, reindexLibrary, saveMeta } from './libraryIndex.ts'
+import { entryOf, itemDetail, libraryFor, readableLibraries, searchLibraries, summaryOf } from './libraryQueries.ts'
 import { itemThumb, NoThumbError } from './libraryThumbs.ts'
 import { RendererBusyError } from './renderBrowser.ts'
 
@@ -398,6 +398,38 @@ export async function patchItem(
   await saveMeta(meta)
   return meta
 }
+
+/** What the rules flagged: drafts, and items with findings (curators). */
+libraryRouter.get('/:id/inbox', async (req, res) => {
+  const found = libraryFor(req.user!.id, req.params.id, 'curate')
+  if (!found) return notFound(res)
+  const items = (await libraryItems(found.canvas.id)).filter(
+    (item) => item.status === 'draft' || (item.findings.length > 0 && item.status !== 'hidden'),
+  )
+  res.json({
+    drafts: items.filter((i) => i.status === 'draft').length,
+    items: items.slice(0, 500).map((item) => ({ ...summaryOf(item), findings: item.findings })),
+  })
+})
+
+/** Set the status of several items at once (Accept, Hide). */
+libraryRouter.post('/:id/items/batch', async (req, res) => {
+  const found = libraryFor(req.user!.id, req.params.id, 'curate')
+  if (!found) return notFound(res)
+  const status = req.body?.status
+  const itemIds = Array.isArray(req.body?.itemIds) ? (req.body.itemIds as unknown[]).map(String).slice(0, 500) : []
+  if (!['active', 'deprecated', 'hidden'].includes(status) || !itemIds.length) {
+    return res.status(400).json({ error: 'send itemIds and a status: active, deprecated or hidden' })
+  }
+  const known = new Set((await libraryItems(found.canvas.id)).map((i) => i.itemId))
+  let changed = 0
+  for (const itemId of itemIds) {
+    if (!known.has(itemId)) continue
+    await patchItem(found.canvas.id, itemId, { status }, req.user!.name)
+    changed++
+  }
+  res.json({ changed })
+})
 
 libraryRouter.patch('/:id/items/:itemId', async (req, res) => {
   const found = libraryFor(req.user!.id, req.params.id, 'curate')

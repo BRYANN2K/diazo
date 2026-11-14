@@ -29,6 +29,7 @@ vi.mock('../src/lib/api', () => ({
       taxonomy: { kinds: [], sources: [], categories: [] },
     }),
     libraryItems: (id: string, q: LibrarySearchQuery) => libraryItems(id, q),
+    libraryInbox: async () => ({ drafts: 2, items: [] }),
   },
 }))
 
@@ -116,5 +117,15 @@ describe('the gallery', () => {
   it('mounts no live preview until a tile is rested on', async () => {
     await mount()
     expect(host.querySelector('[data-live]')).toBeNull()
+  })
+
+  it('counts drafts on the menu for curators only', async () => {
+    await mount()
+    expect(host.querySelector('[data-testid="inbox-badge"]')!.textContent).toBe('2')
+    await act(async () => root.unmount())
+    host.remove()
+    role = 'read'
+    await mount()
+    expect(host.querySelector('[data-testid="inbox-badge"]')).toBeNull()
   })
 })
