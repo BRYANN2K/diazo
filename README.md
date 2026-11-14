@@ -117,6 +117,10 @@ to upstream's.
 - **Drift review** — compare a frame with a live URL: pixel score, drift cards, a compare modal
   and a CI webhook. Agents call `compare_with_url`; the desktop app fetches local URLs
   (loopback GET/HEAD only).
+- **Component ↔ file mapping** — map a component or a frame to its file and export in the linked
+  repo (`code_links`). The Inspector's Code row suggests the file from `repo_search` /
+  `repo_list`; `get_component`, `get_frame` and the Stip pack (`code-links.json`) carry the
+  mapping. Agents call `set_code_link` and `suggest_code_links`. Read-only on the repo.
 - **Self-hosting** — Docker image `ghcr.io/bryann2k/doop:bryann2k-main` built on every push, k3s
   manifests in `deploy/k3s/` with a persistent volume for uploads, exposed through Tailscale
   Serve only (no ingress, no Funnel).

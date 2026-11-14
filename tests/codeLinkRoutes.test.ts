@@ -115,6 +115,9 @@ describe('/api/canvases/:id/code-links', () => {
       expect(both.isError).toBe(true)
       const { links } = await (await owner.get(`/api/canvases/${canvasId}/code-links`)).json()
       expect(links).toEqual([expect.objectContaining({ targetId: frameId, exportName: 'Pricing' })])
+      const read = await agent.callTool({ name: 'get_frame', arguments: { frame_id: frameId } })
+      expect(JSON.stringify(read.content)).toContain('code_links')
+      expect(JSON.stringify(read.content)).toContain('src/Pricing.tsx')
       const clear = await agent.callTool({
         name: 'set_code_link',
         arguments: { canvas_id: canvasId, frame_id: frameId, path: null },

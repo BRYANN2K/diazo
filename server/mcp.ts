@@ -40,7 +40,14 @@ import { capture, captureThrottled } from './analytics.ts'
 import { renderFrame } from './screenshot.ts'
 import { lintAndStore } from './lint.ts'
 import { buildHandoffPack, HandoffError } from './handoff.ts'
-import { CodeLinkError, SET_CODE_LINK_DESCRIPTION, setCodeLinkTool } from './codeLinks.ts'
+import {
+  CodeLinkError,
+  SET_CODE_LINK_DESCRIPTION,
+  componentCodeLink,
+  frameCodeLinks,
+  listCodeLinks,
+  setCodeLinkTool,
+} from './codeLinks.ts'
 import { suggestCodeLinks } from './codeSuggest.ts'
 import { CODE_LINK_MAX_EXPORT, CODE_LINK_MAX_PATH } from '../shared/codeLinks.ts'
 import { imagesForFrames } from './assets.ts'
@@ -1583,11 +1590,17 @@ export function buildMcpServer(
       arrive(f.canvasId, agent_name)
       const images = (await imagesForFrames([f.id])).get(f.id)
       const instances = f.html.includes(INSTANCE_ATTR) ? instancesIn(f) : []
+      const codeLinks = await frameCodeLinks(
+        f.canvasId,
+        f.id,
+        instances.map((i) => i.component_id),
+      )
       return withFeedbackNotice(
         text({
           ...frameSummary(f, images),
           html: expand_components ? f.html : compactFrameHtml(f),
           ...(instances.length ? { instances } : {}),
+          ...(codeLinks ? { code_links: codeLinks } : {}),
         }),
         f.canvasId,
         agent_name ? actorFrom(agent_name) : undefined,
@@ -2322,7 +2335,10 @@ export function buildMcpServer(
             workspaces.canvasesFor(ownerId ?? '').flatMap((meta) => store.getCanvas(meta.id) ?? []),
         })
         if (!outcome.ok) return err(outcome.error)
-        const { data, note, frames } = outcome.result
+        const { note, frames } = outcome.result
+        let { data } = outcome.result
+        if (tool.name === 'get_component' && data && typeof data === 'object' && 'id' in data)
+          data = { ...data, code_link: await componentCodeLink(canvasId, String((data as { id: unknown }).id)) }
         const result = note ? textWithNudge(data, note) : text(data)
         for (const frame of frames ?? []) withComponentNotes(result, frame)
         return tool.readOnly
@@ -2445,6 +2461,7 @@ export function buildMcpServer(
           title,
           changeId: change_id,
           docs: proposal || spec || tasks ? { proposal, spec, tasks } : undefined,
+          codeLinks: await listCodeLinks(canvas_id).catch(() => []),
         })
         return text(pack)
       } catch (e) {

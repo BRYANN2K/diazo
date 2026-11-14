@@ -12,6 +12,7 @@ import { setFramesLocked } from '../lib/layerEdits'
 import { FrameHistoryModal } from './FrameHistoryModal'
 import { FrameApprovalControl } from './FrameApproval'
 import { HandoffModal } from './HandoffModal'
+import { CodeLinkSection } from './CodeLinkSection'
 import { cn } from '@/lib/utils'
 import { Panel, PanelClose, PanelHeader, type PanelSurface } from './ui/panel'
 import { Collapsible, CollapsibleContent } from './ui/collapsible'
@@ -54,6 +55,8 @@ export function Inspector({
   const t = useT()
   const select = useStore((s) => s.select)
   const canEdit = useStore(canEditOpenCanvas)
+  /* a component's main frame maps the component; any other frame maps itself */
+  const mainOf = useStore((s) => s.canvas?.components?.find((c) => c.mainFrameId === frame.id))
   /* the raw HTML editor is a power tool — collapsed by default so the panel
      reads as frame properties, not a code dump; the choice sticks */
   const [showHtml, setShowHtml] = useState(() => localStorage.getItem(HTML_OPEN_KEY) === '1')
@@ -244,6 +247,14 @@ export function Inspector({
               {t('handoff.action')}
             </Button>
           )}
+        </InspectorGroup>
+        <InspectorGroup title={t('inspector.codeLinkTitle')}>
+          <CodeLinkSection
+            key={mainOf ? `component:${mainOf.id}` : `frame:${frame.id}`}
+            canvasId={frame.canvasId}
+            canEdit={canEdit}
+            target={mainOf ? { kind: 'component', id: mainOf.id, name: mainOf.name } : { kind: 'frame', id: frame.id }}
+          />
         </InspectorGroup>
         <PropertyScrubContext.Provider value={boxScrub}>
           <InspectorGroup title={t('inspector.sectionPosition')}>

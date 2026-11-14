@@ -10,6 +10,8 @@ import type { AgentModel } from './agentModel.ts'
 import * as actions from './actions.ts'
 import type { Canvas, ChatPlan, Frame } from '../shared/types.ts'
 import type { RepoReadResult } from '../shared/localRepo.ts'
+import { codeLinkLabel, type CodeLink } from '../shared/codeLinks.ts'
+import { usedComponentIds } from './componentEngine.ts'
 import {
   HANDOFF_CHANGE_ID,
   HANDOFF_MAX_FRAMES,
@@ -64,6 +66,9 @@ export interface HandoffBuild {
   requesterId?: string
   /** bounded read inside the linked repo, for state.json's target_before */
   readRepo?: (paths: string[]) => Promise<RepoReadResult | undefined>
+  /** the canvas's component ↔ file mappings (server/codeLinks.ts) — the
+   *  pack lists those of its frames and the components they use */
+  codeLinks?: CodeLink[]
   /** the frame→PNG renderer — injectable so tests don't boot Chromium */
   renderPng?: (frame: Frame) => Promise<Buffer>
 }
@@ -181,7 +186,51 @@ interface DocInput {
   assets: { frame: Frame; path: string; png: Buffer }[]
   tokens: DesignToken[]
   themes: string[]
+  /** the pack's mappings, already narrowed to its frames and their components */
+  codeMap: CodeMapEntry[]
 }
+
+interface CodeMapEntry {
+  kind: 'frame' | 'component'
+  name: string
+  path: string
+  export?: string
+}
+
+/** The mappings a pack carries: its frames' own, and those of every
+ *  component an exported frame uses. */
+function codeMapFor(canvas: Canvas, frames: Frame[], links: readonly CodeLink[]): CodeMapEntry[] {
+  const out: CodeMapEntry[] = []
+  const components = new Set<string>()
+  for (const f of frames) {
+    for (const id of usedComponentIds(f.html ?? '')) components.add(id)
+    const link = links.find((l) => l.targetKind === 'frame' && l.targetId === f.id)
+    if (link)
+      out.push({
+        kind: 'frame',
+        name: f.name,
+        path: link.path,
+        ...(link.exportName ? { export: link.exportName } : {}),
+      })
+  }
+  for (const def of canvas.components ?? []) {
+    if (!components.has(def.id)) continue
+    const link = links.find((l) => l.targetKind === 'component' && l.targetId === def.id)
+    if (link)
+      out.push({
+        kind: 'component',
+        name: def.name,
+        path: link.path,
+        ...(link.exportName ? { export: link.exportName } : {}),
+      })
+  }
+  return out
+}
+
+const codeMapLines = (map: CodeMapEntry[]) =>
+  map
+    .map((e) => `  - ${e.kind} "${e.name}" → \`${codeLinkLabel({ path: e.path, exportName: e.export ?? null })}\``)
+    .join('\n')
 
 function frameLines(input: DocInput): string {
   const byId = new Map(input.assets.map((a) => [a.frame.id, a.path]))
@@ -216,6 +265,10 @@ function templateDraft(input: DocInput): Draft {
   criteria.push(
     'The implementation reuses the project’s existing components and, where they cover the same value, the design tokens in tokens.json.',
   )
+  if (input.codeMap.length)
+    criteria.push(
+      'Every mapped screen and component in code-links.json is implemented in, or imported from, its mapped file.',
+    )
   criteria.push('States the design does not show (loading, empty, error) follow the project’s existing patterns.')
   if (plan?.openQuestions?.length)
     criteria.push('The open questions in proposal.md are resolved before this change ships.')
@@ -243,6 +296,7 @@ function docsFromDraft(input: DocInput, draft: Draft): { proposal: string; spec:
     scope.push(
       `- Design tokens — \`tokens.json\` (${tokens.length} tokens${themes.length ? `, themes: ${themes.join(', ')}` : ''})`,
     )
+  if (input.codeMap.length) scope.push(`- Code mapping — \`code-links.json\`\n${codeMapLines(input.codeMap)}`)
   scope.push(`- Canvas — ${canvasUrl(canvas.id)}`)
   const questions = plan?.openQuestions?.length
     ? plan.openQuestions.map((q) => `- ${q}`).join('\n')
@@ -256,6 +310,7 @@ function docsFromDraft(input: DocInput, draft: Draft): { proposal: string; spec:
   const refs = [`- Canvas: ${canvasUrl(canvas.id)}`]
   if (frames.length) refs.push(frameLines(input))
   if (tokens.length) refs.push('- Design tokens: `tokens.json`')
+  if (input.codeMap.length) refs.push(`- Code mapping: \`code-links.json\`\n${codeMapLines(input.codeMap)}`)
   const spec =
     `# ${title}\n\n## Intent\n\n${draft.intent}\n\n## Acceptance criteria\n\n` +
     `${draft.criteria.map((c, i) => `- AC-${i + 1}: ${c}`).join('\n')}\n\n## References\n\n${refs.join('\n')}\n`
@@ -354,7 +409,8 @@ export async function buildHandoffPack(canvasId: string, opts: HandoffBuild): Pr
   const assets = await renderAssets(frames, opts.renderPng ?? ((f) => renderFrame(f, 1)), warnings)
   const tokens = store.getTokens(canvasId)
   const themes = store.getTokenThemes(canvasId)
-  const input: DocInput = { canvas, title, plan, frames, assets, tokens, themes }
+  const codeMap = codeMapFor(canvas, frames, opts.codeLinks ?? [])
+  const input: DocInput = { canvas, title, plan, frames, assets, tokens, themes, codeMap }
 
   /* the spec's contract: caller docs win verbatim, then the requester's
      model drafts it, then the template */
@@ -420,6 +476,8 @@ export async function buildHandoffPack(canvasId: string, opts: HandoffBuild): Pr
       path: `${dir}/tokens.json`,
       text: JSON.stringify({ tokens: describeTokens(tokens), ...(themes.length ? { themes } : {}) }, null, 2) + '\n',
     })
+  if (codeMap.length)
+    files.push({ path: `${dir}/code-links.json`, text: JSON.stringify({ links: codeMap }, null, 2) + '\n' })
   for (const a of assets) files.push({ path: `${dir}/${a.path}`, base64: a.png.toString('base64') })
 
   const bad = handoffFilesProblem(changeId, files)

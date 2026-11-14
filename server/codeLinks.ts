@@ -171,3 +171,28 @@ export async function setCodeLinkTool(
 
 export const SET_CODE_LINK_DESCRIPTION =
   'Record where a component or a frame lives in the linked repo: a repo-relative file path plus the export name (Button, or default). Implementers read it in get_component, get_frame and the Stip handoff pack. It writes nothing to the repo. Pass path null to clear the mapping.'
+
+/** get_component's mapping, added to its answer (MCP and resident alike). */
+export async function componentCodeLink(canvasId: string, componentId: string) {
+  const link = await codeLinkFor(canvasId, 'component', componentId).catch(() => undefined)
+  return link ? describeCodeLink(link) : null
+}
+
+/** get_frame's mappings: the frame's own, and those of the components it
+ *  uses, by component name — what an implementer imports instead of redrawing. */
+export async function frameCodeLinks(canvasId: string, frameId: string, componentIds: readonly string[]) {
+  const links = await listCodeLinks(canvasId).catch(() => [] as CodeLink[])
+  const canvas = store.getCanvas(canvasId)
+  const frame = links.find((l) => l.targetKind === 'frame' && l.targetId === frameId)
+  const components: Record<string, ReturnType<typeof describeCodeLink>> = {}
+  for (const id of new Set(componentIds)) {
+    const link = links.find((l) => l.targetKind === 'component' && l.targetId === id)
+    const def = canvas?.components?.find((c) => c.id === id)
+    if (link && def) components[def.name] = describeCodeLink(link)
+  }
+  if (!frame && !Object.keys(components).length) return null
+  return {
+    ...(frame ? { frame: describeCodeLink(frame) } : {}),
+    ...(Object.keys(components).length ? { components } : {}),
+  }
+}

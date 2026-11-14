@@ -41,7 +41,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema'
 import { z } from 'zod'
 import { catalogEntry, compactFrameHtml, findComponent } from './componentActions.ts'
 import { COMPONENT_TOOLS, COMPONENT_TOOL_NAMES, componentWriteNotes, runComponentTool } from './componentTools.ts'
-import { CodeLinkError, SET_CODE_LINK_DESCRIPTION, setCodeLinkTool } from './codeLinks.ts'
+import { CodeLinkError, SET_CODE_LINK_DESCRIPTION, componentCodeLink, setCodeLinkTool } from './codeLinks.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
 import { canvasesFor } from './workspaces.ts'
@@ -3367,7 +3367,10 @@ export async function execTool(
             reader ? canvasesFor(reader).flatMap((meta) => store.getCanvas(meta.id) ?? []) : [canvas],
         })
         if (!outcome.ok) return fail(outcome.error)
-        const { data, note, frames } = outcome.result
+        const { note, frames } = outcome.result
+        let { data } = outcome.result
+        if (block.name === 'get_component' && data && typeof data === 'object' && 'id' in data)
+          data = { ...data, code_link: await componentCodeLink(canvasId, String((data as { id: unknown }).id)) }
         const notes = (frames ?? []).flatMap((frame) => {
           runState.mutatedFrames.add(frame.id)
           runState.verifiedFrames.delete(frame.id)

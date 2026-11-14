@@ -1198,7 +1198,8 @@ app.post('/api/canvases/:id/handoff', async (req, res) => {
           return r.ok ? (r.result as RepoReadResult) : undefined
         }
       : undefined
-    const pack = await buildHandoffPack(c.id, { ...parsed.data, requesterId: req.user!.id, readRepo })
+    const codeLinks = await listCodeLinks(c.id).catch(() => [])
+    const pack = await buildHandoffPack(c.id, { ...parsed.data, requesterId: req.user!.id, readRepo, codeLinks })
     res.json({ pack, link: link ? { name: link.name } : null, writable })
   } catch (e) {
     if (e instanceof HandoffError) return res.status(e.status).json({ error: e.message })
