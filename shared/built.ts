@@ -205,3 +205,24 @@ export function routeUrl(deployUrl: string, route: string): URL {
   if (url.origin !== base.origin) throw new Error('the route leaves the deploy’s origin')
   return url
 }
+
+/** Mappings as the settings card's textarea shows them: one
+ *  `<route> <frame name>` per line. */
+export function formatBuiltMappings(mappings: BuiltMapping[]): string {
+  return mappings.map((m) => `${m.route} ${m.frameName ?? m.frameId}`).join('\n')
+}
+
+/** The textarea back into `{ route, frame }` pairs: the first word is the
+ *  route, the rest of the line the frame name (or id). Blank lines drop. */
+export function parseBuiltMappings(text: string): { route: string; frame: string }[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const space = line.search(/\s/)
+      return space === -1
+        ? { route: line, frame: '' }
+        : { route: line.slice(0, space), frame: line.slice(space + 1).trim() }
+    })
+}

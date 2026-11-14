@@ -24,6 +24,7 @@ import { components } from './components'
 import { actions } from './actions'
 import { lint } from './lint'
 import { handoff } from './handoff'
+import { built } from './built'
 
 export const ptBR: Catalog = {
   common,
@@ -51,4 +52,5 @@ export const ptBR: Catalog = {
   actions,
   lint,
   handoff,
+  built,
 }

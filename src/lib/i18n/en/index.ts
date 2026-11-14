@@ -23,6 +23,7 @@ import { components } from './components'
 import { actions } from './actions'
 import { lint } from './lint'
 import { handoff } from './handoff'
+import { built } from './built'
 
 /** The source catalog, one namespace per area of the app. */
 export const en = {
@@ -51,4 +52,5 @@ export const en = {
   actions,
   lint,
   handoff,
+  built,
 }

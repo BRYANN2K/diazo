@@ -50,9 +50,12 @@ import { ExportModal } from '../components/ExportModal'
 import { AppIcon } from '../components/ui/brand-mark'
 import { pageFrames } from '../../shared/pages'
 import type { Frame } from '../../shared/types'
+import type { DriftComparison } from '../../shared/drift'
+import { DriftModal } from '../components/DriftModal'
 import { ImportStepFooter, ImportStepHeader, SourcePicker } from '../components/ImportSources'
 import { importSources } from '../components/importSourceList'
 import { LiveFrameSection } from '../components/LiveFrameSection'
+import { BuiltHookSection } from '../components/BuiltHookSection'
 import { PresentMode } from '../components/PresentMode'
 import { CommandPalette } from '../components/CommandPalette'
 import { MainMenu } from '../components/MainMenu'
@@ -282,6 +285,35 @@ export function CanvasPage({
     url.searchParams.delete('connect')
     history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`)
   }, [])
+  /* ?frame=<id>&drift=<comparison> (the Built page's "Open compare" link)
+     opens that frame's drift compare on the recorded comparison, once the
+     frame is on the canvas; the flag then comes off the URL */
+  const [driftLink] = useState(() => {
+    const params = new URLSearchParams(location.search)
+    const id = params.get('drift')
+    const frameId = params.get('frame')
+    return id && frameId ? { id, frameId } : null
+  })
+  const [linkedDrift, setLinkedDrift] = useState<{ frame: Frame; comparison: DriftComparison } | null>(null)
+  const driftLinkReady = useStore((s) => !!driftLink && !!s.canvas?.frames.some((f) => f.id === driftLink.frameId))
+  useEffect(() => {
+    if (!driftLink || !driftLinkReady) return
+    const url = new URL(location.href)
+    url.searchParams.delete('drift')
+    history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`)
+    let live = true
+    api
+      .listDrift(driftLink.frameId)
+      .then((list) => {
+        const comparison = list.find((c) => c.id === driftLink.id)
+        const frame = useStore.getState().canvas?.frames.find((f) => f.id === driftLink.frameId)
+        if (live && comparison && frame) setLinkedDrift({ frame, comparison })
+      })
+      .catch(console.error)
+    return () => {
+      live = false
+    }
+  }, [driftLink, driftLinkReady])
   const [showShare, setShowShare] = useState(false)
   /* the frame the player was launched on, while presenting */
   const [presenting, setPresenting] = useState<string | null>(null)
@@ -1276,6 +1308,9 @@ export function CanvasPage({
       {shortcutsOpen && <ShortcutsSheet onClose={() => setShortcutsOpen(false)} />}
       {linkOpen && <LinkDialog onClose={() => setLinkOpen(false)} />}
       {historyFrame && <FrameHistoryModal frame={historyFrame} onClose={() => setHistoryFrame(null)} />}
+      {linkedDrift && (
+        <DriftModal frame={linkedDrift.frame} initial={linkedDrift.comparison} onClose={() => setLinkedDrift(null)} />
+      )}
       <Input
         ref={placeImageRef}
         type="file"
@@ -1774,6 +1809,8 @@ function ImportModal({
                 onBack={() => setSource(null)}
                 onCreated={(frame) => onDone([frame.id], 0)}
               />
+            ) : source === 'built' ? (
+              <BuiltHookSection canvasId={canvasId} onBack={() => setSource(null)} />
             ) : source === 'github' ? (
               <GithubSection
                 canvasId={canvasId}

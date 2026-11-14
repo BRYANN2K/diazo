@@ -95,6 +95,21 @@ describe('shared/built', () => {
     })
   })
 
+  it('round-trips the mappings textarea', () => {
+    const text = shared.formatBuiltMappings([
+      { route: '/', frameId: 'f1', frameName: 'Home' },
+      { route: '/pricing', frameId: 'f2', frameName: 'Pricing page' },
+      { route: '/gone', frameId: 'f3' },
+    ])
+    expect(text).toBe('/ Home\n/pricing Pricing page\n/gone f3')
+    expect(shared.parseBuiltMappings(`${text}\n\n  /solo  `)).toEqual([
+      { route: '/', frame: 'Home' },
+      { route: '/pricing', frame: 'Pricing page' },
+      { route: '/gone', frame: 'f3' },
+      { route: '/solo', frame: '' },
+    ])
+  })
+
   it('refuses local deploy URLs with a 422, like the drift CI hook', () => {
     for (const deployUrl of ['http://localhost:3000', 'http://10.0.0.2', 'http://169.254.169.254', 'http://[::1]']) {
       expect(shared.parseBuiltPayload({ deployUrl, routes: ['/'] }), deployUrl).toMatchObject({

@@ -6,6 +6,7 @@ import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../.
 import type { RepoLink, RepoLinkStatus, RepoRequest, RepoResult } from '../../shared/localRepo'
 import type { HandoffFile, HandoffPack, HandoffWriteResult } from '../../shared/handoff'
 import type { DriftComparison, DriftFetchRequest, DriftFetchResult } from '../../shared/drift'
+import type { BuiltHookInfo } from '../../shared/built'
 import type { ImageDescriptionMode, ImageDescriptionPreference } from '../../shared/imageDescriptions'
 import type { AgentRunners, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
 import type { CanvasFindResult } from '../../shared/canvasFind'
@@ -518,6 +519,17 @@ export const api = {
   deleteSyncKey: (canvasId: string, keyId: string) =>
     req(`/api/canvases/${canvasId}/sync-keys/${keyId}`, { method: 'DELETE' }),
   syncFlow: (canvasId: string) => req<SyncFlow>(`/api/canvases/${canvasId}/sync-flow`),
+  /* the Built page's preview-deploy hook (shared/built.ts); the secret comes
+     back from create/rotate only */
+  getBuiltHook: (canvasId: string) => req<{ hook: BuiltHookInfo | null }>(`/api/canvases/${canvasId}/built-hook`),
+  issueBuiltHook: (canvasId: string) =>
+    req<{ hook: BuiltHookInfo; secret: string }>(`/api/canvases/${canvasId}/built-hook`, { method: 'POST' }),
+  setBuiltMappings: (canvasId: string, mappings: { route: string; frame: string }[]) =>
+    req<{ hook: BuiltHookInfo }>(`/api/canvases/${canvasId}/built-hook/mappings`, {
+      method: 'PUT',
+      body: JSON.stringify({ mappings }),
+    }),
+  deleteBuiltHook: (canvasId: string) => req(`/api/canvases/${canvasId}/built-hook`, { method: 'DELETE' }),
   /* agent keys: bearer credentials for headless MCP clients */
   listAgentKeys: () => req<AgentKeyInfo[]>('/api/agent-keys'),
   createAgentKey: (name: string) =>
