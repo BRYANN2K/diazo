@@ -214,8 +214,12 @@ export function findPreviewRuntime(token: string): void {
       focus?: string
       find?: { text?: string; selector?: string; anchor?: boolean }
       snapshot?: string
+      type?: string
     } | null
-    if (!data || data.doopFindPreview !== token) return
+    /* what this script posts carries a `type`: a document that is its own
+       parent (opened top level) must not take its own box for a new focus,
+       which looped and reset the retries forever */
+    if (!data || data.doopFindPreview !== token || data.type !== undefined) return
     if (typeof data.snapshot === 'string') {
       post({ type: 'snapshot', request: data.snapshot, snapshot: snapshot() })
       return

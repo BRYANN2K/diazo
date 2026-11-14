@@ -27,7 +27,9 @@ export function DuelCards({ canvasId }: { canvasId: string }) {
     let live = true
     api
       .listDuels(canvasId)
-      .then((list) => live && setDuels(list))
+      /* anything but a list (an older server, a stub) shows no duels rather
+       * than throwing in render and taking the canvas page down with it */
+      .then((list) => live && setDuels(Array.isArray(list) ? list : []))
       .catch(() => {})
     return () => {
       live = false

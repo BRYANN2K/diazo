@@ -96,6 +96,9 @@ describe.skipIf(!findBrowserPath())('pixel grid', { timeout: 30_000 }, () => {
     await page.waitForSelector('[aria-label="Canvas tools"]')
     await page.evaluate((vp) => window.rulersHarness.viewport(vp), CAMERA)
     await page.waitForSelector('[data-pixel-grid="paper"]:not([hidden])')
+    /* a frame gets its live document, and with it its own grid, once the
+       camera settles (frameLod.ts); until then it is drawn as its image */
+    await page.waitForSelector('[data-pixel-grid="frame"]')
     /* the pins pop in; their resting box is the one to hit */
     await page.evaluate(() =>
       Promise.all(
@@ -150,7 +153,9 @@ describe.skipIf(!findBrowserPath())('pixel grid', { timeout: 30_000 }, () => {
   })
 
   it('fades out with the zoom', async () => {
-    await page.evaluate(() => window.rulersHarness.viewport({ x: 40, y: 40, zoom: 2 }))
+    /* 250%: under the grid's 300% threshold, and the 40px frame still 100 screen
+       px, big enough to stay live (MIN_LIVE_PX) and keep a grid to fade */
+    await page.evaluate(() => window.rulersHarness.viewport({ x: 40, y: 40, zoom: 2.5 }))
     await page.waitForSelector('[data-pixel-grid="paper"][hidden]')
     expect(await page.$eval('[data-pixel-grid="frame"]', (el) => getComputedStyle(el).opacity)).toBe('0')
   })
