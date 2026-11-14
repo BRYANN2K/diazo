@@ -278,6 +278,7 @@ export const library = {
   galleryEmptyFrame: 'De um frame em qualquer canvas: clique com o botão direito e Adicionar à biblioteca…',
   galleryEmptyImport: 'De uma página web: importe-a num canvas (Importar → Site) e depois Adicionar à biblioteca…',
   galleryEmptyAgent: 'Com um agente: peça para preencher a biblioteca; ele usa import_to_library e set_library_item.',
+  previewsPreparing: 'Preparando prévias · {ready} / {total}',
   addCategory: 'Categoria',
   addCategoryByRules: 'Pelas regras da biblioteca',
   /* duplicados na importação */
