@@ -13,14 +13,23 @@ import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 
 /** Designed-vs-shipped review for one frame: a URL to capture beside it,
  *  the pixel score, a diff overlay (slider / difference) between the two
- *  renders, and the button that sends the gaps to the resident agent. */
-export function DriftModal({ frame, onClose }: { frame: Frame; onClose: () => void }) {
+ *  renders, and the button that sends the gaps to the resident agent.
+ *  `initial` opens it on a recorded comparison (the Built page's link). */
+export function DriftModal({
+  frame,
+  initial,
+  onClose,
+}: {
+  frame: Frame
+  initial?: DriftComparison
+  onClose: () => void
+}) {
   const t = useT()
   const pushNotice = useStore((s) => s.pushNotice)
-  const [url, setUrl] = useState('')
+  const [url, setUrl] = useState(initial?.url ?? '')
   const [running, setRunning] = useState(false)
   const [analyzing, setAnalyzing] = useState<'idle' | 'running' | 'queued'>('idle')
-  const [comparison, setComparison] = useState<DriftComparison | null>(null)
+  const [comparison, setComparison] = useState<DriftComparison | null>(initial ?? null)
   const [slider, setSlider] = useState(50)
   const [difference, setDifference] = useState(false)
   const splitRef = useRef<HTMLDivElement>(null)

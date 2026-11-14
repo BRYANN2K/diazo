@@ -37,6 +37,8 @@ import {
 } from '../shared/handoff.ts'
 import { REPO_WRITE_TTL_MS, type RepoReadResult } from '../shared/localRepo.ts'
 import { localDriftRouter } from './driftBridge.ts'
+import * as built from './built.ts'
+import { BUILT_BODY_LIMIT, handleBuiltDelivery } from './builtRoutes.ts'
 import { compareFrameWithUrl, driftErrorMessage, getComparison, listComparisons } from './drift.ts'
 import { classifyDriftUrl } from '../shared/drift.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
@@ -700,6 +702,16 @@ app.post('/stripe/webhook', express.raw({ type: '*/*', limit: '1mb' }), (req, re
 for (const extension of extensions) {
   if (extension.webhookRouter) app.use(`/webhooks/${extension.id}`, extension.webhookRouter())
 }
+
+/* Built page deliveries (server/builtRoutes.ts): a preview deploy's signed
+   POST. Ahead of the JSON parser — the signature covers the raw bytes — and
+   of the session gate, since the signature is the credential. */
+app.post('/api/canvases/:id/built', express.raw({ type: () => true, limit: BUILT_BODY_LIMIT }), (req, res) => {
+  handleBuiltDelivery(req, res).catch((err) => {
+    console.error('[built] delivery crashed', err)
+    if (!res.headersSent) res.status(500).json({ error: 'delivery failed' })
+  })
+})
 
 app.use(express.json({ limit: '10mb' }))
 app.all('/gemini-cloud/mcp/:id', (req, res, next) => {
@@ -1918,6 +1930,62 @@ app.delete('/api/canvases/:id/sync-keys/:keyId', async (req, res) => {
   if (!requireDurableCanvas(req, res, req.params.id)) return
   if (!(await ingest.deleteSyncKey(req.params.id, req.params.keyId)))
     return res.status(404).json({ error: 'sync key not found' })
+  res.json({ ok: true })
+})
+
+/* ---- Built page (server/built.ts): the canvas's preview-deploy hook. Same
+   durable-access rule as sync keys — the secret is a standing credential —
+   plus edit, since deliveries write frames. The secret leaves on POST only. */
+
+function requireBuiltCanvas(req: express.Request, res: express.Response, canvasId: string) {
+  const c = requireDurableCanvas(req, res, canvasId)
+  if (!c) return null
+  if (!roleAllows(canvasRole(req.user!.id, c), 'edit')) {
+    res.status(403).json({ error: 'deploy hooks need edit access' })
+    return null
+  }
+  return c
+}
+
+app.get('/api/canvases/:id/built-hook', async (req, res) => {
+  const c = requireBuiltCanvas(req, res, req.params.id)
+  if (!c) return
+  const row = await built.getHook(c.id)
+  res.json({ hook: row ? built.hookInfo(row, c) : null })
+})
+
+/* create the hook, or rotate its secret */
+app.post('/api/canvases/:id/built-hook', async (req, res) => {
+  const c = requireBuiltCanvas(req, res, req.params.id)
+  if (!c) return
+  const { row, secret } = await built.issueHook(c.id, req.user!.id)
+  res.json({ hook: built.hookInfo(row, c), secret })
+})
+
+app.put('/api/canvases/:id/built-hook/mappings', async (req, res) => {
+  const c = requireBuiltCanvas(req, res, req.params.id)
+  if (!c) return
+  const raw: unknown = req.body?.mappings
+  if (!Array.isArray(raw)) return res.status(400).json({ error: 'mappings must be a list of { route, frame }' })
+  const input = raw.map((m: { route?: unknown; frame?: unknown } | null) => ({
+    route: typeof m?.route === 'string' ? m.route : '',
+    frame: typeof m?.frame === 'string' ? m.frame : '',
+  }))
+  try {
+    await built.setMappings(c, input)
+  } catch (error) {
+    if (error instanceof built.BuiltInputError) return res.status(400).json({ error: error.message })
+    console.error('[built] mappings failed', error)
+    return res.status(500).json({ error: 'the mappings could not be saved' })
+  }
+  const row = await built.getHook(c.id)
+  res.json({ hook: row ? built.hookInfo(row, c) : null })
+})
+
+app.delete('/api/canvases/:id/built-hook', async (req, res) => {
+  const c = requireBuiltCanvas(req, res, req.params.id)
+  if (!c) return
+  if (!(await built.deleteHook(c.id))) return res.status(404).json({ error: 'no deploy hook on this canvas' })
   res.json({ ok: true })
 })
 

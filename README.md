@@ -135,6 +135,11 @@ to upstream's.
 - **Drift review** — compare a frame with a live URL: pixel score, drift cards, a compare modal
   and a CI webhook. Agents call `compare_with_url`; the desktop app fetches local URLs
   (loopback GET/HEAD only).
+- **Built page** — a signed preview-deploy webhook per canvas (Import → Preview deploys, secret
+  shown once). Each route the deploy lists is captured onto a "Built" page beside a snapshot of
+  its designed frame (matched by route mapping or name), scored as a drift comparison, and
+  rewritten in place on the next delivery. Payload and CI recipe in
+  [docs/built-page.md](docs/built-page.md).
 - **Local install on a Mac** — one `curl … | sh` runs doop in a single Apple `container` on
   `127.0.0.1:4400`, with PGlite and uploads in `~/.doop/data` and secrets generated on the Mac
   ([Run doop](#local-mac-lightweight)).

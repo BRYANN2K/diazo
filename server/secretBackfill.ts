@@ -2,6 +2,7 @@ import { getTableColumns, getTableName, isNotNull, sql } from 'drizzle-orm'
 import type { AnyPgColumn, PgTable } from 'drizzle-orm/pg-core'
 import type { Db } from './db/index.ts'
 import {
+  builtHooks,
   githubConnections,
   integrations,
   linearInstallations,
@@ -21,6 +22,7 @@ const SEALED: { table: PgTable; key: AnyPgColumn; columns: AnyPgColumn[] }[] = [
   { table: integrations, key: integrations.id, columns: [integrations.accessToken] },
   { table: githubConnections, key: githubConnections.id, columns: [githubConnections.token] },
   { table: webhooks, key: webhooks.id, columns: [webhooks.secret] },
+  { table: builtHooks, key: builtHooks.canvasId, columns: [builtHooks.secret] },
   {
     table: linearInstallations,
     key: linearInstallations.organizationId,

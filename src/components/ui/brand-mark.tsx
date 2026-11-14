@@ -312,6 +312,7 @@ export type AppIconBrand =
   | 'website'
   | 'live-app'
   | 'live-frame'
+  | 'built'
   | 'pdf'
   | 'png'
   | 'jpg'
@@ -405,6 +406,8 @@ const APP_TILES: Record<AppIconBrand, AppTile> = {
   /* a dev-server frame: the live signal on the brand's blue, not the sync
      flow's green */
   'live-frame': { tile: '#0177d3', art: chromeGlyph(RadioTowerIcon) },
+  /* a preview deploy landing on the Built page: the server glyph on ink */
+  built: { tile: '#1c1c1e', art: chromeGlyph(ServerIcon) },
   pdf: { tile: '#e5322d', art: chromeGlyph(PdfIcon) },
   png: { tile: '#6e56cf', art: chromeGlyph(ImageIcon) },
   jpg: { tile: '#0891b2', art: chromeGlyph(ImageIcon) },

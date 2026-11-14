@@ -16,6 +16,7 @@ import { open, seal } from '../secretBox.ts'
 import type { CanvasGuide, CanvasPageInfo, ChatPlan, FrameApproval } from '../../shared/types.ts'
 import type { FrameLint } from '../../shared/slopRules.ts'
 import type { FrameChecks } from '../../shared/frameChecks.ts'
+import type { BuiltDelivery } from '../../shared/built.ts'
 import type { AutomationRunState, AutomationTrigger, Schedule, Step } from '../../shared/automations.ts'
 import type {
   ComponentCode,
@@ -1101,6 +1102,35 @@ export const driftComparisons = pgTable(
   },
   (t) => [index('drift_comparisons_frame_idx').on(t.frameId)],
 )
+
+/** One route a preview deploy shipped, as the Built page keeps it: the
+ *  capture frame it lives in, the designed frame it was matched to and that
+ *  frame's snapshot beside it, so a re-delivery rewrites the same frames. */
+export interface BuiltCaptureRecord {
+  builtFrameId: string
+  designFrameId?: string
+  designSnapshotFrameId?: string
+  comparisonId?: string
+  updatedAt: number
+}
+
+/** The preview-deploy hook of a canvas (shared/built.ts), one per canvas.
+ *  Its secret verifies each delivery's HMAC, so the server needs it back:
+ *  sealed at rest like the outbound webhook secrets, never hashed. */
+export const builtHooks = pgTable('built_hooks', {
+  canvasId: text('canvas_id').primaryKey(),
+  /** public id, shown in the settings card; the secret never is after creation */
+  id: text('id').notNull(),
+  secret: sealedText('secret').notNull(),
+  /** route → designed frame id, set in the settings card */
+  mappings: jsonb('mappings').$type<Record<string, string>>().notNull().default({}),
+  /** route → its frames on the Built page */
+  captures: jsonb('captures').$type<Record<string, BuiltCaptureRecord>>().notNull().default({}),
+  builtPageId: text('built_page_id'),
+  lastDelivery: jsonb('last_delivery').$type<BuiltDelivery>(),
+  createdBy: text('created_by').notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+})
 
 /** The instance's sign-in policy (shared/instanceSettings.ts): one row, id
  *  'instance', written by admins in Admin → Sign-in and read into memory at
