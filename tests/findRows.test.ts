@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CanvasFindHit } from '../shared/canvasFind'
-import { defaultFocus, focusOf, groupByFrame, resultRows, rowDomId, rowKey, variantIds } from '../src/lib/findRows'
+import { defaultFocus, focusOf, groupByFrame, resultRows, rowDomId, rowKey } from '../src/lib/findRows'
 
 const hit = (over: Partial<CanvasFindHit>): CanvasFindHit => ({
   frameId: 'f',
@@ -71,12 +71,16 @@ describe('groupByFrame', () => {
     expect(groups.map((g) => g.frameId)).toEqual(['sheet', 'card', 'mention', 'sec'])
   })
 
-  it('splits the frame name and lists the distinct variants found inside', () => {
+  it('splits the frame name and lists the distinct snippets found inside, guessing no variant', () => {
     const sheet = groups[0]!
     expect(sheet).toMatchObject({ id: 'cp.scb-otp', label: 'shadcnblocks · OTP (3)', pageName: 'Page 1' })
     expect(sheet.hits).toHaveLength(4)
-    expect(sheet.inside.map((x) => x.label)).toEqual(['cp.scb-otp-input-dark', 'cp.scb-otp-input-six'])
-    expect(variantIds(sheet).map((x) => x.label)).toEqual(['cp.scb-otp-input-dark', 'cp.scb-otp-input-six'])
+    expect(sheet.inside.map((x) => x.label)).toEqual([
+      'cp.scb-otp-input-dark · dark',
+      'cp.scb-otp-input-six · six',
+      'cp.scb-otp-input-six · again',
+    ])
+    expect(sheet.variantCount).toBeUndefined()
   })
 
   it('keeps a passing mention as its snippet', () => {
@@ -93,20 +97,21 @@ describe('rows and focus', () => {
     const rows = resultRows(groups, new Set(['sheet']))
     expect(rows.map((r) => r.key)).toEqual([
       'sheet',
-      'sheet\ncp.scb-otp-input-dark',
-      'sheet\ncp.scb-otp-input-six',
+      'sheet\ncp.scb-otp-input-dark · dark',
+      'sheet\ncp.scb-otp-input-six · six',
+      'sheet\ncp.scb-otp-input-six · again',
       'card',
       'mention',
       'sec',
     ])
-    expect(rowDomId(rows[1]!.key)).toBe('find-row-sheet_cp_scb-otp-input-dark')
+    expect(rowDomId('sheet\ncp.scb-otp-input-dark')).toBe('find-row-sheet_cp_scb-otp-input-dark')
     expect(rowKey(groups[0]!, 'x')).toBe('sheet\nx')
   })
 
-  it('frames a variant row on its id, a frame row on its first variant or its own id', () => {
+  it('frames a text row on its snippet, a frame row on its own id or the query', () => {
     const rows = resultRows(groups, new Set(['sheet']))
-    expect(focusOf(rows[1]!, 'otp')).toBe('cp.scb-otp-input-dark')
-    expect(focusOf(rows[0]!, 'otp')).toBe('cp.scb-otp-input-dark')
+    expect(focusOf(rows[1]!, 'otp')).toBe('cp.scb-otp-input-dark · dark')
+    expect(focusOf(rows[0]!, 'otp')).toBe('cp.scb-otp')
     expect(
       defaultFocus(
         groups.find((g) => g.frameId === 'card')!,

@@ -28,6 +28,7 @@ import { built } from './built'
 import { usage } from './usage'
 import { replay } from './replay'
 import { duel } from './duel'
+import { library } from './library'
 
 /** The source catalog, one namespace per area of the app. */
 export const en = {
@@ -61,4 +62,5 @@ export const en = {
   usage,
   replay,
   duel,
+  library,
 }

@@ -268,6 +268,9 @@ function handle(msg: ServerMessage) {
     case 'component':
       s.setComponentLocal(msg.id, msg.component)
       break
+    case 'library':
+      s.setLibraryLocal(msg.library)
+      break
     case 'guidelines':
       s.setGuidelineLocal(msg.name, msg.doc)
       break

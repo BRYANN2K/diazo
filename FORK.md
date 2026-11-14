@@ -38,6 +38,9 @@ conflits résolus à la main pour préserver l'intention de chaque côté.
 | #457 | OpenCode dans le sélecteur « Connect AI » (brand mark + icône).                    |
 | #506 | Synchronisation des feuilles de style externes dans les frames (sync CSS).         |
 
+Fonctionnalité propre au fork : **bibliothèques de design** (`.context/specs/design-libraries.md`),
+un canvas devient une bibliothèque indexée en items et variantes, cherchée depuis ⌘F et par MCP.
+
 ## PRs abandonnées
 
 | PR   | Raison                                                                                                                                                                                                                                                                                                                                                                                                                                        |

@@ -82,6 +82,8 @@ export interface ActionHost {
   placeImage(): void
   newCanvas(): void
   duplicateCanvas(): void
+  /** the "Turn into a library" dialog */
+  openConvertLibrary(): void
   present(): void
   toggleHideUi(): void
   toggleAgents(): void
@@ -223,6 +225,15 @@ export const ACTIONS: readonly CanvasAction[] = [
     section: 0,
     enabled: () => !h()?.guest,
     run: () => h()?.duplicateCanvas(),
+  },
+  {
+    id: 'library-convert',
+    label: 'library.convert',
+    menu: 'file',
+    section: 0,
+    edit: true,
+    enabled: () => !h()?.guest && !!store().canvas && !store().canvas?.library,
+    run: () => h()?.openConvertLibrary(),
   },
   {
     id: 'place-image',

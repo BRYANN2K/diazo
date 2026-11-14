@@ -785,6 +785,25 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   linked by id, so they follow); an instance's row is not renamed on its own. Stored in `components`
   (migration `0052_components`). Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
   `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`.
+- Design libraries (`.context/specs/design-libraries.md`, plan in `.context/plans/design-libraries.md`):
+  a canvas is a library when it has a `libraries` row (migration 0066: `libraries`, the rebuildable
+  projection `library_items`, the curation `library_item_meta`), mirrored on `canvas.library`
+  (`LibraryInfo`) and broadcast as a `library` room message. `shared/library.ts` (types,
+  `effectiveItem`), `shared/libraryIds.ts` (the id grammar, `splitFrameName`, `parentIdOf`),
+  `shared/libraryRules.ts` (`LibraryRules`, presets `blank` and `sheets`, strict parser),
+  `shared/librarySearch.ts` (the in-memory index: BM25 over weighted fields, prefix and one-edit
+  matching, filters, facets, families). `server/libraries.ts` keeps the rows and is the one gate
+  (`libraryRole`: read / curate / manage, on top of `canvasRole`, which is not changed);
+  `server/libraryExtract.ts` reads one frame's items over parse5 (`server/libraryDom.ts`, a small
+  selector engine for rule selectors); `server/libraryIndex.ts` keeps the projection in step
+  (full runs 50 frames at a time through `store.renderableFrame`, resumed at boot; one frame 1.5 s
+  after `store.onFrameWrite`; the search index built on first use, dropped after 10 idle minutes).
+  REST under `/api/libraries` (`server/libraryRoutes.ts`, 30 searches per 10 s per account; never
+  `store.load`); agent tools in `server/libraryTools.ts`, registered for MCP and the resident agent
+  under the same names. ⌘F's Library scope (`src/lib/findLibrary.ts`, `src/lib/findRows.ts`,
+  `src/components/find/FindResultList.tsx`) and File → Turn into a library
+  (`src/components/library/ConvertToLibraryModal.tsx`). Tests: `library*.test.ts`,
+  `librariesHttp.test.ts`, `findLibrary*.test.ts*`, `findRows.test.ts`, `convertLibraryUi.test.tsx`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
   `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`

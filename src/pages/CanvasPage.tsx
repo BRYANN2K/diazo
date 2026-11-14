@@ -60,6 +60,7 @@ import { PresentMode } from '../components/PresentMode'
 import { CommandPalette } from '../components/CommandPalette'
 import { MainMenu } from '../components/MainMenu'
 import { ShortcutsSheet } from '../components/ShortcutsSheet'
+import { ConvertToLibraryModal } from '../components/library/ConvertToLibraryModal'
 import { FindBar } from '../components/FindBar'
 import { InsertedBlockBox } from '../components/InsertedBlockBox'
 import { LinkDialog } from '../components/LinkDialog'
@@ -351,6 +352,7 @@ export function CanvasPage({
     url.searchParams.delete('import')
     history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`)
   }, [])
+  const [convertingLibrary, setConvertingLibrary] = useState(false)
   const [showImport, setShowImport] = useState(!!ghInstallPass || !!ghInstallError || !!importRequested)
   const [exporting, setExporting] = useState<{ frames: Frame[]; selected: string[] } | null>(null)
   const [showMobileActions, setShowMobileActions] = useState(false)
@@ -656,6 +658,7 @@ export function CanvasPage({
           .then((made) => navigate(`/c/${made.id}`))
           .catch((err: Error) => showToast(err.message))
       },
+      openConvertLibrary: () => setConvertingLibrary(true),
       duplicateCanvas: () => {
         api
           .duplicateCanvas(canvasId)
@@ -1362,6 +1365,13 @@ export function CanvasPage({
           frames={exporting.frames}
           initialSelection={exporting.selected}
           onClose={() => setExporting(null)}
+        />
+      )}
+      {convertingLibrary && (
+        <ConvertToLibraryModal
+          canvasId={canvasId}
+          onClose={() => setConvertingLibrary(false)}
+          onConverted={() => showToast(translate('library.converted'))}
         />
       )}
       {showImport && editorReady && (

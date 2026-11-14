@@ -1,13 +1,24 @@
 /**
- * The rows of ⌘F's remote scopes (every page, everywhere): hits grouped by
- * frame, ranked, and the variants listed under an expanded frame. Pure, so
- * the list can take rows from another source than the text search.
+ * The rows of ⌘F's remote scopes: text hits grouped by frame (every page,
+ * everywhere), or library families with their variants (the Library scope,
+ * built by findLibrary.ts). Pure, so the list renders either the same way.
  */
 import type { CanvasFindHit } from '../../shared/canvasFind'
+import type { LibraryItemSummary } from '../../shared/library'
 import { splitFrameName } from '../../shared/libraryIds'
 
-/** One frame in the all-pages results, with every match found in it. */
+/** Something matched inside a group: a text snippet, or a library variant. */
+export interface InsideEntry {
+  label: string
+  hit?: CanvasFindHit
+  item?: LibraryItemSummary
+}
+
+/** One group of the remote results: a frame with every match found in it,
+ *  or a library family with its matched variants. */
 export interface FrameGroup {
+  /** what tells two groups apart (the frame id, unless several share it) */
+  key?: string
   frameId: string
   pageId: string
   pageName: string
@@ -16,11 +27,15 @@ export interface FrameGroup {
   id: string | null
   label: string
   hits: CanvasFindHit[]
-  /** the distinct things matched inside: library ids when the snippet holds one */
-  inside: { label: string; hit: CanvasFindHit }[]
+  /** the distinct things matched inside */
+  inside: InsideEntry[]
+  /** set on a library family: the item, its library and its variant count */
+  item?: LibraryItemSummary
+  libraryId?: string
+  variantCount?: number
 }
 
-const LIBRARY_ID = /[a-z][\w-]*\.[\w.-]*[\w]/gi
+export const groupKey = (g: FrameGroup) => g.key ?? g.frameId
 
 export function groupByFrame(hits: CanvasFindHit[], query: string): FrameGroup[] {
   const q = query.trim().toLowerCase()
@@ -43,17 +58,14 @@ export function groupByFrame(hits: CanvasFindHit[], query: string): FrameGroup[]
     }
     g.hits.push(hit)
     if (hit.where === 'name') continue
-    /* a library sheet's matches are its variants' ids: list those, once each */
-    const around = hit.before + hit.text + hit.after
-    const ids = [...around.matchAll(LIBRARY_ID)].map((m) => m[0]).filter((id) => id.toLowerCase().includes(q))
-    const label = ids.find((id) => id !== g.id) ?? `${hit.before.slice(-24)}${hit.text}${hit.after.slice(0, 24)}`.trim()
+    const label = `${hit.before.slice(-24)}${hit.text}${hit.after.slice(0, 24)}`.trim()
     if (!g.inside.some((x) => x.label === label)) g.inside.push({ label, hit })
   }
   return groups.sort((a, b) => relevance(b, q) - relevance(a, q))
 }
 
-/* what you searched for first: a frame named for it, then a sheet holding
-   variants of it, then passing mentions; section headers (§) last */
+/* what you searched for first: a frame named for it, then passing
+   mentions; section headers (§) last */
 export function relevance(g: FrameGroup, q: string): number {
   const id = (g.id ?? '').toLowerCase()
   const label = g.label.toLowerCase()
@@ -61,40 +73,36 @@ export function relevance(g: FrameGroup, q: string): number {
   if (id.includes(q)) score += 1000
   if (id.split(/[.-]/).includes(q)) score += 400
   if (label.includes(q)) score += 300
-  score += Math.min(variantIds(g).length, 30) * 25
   score += Math.min(g.hits.length, 20)
   if (g.label.startsWith('§') || id.startsWith('§')) score -= 2000
   return score
 }
 
-export const looksLikeId = (s: string) => /^[a-z][\w-]*\.[\w.-]+$/i.test(s)
-export const variantIds = (g: FrameGroup) => g.inside.filter((x) => looksLikeId(x.label))
-
-/** Frames listed in the all-pages results. */
+/** Groups listed in the remote results. */
 export const MAX_GROUPS = 300
 
-/** Variants listed under an expanded frame. */
+/** Entries listed under an expanded group. */
 export const MAX_INSIDE = 40
 
-/** One line of the all-pages results: a frame, or a variant listed under it. */
+/** One line of the remote results: a group, or an entry listed under it. */
 export interface ResultRow {
   key: string
   group: FrameGroup
   groupIndex: number
-  variant?: { label: string; hit: CanvasFindHit }
+  variant?: InsideEntry
 }
 
 export const rowKey = (g: FrameGroup, variant?: string) =>
-  variant === undefined ? g.frameId : `${g.frameId}\n${variant}`
+  variant === undefined ? groupKey(g) : `${groupKey(g)}\n${variant}`
 export const rowDomId = (key: string) => `find-row-${key.replace(/[^\w-]/g, '_')}`
 
-/** Every visible row in list order: each frame, then its variants when expanded. */
+/** Every visible row in list order: each group, then its entries when expanded. */
 export function resultRows(groups: FrameGroup[], open: ReadonlySet<string>): ResultRow[] {
   return groups
     .slice(0, MAX_GROUPS)
     .flatMap((group, groupIndex) => [
       { key: rowKey(group), group, groupIndex },
-      ...(open.has(group.frameId)
+      ...(open.has(groupKey(group))
         ? group.inside
             .slice(0, MAX_INSIDE)
             .map((variant) => ({ key: rowKey(group, variant.label), group, groupIndex, variant }))
@@ -102,13 +110,20 @@ export function resultRows(groups: FrameGroup[], open: ReadonlySet<string>): Res
     ])
 }
 
-/** What the preview frames, and an insert copies, for a row. */
+/** The library item a row stands for, if any. */
+export function rowItem(row: ResultRow): LibraryItemSummary | null {
+  return row.variant ? (row.variant.item ?? null) : (row.group.item ?? null)
+}
+
+/** What the preview frames, and an insert copies, for a text row. */
 export function focusOf(row: ResultRow, query: string): string {
+  if (row.variant?.item) return row.variant.item.id
   return row.variant?.label ?? defaultFocus(row.group, query)
 }
 
-/** What the preview frames when a frame row (not a variant) is shown. */
+/** What the preview frames when a group row (not an entry) is shown. */
 export function defaultFocus(g: FrameGroup, query: string): string {
   const q = query.trim()
-  return variantIds(g)[0]?.label ?? (g.id && g.id.toLowerCase().includes(q.toLowerCase()) ? g.id : q)
+  if (g.item) return g.inside[0]?.item?.id ?? g.item.id
+  return g.id && g.id.toLowerCase().includes(q.toLowerCase()) ? g.id : q
 }

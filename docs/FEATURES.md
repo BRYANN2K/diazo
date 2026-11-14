@@ -15,6 +15,12 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   row onto any frame; a line shows the drop slot between elements. ⇧ click goes to the item,
   ↩ / ⇧↩ / ⌘C do the same from the keyboard. A box beside the copy sends an instruction to the
   chat (**Adapt**, through the plan → Go flow) or removes the copy (**Undo**).
+- **Design libraries** — a canvas becomes a library (File → Turn into a library…): its frames are
+  indexed as items, a family with its variants, each with a kind, a category and tags, read from
+  the frame names (`<id> — <label>`), `§` section frames and the sheets' cells, or from
+  `data-doop-item` / `data-doop-variant` markers. Converting changes no frame. ⌘F has a Library
+  scope answered by the index: one row per family, its variants under it, kind chips, and insert
+  as before. Agents call `list_libraries`, `get_library`, `search_library` and `get_library_item`.
 - **Reference library** — store design-library items as references, find them with
   `find_references`, and attach them to plan cards (thumbnails, remove button, Settings card).
 - **Plan-first Chat tab** — thread list, one composer, plan card and repo chip. An editor's line

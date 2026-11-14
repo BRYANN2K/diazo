@@ -1,0 +1,40 @@
+/** Bibliotecas de design: o escopo Biblioteca do ⌘F, transformar um canvas em
+ *  biblioteca, a galeria, os itens, as regras e a caixa de entrada. */
+export const library = {
+  /* ⌘F */
+  scope: 'Buscar nas suas bibliotecas de design',
+  scopeShort: 'Biblioteca',
+  scopeMenu: 'Onde buscar',
+  allKinds: 'Todos',
+  kinds: 'Tipos',
+  findSummary: { one: '{count} família', other: '{count} famílias' },
+  noLibrary: 'Ainda não há biblioteca de design. Transforme um canvas em uma pelo menu Arquivo.',
+  openInGallery: 'Abrir na galeria',
+
+  /* transformar um canvas em biblioteca */
+  convert: 'Transformar em biblioteca…',
+  convertTitle: 'Transformar este canvas em biblioteca',
+  convertLede: 'Os frames viram itens que você busca pelo ⌘F, navega numa galeria e insere. Nenhum frame é alterado.',
+  presetLabel: 'Como os frames são nomeados',
+  presetSheets: 'Folhas de variantes',
+  presetSheetsHint: 'Frames chamados “<id> — <rótulo>”, seções §, variantes em células.',
+  presetBlank: 'Um item por frame',
+  presetBlankHint: 'Cada frame é um item, nomeado pelo seu rótulo.',
+  presetDetected: 'Detectado pelos nomes dos frames',
+  previewing: 'Lendo os frames…',
+  previewFailed: 'Não foi possível ler este canvas.',
+  countFamilies: { one: '{count} família', other: '{count} famílias' },
+  countVariants: { one: '{count} variante', other: '{count} variantes' },
+  countIgnored: { one: '{count} frame ignorado', other: '{count} frames ignorados' },
+  countScripted: {
+    one: '{count} folha com script: suas variantes são lidas depois de renderizadas',
+    other: '{count} folhas com script: suas variantes são lidas depois de renderizadas',
+  },
+  countDuplicates: { one: '{count} id usado duas vezes', other: '{count} ids usados duas vezes' },
+  unreadable: { one: '{count} frame não pôde ser lido', other: '{count} frames não puderam ser lidos' },
+  convertConfirm: 'Transformar em biblioteca',
+  converting: 'Transformando em biblioteca…',
+  converted: 'Este canvas agora é uma biblioteca. Seus itens estão sendo indexados.',
+  convertFailed: 'Não foi possível transformar este canvas em biblioteca.',
+  cancel: 'Cancelar',
+} as const

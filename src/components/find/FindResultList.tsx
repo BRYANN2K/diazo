@@ -1,15 +1,7 @@
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { cn } from '@/lib/utils'
 import { useT } from '../../lib/i18n'
-import {
-  MAX_GROUPS,
-  MAX_INSIDE,
-  rowDomId,
-  rowKey,
-  variantIds,
-  type FrameGroup,
-  type ResultRow,
-} from '../../lib/findRows'
+import { groupKey, MAX_GROUPS, MAX_INSIDE, rowDomId, rowKey, type FrameGroup, type ResultRow } from '../../lib/findRows'
 import { IconButton } from '../ui/icon-button'
 import { ChevronRightIcon } from '../ui/icons'
 import { Pressable } from '../ui/pressable'
@@ -33,7 +25,7 @@ export function FindResultList({
   onActivate,
 }: {
   groups: FrameGroup[]
-  /** the frames whose variants are shown */
+  /** the groups whose entries are shown, by group key */
   open: ReadonlySet<string>
   /** the row the preview follows, by key */
   pointed: string | null
@@ -53,11 +45,11 @@ export function FindResultList({
   return (
     <ul className="max-h-80 overflow-y-auto" aria-label={t('actions.findLabel')} onMouseLeave={onLeave}>
       {groups.slice(0, MAX_GROUPS).map((g, i) => {
-        const expanded = open.has(g.frameId)
-        const variants = variantIds(g).length
+        const expanded = open.has(groupKey(g))
+        const variants = g.variantCount ?? 0
         const row: ResultRow = { key: rowKey(g), group: g, groupIndex: i }
         return (
-          <li key={g.frameId}>
+          <li key={groupKey(g)}>
             <div
               id={rowDomId(rowKey(g))}
               className={cn(
@@ -87,14 +79,16 @@ export function FindResultList({
               <span className="flex-none text-caption text-ink-faint tabular-nums">
                 {variants
                   ? t('actions.findVariants', { count: variants })
-                  : t('actions.findMatches', { count: g.hits.length })}
+                  : g.item
+                    ? ''
+                    : t('actions.findMatches', { count: g.hits.length })}
               </span>
               {g.inside.length > 0 ? (
                 <IconButton
                   size="sm"
                   aria-label={t('actions.findShowInside')}
                   aria-expanded={expanded}
-                  onClick={() => onToggle(g.frameId)}
+                  onClick={() => onToggle(groupKey(g))}
                 >
                   <ChevronRightIcon
                     width={14}

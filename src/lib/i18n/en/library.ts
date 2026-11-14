@@ -1,0 +1,40 @@
+/** Design libraries: ⌘F's Library scope, turning a canvas into a library,
+ *  the gallery, items, rules and the inbox. */
+export const library = {
+  /* ⌘F */
+  scope: 'Search your design libraries',
+  scopeShort: 'Library',
+  scopeMenu: 'Where to search',
+  allKinds: 'All',
+  kinds: 'Kinds',
+  findSummary: { one: '{count} family', other: '{count} families' },
+  noLibrary: 'No design library yet. Turn a canvas into one from its File menu.',
+  openInGallery: 'Open in gallery',
+
+  /* turning a canvas into a library */
+  convert: 'Turn into a library…',
+  convertTitle: 'Turn this canvas into a library',
+  convertLede: 'Its frames become items you can search from ⌘F, browse in a gallery and insert. No frame is changed.',
+  presetLabel: 'How the frames are named',
+  presetSheets: 'Sheets of variants',
+  presetSheetsHint: 'Frames named “<id> — <label>”, § sections, variants in cells.',
+  presetBlank: 'One item per frame',
+  presetBlankHint: 'Each frame is one item, named by its label.',
+  presetDetected: 'Detected from the frame names',
+  previewing: 'Reading the frames…',
+  previewFailed: 'Could not read this canvas.',
+  countFamilies: { one: '{count} family', other: '{count} families' },
+  countVariants: { one: '{count} variant', other: '{count} variants' },
+  countIgnored: { one: '{count} frame ignored', other: '{count} frames ignored' },
+  countScripted: {
+    one: '{count} scripted sheet: its variants are read once rendered',
+    other: '{count} scripted sheets: their variants are read once rendered',
+  },
+  countDuplicates: { one: '{count} id used twice', other: '{count} ids used twice' },
+  unreadable: { one: '{count} frame could not be read', other: '{count} frames could not be read' },
+  convertConfirm: 'Turn into a library',
+  converting: 'Turning into a library…',
+  converted: 'This canvas is now a library. Its items are being indexed.',
+  convertFailed: 'Could not turn this canvas into a library.',
+  cancel: 'Cancel',
+} as const

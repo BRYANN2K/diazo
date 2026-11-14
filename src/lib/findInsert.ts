@@ -12,16 +12,22 @@ import { ELEMENT_ID_ATTR, elementIdSelector } from '../../shared/elementId'
 import type { LibrarySnapshot } from './findPreviewRuntime'
 import { snapshotLibraryItem } from './findSnapshot'
 import { saveFrameHtml } from './layerEdits'
+import type { LibraryItemSummary } from '../../shared/library'
+import { isInsertable } from './findLibrary'
 
 type StoreState = ReturnType<typeof useStore.getState>
 
-/** Library ids are `cp.*` (copied components) and `ui.*` (UI kits). */
-const LIBRARY_ID = /^(cp|ui)\.[\w.-]+$/i
-const LIBRARY_CANVAS = /design library/i
+/** A result row as an insert sees it: the library item it stands for (none
+ *  for a text hit) and the frame it lives in. */
+export interface InsertSource {
+  item: LibraryItemSummary | null
+  frameId: string
+}
 
-/** Is this result a library item, which a click copies in? */
-export function isLibraryItem(id: string | null | undefined, canvasName: string | null | undefined): boolean {
-  return (!!id && LIBRARY_ID.test(id)) || (!!canvasName && LIBRARY_CANVAS.test(canvasName))
+/** Is this result a library item a click copies in? Only rows the library
+ *  index answered carry an item, and only insertable kinds are copied. */
+export function isLibraryItem(source: InsertSource | null | undefined): boolean {
+  return isInsertable(source?.item)
 }
 
 /** Where an insert lands: a frame, and in it a slot (a drop between
@@ -53,26 +59,19 @@ export type RowAction = { kind: 'insert'; target: InsertTarget } | { kind: 'go' 
 
 /** Click inserts only for a library item while a frame is selected; ⇧ (or
  *  anything else) goes to the item. */
-export function rowAction(
-  s: StoreState,
-  item: { id: string | null; canvasName?: string | null; frameId: string },
-  shift: boolean,
-): RowAction {
-  if (shift || !isLibraryItem(item.id, item.canvasName ?? s.canvas?.name)) return { kind: 'go' }
-  const target = insertTarget(s, item.frameId)
+export function rowAction(s: StoreState, source: InsertSource, shift: boolean): RowAction {
+  if (shift || !isLibraryItem(source)) return { kind: 'go' }
+  const target = insertTarget(s, source.frameId)
   return target ? { kind: 'insert', target } : { kind: 'go' }
 }
 
 /** The footer line under the results. */
 export type FooterHint = { kind: 'insert'; frameName: string } | { kind: 'select' } | { kind: 'go' } | { kind: 'none' }
 
-export function footerHint(
-  s: StoreState,
-  item: { id: string | null; canvasName?: string | null; frameId: string } | null,
-): FooterHint {
-  if (!item) return { kind: 'none' }
-  if (!isLibraryItem(item.id, item.canvasName ?? s.canvas?.name)) return { kind: 'go' }
-  const target = insertTarget(s, item.frameId)
+export function footerHint(s: StoreState, source: InsertSource | null): FooterHint {
+  if (!source) return { kind: 'none' }
+  if (!isLibraryItem(source)) return { kind: 'go' }
+  const target = insertTarget(s, source.frameId)
   return target ? { kind: 'insert', frameName: target.frame.name } : { kind: 'select' }
 }
 
