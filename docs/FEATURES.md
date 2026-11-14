@@ -33,6 +33,8 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   only with `DOOP_PUBLIC_LIBRARIES=true`, off by default — every account on the instance, after a
   warning that library content is often a vendor's. A public library is searched, browsed and
   inserted from (Community has a Libraries shelf: Use, Copy), never opened as a canvas.
+  A block inserted from a library shows "From library" in the element panel, with Update when its
+  item has a newer revision (a fresh copy in its place, one undo step, after a confirmation).
   Agents call `list_libraries`, `get_library`, `search_library`, `get_library_item` (with the item as
   a scoped block) and `insert_library_item`, which places the copy for them.
 - **Reference library** — store design-library items as references, find them with

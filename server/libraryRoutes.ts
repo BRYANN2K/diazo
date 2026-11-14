@@ -94,6 +94,28 @@ libraryRouter.get('/', async (req, res) => {
   res.json({ libraries })
 })
 
+/** The current revisions of items blocks were inserted from, for "Update
+ *  available". Libraries the caller may not read answer nothing. */
+libraryRouter.post('/revs', async (req, res) => {
+  const refs = Array.isArray(req.body?.refs)
+    ? (req.body.refs as { libraryId?: unknown; itemId?: unknown }[]).slice(0, 200)
+    : []
+  const userId = req.user!.id
+  const revs: { libraryId: string; itemId: string; rev: number }[] = []
+  const byLibrary = new Map<string, Set<string>>()
+  for (const r of refs) {
+    if (typeof r?.libraryId !== 'string' || typeof r?.itemId !== 'string') continue
+    byLibrary.set(r.libraryId, (byLibrary.get(r.libraryId) ?? new Set()).add(r.itemId))
+  }
+  for (const [libraryId, ids] of byLibrary) {
+    if (!libraryFor(userId, libraryId)) continue
+    for (const item of await libraryItems(libraryId)) {
+      if (ids.has(item.itemId)) revs.push({ libraryId, itemId: item.itemId, rev: item.rev })
+    }
+  }
+  res.json({ revs })
+})
+
 /** The public libraries of the instance (Community's shelf). */
 libraryRouter.get('/public', (req, res) => {
   if (!env.DOOP_PUBLIC_LIBRARIES) return res.json({ libraries: [] })

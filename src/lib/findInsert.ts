@@ -15,7 +15,8 @@ import { snapshotLibraryItem } from './findSnapshot'
 import { saveFrameHtml } from './layerEdits'
 import { api } from './api'
 import type { LibraryItemSummary } from '../../shared/library'
-import { isInsertable } from './findLibrary'
+import { focusOfItem, isInsertable } from './findLibrary'
+import { replaceBlock, type LibraryRef } from './libraryRefs'
 
 type StoreState = ReturnType<typeof useStore.getState>
 
@@ -186,6 +187,31 @@ export async function insertLibraryItem(opts: {
     approvalWithdrawn: frame.approval?.status === 'ready_for_dev',
     before: frame.html,
   }
+}
+
+/** Put a fresh copy of a block's item in its place (its item moved on):
+ *  the block keeps its place and id, one undo step. Local edits to the
+ *  block are lost, which the caller confirmed. */
+export async function replaceLibraryBlock(frameId: string, block: LibraryRef): Promise<boolean> {
+  const detail = await api.libraryItem(block.libraryId, block.ref)
+  const snap = await snapshotLibraryItem(detail.item.frameId, focusOfItem(detail.item))
+  if (!snap) return false
+  const frame = useStore.getState().canvas?.frames.find((f) => f.id === frameId)
+  if (!frame || frame.locked || frame.htmlDeferred) return false
+  const ref = refId(detail.item.id)
+  const html = replaceBlock(
+    frame.html,
+    block.elementId,
+    libraryBlock(snap, {
+      ref,
+      libraryId: block.libraryId,
+      rev: detail.item.rev,
+      prefix: `${ref}-${Math.random().toString(36).slice(2, 7)}-`,
+    }),
+  )
+  if (!html) return false
+  saveFrameHtml(frame, html)
+  return true
 }
 
 /** Take an inserted block out again (the box's Undo), found by its own id so

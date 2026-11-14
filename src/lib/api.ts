@@ -1039,6 +1039,11 @@ export const api = {
   /* design libraries (shared/library.ts) */
   listLibraries: (scope?: 'mine' | 'workspace' | 'listed') =>
     req<{ libraries: LibraryListEntry[] }>(`/api/libraries${scope ? `?scope=${scope}` : ''}`),
+  libraryRevs: (refs: { libraryId: string; itemId: string }[]) =>
+    req<{ revs: { libraryId: string; itemId: string; rev: number }[] }>('/api/libraries/revs', {
+      method: 'POST',
+      body: JSON.stringify({ refs }),
+    }),
   publicLibraries: () => req<{ libraries: LibraryListEntry[] }>('/api/libraries/public'),
   copyLibrary: (libraryId: string) => req<{ id: string }>(`/api/libraries/${libraryId}/copy`, { method: 'POST' }),
   previewLibrary: (canvasId: string, opts: { preset?: RulePresetName; rules?: unknown } = {}) =>

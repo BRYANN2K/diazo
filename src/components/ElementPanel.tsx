@@ -44,6 +44,7 @@ import { Textarea } from './ui/textarea'
 import { ImageFill } from './ImageFill'
 import { InteractionsPanel } from './InteractionsPanel'
 import { ComponentSection } from './ComponentSection'
+import { LibrarySourceSection } from './library/LibrarySourceSection'
 import { Tooltip } from './ui/tooltip'
 import { familyWeights, fontStack, libraryFamilies } from '../../shared/fonts'
 import { WEB_FONTS, webFontStack } from '../../shared/webFonts'
@@ -293,6 +294,7 @@ export function ElementPanel({
         </div>
         <PanelTabPanel value="design">
           <PanelBody>
+            <LibrarySourceSection frame={frame} selector={selector} />
             <ComponentSection frame={frame} selector={selector} />
             {info ? (
               <PropertyScrubContext.Provider

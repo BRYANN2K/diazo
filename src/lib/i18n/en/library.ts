@@ -183,4 +183,10 @@ export const library = {
   use: 'Use',
   copy: 'Copy',
   listed: 'Added to your libraries',
+  fromLibrary: 'From library',
+  update: 'Update',
+  updateAvailable: 'A newer version is in the library (revision {rev}).',
+  updateTitle: 'Replace this block with the library’s newer version?',
+  updateDescription:
+    'The block is copied again from its item, in the same place. Changes made to it here are lost. ⌘Z undoes it.',
 } as const
