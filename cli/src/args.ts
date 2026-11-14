@@ -30,6 +30,9 @@ const COMMANDS: Record<string, [number, number]> = {
   config: [0, 0],
   link: [1, 1],
   open: [0, 1],
+  find: [1, 1],
+  pull: [1, 1],
+  push: [1, 1],
 }
 
 /** Turns argv (without the runtime and script) into an invocation, or throws a UsageError. */
@@ -120,6 +123,9 @@ export const HELP = `doop - work with a doop canvas from a project folder
 Usage
   doop link <canvas>          Link this folder to a canvas (writes .doop.json)
   doop open [frame]           Open the linked canvas (or one frame) in the browser
+  doop find <query>           Search the linked canvas (--all: every canvas)
+  doop pull <frame>           Write a frame's HTML to a file (-o file)
+  doop push <file>            Replace the frame's HTML with the file, after a check
   doop config                 Show the server URL and where the agent key comes from
 
 Options
