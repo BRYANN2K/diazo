@@ -4,6 +4,7 @@ import type { ComponentDef } from './components.ts'
 import type { DesignToken } from './designTokens.ts'
 import type { RunnerPick } from './agentRunner.ts'
 import type { FrameLint } from './slopRules.ts'
+import type { FrameChecks } from './frameChecks.ts'
 
 export interface Frame {
   id: string
@@ -46,6 +47,10 @@ export interface Frame {
   /** Latest anti-slop lint of the frame's design (shared/slopRules.ts):
    *  score + issues, recomputed after each creation or design edit. */
   lint?: FrameLint
+  /** Latest frame checks (shared/frameChecks.ts): the frame rendered at
+   *  375 / 768 / 1440 plus a keyboard walk — overflow, clipped text, tap
+   *  targets, contrast and focus. */
+  checks?: FrameChecks
 }
 
 /** The HTML of one frame that arrived deferred. */
@@ -741,6 +746,8 @@ export type ServerMessage =
   /** a lint pass landed: the badge and Quality rail read this — slimmer than
    *  frame:updated since the HTML never changed */
   | { type: 'frame:lint'; frameId: string; lint: FrameLint; actor: Actor }
+  /** a frame-checks pass landed (responsive + accessibility) */
+  | { type: 'frame:checks'; frameId: string; checks: FrameChecks; actor: Actor }
   | { type: 'canvas:renamed'; name: string; actor: Actor }
   | { type: 'canvas:pages'; pages: CanvasPageInfo[]; actor: Actor }
   /** a ruler guide was added or moved (guide set) or removed (null) */

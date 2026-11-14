@@ -55,6 +55,7 @@ import { GuideLimitError, PageLimitError, store } from './store.ts'
 import { parseGuide } from '../shared/guides.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
+import { checkAndStore } from './frameChecks.ts'
 import { liveActivitiesRouter, logLiveActivityRequests, startLiveActivityDelivery } from './liveActivities.ts'
 import { onCanvasEvent } from './events.ts'
 import * as imageDescriptions from './imageDescriptions.ts'
@@ -2758,6 +2759,23 @@ app.put('/api/frames/:id/lint', (req, res) => {
   const frame = actions.setFrameLint(req.params.id, lint as Frame['lint'], userActor(req))
   if (!frame) return res.status(404).json({ error: 'frame not found' })
   res.json({ ok: true })
+})
+
+/* run the frame checks (375 / 768 / 1440 + keyboard walk) in the server's
+   renderer; an unchanged document answers from the stored result unless
+   `force` is set. Clients call this once a frame's document settles. */
+app.post('/api/frames/:id/checks', async (req, res) => {
+  if (!requireFrame(req, res, req.params.id, 'edit')) return
+  const force = req.body?.force === true
+  const outcome = await checkAndStore(req.params.id, userActor(req), {
+    force,
+    priority: force ? 'interactive' : 'background',
+  })
+  if (outcome.ok) return res.json({ ok: true, checks: outcome.checks, reused: outcome.reused })
+  if (outcome.reason === 'not_found') return res.status(404).json({ error: 'frame not found' })
+  if (outcome.reason === 'no_renderer')
+    return res.status(503).json({ error: 'no renderer configured for frame checks' })
+  res.status(502).json({ error: 'frame checks failed', detail: outcome.error })
 })
 
 app.post('/api/frames/:id/append', (req, res) => {

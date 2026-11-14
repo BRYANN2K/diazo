@@ -1088,6 +1088,15 @@ class Store {
     return frame
   }
 
+  /** Record the latest frame checks — derived metadata, like the lint. */
+  setFrameChecks(frameId: string, checks: Frame['checks']): Frame | undefined {
+    const frame = this.getFrame(frameId)
+    if (!frame) return undefined
+    frame.checks = checks
+    persist.saveFrame(frame)
+    return frame
+  }
+
   deleteFrame(frameId: string): Frame | undefined {
     const canvasId = this.frameIndex.get(frameId)
     if (!canvasId) return undefined

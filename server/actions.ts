@@ -2528,6 +2528,14 @@ export function setFrameLint(frameId: string, lint: Frame['lint'], actor: Actor)
   return frame
 }
 
+/** Record a frame-checks pass and tell the room (`frame:checks`), the same
+ *  bookkeeping path as setFrameLint. */
+export function setFrameChecks(frameId: string, checks: Frame['checks'], actor: Actor): Frame | undefined {
+  const frame = store.setFrameChecks(frameId, checks)
+  if (frame && checks) broadcast(frame.canvasId, { type: 'frame:checks', frameId, checks, actor })
+  return frame
+}
+
 export function isFrameStreaming(frameId: string): boolean {
   return streams.has(frameId) || reveals.has(frameId)
 }
