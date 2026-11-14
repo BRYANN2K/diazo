@@ -58,3 +58,16 @@ it('shows the diff and what the export imported, inlined and tokenized', async (
   expect(text).toContain('inlined as markup: Card')
   expect(text).toContain('--color-brand')
 })
+
+it('writes the previewed patch and reports the new mapping', async () => {
+  calls.writeFrameCode.mockResolvedValue({
+    ok: true,
+    result: { written: ['src/components/Pricing.tsx'], repo: 'site' },
+    link: { path: 'src/components/Pricing.tsx' },
+  })
+  await act(async () => root.render(<FrameCodeModal frameId="f1" onClose={() => {}} />))
+  const write = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Write to repo')!
+  await act(async () => write.click())
+  expect(calls.writeFrameCode).toHaveBeenCalledWith('f1', { framework: 'react' }, PATCH)
+  expect(document.body.textContent).toContain('The frame now maps to src/components/Pricing.tsx.')
+})

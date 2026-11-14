@@ -21,6 +21,7 @@ export function FrameCodeModal({ frameId, onClose }: { frameId: string; onClose:
   const [preview, setPreview] = useState<FrameCodePreview | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [written, setWritten] = useState<{ written: string[]; repo: string; path: string } | null>(null)
 
   const load = useCallback(
     async (next: { framework: FrameCodeFramework; path: string }) => {
@@ -63,7 +64,45 @@ export function FrameCodeModal({ frameId, onClose }: { frameId: string; onClose:
     void load({ framework: next, path: nextPath })
   }
 
+  async function write() {
+    if (!preview?.patch) return
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await api.writeFrameCode(
+        frameId,
+        { framework, ...(path.trim() ? { path: path.trim() } : {}) },
+        preview.patch,
+      )
+      setWritten({ ...res.result, path: res.link.path })
+    } catch (e) {
+      setError(errorMessage(e, translate('inspector.frameCodeWriteFailed')))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const code = preview?.code
+  if (written)
+    return (
+      <Modal size="md" onClose={onClose} aria-label={t('inspector.frameCodeTitle')}>
+        <ModalEyebrow>{t('inspector.frameCodeEyebrow')}</ModalEyebrow>
+        <ModalTitle>{t('inspector.frameCodeTitle')}</ModalTitle>
+        <ModalLede className="mt-4">
+          {t('inspector.frameCodeWritten', { repo: written.repo, path: written.path })}
+        </ModalLede>
+        <ul className="mt-2 space-y-0.5 text-caption text-ink-faint">
+          {written.written.map((p) => (
+            <li key={p}>{p}</li>
+          ))}
+        </ul>
+        <ModalActions>
+          <Button variant="primary" onClick={onClose}>
+            {t('common.close')}
+          </Button>
+        </ModalActions>
+      </Modal>
+    )
   return (
     <Modal size="xl" onClose={onClose} aria-label={t('inspector.frameCodeTitle')}>
       <ModalEyebrow>{t('inspector.frameCodeEyebrow')}</ModalEyebrow>
@@ -131,7 +170,15 @@ export function FrameCodeModal({ frameId, onClose }: { frameId: string; onClose:
       )}
       <ModalActions>
         <Button variant="bare" onClick={onClose}>
-          {t('common.close')}
+          {t('common.cancel')}
+        </Button>
+        <Button
+          variant="primary"
+          disabled={busy || !preview?.patch}
+          title={t('inspector.frameCodeWriteTitle')}
+          onClick={() => void write()}
+        >
+          {busy ? t('inspector.frameCodeWriting') : t('inspector.frameCodeWrite')}
         </Button>
       </ModalActions>
     </Modal>

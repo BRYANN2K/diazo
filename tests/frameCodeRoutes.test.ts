@@ -74,4 +74,52 @@ describe('POST /api/frames/:id/code/preview', () => {
     expect(body.patch).toContain('--- /dev/null\n+++ b/src/components/Pricing.tsx')
     expect(body.patch).toContain('-.old {}')
   })
+
+  it('writes exactly the previewed patch through apply_patch, then maps the frame', async () => {
+    const serve = async (ops: string[], seen: { op: string; args: Record<string, unknown> }[]) => {
+      for (const want of ops) {
+        const { request } = await poll()
+        seen.push(request)
+        expect(request.op).toBe(want)
+        await finish(
+          request.id,
+          request.op === 'read'
+            ? {
+                files: (request.args.paths as string[]).map((path) => ({ path, error: 'missing' })),
+                truncated: false,
+              }
+            : { written: ['src/components/Pricing.tsx', 'src/components/Pricing.css'], repo: 'site' },
+        )
+      }
+    }
+    const first = serve(['read'], [])
+    await new Promise((r) => setTimeout(r, 300))
+    const preview = await (await owner.post(`/api/frames/${frameId}/code/preview`, { framework: 'react' })).json()
+    await first
+
+    const stale = serve(['read'], [])
+    await new Promise((r) => setTimeout(r, 300))
+    const refused = await owner.post(`/api/frames/${frameId}/code/write`, { framework: 'react', patch: 'nope' })
+    await stale
+    expect(refused.status).toBe(409)
+
+    const seen: { op: string; args: Record<string, unknown> }[] = []
+    const writer = serve(['read', 'apply_patch'], seen)
+    await new Promise((r) => setTimeout(r, 300))
+    const res = await owner.post(`/api/frames/${frameId}/code/write`, { framework: 'react', patch: preview.patch })
+    await writer
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.result.repo).toBe('site')
+    expect(seen[1]!.args.patch).toBe(preview.patch)
+    expect(body.link).toMatchObject({
+      targetKind: 'frame',
+      targetId: frameId,
+      path: 'src/components/Pricing.tsx',
+      exportName: 'Pricing',
+      source: 'generated',
+    })
+    const { links } = await (await owner.get(`/api/canvases/${canvasId}/code-links`)).json()
+    expect(links).toEqual([expect.objectContaining({ targetId: frameId, source: 'generated' })])
+  })
 })

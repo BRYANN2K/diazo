@@ -513,6 +513,11 @@ export const api = {
   /* frame → code: the generated component as a patch against the linked repo */
   previewFrameCode: (frameId: string, input: FrameCodeInput) =>
     req<FrameCodePreview>(`/api/frames/${frameId}/code/preview`, { method: 'POST', body: JSON.stringify(input) }),
+  writeFrameCode: (frameId: string, input: FrameCodeInput, patch: string) =>
+    req<{ ok: boolean; result: { written: string[]; repo: string }; link: CodeLink }>(
+      `/api/frames/${frameId}/code/write`,
+      { method: 'POST', body: JSON.stringify({ ...input, patch }) },
+    ),
   /* drift review: compare a frame with the page shipped at a URL */
   compareDrift: (frameId: string, url: string) =>
     req<{ comparison: DriftComparison; shippedFrame: Frame }>(`/api/frames/${frameId}/drift`, {

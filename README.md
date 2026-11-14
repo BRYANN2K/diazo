@@ -126,6 +126,10 @@ to upstream's.
   shows the diff, and applies the ticked values in doop. The other way, doop's values become a
   unified patch against the repo's style files, written by the desktop app's `repo_apply_patch`
   only after its native dialog lists every file and the diff (needs a desktop release).
+- **Frame → code** — the Inspector exports a frame as a React (`.tsx` + `.css`) or Astro component:
+  raw values equal to a token become `var(--token)`, mapped components are imported from their
+  files. A diff preview against the repo comes first; the write goes through `repo_apply_patch`
+  and then maps the frame to its new file. Agents call `export_frame_code` (returns the files).
 - **Self-hosting** — Docker image `ghcr.io/bryann2k/doop:bryann2k-main` built on every push, k3s
   manifests in `deploy/k3s/` with a persistent volume for uploads, exposed through Tailscale
   Serve only (no ingress, no Funnel).

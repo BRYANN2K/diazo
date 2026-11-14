@@ -1423,6 +1423,33 @@ app.post('/api/frames/:id/code/preview', async (req, res) => {
   }
 })
 
+/* the write rebuilds the patch from a fresh read and must match the preview;
+   once the desktop app wrote it, the frame maps to the file it now lives in */
+app.post('/api/frames/:id/code/write', async (req, res) => {
+  const frame = requireFrame(req, res, req.params.id, 'edit')
+  if (!frame) return
+  const parsed = frameCodeBody.extend({ patch: z.string().max(PATCH_MAX_BYTES) }).safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid write request' })
+  const { patch, ...opts } = parsed.data
+  try {
+    const preview = await frameCodePatch(req.user!.id, frame, opts)
+    if (!preview.patch)
+      return res.status(409).json({ error: 'nothing to write — the repo already holds this component' })
+    if (preview.patch !== patch)
+      return res.status(409).json({ error: 'the frame or the repo changed since the preview — preview again' })
+    const result = await applyRepoPatch(req.user!.id, frame.canvasId, patch, `Frame → code: "${frame.name}"`)
+    const main = preview.code.files[0]!
+    const link = await putCodeLink(
+      frame.canvasId,
+      { targetKind: 'frame', targetId: frame.id, path: main.path, exportName: preview.code.name, source: 'generated' },
+      req.user!.name,
+    )
+    res.json({ ok: true, result, link })
+  } catch (e) {
+    frameCodeError(res, e)
+  }
+})
+
 app.use('/api/admin', adminRouter)
 app.use('/api/community', communityRouter)
 app.use('/api/automations', automationsRouter)

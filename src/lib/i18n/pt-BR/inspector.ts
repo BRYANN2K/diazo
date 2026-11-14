@@ -304,4 +304,9 @@ export const inspector: Catalog['inspector'] = {
   frameCodeUnmapped: 'Ainda não mapeados, inseridos como markup: {list}',
   frameCodeTokens: 'Tokens usados: {list}',
   frameCodeScripts: { one: '{count} script deixado de fora', other: '{count} scripts deixados de fora' },
+  frameCodeWrite: 'Gravar no repositório',
+  frameCodeWriteTitle: 'Enviar o patch ao app desktop — ele pergunta antes de alterar qualquer arquivo',
+  frameCodeWriting: 'Aguardando o app desktop…',
+  frameCodeWriteFailed: 'O componente não foi gravado',
+  frameCodeWritten: 'Gravado em {repo}. O frame agora aponta para {path}.',
 }

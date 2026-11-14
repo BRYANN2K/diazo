@@ -304,4 +304,9 @@ export const inspector = {
   frameCodeUnmapped: 'Not mapped yet, inlined as markup: {list}',
   frameCodeTokens: 'Tokens used: {list}',
   frameCodeScripts: { one: '{count} script left out', other: '{count} scripts left out' },
+  frameCodeWrite: 'Write to repo',
+  frameCodeWriteTitle: 'Send the patch to the desktop app — it asks before changing any file',
+  frameCodeWriting: 'Waiting for the desktop app…',
+  frameCodeWriteFailed: 'The component was not written',
+  frameCodeWritten: 'Written to {repo}. The frame now maps to {path}.',
 } as const
