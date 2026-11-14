@@ -1642,6 +1642,9 @@ const FRAME_BOOTSTRAP_TEMPLATE = `<!doctype html>
     if (d.type === 'doop:move-target') {
       parent.postMessage({ type: 'doop:move-target-result', reqId: d.reqId, result: moveTarget(d.selector, d.x, d.y) }, '*')
     }
+    if (d.type === 'doop:insert-target') {
+      parent.postMessage({ type: 'doop:insert-target-result', reqId: d.reqId, result: insertTarget(d.x, d.y) }, '*')
+    }
     if (d.type === 'doop:path') {
       parent.postMessage({ type: 'doop:path-result', reqId: d.reqId, hit: pathInfo(d) }, '*')
     }

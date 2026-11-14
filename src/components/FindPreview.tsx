@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { api } from '../lib/api'
 import { useStore } from '../lib/store'
+import { withFindPreviewScript, type FindPreviewMessage } from '../lib/findPreviewRuntime'
+import { clearLivePreview, frameHtml, setLivePreview } from '../lib/findSnapshot'
 import { FramePreview } from './FramePreview'
 
 /**
@@ -10,51 +11,10 @@ import { FramePreview } from './FramePreview'
  * preview finds the element carrying `focus` (a library id, or the query),
  * outlines it, and zooms the frame onto it.
  *
- * The frame stays sandboxed (scripts only, no same-origin): a small script
- * injected into the document finds the element and posts its box back.
+ * The iframe loads once per frame. A focus change is a message to the
+ * script inside (`findPreviewRuntime`), which moves the outline and posts
+ * the new box back; only the transform here animates.
  */
-
-interface Loaded {
-  html: string
-  width: number
-  height: number
-}
-
-const htmlCache = new Map<string, Promise<Loaded>>()
-
-/* the open canvas's frames are in the store; a hit in another canvas is fetched */
-function frameHtml(frameId: string): Promise<Loaded> {
-  const local = useStore.getState().canvas?.frames.find((f) => f.id === frameId)
-  if (local?.html) return Promise.resolve({ html: local.html, width: local.width, height: local.height })
-  let p = htmlCache.get(frameId)
-  if (!p) {
-    p = api.frame(frameId).then((f) => ({ html: f.html ?? '', width: f.width, height: f.height }))
-    p.catch(() => htmlCache.delete(frameId))
-    htmlCache.set(frameId, p)
-  }
-  return p
-}
-
-/* runs inside the frame: find the smallest card-sized box around the text */
-const FINDER = (token: string, focus: string) => `<script>(function(){
-var T=${JSON.stringify(token)},F=${JSON.stringify(focus.toLowerCase())};
-function find(){
-  var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT),n,hit=null;
-  while((n=w.nextNode())){if(n.nodeValue&&n.nodeValue.toLowerCase().indexOf(F)>=0){hit=n.parentElement;break}}
-  if(!hit)return null;
-  var el=hit,r=el.getBoundingClientRect();
-  for(var i=0;i<8&&el.parentElement&&el.parentElement!==document.body;i++){
-    if(r.width>=160&&r.height>=110)break;
-    el=el.parentElement;r=el.getBoundingClientRect();
-  }
-  el.style.outline='3px solid #7c5cff';el.style.outlineOffset='4px';el.style.borderRadius=el.style.borderRadius||'6px';
-  var sx=window.scrollX,sy=window.scrollY;
-  return {x:r.left+sx,y:r.top+sy,w:r.width,h:r.height};
-}
-function post(){var b=find();parent.postMessage({doopFindPreview:T,box:b,docW:document.documentElement.scrollWidth,docH:document.documentElement.scrollHeight},'*');return b}
-/* sheets often render their items from a script after load */
-window.addEventListener('load',function(){if(!post()){setTimeout(post,500);setTimeout(post,1500)}});
-})();</script>`
 
 interface Box {
   x: number
@@ -63,40 +23,83 @@ interface Box {
   h: number
 }
 
-export function FindPreview({ frameId, focus }: { frameId: string; focus: string }) {
+let tokens = 0
+
+export function FindPreview({
+  frameId,
+  focus,
+  staticNote,
+}: {
+  frameId: string
+  focus: string
+  /** shown over a preview whose sheet runs scripts, which the copy loses */
+  staticNote?: string
+}) {
   const frame = useStore((s) => s.canvas?.frames.find((f) => f.id === frameId))
   const wrapRef = useRef<HTMLDivElement>(null)
-  const [doc, setDoc] = useState<{ key: string; html: string; width: number; height: number } | null>(null)
-  const [box, setBox] = useState<{ key: string; box: Box | null } | null>(null)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const [doc, setDoc] = useState<{
+    frameId: string
+    token: string
+    html: string
+    width: number
+    height: number
+    scripted: boolean
+  } | null>(null)
+  const [ready, setReady] = useState<string | null>(null)
+  const [box, setBox] = useState<{ token: string; focus: string; box: Box | null } | null>(null)
   const [size, setSize] = useState({ w: 444, h: 220 })
-  const key = `${frameId}\n${focus}`
-  const token = useRef(0)
 
   useEffect(() => {
     let stale = false
     void frameHtml(frameId)
       .then(({ html, width, height }) => {
         if (stale) return
-        token.current += 1
-        const finder = FINDER(`${token.current}`, focus)
-        const withFinder = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${finder}</body>`) : html + finder
-        setDoc({ key, html: withFinder, width, height })
+        tokens += 1
+        const token = `${tokens}`
+        setDoc({
+          frameId,
+          token,
+          html: withFindPreviewScript(html, token),
+          width,
+          height,
+          scripted: /<script\b/i.test(html),
+        })
       })
       .catch(() => {})
     return () => {
       stale = true
     }
-  }, [frameId, focus, key])
+  }, [frameId])
+
+  const current = doc?.frameId === frameId ? doc : null
+  const token = current?.token ?? null
 
   useEffect(() => {
+    if (!token) return
     const onMessage = (e: MessageEvent) => {
-      const data = e.data as { doopFindPreview?: string; box?: Box | null } | null
-      if (!data || data.doopFindPreview !== `${token.current}`) return
-      setBox({ key, box: data.box ?? null })
+      const data = e.data as FindPreviewMessage | null
+      if (!data || data.doopFindPreview !== token) return
+      if (data.type === 'ready') setReady(token)
+      else if (data.type === 'box') {
+        setBox({ token, focus: data.focus ?? '', box: data.box ?? null })
+        const win = iframeRef.current?.contentWindow
+        if (win) setLivePreview({ frameId, focus: data.focus ?? '', token, win, found: !!data.box })
+      }
     }
     window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
-  }, [key])
+    return () => {
+      window.removeEventListener('message', onMessage)
+      clearLivePreview(token)
+    }
+  }, [token, frameId])
+
+  /* the focus travels as a message once the document listens; it is sent
+     again on ready, since the first one can beat the script's load */
+  useEffect(() => {
+    if (!token) return
+    iframeRef.current?.contentWindow?.postMessage({ doopFindPreview: token, focus }, '*')
+  }, [token, focus, ready])
 
   useEffect(() => {
     const el = wrapRef.current
@@ -106,9 +109,10 @@ export function FindPreview({ frameId, focus }: { frameId: string; focus: string
     return () => ro.disconnect()
   }, [])
 
-  const fw = frame?.width ?? (doc?.key === key ? doc.width : 1440)
-  const fh = frame?.height ?? (doc?.key === key ? doc.height : 900)
-  const target = box?.key === key ? box.box : null
+  const fw = frame?.width ?? current?.width ?? 1440
+  const fh = frame?.height ?? current?.height ?? 900
+  /* the last box keeps the view while the next focus is looked up */
+  const target = box && box.token === token ? box.box : null
   /* zoom on the matched component with a margin; otherwise fit the frame's width */
   let scale = size.w / fw
   let tx = 0
@@ -122,17 +126,24 @@ export function FindPreview({ frameId, focus }: { frameId: string; focus: string
 
   return (
     <div ref={wrapRef} className="relative h-56 flex-none overflow-hidden rounded-row bg-sub ring-1 ring-line-soft">
-      {doc?.key === key ? (
+      {current ? (
         <iframe
+          key={current.token}
+          ref={iframeRef}
           title="preview"
           sandbox="allow-scripts"
-          srcDoc={doc.html}
+          srcDoc={current.html}
           tabIndex={-1}
-          className="pointer-events-none absolute top-0 left-0 origin-top-left border-0 transition-transform duration-300 ease-out"
+          className="pointer-events-none absolute top-0 left-0 origin-top-left border-0 transition-transform duration-180 ease-out"
           style={{ width: fw, height: fh, transform: `translate(${tx}px, ${ty}px) scale(${scale})` }}
         />
       ) : (
         <FramePreview frameId={frameId} empty={null} />
+      )}
+      {staticNote && current?.scripted && (
+        <span className="absolute right-1.5 bottom-1.5 rounded-tag bg-surface/90 px-1.5 py-0.5 text-micro text-ink-soft shadow-ring">
+          {staticNote}
+        </span>
       )}
     </div>
   )
