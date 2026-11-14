@@ -1046,6 +1046,15 @@ export const api = {
     patch: { description?: string; rules?: unknown; taxonomy?: LibraryTaxonomy; visibility?: LibraryVisibility },
   ) => req<LibraryListEntry>(`/api/libraries/${libraryId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteLibrary: (libraryId: string) => req(`/api/libraries/${libraryId}`, { method: 'DELETE' }),
+  transferLibraryCategories: (libraryId: string, fromLibraryId: string, dryRun = false) =>
+    req<{
+      matched: number
+      changes: number
+      onlyFrom: string[]
+      onlyTo: string[]
+      onlyFromCount: number
+      onlyToCount: number
+    }>(`/api/libraries/${libraryId}/transfer`, { method: 'POST', body: JSON.stringify({ fromLibraryId, dryRun }) }),
   reindexLibrary: (libraryId: string) => req(`/api/libraries/${libraryId}/reindex`, { method: 'POST' }),
   searchLibraries: (query: LibrarySearchQuery) =>
     req<LibrarySearchResult>(`/api/libraries/search?${libraryParams(query)}`),

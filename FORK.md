@@ -52,6 +52,10 @@ Les canvases vivent sur doop.design ; les copier d'abord sur l'instance du fork 
 2. Attendre la fin de l'indexation (le compteur `items · variants` de la bibliothèque) ; la passe
    rendue lit ensuite les feuilles scriptées.
 3. Faire de même pour « Design Library · by function ».
+4. Reprendre ses catégories dans « Design Library » (décision D2) : `POST
+/api/libraries/<design-library>/transfer { "fromLibraryId": "<by-function>", "dryRun": true }`,
+   relire `matched`, `onlyFrom`, `onlyTo`, puis relancer sans `dryRun`. Seule la curation de « Design
+   Library » est écrite ; une seconde exécution ne change rien. Archiver ensuite « by function ».
 
 ## PRs abandonnées
 

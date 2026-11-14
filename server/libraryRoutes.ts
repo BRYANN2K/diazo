@@ -11,6 +11,7 @@ import { describeRules, parseLibraryRules, RULE_PRESETS, type RulePresetName } f
 import type { QueryFilters } from '../shared/librarySearch.ts'
 import { canEditCanvas, canManageCanvas } from './access.ts'
 import { countUse, insertItem, InsertError } from './librarySnapshot.ts'
+import { applyTransfer } from './libraryImport.ts'
 import { resolveActor } from './actions.ts'
 import { store } from './store.ts'
 import { createLibrary, disableLibrary, getLibrary, libraryAllows, presetFor, updateLibrary } from './libraries.ts'
@@ -167,6 +168,24 @@ libraryRouter.delete('/:id', (req, res) => {
   if (!libraryFor(req.user!.id, req.params.id, 'manage')) return notFound(res)
   disableLibrary(req.params.id, actorOf(req))
   res.json({ ok: true })
+})
+
+/** Take the categories of another library for the items both hold (by id).
+ *  Manage on this library, read on the other; the other is never written. */
+libraryRouter.post('/:id/transfer', async (req, res) => {
+  const userId = req.user!.id
+  if (!libraryFor(userId, req.params.id, 'manage')) return notFound(res)
+  const fromId = String(req.body?.fromLibraryId ?? '')
+  if (!fromId || fromId === req.params.id || !libraryFor(userId, fromId)) return notFound(res)
+  const plan = await applyTransfer(fromId, req.params.id, actorOf(req), { dryRun: req.body?.dryRun === true })
+  res.json({
+    matched: plan.matched.length,
+    changes: plan.changes,
+    onlyFrom: plan.onlyFrom.slice(0, 500),
+    onlyTo: plan.onlyTo.slice(0, 500),
+    onlyFromCount: plan.onlyFrom.length,
+    onlyToCount: plan.onlyTo.length,
+  })
 })
 
 libraryRouter.post('/:id/reindex', (req, res) => {
