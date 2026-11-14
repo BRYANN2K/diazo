@@ -4,6 +4,7 @@ import { LibraryTile } from '@/components/library/LibraryTile'
 import { ItemThumb } from '@/components/library/ItemThumb'
 import { LibraryItemTile } from '@/components/library/LibraryItemTile'
 import { LibraryFacets } from '@/components/library/LibraryFacets'
+import { VariantCard } from '@/components/library/VariantCard'
 
 const item = (id: string): LibraryItemSummary => ({
   id,
@@ -89,6 +90,19 @@ export const Facets: StoryObj = {
         category="Auth"
         onKind={() => {}}
         onCategory={() => {}}
+      />
+    </div>
+  ),
+}
+
+/** One variant in the item view: image, id, copy, and the view's actions. */
+export const Variant: StoryObj = {
+  render: () => (
+    <div className="w-64 p-6">
+      <VariantCard
+        item={{ ...item('cp.scb-otp-input-dark'), scripted: true }}
+        live={false}
+        scriptedNote="Static once inserted"
       />
     </div>
   ),

@@ -15,6 +15,7 @@ import { AppRail, railLayout } from '../components/AppRail'
 import { LibraryFacets } from '../components/library/LibraryFacets'
 import { LibraryGrid } from '../components/library/LibraryGrid'
 import { LibraryItemTile } from '../components/library/LibraryItemTile'
+import { LibraryItemView } from '../components/library/LibraryItemView'
 import { Button } from '../components/ui/button'
 import { Kbd } from '../components/ui/kbd'
 import { SearchField } from '../components/ui/search-field'
@@ -181,7 +182,14 @@ export function LibraryPage({ libraryId, itemId }: { libraryId: string; itemId: 
               )}
             />
           </div>
-          {itemId && <span data-open-item={itemId} hidden />}
+          {itemId && (
+            <LibraryItemView
+              libraryId={libraryId}
+              itemId={itemId}
+              curator={curator}
+              onClose={() => navigate(`/l/${libraryId}${location.search}`)}
+            />
+          )}
         </DashContent>
       </DashMain>
     </DashLayout>
