@@ -11,10 +11,10 @@ render real HTML in sandboxed iframes. People edit in the browser; AI agents edi
 built-in MCP server, streaming designs in live. Everyone sees cursors, presence, frame edits, agent
 status, and an activity feed in realtime over one WebSocket room per canvas.
 
-## Fork rules (BRYANN2K/doop)
+## Fork rules (BRYANN2K/redoop)
 
-- Work on `bryann2k/main` (or a `feat/*` branch merged into it). Never push to `upstream`
-  (`kgoedecke/doop`); `origin` is `BRYANN2K/doop`.
+- Work on `main` (or a `feat/*` branch merged into it). Never push to `upstream`
+  (`kgoedecke/doop`); `origin` is `BRYANN2K/redoop`.
 - Read `FORK.md` first: merged and dropped upstream PRs, the resync recipe, the k3s deploy.
 - The fork's own features are listed in `docs/FEATURES.md` (the README's "What it does" sums them
   up). Update it when you add one. The project is presented as **redoop**.

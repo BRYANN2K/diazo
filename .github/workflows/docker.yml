@@ -1,18 +1,17 @@
 name: docker
 
-# Builds ghcr.io/bryann2k/doop for linux/amd64 (the k3s VPS) and linux/arm64
-# (Apple silicon Macs running the local install through Apple's `container`).
+# Builds ghcr.io/bryann2k/redoop (the repository's name, lowercased) for
+# linux/amd64 (the k3s VPS) and linux/arm64 (Apple silicon Macs running the
+# local install through Apple's `container`).
 # Each architecture builds on a native runner (no QEMU: bun and Chromium are
 # slow and flaky under emulation), pushes by digest, and a final job joins the
-# two digests into one multi-arch tag.
+# two digests into one multi-arch image tagged `main`, `latest` and
+# `sha-<short commit>`.
 
 on:
   push:
-    branches: [bryann2k/main]
+    branches: [main]
   workflow_dispatch:
-
-env:
-  IMAGE: ghcr.io/bryann2k/doop
 
 jobs:
   build:
@@ -32,6 +31,9 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -70,6 +72,9 @@ jobs:
       contents: read
       packages: write
     steps:
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       - uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
@@ -88,9 +93,10 @@ jobs:
         working-directory: /tmp/digests
         run: |
           docker buildx imagetools create \
-            -t "$IMAGE:bryann2k-main" \
-            -t "$IMAGE:sha-$GITHUB_SHA" \
+            -t "$IMAGE:main" \
+            -t "$IMAGE:latest" \
+            -t "$IMAGE:sha-${GITHUB_SHA::7}" \
             $(printf "$IMAGE@sha256:%s " *)
 
       - name: Inspect
-        run: docker buildx imagetools inspect "$IMAGE:bryann2k-main"
+        run: docker buildx imagetools inspect "$IMAGE:main"

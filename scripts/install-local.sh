@@ -1,9 +1,9 @@
 #!/bin/sh
 # doop-local: run doop on this Mac in one container, with Apple's `container`.
 #
-#   curl -fsSL https://raw.githubusercontent.com/BRYANN2K/doop/bryann2k/main/scripts/install-local.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/BRYANN2K/redoop/main/scripts/install-local.sh | sh
 #
-# One container (ghcr.io/bryann2k/doop), its embedded Postgres (PGlite) and its
+# One container (ghcr.io/bryann2k/redoop), its embedded Postgres (PGlite) and its
 # uploads in ~/.doop/data, its secrets in ~/.doop/doop.env (generated here, mode
 # 600). Published on 127.0.0.1 only. Re-running it updates the image and
 # restarts the container; data and secrets are kept.
@@ -19,9 +19,9 @@ set -eu
 DOOP_HOME=${DOOP_HOME:-"$HOME/.doop"}
 DOOP_PORT=${DOOP_PORT:-4400}
 DOOP_NAME=${DOOP_NAME:-doop}
-DOOP_IMAGE=${DOOP_IMAGE:-ghcr.io/bryann2k/doop:bryann2k-main}
-DOOP_REF=${DOOP_REF:-bryann2k/main}
-DOOP_REPO=${DOOP_REPO:-BRYANN2K/doop}
+DOOP_IMAGE=${DOOP_IMAGE:-ghcr.io/bryann2k/redoop:main}
+DOOP_REF=${DOOP_REF:-main}
+DOOP_REPO=${DOOP_REPO:-BRYANN2K/redoop}
 DOOP_HEALTH_TIMEOUT=${DOOP_HEALTH_TIMEOUT:-240}
 DOOP_SCRIPT_URL=${DOOP_SCRIPT_URL:-"https://raw.githubusercontent.com/$DOOP_REPO/$DOOP_REF/scripts/install-local.sh"}
 LOCAL_TAG=doop-local:latest

@@ -1,7 +1,7 @@
 # RFC: Link a local project + a chat tab that plans before it designs
 
 Status: draft for review — no code yet.
-Scope: doop fork `bryann2k/main`, desktop app (Tauri) + server (VPS) + web.
+Scope: doop fork (redoop, branch `main`), desktop app (Tauri) + server (VPS) + web.
 
 ## What this adds
 

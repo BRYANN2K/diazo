@@ -50,7 +50,7 @@ Every feature this fork adds, and the upstream pull requests it merged early, ar
 ### Local (Mac, lightweight)
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BRYANN2K/doop/bryann2k/main/scripts/install-local.sh | sh
+curl -fsSL https://raw.githubusercontent.com/BRYANN2K/redoop/main/scripts/install-local.sh | sh
 ```
 
 One container on `127.0.0.1:4400`, with the database and uploads in `~/.doop/data` and secrets
