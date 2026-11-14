@@ -123,3 +123,40 @@ it('a launched plan says who queued the cards and closes the actions', () => {
   expect(container.textContent).toContain('2 cards queued by Bryan')
   expect(button('Go design')).toBeUndefined()
 })
+
+const ask: ChatMessage = { id: 'q1', canvasId: 'c', from: 'Bryan', text: 'A pricing page?', at: 1 }
+
+function typeInComposer(value: string) {
+  const field = container.querySelector('textarea')!
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+  setter.call(field, value)
+  field.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+it('has one composer and no reply field per thread', () => {
+  useStore.setState({ canvas: canvasWith('edit'), chat: [planMessage(), ask] })
+  act(() => root.render(<ChatPanel canvasId="c" />))
+  expect(container.querySelectorAll('textarea')).toHaveLength(1)
+  expect(container.querySelector('input[placeholder="Reply…"]')).toBeNull()
+})
+
+it('Reply points the composer at the thread, and the send carries it', async () => {
+  useStore.setState({ canvas: canvasWith('edit'), chat: [ask] })
+  act(() => root.render(<ChatPanel canvasId="c" />))
+  act(() => (container.querySelector('button[aria-label="Reply to Bryan"]') as HTMLButtonElement).click())
+  expect(container.textContent).toContain('Replying to Bryan: A pricing page?')
+  act(() => typeInComposer('Three tiers please'))
+  await act(async () => (container.querySelector('button[type="submit"]') as HTMLButtonElement).click())
+  expect(calls.sendChat).toHaveBeenCalledWith('c', { text: 'Three tiers please', threadId: 'q1' })
+  expect(container.textContent).not.toContain('Replying to')
+})
+
+it('a new message without Reply starts a thread; ✕ drops the reply', async () => {
+  useStore.setState({ canvas: canvasWith('edit'), chat: [ask] })
+  act(() => root.render(<ChatPanel canvasId="c" />))
+  act(() => (container.querySelector('button[aria-label="Reply to Bryan"]') as HTMLButtonElement).click())
+  act(() => (container.querySelector('button[aria-label="Stop replying"]') as HTMLButtonElement).click())
+  act(() => typeInComposer('Something new'))
+  await act(async () => (container.querySelector('button[type="submit"]') as HTMLButtonElement).click())
+  expect(calls.sendChat).toHaveBeenCalledWith('c', { text: 'Something new' })
+})

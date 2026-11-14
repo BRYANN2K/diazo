@@ -136,6 +136,7 @@ import {
   Ruler,
   Space,
   ZoomIn,
+  Reply,
 } from 'lucide-react'
 
 type SvgProps = Omit<SVGProps<SVGSVGElement>, 'ref'>
@@ -244,6 +245,7 @@ export const ImportIcon = icon(Download)
 /** Import's counterpart: the arrow leaving the box. */
 export const ExportIcon = icon(ExternalLink)
 export const PulseIcon = icon(Activity)
+export const ReplyIcon = icon(Reply)
 export const BellIcon = icon(Bell)
 export const SparkIcon = icon(Sparkles)
 export const SearchIcon = icon(Search)

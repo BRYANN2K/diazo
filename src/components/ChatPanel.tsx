@@ -22,8 +22,9 @@ import { Avatar } from './ui/avatar'
 import { StatusLabel } from './ui/status-label'
 import { HandoffModal } from './HandoffModal'
 import { Note } from './ui/note'
-import { ArrowUpIcon, CheckIcon, FolderIcon, XIcon } from './ui/icons'
+import { ArrowUpIcon, CheckIcon, FolderIcon, ReplyIcon, XIcon } from './ui/icons'
 import { useT } from '@/lib/i18n'
+import { cn } from '@/lib/utils'
 
 const emptyNote = 'px-4 py-6 text-center text-body text-ink-faint'
 /** the field grows with the draft up to this many lines, then scrolls */
@@ -60,6 +61,8 @@ export function ChatPanel({ canvasId }: { canvasId: string }) {
   const chat = useStore((s) => s.chat)
   const canComment = useStore(canCommentOpenCanvas)
   const t = useT()
+  /* the thread the composer answers in, set from a thread's Reply action */
+  const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   /* thread views: a root and its replies, oldest thread first so the newest
      conversation is the one the scroll lands on */
@@ -85,11 +88,24 @@ export function ChatPanel({ canvasId }: { canvasId: string }) {
         {threads.length === 0 ? (
           <div className={emptyNote}>{t('panels.chatEmpty')}</div>
         ) : (
-          threads.map((thread) => <ChatThread key={thread.root.id} root={thread.root} replies={thread.replies} />)
+          threads.map((thread) => (
+            <ChatThread
+              key={thread.root.id}
+              root={thread.root}
+              replies={thread.replies}
+              onReply={canComment ? () => setReplyTo(thread.root) : undefined}
+            />
+          ))
         )}
         <div ref={bottomRef} />
       </PanelBody>
-      {canComment && <ChatComposer canvasId={canvasId} />}
+      {canComment && (
+        <ChatComposer
+          canvasId={canvasId}
+          replyTo={replyTo && threads.some((th) => th.root.id === replyTo.id) ? replyTo : null}
+          onClearReply={() => setReplyTo(null)}
+        />
+      )}
     </div>
   )
 }
@@ -121,25 +137,33 @@ function ChatAvatar({ message }: { message: ChatMessage }) {
       name={message.from}
       kind={message.agent ? 'agent' : 'user'}
       color={colorFor(message.from)}
-      size={16}
+      size={18}
       className="flex-none shadow-none dark:shadow-none"
     />
   )
 }
 
-/** A thread: its root line, the replies under it, then a reply field for
- *  anyone who may comment. The agent's plan cards live inside the thread. */
-function ChatThread({ root, replies }: { root: ChatMessage; replies: ChatMessage[] }) {
-  const canComment = useStore(canCommentOpenCanvas)
+/** A thread: its root line and the replies under it. A follow-up is
+ *  written in the panel's one composer: Reply points it at this thread. */
+function ChatThread({ root, replies, onReply }: { root: ChatMessage; replies: ChatMessage[]; onReply?: () => void }) {
+  const t = useT()
   return (
-    <div className="mx-1.5 py-1">
+    <div className="group/thread relative flex flex-col gap-1.5 border-b border-line-soft px-3 py-3 last:border-b-0">
       <ChatLine message={root} />
       {replies.map((reply) => (
-        <div key={reply.id} className="pl-[22px]">
-          <ChatLine message={reply} />
-        </div>
+        <ChatLine key={reply.id} message={reply} />
       ))}
-      {canComment && <ReplyField root={root} />}
+      {onReply && (
+        <IconButton
+          size="sm"
+          aria-label={t('panels.chatReplyTo', { name: root.from })}
+          title={t('panels.chatReplyTo', { name: root.from })}
+          className="absolute top-2 right-2 opacity-0 transition-opacity group-hover/thread:opacity-100 focus-visible:opacity-100"
+          onClick={onReply}
+        >
+          <ReplyIcon size="rail" />
+        </IconButton>
+      )}
     </div>
   )
 }
@@ -152,30 +176,69 @@ function ChatLine({ message }: { message: ChatMessage }) {
   const canEdit = useStore(canEditOpenCanvas)
   const t = useT()
   const asking = message.forAgent && !message.answeredAt && !message.failedAt
+  /* a person's line is a bubble on the right; the agent's turn is plain
+     text beside its mark, with its plan card under it */
+  if (!message.agent) {
+    return (
+      <div className="flex flex-col items-end gap-1">
+        <span className="flex items-center gap-1.5 pr-0.5 text-caption text-ink-faint">
+          <span className="truncate font-medium text-ink-soft">{message.from}</span>
+          <span className="tabular-nums">{timeAgo(message.at)}</span>
+        </span>
+        <div className="max-w-[85%] rounded-card rounded-br-tag bg-paper-deep px-3 py-2 text-body break-words whitespace-pre-wrap text-ink">
+          {message.text}
+        </div>
+        {asking && (
+          <span className="pr-0.5 text-caption text-ink-faint">
+            {message.claimedBy
+              ? t('panels.chatThinking', { agent: message.claimedBy })
+              : t('panels.chatQueued', { agent: message.targetAgent ?? '' })}
+          </span>
+        )}
+        {message.failedAt && (
+          <span className="flex w-full min-w-0 items-start gap-2">
+            <Note tone="error" className="line-clamp-3 min-w-0 break-words">
+              {message.failureReason ?? t('panels.chatAskFailed')}
+            </Note>
+            {canEdit && canvasId && (
+              <Button
+                variant="danger-solid"
+                size="pill"
+                className="ml-auto flex-none"
+                onClick={() => api.retryChatAsk(message.id).catch(reportLimit)}
+              >
+                {t('panels.chatRetry')}
+              </Button>
+            )}
+          </span>
+        )}
+      </div>
+    )
+  }
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-[2px] rounded-row px-1.5 py-1.5">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
       <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
         <ChatAvatar message={message} />
         <b className="truncate text-body font-medium text-ink">{message.from}</b>
       </span>
       <span className="text-caption text-ink-faint tabular-nums">{timeAgo(message.at)}</span>
-      <span className="col-span-2 min-w-0 break-words pl-[22px] whitespace-pre-wrap text-body text-ink-soft">
+      <span className="col-span-2 min-w-0 break-words pl-[24px] whitespace-pre-wrap text-body text-ink">
         {message.text}
       </span>
       {message.plan && (
-        <div className="col-span-2 pl-[22px]">
+        <div className="col-span-2 pl-[24px]">
           <PlanCard message={message} plan={message.plan} />
         </div>
       )}
       {asking && (
-        <span className="col-span-2 pl-[22px] text-caption text-ink-faint">
+        <span className="col-span-2 pl-[24px] text-caption text-ink-faint">
           {message.claimedBy
             ? t('panels.chatThinking', { agent: message.claimedBy })
             : t('panels.chatQueued', { agent: message.targetAgent ?? '' })}
         </span>
       )}
       {message.failedAt && (
-        <span className="col-span-2 flex min-w-0 items-start gap-2 pl-[22px]">
+        <span className="col-span-2 flex min-w-0 items-start gap-2 pl-[24px]">
           <Note tone="error" className="line-clamp-3 min-w-0 break-words">
             {message.failureReason ?? t('panels.chatAskFailed')}
           </Note>
@@ -190,54 +253,6 @@ function ChatLine({ message }: { message: ChatMessage }) {
             </Button>
           )}
         </span>
-      )}
-    </div>
-  )
-}
-
-/** The reply field under a thread — sends a plain chat message in it. */
-function ReplyField({ root }: { root: ChatMessage }) {
-  const canvasId = useStore((s) => s.canvas?.id)
-  const t = useT()
-  const [draft, setDraft] = useState('')
-  const [sending, setSending] = useState(false)
-  const [failed, setFailed] = useState(false)
-
-  async function reply() {
-    const text = draft.trim()
-    if (!text || sending || !canvasId) return
-    setSending(true)
-    setFailed(false)
-    try {
-      await api.sendChat(canvasId, { text, threadId: root.id, ...runnerArg() })
-      setDraft((current) => (current === draft ? '' : current))
-    } catch (err) {
-      setFailed(true)
-      reportLimit(err)
-    } finally {
-      setSending(false)
-    }
-  }
-
-  return (
-    <div className="py-1 pr-1.5 pl-[28px]">
-      <Input
-        variant="bare"
-        inputSize="auto"
-        className="h-7 min-w-0 flex-1 rounded-row bg-surface px-2.5 shadow-ring focus:shadow-elevation-1-focus"
-        placeholder={t('panels.chatReplyPlaceholder')}
-        aria-label={t('panels.chatReplyTo', { name: root.from })}
-        value={draft}
-        disabled={sending}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !isComposingEnter(e)) void reply()
-        }}
-      />
-      {failed && (
-        <Note tone="error" size="sm" className="mt-1">
-          {t('panels.chatSendFailed')}
-        </Note>
       )}
     </div>
   )
@@ -579,7 +594,16 @@ function PlanEditor({
 
 /** The composer docked under the conversation: a message to the room, or an
  *  @mention to the agent — same field, the server tells them apart. */
-function ChatComposer({ canvasId }: { canvasId: string }) {
+function ChatComposer({
+  canvasId,
+  replyTo,
+  onClearReply,
+}: {
+  canvasId: string
+  /** the thread a send answers in; null starts a new thread */
+  replyTo: ChatMessage | null
+  onClearReply: () => void
+}) {
   const canEdit = useStore(canEditOpenCanvas)
   const t = useT()
   const [text, setText] = useState('')
@@ -591,15 +615,21 @@ function ChatComposer({ canvasId }: { canvasId: string }) {
     if (inputRef.current) autosize(inputRef.current)
   }, [text])
 
+  /* Reply on a thread puts the keyboard here */
+  useEffect(() => {
+    if (replyTo) inputRef.current?.focus()
+  }, [replyTo])
+
   async function submit() {
     const clean = text.trim()
     if (!clean || sending) return
     setSending(true)
     setError(null)
     try {
-      await api.sendChat(canvasId, { text: clean, ...runnerArg() })
+      await api.sendChat(canvasId, { text: clean, ...(replyTo ? { threadId: replyTo.id } : {}), ...runnerArg() })
       posthog.capture('chat_message_sent')
       setText('')
+      onClearReply()
     } catch (err) {
       setError(errorMessage(err, t('panels.chatSendFailed')))
       reportLimit(err)
@@ -612,46 +642,75 @@ function ChatComposer({ canvasId }: { canvasId: string }) {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       void submit()
+    } else if (e.key === 'Escape' && replyTo) {
+      e.preventDefault()
+      onClearReply()
     }
   }
 
+  const ready = !!text.trim() && !sending
   return (
     <form
-      className="flex shrink-0 flex-col gap-1.5 border-t border-line-soft bg-surface px-3 pt-2.5 pb-2"
+      className="shrink-0 px-2.5 pt-1.5 pb-2.5"
       onSubmit={(e) => {
         e.preventDefault()
         void submit()
       }}
     >
-      <Textarea
-        ref={inputRef}
-        variant="bare"
-        rows={1}
-        maxLength={MAX_CHAT_TEXT_CHARS}
-        aria-label={t('panels.chatAria')}
-        className="block overflow-y-auto px-0.5 text-body"
-        value={text}
-        disabled={sending}
-        placeholder={canEdit ? t('panels.chatPlaceholderAgent') : t('panels.chatPlaceholder')}
-        onKeyDown={onKeyDown}
-        onChange={(e) => setText(e.target.value)}
-      />
-      <div className="flex items-center gap-1">
-        <span className="flex-1" />
-        {canEdit && <ModelPicker disabled={sending} />}
-        <IconButton
-          variant="primary"
-          size="lg"
-          shape="round"
-          type="submit"
-          aria-label={t('panels.chatSend')}
-          disabled={sending || !text.trim()}
-        >
-          {sending ? <span aria-hidden>…</span> : <ArrowUpIcon />}
-        </IconButton>
+      <div className="flex flex-col gap-1.5 rounded-panel bg-surface px-3 pt-2.5 pb-2 shadow-ring transition-shadow focus-within:shadow-float">
+        {replyTo && (
+          <span className="flex min-w-0 items-center gap-1 self-start rounded-pill bg-sub py-0.5 pr-0.5 pl-2 text-caption text-ink-soft">
+            <ReplyIcon size={12} className="flex-none text-ink-faint" />
+            <span className="min-w-0 truncate">
+              {t('panels.chatReplyingTo', { name: replyTo.from, text: replyTo.text.slice(0, 60) })}
+            </span>
+            <IconButton
+              size="sm"
+              className="size-5 flex-none"
+              aria-label={t('panels.chatReplyCancel')}
+              onClick={onClearReply}
+            >
+              <XIcon size={12} />
+            </IconButton>
+          </span>
+        )}
+        <Textarea
+          ref={inputRef}
+          variant="bare"
+          rows={2}
+          maxLength={MAX_CHAT_TEXT_CHARS}
+          aria-label={t('panels.chatAria')}
+          className="block min-h-10 overflow-y-auto px-0.5 text-copy"
+          value={text}
+          disabled={sending}
+          placeholder={
+            replyTo
+              ? t('panels.chatReplyPlaceholder')
+              : canEdit
+                ? t('panels.chatPlaceholderAgent')
+                : t('panels.chatPlaceholder')
+          }
+          onKeyDown={onKeyDown}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <div className="flex items-center gap-1">
+          {canEdit && <ModelPicker disabled={sending} />}
+          <span className="flex-1" />
+          <IconButton
+            variant="primary"
+            size="md"
+            shape="round"
+            type="submit"
+            aria-label={sending ? t('panels.chatSending') : t('panels.chatSend')}
+            disabled={!ready}
+            className={cn('transition-transform', ready && 'scale-105')}
+          >
+            <ArrowUpIcon className={cn(sending && 'animate-pulse')} />
+          </IconButton>
+        </div>
       </div>
       {error && (
-        <Note tone="error" size="sm">
+        <Note tone="error" size="sm" className="mt-1.5">
           {error}
         </Note>
       )}
