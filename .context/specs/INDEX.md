@@ -42,3 +42,6 @@ lists every file in this folder.
   editor's read-only mode.
 - [workspaces-billing.md](workspaces-billing.md) - Shared workspaces (org-level canvas access with
   roles) and the per-seat Team plan on Stripe: data model, entitlement rules, API, webhook flow.
+- [design-libraries.md](design-libraries.md) - Design libraries: a canvas kind whose frames are indexed as
+  items with variants, categories and tags; per-library import rules; a real search index behind ⌘F and the
+  agent tools; the gallery; sharing; the path from today's name-based "Design Library" canvases.
