@@ -15,5 +15,16 @@ export const replay = {
   deletedSince: 'Deleted since',
   editedSince: 'Edited since the run',
   openRun: 'Open the run',
+  rollback: 'Roll back this run',
+  rollingBack: 'Rolling back…',
+  rollbackDone: {
+    one: 'Rolled back {count} frame — ⌘Z puts it back',
+    other: 'Rolled back {count} frames — ⌘Z puts them back',
+  },
+  rollbackNothing: 'Nothing to roll back: every frame this run touched is gone.',
+  rollbackFailed: 'Could not roll back this run.',
+  rollbackConflictTitle: 'Some frames changed after this run',
+  rollbackConflictDescription: '{names} were edited since. Rolling back throws those edits away too.',
+  rollbackAnyway: 'Roll back anyway',
   close: 'Close',
 } as const

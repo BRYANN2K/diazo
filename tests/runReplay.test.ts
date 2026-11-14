@@ -10,6 +10,17 @@ vi.mock('../server/db/persist.ts', () => ({
   listRunActivity: async () => [],
   listRunFrameIds: async () => [],
   listFrameVersions: async () => [],
+  getFrameVersion: async (frameId: string, id: string) => ({
+    id,
+    frameId,
+    canvasId: 'c1',
+    html: '<p>before</p>',
+    width: 320,
+    height: 200,
+    savedAt: 1,
+    savedBy: 'Vera',
+    htmlBytes: 13,
+  }),
   deleteFrame: () => {},
 }))
 vi.mock('../server/db/index.ts', () => ({ db: {} }))
@@ -17,7 +28,8 @@ vi.mock('../server/resident.ts', () => ({ onFeedback: () => {} }))
 vi.mock('../server/distill.ts', () => ({ onDecision: () => {} }))
 
 const { frameChange } = await import('../shared/runReplay.ts')
-const { replayDeps, runTimeline } = await import('../server/runReplay.ts')
+const { replayDeps, rollbackRun, runTimeline, RollbackConflictError } = await import('../server/runReplay.ts')
+const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
 
 const version = (id: string, savedAt: number, runId?: string): FrameVersionInfo => ({
@@ -104,5 +116,63 @@ describe('runTimeline', () => {
   it('is undefined for a run that left nothing', async () => {
     vi.spyOn(replayDeps, 'run').mockResolvedValue(undefined)
     expect(await runTimeline('c1', 'nope')).toBeUndefined()
+  })
+})
+
+describe('rollbackRun', () => {
+  const canvas: Canvas = {
+    id: 'c1',
+    name: 'Rollback',
+    ownerId: 'o',
+    createdAt: 0,
+    updatedAt: 0,
+    frames: [
+      { id: 'f1', canvasId: 'c1', name: 'Hero', html: '<p>by run</p>', x: 0, y: 0, width: 400, height: 300 } as never,
+      { id: 'f2', canvasId: 'c1', name: 'New', html: '<p>new</p>', x: 0, y: 0, width: 400, height: 300 } as never,
+    ],
+  }
+  const human = actions.resolveActor({ name: 'Vera', kind: 'user' })
+
+  function seed(edited: boolean) {
+    store.init([structuredClone(canvas)])
+    vi.spyOn(replayDeps, 'run').mockResolvedValue(undefined)
+    vi.spyOn(replayDeps, 'activity').mockResolvedValue([
+      {
+        id: 'a1',
+        canvasId: 'c1',
+        actorName: 'Doop',
+        actorKind: 'agent',
+        actorColor: '#000',
+        message: 'created frame “New”',
+        frameId: 'f2',
+        at: 5,
+        runId: 'r1',
+      },
+    ])
+    vi.spyOn(replayDeps, 'versionedFrames').mockResolvedValue([{ frameId: 'f1', canvasId: 'c1' }])
+    vi.spyOn(replayDeps, 'versions').mockImplementation(async (frameId) =>
+      frameId === 'f1' ? [version('v1', 3, 'r1'), ...(edited ? [version('v2', 9)] : [])] : [],
+    )
+  }
+
+  it('restores what the run changed and removes what it created, in one result', async () => {
+    seed(false)
+    const result = await rollbackRun('c1', 'r1', human)
+    expect(result?.restored.map((r) => [r.frame.id, r.frame.html, r.replaced.html])).toEqual([
+      ['f1', '<p>before</p>', '<p>by run</p>'],
+    ])
+    expect(result?.deleted.map((f) => f.id)).toEqual(['f2'])
+    expect(store.getFrame('f2')).toBeUndefined()
+    expect(store.getFrame('f1')?.width).toBe(320)
+  })
+
+  it('refuses a frame edited since unless forced, and changes nothing when it refuses', async () => {
+    seed(true)
+    await expect(rollbackRun('c1', 'r1', human)).rejects.toBeInstanceOf(RollbackConflictError)
+    expect(store.getFrame('f1')?.html).toBe('<p>by run</p>')
+    expect(store.getFrame('f2')).toBeDefined()
+    const forced = await rollbackRun('c1', 'r1', human, { force: true })
+    expect(forced?.restored).toHaveLength(1)
+    expect(forced?.deleted).toHaveLength(1)
   })
 })

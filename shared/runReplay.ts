@@ -1,5 +1,5 @@
 import type { AgentRunRecord } from './agentRuns.ts'
-import type { ActivityItem, FrameVersionInfo } from './types.ts'
+import type { ActivityItem, Frame, FrameVersionInfo } from './types.ts'
 
 /**
  * Run replay: what one resident run did on a canvas. Frame versions carry
@@ -36,9 +36,14 @@ export interface RunTimeline {
 
 export interface RollbackResult {
   /** each restored frame and the state the rollback replaced (the undo copy) */
-  restored: { frameId: string; replaced: { html: string; width: number; height: number } }[]
-  /** frames the run created, removed by the rollback */
-  deleted: string[]
+  restored: { frame: Frame; replaced: Pick<Frame, 'html' | 'width' | 'height'> }[]
+  /** frames the run created, as they were when the rollback removed them */
+  deleted: Frame[]
+}
+
+/** What a rollback refuses without confirmation: frames written over since. */
+export interface RollbackConflict {
+  conflicts: Pick<RunFrameChange, 'frameId' | 'name'>[]
 }
 
 /** The change one run made to one frame, from that frame's version rows. */

@@ -15,5 +15,13 @@ export const replay = {
   deletedSince: 'Excluído desde então',
   editedSince: 'Editado depois da execução',
   openRun: 'Abrir a execução',
+  rollback: 'Desfazer esta execução',
+  rollingBack: 'Desfazendo…',
+  rollbackDone: { one: '{count} frame restaurado — ⌘Z refaz', other: '{count} frames restaurados — ⌘Z refaz' },
+  rollbackNothing: 'Nada a desfazer: todos os frames desta execução já não existem.',
+  rollbackFailed: 'Não foi possível desfazer esta execução.',
+  rollbackConflictTitle: 'Alguns frames mudaram depois desta execução',
+  rollbackConflictDescription: '{names} foram editados depois. Desfazer também descarta essas edições.',
+  rollbackAnyway: 'Desfazer mesmo assim',
   close: 'Fechar',
 } as const

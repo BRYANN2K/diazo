@@ -1,7 +1,9 @@
 import * as persist from './db/persist.ts'
 import { store } from './store.ts'
 import { getRun } from './agentRuns.ts'
-import { frameChange, type RunTimeline } from '../shared/runReplay.ts'
+import * as actions from './actions.ts'
+import type { Actor } from '../shared/types.ts'
+import { frameChange, type RollbackResult, type RunFrameChange, type RunTimeline } from '../shared/runReplay.ts'
 
 /* Run replay (shared/runReplay.ts): rebuild what one resident run did from
  * the rows it tagged — its activity lines and the frame versions its writes
@@ -50,4 +52,42 @@ export async function runTimeline(canvasId: string, runId: string): Promise<RunT
 /** `created frame “Hero”` → Hero: the name a deleted frame last had. */
 function frameNameIn(message: string): string | undefined {
   return /“([^”]+)”/.exec(message)?.[1]
+}
+
+/** A rollback that would overwrite work done since the run. */
+export class RollbackConflictError extends Error {
+  constructor(readonly frames: RunFrameChange[]) {
+    super('frames were edited since the run')
+  }
+}
+
+/**
+ * Undo a whole run: every frame it changed goes back to its state before
+ * the run, every frame it created is removed. Each restore files the state
+ * it replaces as a version, so the rollback is itself in the history. A
+ * frame written over since the run is refused unless `force`, all or
+ * nothing: the run comes back whole or not at all.
+ */
+export async function rollbackRun(
+  canvasId: string,
+  runId: string,
+  actor: Actor,
+  { force = false }: { force?: boolean } = {},
+): Promise<RollbackResult | undefined> {
+  const timeline = await runTimeline(canvasId, runId)
+  if (!timeline) return undefined
+  const targets = timeline.frames.filter((f) => f.exists && (f.created || f.beforeVersionId))
+  const conflicts = targets.filter((f) => f.editedSince)
+  if (conflicts.length > 0 && !force) throw new RollbackConflictError(conflicts)
+  const result: RollbackResult = { restored: [], deleted: [] }
+  for (const change of targets) {
+    if (change.created) {
+      const frame = actions.deleteFrame(change.frameId, actor)
+      if (frame) result.deleted.push(frame)
+    } else if (change.beforeVersionId) {
+      const restored = await actions.restoreFrameVersion(change.frameId, change.beforeVersionId, actor)
+      if (restored) result.restored.push(restored)
+    }
+  }
+  return result
 }

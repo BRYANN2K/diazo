@@ -40,7 +40,7 @@ import { localDriftRouter } from './driftBridge.ts'
 import { compareFrameWithUrl, driftErrorMessage, getComparison, listComparisons } from './drift.ts'
 import { classifyDriftUrl } from '../shared/drift.ts'
 import { usageReport } from './agentRuns.ts'
-import { runTimeline } from './runReplay.ts'
+import { RollbackConflictError, rollbackRun, runTimeline } from './runReplay.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
@@ -3022,6 +3022,28 @@ app.get('/api/canvases/:id/usage', async (req, res) => {
 
 /* run replay (server/runReplay.ts): one resident run's activity and the
    before/after of every frame it touched */
+/* roll a whole run back: 409 with the frames edited since, unless the body
+   says { force: true } */
+app.post('/api/canvases/:id/runs/:runId/rollback', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  try {
+    const result = await rollbackRun(req.params.id, req.params.runId, userActor(req), {
+      force: req.body?.force === true,
+    })
+    if (!result) return res.status(404).json({ error: 'No such run on this canvas' })
+    res.json(result)
+  } catch (err) {
+    if (!(err instanceof RollbackConflictError)) {
+      console.error('[replay] rollback failed', err)
+      return res.status(500).json({ error: 'The rollback failed' })
+    }
+    res.status(409).json({
+      error: 'Some frames were edited since this run',
+      conflicts: err.frames.map((f) => ({ frameId: f.frameId, name: f.name })),
+    })
+  }
+})
+
 app.get('/api/canvases/:id/runs/:runId', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   const timeline = await runTimeline(req.params.id, req.params.runId)
