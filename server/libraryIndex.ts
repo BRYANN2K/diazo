@@ -12,14 +12,17 @@
  */
 import type { Actor, Frame } from '../shared/types.ts'
 import {
+  EMPTY_TAXONOMY,
   effectiveItem,
+  type LibraryPreview,
+  type LibraryTaxonomy,
   type LibraryIndexState,
   type LibraryItem,
   type LibraryItemMeta,
   type RuleFinding,
 } from '../shared/library.ts'
 import { parentIdOf } from '../shared/libraryIds.ts'
-import { sectionCategory } from '../shared/libraryRules.ts'
+import { sectionCategory, type LibraryRules } from '../shared/libraryRules.ts'
 import { buildIndex, type LibraryIndex } from '../shared/librarySearch.ts'
 import { readingOrder } from '../shared/frameOrder.ts'
 import { canvasPages, framePageId } from '../shared/pages.ts'
@@ -141,7 +144,7 @@ interface Placed {
 
 /** Every frame of the library in reading order, page by page, with the
  *  section category carried down each page. Reads names only. */
-function framesInOrder(record: LibraryRecord): Placed[] {
+function framesInOrder(record: Pick<LibraryRecord, 'canvasId' | 'rules'>): Placed[] {
   const canvas = store.getCanvas(record.canvasId)
   if (!canvas) return []
   const pages = canvasPages(canvas)
@@ -233,7 +236,7 @@ function countsOf(rows: LibraryItem[]) {
   return { items, variants }
 }
 
-function extract(record: LibraryRecord, placed: Placed, frame: Frame) {
+function extract(record: Pick<LibraryRecord, 'canvasId' | 'rules' | 'taxonomy'>, placed: Placed, frame: Frame) {
   return extractFrameItems({
     frame: { ...frame, pageId: framePageId(store.getCanvas(record.canvasId)!, frame) },
     pageName: placed.pageName,
@@ -460,4 +463,73 @@ export function resetIndexerForTest(): void {
   timers.clear()
   rerun.clear()
   afterRun.clear()
+}
+
+/* ---- the dry run ---- */
+
+/** What indexing a canvas under `rules` would give, without writing
+ *  anything: counts, frames it ignored, frames it could not read, ids
+ *  claimed twice, and the categories it found. */
+export async function previewIndex(
+  canvasId: string,
+  rules: LibraryRules,
+  taxonomy: LibraryTaxonomy = EMPTY_TAXONOMY,
+): Promise<LibraryPreview> {
+  const record = { canvasId, rules, taxonomy }
+  const order = framesInOrder(record)
+  const report: LibraryPreview = {
+    frames: order.length,
+    families: 0,
+    variants: 0,
+    scripted: 0,
+    ignored: [],
+    unreadable: [],
+    duplicates: [],
+    categories: [],
+  }
+  const taken = new Map<string, string>()
+  const categories = new Map<string, number>()
+  for (let at = 0; at < order.length; at += INDEX_BATCH) {
+    for (const placed of order.slice(at, at + INDEX_BATCH)) {
+      const frame = await store.renderableFrame(placed.frame.id)
+      if (!frame) continue
+      let result: ReturnType<typeof extract>
+      try {
+        result = extract(record, placed, frame)
+      } catch (error) {
+        report.unreadable.push({
+          frameId: frame.id,
+          name: frame.name,
+          reason: String((error as Error).message ?? error),
+        })
+        continue
+      }
+      if (result.ignored) {
+        report.ignored.push({
+          frameId: frame.id,
+          name: frame.name,
+          ...(result.section ? { section: result.section } : {}),
+        })
+        continue
+      }
+      if (!result.items.length) {
+        report.unreadable.push({ frameId: frame.id, name: frame.name, reason: 'no id could be read or assigned' })
+        continue
+      }
+      if (result.scripted) report.scripted++
+      for (const item of result.items) {
+        if (item.parentId) report.variants++
+        else report.families++
+        const owner = taken.get(item.itemId.toLowerCase())
+        if (owner !== undefined && owner !== frame.id)
+          report.duplicates.push({ itemId: item.itemId, frameIds: [owner, frame.id] })
+        else taken.set(item.itemId.toLowerCase(), frame.id)
+        if (!item.parentId) categories.set(item.category, (categories.get(item.category) ?? 0) + 1)
+      }
+    }
+  }
+  report.categories = [...categories]
+    .map(([path, count]) => ({ path, count }))
+    .sort((a, b) => b.count - a.count || a.path.localeCompare(b.path))
+  return report
 }

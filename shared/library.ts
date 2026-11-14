@@ -253,3 +253,59 @@ export interface LibrarySearchResult {
   facets: Record<LibraryFacetName, LibraryFacet[]>
   cursor?: string
 }
+
+/** What converting a canvas, or changing its rules, would give: the dry run. */
+export interface LibraryPreview {
+  frames: number
+  families: number
+  variants: number
+  /** frames whose scripts build variants the static pass cannot see */
+  scripted: number
+  ignored: { frameId: string; name: string; section?: string }[]
+  unreadable: { frameId: string; name: string; reason: string }[]
+  duplicates: { itemId: string; frameIds: string[] }[]
+  categories: { path: string; count: number }[]
+}
+
+/** A library in a list: the canvas it is, and what the caller may do. */
+export interface LibraryListEntry {
+  id: string
+  name: string
+  library: LibraryInfo
+  role: 'read' | 'curate' | 'manage'
+  workspaceId: string | null
+  /** picked in the person's reference library */
+  listed: boolean
+}
+
+/** One library in full: its rules and taxonomy, for its settings and agents. */
+export interface LibraryDetail extends LibraryListEntry {
+  rules: unknown
+  rulesText: string[]
+  taxonomy: LibraryTaxonomy
+}
+
+/** One item with its variants and provenance. */
+export interface LibraryItemDetail {
+  libraryId: string
+  libraryName: string
+  item: LibraryItemSummary & {
+    description: string
+    sourceUrl: string | null
+    license: string | null
+    findings: RuleFinding[]
+    useCount: number
+  }
+  variants: LibraryItemSummary[]
+  /** the family, when the item is a variant */
+  family: LibraryItemSummary | null
+}
+
+/** Curation a person may write on an item. */
+export interface LibraryItemPatch {
+  label?: string | null
+  description?: string | null
+  category?: string | null
+  tags?: string[] | null
+  status?: 'active' | 'deprecated' | 'hidden' | null
+}

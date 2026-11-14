@@ -19,6 +19,18 @@ import type { FrameCodeInput, FrameCodePreview } from '../../shared/frameCode'
 import type { ImageDescriptionMode, ImageDescriptionPreference } from '../../shared/imageDescriptions'
 import type { AgentRunners, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
 import type { CanvasFindResult } from '../../shared/canvasFind'
+import type {
+  ItemLocator,
+  LibraryDetail,
+  LibraryItemDetail,
+  LibraryItemPatch,
+  LibraryListEntry,
+  LibraryPreview,
+  LibrarySearchResult,
+  LibraryTaxonomy,
+  LibraryVisibility,
+} from '../../shared/library'
+import type { RulePresetName } from '../../shared/libraryRules'
 import type { CustomProviderConfig, CustomProviderKind } from '../../shared/customProvider'
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
 import type { WebhookDeliveryResult, WebhookEventType, WebhookInfo } from '../../shared/webhooks'
@@ -109,6 +121,35 @@ import type {
 } from '../../shared/designTokens'
 
 export type HomeActivity = ActivityItem & { canvasId: string; canvasName: string }
+
+/** A library search as query parameters (GET /api/libraries/search). */
+export interface LibrarySearchQuery {
+  q?: string
+  /** one library, or several */
+  lib?: string | string[]
+  kind?: string[]
+  category?: string[]
+  tag?: string[]
+  source?: string[]
+  status?: 'draft'
+  limit?: number
+  cursor?: string
+}
+
+function libraryParams(query: LibrarySearchQuery): string {
+  const params = new URLSearchParams()
+  if (query.q) params.set('q', query.q)
+  const lists: (keyof LibrarySearchQuery)[] = ['lib', 'kind', 'category', 'tag', 'source']
+  for (const key of lists) {
+    const value = query[key]
+    const values = Array.isArray(value) ? value : value ? [String(value)] : []
+    if (values.length) params.set(key, values.join(','))
+  }
+  if (query.status) params.set('status', query.status)
+  if (query.limit) params.set('limit', String(query.limit))
+  if (query.cursor) params.set('cursor', query.cursor)
+  return params.toString()
+}
 
 export interface CanvasMember {
   userId: string
@@ -990,6 +1031,37 @@ export const api = {
   listChat: (canvasId: string) => req<ChatMessage[]>(`/api/canvases/${canvasId}/chat`),
   findEverywhere: (q: string, matchCase: boolean) =>
     req<CanvasFindResult>(`/api/find?q=${encodeURIComponent(q)}${matchCase ? '&case=1' : ''}`),
+  /* design libraries (shared/library.ts) */
+  listLibraries: () => req<{ libraries: LibraryListEntry[] }>('/api/libraries'),
+  previewLibrary: (canvasId: string, opts: { preset?: RulePresetName; rules?: unknown } = {}) =>
+    req<{ preset: RulePresetName; rules: unknown; preview: LibraryPreview }>('/api/libraries/preview', {
+      method: 'POST',
+      body: JSON.stringify({ canvasId, ...opts }),
+    }),
+  createLibrary: (canvasId: string, opts: { preset?: RulePresetName; taxonomy?: LibraryTaxonomy } = {}) =>
+    req<LibraryListEntry>('/api/libraries', { method: 'POST', body: JSON.stringify({ canvasId, ...opts }) }),
+  getLibraryDetail: (libraryId: string) => req<LibraryDetail>(`/api/libraries/${libraryId}`),
+  updateLibrary: (
+    libraryId: string,
+    patch: { description?: string; rules?: unknown; taxonomy?: LibraryTaxonomy; visibility?: LibraryVisibility },
+  ) => req<LibraryListEntry>(`/api/libraries/${libraryId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteLibrary: (libraryId: string) => req(`/api/libraries/${libraryId}`, { method: 'DELETE' }),
+  reindexLibrary: (libraryId: string) => req(`/api/libraries/${libraryId}/reindex`, { method: 'POST' }),
+  searchLibraries: (query: LibrarySearchQuery) =>
+    req<LibrarySearchResult>(`/api/libraries/search?${libraryParams(query)}`),
+  libraryItems: (libraryId: string, query: Omit<LibrarySearchQuery, 'lib'> = {}) =>
+    req<LibrarySearchResult>(`/api/libraries/${libraryId}/items?${libraryParams(query)}`),
+  libraryItem: (libraryId: string, itemId: string) =>
+    req<LibraryItemDetail>(`/api/libraries/${libraryId}/items/${encodeURIComponent(itemId)}`),
+  libraryItemHtml: (libraryId: string, itemId: string) =>
+    req<{ html: string; width: number; height: number; locator: ItemLocator; fidelity: string }>(
+      `/api/libraries/${libraryId}/items/${encodeURIComponent(itemId)}/html`,
+    ),
+  setLibraryItemMeta: (libraryId: string, itemId: string, patch: LibraryItemPatch) =>
+    req<LibraryItemDetail>(`/api/libraries/${libraryId}/items/${encodeURIComponent(itemId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
   findInCanvas: (canvasId: string, q: string, matchCase: boolean) =>
     req<CanvasFindResult>(`/api/canvases/${canvasId}/find?q=${encodeURIComponent(q)}${matchCase ? '&case=1' : ''}`),
   sendChat: (canvasId: string, input: { text: string; threadId?: string; forAgent?: string; runner?: RunnerPick }) =>
