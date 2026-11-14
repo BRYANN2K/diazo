@@ -3,6 +3,7 @@ import type { Page } from 'puppeteer-core'
 import { findBrowserPath } from '../server/screenshot'
 import { withFindPreviewScript } from '../src/lib/findPreviewRuntime'
 import { pagePerTest } from './browser'
+import { fixture } from './libraryFixtures'
 
 /* A library sheet: two cards, the second rendered by a script after load. */
 const SHEET = `<!doctype html><html><head><style>
@@ -58,5 +59,49 @@ describe.skipIf(!findBrowserPath())('⌘F preview runtime', () => {
     await page.evaluate(() => window.postMessage({ doopFindPreview: 'other', focus: 'cp.vui-button-primary' }, '*'))
     await new Promise((r) => setTimeout(r, 100))
     expect(await outlined()).toEqual([])
+  })
+
+  describe('by locator', () => {
+    const boxFor = (focus: string, find: Record<string, unknown>) =>
+      page.evaluate(
+        (f, how) =>
+          new Promise<{ w: number; h: number } | null>((resolve) => {
+            window.addEventListener('message', (e) => {
+              const d = e.data as { type?: string; focus?: string; box?: { w: number; h: number } | null }
+              if (d.type === 'box' && d.focus === f) resolve(d.box ?? null)
+            })
+            window.postMessage({ doopFindPreview: 't2', focus: f, find: how }, '*')
+          }),
+        focus,
+        find,
+      )
+
+    it('frames the design of a static variant, not the wrapper around its caption', async () => {
+      await page.setViewport({ width: 2040, height: 600 })
+      await page.setContent(withFindPreviewScript(fixture('sheet-static'), 't2'), { waitUntil: 'load' })
+      const id = 'bk.scb-login-social-with-email-option'
+      const byAnchor = await boxFor(id, { text: id, anchor: true })
+      const byText = await boxFor(`${id} `, { text: id })
+      expect(byAnchor).toMatchObject({ w: 490, h: 300 })
+      /* the old text focus climbed to the cell, caption included: taller */
+      expect(byText!.h).toBeGreaterThan(300)
+    })
+
+    it('takes a selector first', async () => {
+      const html = fixture('sheet-static').replace('<div class="v dk">', '<div class="v dk" data-doop-id="dk1">')
+      await page.setContent(withFindPreviewScript(html, 't2'), { waitUntil: 'load' })
+      expect(await boxFor('k', { text: 'nothing', selector: '[data-doop-id="dk1"]' })).toMatchObject({ w: 490, h: 300 })
+    })
+
+    it('finds a scripted variant by its anchor once the script ran', async () => {
+      await page.setViewport({ width: 2040, height: 800 })
+      await page.setContent(withFindPreviewScript(fixture('sheet-scripted'), 't2'), { waitUntil: 'load' })
+      const box = await boxFor('cp.tuff-json-viewer', { text: 'cp.tuff-json-viewer', anchor: true })
+      const d = (await page.evaluate(() => {
+        const r = document.querySelectorAll('.d')[2]!.getBoundingClientRect()
+        return { w: r.width, h: r.height }
+      })) as { w: number; h: number }
+      expect(box).toMatchObject({ w: Math.round(d.w), h: Math.round(d.h) })
+    })
   })
 })

@@ -34,6 +34,21 @@ export interface LibrarySnapshot {
   scripted: boolean
 }
 
+/** Where the preview looks for an item: a selector (an element id) first,
+ *  else the text, as is (a query) or as an id whose design is the cell's
+ *  largest part (`anchor`). `key` tells two focuses apart. */
+export interface ItemFocus {
+  key: string
+  text: string
+  selector?: string
+  anchor?: boolean
+}
+
+/** The focus of a text search: the text itself. */
+export function textFocus(text: string): ItemFocus {
+  return { key: text, text }
+}
+
 /** What the preview script posts to the parent. */
 export interface FindPreviewMessage {
   doopFindPreview: string
@@ -52,7 +67,69 @@ export function findPreviewRuntime(token: string): void {
   let current: HTMLElement | null = null
   let saved: { outline: string; outlineOffset: string; borderRadius: string } | null = null
   let focus = ''
+  let focusFind: { text: string; selector?: string; anchor?: boolean } = { text: '' }
   let retries: number[] = []
+  const ID_TEXT = /^(?:[a-z0-9]+\.)[a-z0-9]+(?:-[a-z0-9]+)*$/
+
+  /* the element carrying exactly this text, innermost */
+  function exactText(term: string): HTMLElement | null {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const parent = n.parentElement
+      if (!parent || (n.nodeValue ?? '').trim() !== term || parent.closest('script,style')) continue
+      if ((parent.textContent ?? '').trim() === term) return parent
+    }
+    return null
+  }
+
+  /* how many id texts an element holds, stopping at two */
+  function idsIn(el: Element): number {
+    let count = 0
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+    for (let n = walker.nextNode(); n && count < 2; n = walker.nextNode()) {
+      if (ID_TEXT.test((n.nodeValue ?? '').trim())) count++
+    }
+    return count
+  }
+
+  /* an id's design: the cell holding it is the child of the first ancestor
+     holding another id; the design is the cell's largest part without the id */
+  function design(term: string): HTMLElement | null {
+    const idEl = exactText(term)
+    if (!idEl) return null
+    let cell: HTMLElement = idEl
+    for (let up = idEl.parentElement; up && up !== document.body; up = up.parentElement) {
+      if (idsIn(up) >= 2) break
+      cell = up
+    }
+    let best: HTMLElement | null = null
+    let bestArea = -1
+    for (const child of Array.from(cell.children) as HTMLElement[]) {
+      if (child.contains(idEl)) continue
+      const r = child.getBoundingClientRect()
+      if (r.width * r.height > bestArea) {
+        best = child
+        bestArea = r.width * r.height
+      }
+    }
+    return best ?? cell
+  }
+
+  function locate(f: { text: string; selector?: string; anchor?: boolean }): HTMLElement | null {
+    if (f.selector) {
+      try {
+        const el = document.querySelector(f.selector)
+        if (el instanceof HTMLElement) return el
+      } catch {
+        /* not a selector this engine reads: the text is the fallback */
+      }
+    }
+    if (f.anchor && f.text) {
+      const el = design(f.text)
+      if (el) return el
+    }
+    return find(f.text)
+  }
 
   /* the smallest card-sized box around the first text holding the focus */
   function find(term: string): HTMLElement | null {
@@ -110,7 +187,7 @@ export function findPreviewRuntime(token: string): void {
 
   function show(term: string): boolean {
     clear()
-    const el = find(term)
+    const el = locate(focusFind)
     if (el) mark(el)
     const r = el ? el.getBoundingClientRect() : null
     post({
@@ -121,8 +198,9 @@ export function findPreviewRuntime(token: string): void {
     return !!el
   }
 
-  function focusOn(term: string) {
+  function focusOn(term: string, how?: { text: string; selector?: string; anchor?: boolean }) {
     focus = term
+    focusFind = how ?? { text: term }
     for (const id of retries) clearTimeout(id)
     retries = []
     if (show(term)) return
@@ -318,17 +396,34 @@ export function findPreviewRuntime(token: string): void {
 
   window.addEventListener('message', (e) => {
     if (e.source !== parent) return
-    const data = e.data as { doopFindPreview?: string; focus?: string; snapshot?: string } | null
+    const data = e.data as {
+      doopFindPreview?: string
+      focus?: string
+      find?: { text?: string; selector?: string; anchor?: boolean }
+      snapshot?: string
+    } | null
     if (!data || data.doopFindPreview !== token) return
     if (typeof data.snapshot === 'string') {
       post({ type: 'snapshot', request: data.snapshot, snapshot: snapshot() })
       return
     }
-    if (typeof data.focus === 'string') focusOn(data.focus)
+    if (typeof data.focus === 'string') {
+      const how = data.find
+      focusOn(
+        data.focus,
+        how && typeof how === 'object'
+          ? {
+              text: typeof how.text === 'string' ? how.text : data.focus,
+              ...(typeof how.selector === 'string' ? { selector: how.selector } : {}),
+              ...(how.anchor === true ? { anchor: true } : {}),
+            }
+          : undefined,
+      )
+    }
   })
   window.addEventListener('load', () => {
     post({ type: 'ready' })
-    if (focus) focusOn(focus)
+    if (focus) focusOn(focus, focusFind)
   })
 }
 

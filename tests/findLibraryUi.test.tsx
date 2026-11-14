@@ -133,7 +133,11 @@ describe('the Library scope', () => {
     await key('ArrowDown')
     await key('Enter')
     expect(insertLibraryItem).toHaveBeenCalledWith(
-      expect.objectContaining({ sourceFrameId: 'sheet', focus: 'cp.scb-otp-input-six', ref: 'cp.scb-otp-input-six' }),
+      expect.objectContaining({
+        sourceFrameId: 'sheet',
+        focus: { key: 'cp.scb-otp-input-six', text: 'cp.scb-otp-input-six', anchor: true },
+        ref: 'cp.scb-otp-input-six',
+      }),
     )
   })
 

@@ -9,7 +9,7 @@ import { isCanvasElement } from './drawing'
 import { canEditOpenCanvas, pickedSelectors, useStore } from './store'
 import { freshElementId, insertElements, placeElement, removeElements, type DropTarget } from './layers'
 import { ELEMENT_ID_ATTR, elementIdSelector } from '../../shared/elementId'
-import type { LibrarySnapshot } from './findPreviewRuntime'
+import type { ItemFocus, LibrarySnapshot } from './findPreviewRuntime'
 import { snapshotLibraryItem } from './findSnapshot'
 import { saveFrameHtml } from './layerEdits'
 import type { LibraryItemSummary } from '../../shared/library'
@@ -190,7 +190,7 @@ export interface InsertedItem {
  *  as one undo step, and pick the inserted block. */
 export async function insertLibraryItem(opts: {
   sourceFrameId: string
-  focus: string
+  focus: ItemFocus
   ref: string
   target: InsertTarget
 }): Promise<InsertedItem | null> {

@@ -21,6 +21,7 @@ import type { CanvasFindHit } from '../../shared/canvasFind'
 import type { LibraryItemSummary, LibrarySearchResult } from '../../shared/library'
 import { focusOf, groupByFrame, resultRows, rowDomId, rowItem, rowKey, type ResultRow } from '../lib/findRows'
 import { itemCanvasUrl, libraryFocus, libraryRows } from '../lib/findLibrary'
+import { textFocus } from '../lib/findPreviewRuntime'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 import { IconButton } from './ui/icon-button'
@@ -339,7 +340,7 @@ export function FindBar({
     try {
       const done = await insertLibraryItem({
         sourceFrameId: source.frameId,
-        focus: source.item ? libraryFocus(row) : focusOf(row, query),
+        focus: source.item ? libraryFocus(row) : textFocus(focusOf(row, query)),
         ref,
         target,
       })
@@ -600,7 +601,7 @@ export function FindBar({
             return (
               <FindPreview
                 frameId={source.frameId}
-                focus={source.item ? libraryFocus(row) : focusOf(row, query)}
+                focus={source.item ? libraryFocus(row) : textFocus(focusOf(row, query))}
                 staticNote={library ? t('actions.findStaticNote') : undefined}
               />
             )
