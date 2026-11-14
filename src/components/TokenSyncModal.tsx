@@ -6,6 +6,7 @@ import { Modal, ModalActions, ModalEyebrow, ModalLede, ModalTitle } from './ui/m
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import { Checkbox } from './ui/checkbox'
+import { Textarea } from './ui/textarea'
 
 /* Token sync with the linked repo. The server reads the repo's CSS
    variables and Tailwind theme (through the desktop app) and diffs them
@@ -29,6 +30,9 @@ export function TokenSyncModal({ canvasId, onClose }: { canvasId: string; onClos
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [applied, setApplied] = useState<number | null>(null)
+  /* doop → repo: the patch the server built, then what the desktop app wrote */
+  const [patch, setPatch] = useState<Awaited<ReturnType<typeof api.previewTokenPatch>> | null>(null)
+  const [written, setWritten] = useState<{ written: string[]; repo: string } | null>(null)
 
   useEffect(() => {
     let live = true
@@ -74,6 +78,34 @@ export function TokenSyncModal({ canvasId, onClose }: { canvasId: string; onClos
     }
   }
 
+  /* every token where doop's value differs from the repo's, or the repo lacks it */
+  const outgoing = useMemo(() => preview?.entries.filter((e) => e.kind !== 'add').map((e) => e.name) ?? [], [preview])
+
+  async function previewPatch() {
+    setBusy(true)
+    setError(null)
+    try {
+      setPatch(await api.previewTokenPatch(canvasId, outgoing))
+    } catch (e) {
+      setError(errorMessage(e, translate('panels.tokenSyncFailed')))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function writePatch() {
+    if (!patch?.patch) return
+    setBusy(true)
+    setError(null)
+    try {
+      setWritten((await api.writeTokenPatch(canvasId, outgoing, patch.patch)).result)
+    } catch (e) {
+      setError(errorMessage(e, translate('panels.tokenSyncWriteFailed')))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const row = (e: TokenDiffEntry, checkable: boolean) => (
     <li key={e.name} className="flex items-start gap-2 py-1">
       {checkable && (
@@ -109,7 +141,61 @@ export function TokenSyncModal({ canvasId, onClose }: { canvasId: string; onClos
       <ModalTitle>{t('panels.tokenSyncTitle')}</ModalTitle>
       {!preview && !error && <ModalLede className="mt-4">{t('panels.tokenSyncReading')}</ModalLede>}
       {error && !preview && <p className="mt-4 text-copy text-accent-ink">{error}</p>}
-      {preview && applied === null && (
+      {patch && !written && (
+        <>
+          <ModalLede>{t('panels.tokenSyncPatchLede', { repo: patch.repo })}</ModalLede>
+          {patch.patch ? (
+            <Textarea
+              variant="code"
+              readOnly
+              className="mt-3 h-[260px] w-full"
+              aria-label={t('panels.tokenSyncPatch')}
+              value={patch.patch}
+            />
+          ) : (
+            <p className="mt-3 text-copy text-ink-soft">{t('panels.tokenSyncPatchEmpty')}</p>
+          )}
+          {patch.skipped.length > 0 && (
+            <ul className="mt-2 space-y-0.5 text-caption text-ink-faint">
+              {patch.skipped.map((s) => (
+                <li key={s.name}>
+                  {s.name}: {s.reason}
+                </li>
+              ))}
+            </ul>
+          )}
+          {error && <p className="mt-2 text-caption text-accent-ink">{error}</p>}
+          <ModalActions>
+            <Button variant="bare" onClick={() => setPatch(null)}>
+              {t('common.back')}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={busy || !patch.patch}
+              title={t('panels.tokenSyncWriteTitle')}
+              onClick={() => void writePatch()}
+            >
+              {busy ? t('panels.tokenSyncWriting') : t('panels.tokenSyncWrite')}
+            </Button>
+          </ModalActions>
+        </>
+      )}
+      {written && (
+        <>
+          <ModalLede className="mt-4">{t('panels.tokenSyncWritten', { repo: written.repo })}</ModalLede>
+          <ul className="mt-2 space-y-0.5 text-caption text-ink-faint">
+            {written.written.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ul>
+          <ModalActions>
+            <Button variant="primary" onClick={onClose}>
+              {t('common.close')}
+            </Button>
+          </ModalActions>
+        </>
+      )}
+      {preview && applied === null && !patch && !written && (
         <>
           <ModalLede>
             {t('panels.tokenSyncLede', { repo: preview.repo, files: preview.files.length, same: preview.same })}
@@ -134,6 +220,16 @@ export function TokenSyncModal({ canvasId, onClose }: { canvasId: string; onClos
             <Button variant="bare" onClick={onClose}>
               {t('common.cancel')}
             </Button>
+            {outgoing.length > 0 && (
+              <Button
+                variant="bare"
+                disabled={busy}
+                title={t('panels.tokenSyncToRepoTitle')}
+                onClick={() => void previewPatch()}
+              >
+                {t('panels.tokenSyncToRepo', { count: outgoing.length })}
+              </Button>
+            )}
             <Button variant="primary" disabled={busy || picked.size === 0} onClick={() => void apply()}>
               {busy ? t('panels.tokenSyncApplying') : t('panels.tokenSyncApply', { count: picked.size })}
             </Button>

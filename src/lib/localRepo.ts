@@ -4,6 +4,8 @@ import type { RepoLink, RepoLinkStatus, RepoRequest, RepoResult } from '../../sh
 
 type Bridge = {
   __DOOP_LOCAL_REPO__?: boolean
+  /** the shell has repo_apply_patch (older shells only read and write_change) */
+  __DOOP_REPO_PATCH__?: boolean
   __TAURI__?: {
     core: { invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T> }
   }
@@ -82,6 +84,8 @@ export function startLocalRepo(): () => void {
   let disposed = false
 
   const serve = async (request: RepoRequest): Promise<RepoResult> => {
+    if (request.op === 'apply_patch' && bridge.__DOOP_REPO_PATCH__ !== true)
+      return { ok: false, error: 'update the doop desktop app to write patches into the linked project' }
     try {
       const result = await invokeRepo<unknown>(`repo_${request.op}`, { linkId: request.linkId, ...request.args })
       return { ok: true, result }

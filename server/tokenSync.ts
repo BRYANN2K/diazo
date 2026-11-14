@@ -1,7 +1,8 @@
 import { linkFor, localRepo, repoToolCall } from './localRepo.ts'
 import { store } from './store.ts'
 import * as actions from './actions.ts'
-import type { TokenEdit, TokenResult, TokenType } from '../shared/designTokens.ts'
+import type { DesignToken, TokenEdit, TokenResult, TokenType } from '../shared/designTokens.ts'
+import { diffFromEdits, type LineEdit } from '../shared/patch.ts'
 import type { Actor } from '../shared/types.ts'
 import type { RepoLink, RepoListResult, RepoReadResult } from '../shared/localRepo.ts'
 import { REPO_MAX_DEPTH } from '../shared/localRepo.ts'
@@ -114,6 +115,131 @@ export async function previewTokenSync(userId: string, canvasId: string): Promis
 }
 
 /* ------------------------------------------------------------------ */
+/* doop → repo                                                         */
+/* ------------------------------------------------------------------ */
+
+export interface TokenPatchPlan {
+  patch: string
+  /** names written into the patch */
+  names: string[]
+  /** names left out, with the reason (a Tailwind config, no style file) */
+  skipped: { name: string; reason: string }[]
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** The declaration line with `name`'s value swapped; null when the line
+ *  no longer carries it. */
+function replaceDeclaration(line: string, name: string, value: string): string | null {
+  const re = new RegExp(`(${escapeRe(name)}\\s*:\\s*)([^;}]*?)(\\s*(?:;|}|$))`)
+  if (!re.test(line)) return null
+  return line.replace(re, (_m, head: string, _old: string, tail: string) => `${head}${value}${tail}`)
+}
+
+/** The 0-based line of the `}` closing the first `:root` / `@theme` block. */
+function rootBlockEnd(text: string): { close: number; indent: string } | null {
+  const lines = text.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*(:root|@theme)\b[^{]*\{/.test(lines[i]!)) continue
+    let depth = 0
+    for (let j = i; j < lines.length; j++) {
+      for (const ch of lines[j]!) {
+        if (ch === '{') depth++
+        else if (ch === '}') depth--
+      }
+      if (depth <= 0) {
+        if (j === i) return null // a one-line block: no line to insert before
+        const inner = lines.slice(i + 1, j).find((l) => /^\s*--/.test(l))
+        return { close: j, indent: inner ? /^\s*/.exec(inner)![0] : '  ' }
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * The patch that writes the canvas's values for `names` into the repo's
+ * style files: a changed token edits its declaration line in place (its
+ * theme lines too), a doop-only one is added to the first `:root` /
+ * `@theme` block of the file holding most tokens. Tokens a Tailwind config
+ * declares are skipped — editing JS config is left to a person.
+ */
+export function planTokenPatch(
+  read: RepoTokenRead,
+  doop: readonly DesignToken[],
+  names: readonly string[],
+): TokenPatchPlan {
+  const byName = new Map(doop.map((t) => [t.name, t]))
+  const edits = new Map<string, LineEdit[]>()
+  const lineCache = new Map<string, string[]>()
+  const linesOf = (file: string) => {
+    if (!lineCache.has(file)) lineCache.set(file, read.sources.get(file)!.split('\n'))
+    return lineCache.get(file)!
+  }
+  const written: string[] = []
+  const skipped: { name: string; reason: string }[] = []
+  const pendingAdds: DesignToken[] = []
+  const editLine = (file: string, line: number, name: string, value: string): boolean => {
+    const lines = linesOf(file)
+    const next = replaceDeclaration(lines[line - 1] ?? '', name, value)
+    if (next === null) return false
+    const list = edits.get(file) ?? []
+    const existing = list.find((e) => e.start === line - 1)
+    if (existing) existing.lines = [replaceDeclaration(existing.lines[0]!, name, value) ?? existing.lines[0]!]
+    else list.push({ start: line - 1, end: line, lines: [next] })
+    edits.set(file, list)
+    return true
+  }
+  for (const name of new Set(names)) {
+    const token = byName.get(name)
+    if (!token) {
+      skipped.push({ name, reason: 'not a token on this canvas' })
+      continue
+    }
+    const repo = read.tokens.get(name)
+    if (!repo || !repo.value) {
+      pendingAdds.push(token)
+      continue
+    }
+    if (repo.origin === 'tailwind') {
+      skipped.push({ name, reason: `declared in ${repo.file} — edit the Tailwind config by hand` })
+      continue
+    }
+    let ok = token.value === repo.value || editLine(repo.file, repo.line, name, token.value)
+    for (const [theme, line] of Object.entries(repo.themeLines ?? {})) {
+      const value = token.themes?.[theme]
+      if (value && value !== repo.themes?.[theme]) ok = editLine(repo.file, line, name, value) && ok
+    }
+    if (ok) written.push(name)
+    else skipped.push({ name, reason: `${repo.file}:${repo.line} no longer declares it — sync again` })
+  }
+  if (pendingAdds.length) {
+    const counts = new Map<string, number>()
+    for (const t of read.tokens.values()) if (t.origin === 'css') counts.set(t.file, (counts.get(t.file) ?? 0) + 1)
+    const primary = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
+    const end = primary ? rootBlockEnd(read.sources.get(primary)!) : null
+    if (!primary || !end) {
+      for (const t of pendingAdds)
+        skipped.push({ name: t.name, reason: 'no :root or @theme block in the repo to add it to' })
+    } else {
+      const list = edits.get(primary) ?? []
+      list.push({
+        start: end.close,
+        end: end.close,
+        lines: pendingAdds.map((t) => `${end.indent}${t.name}: ${t.value};`),
+      })
+      edits.set(primary, list)
+      written.push(...pendingAdds.map((t) => t.name))
+    }
+  }
+  const patch = [...edits.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([file, list]) => diffFromEdits(file, read.sources.get(file)!, list))
+    .join('')
+  return { patch, names: written, skipped }
+}
+
+/* ------------------------------------------------------------------ */
 /* repo → doop, after approval                                         */
 /* ------------------------------------------------------------------ */
 
@@ -142,4 +268,10 @@ export function applyRepoTokens(canvasId: string, approved: readonly ApprovedTok
   if (edits.length) results.push(...(actions.setTokens(canvasId, edits, actor) ?? []))
   if (creates.length) results.push(...(actions.createTokens(canvasId, creates, actor) ?? []))
   return results
+}
+
+/** The doop → repo patch for `names`, built against a fresh read of the repo. */
+export async function previewTokenPatch(userId: string, canvasId: string, names: readonly string[]) {
+  const read = await readRepoTokens(userId, canvasId)
+  return { ...planTokenPatch(read, store.getTokens(canvasId), names), repo: read.repo }
 }

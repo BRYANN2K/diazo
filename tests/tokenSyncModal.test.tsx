@@ -3,7 +3,12 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-const calls = vi.hoisted(() => ({ previewTokenSync: vi.fn(), applyTokenSync: vi.fn() }))
+const calls = vi.hoisted(() => ({
+  previewTokenSync: vi.fn(),
+  applyTokenSync: vi.fn(),
+  previewTokenPatch: vi.fn(),
+  writeTokenPatch: vi.fn(),
+}))
 
 vi.mock('../src/lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lib/api')>()
@@ -66,4 +71,25 @@ it('lists the diff, applies only the ticked repo values', async () => {
     { name: '--color-brand', type: 'color', value: '#0a7cff', themes: undefined },
   ])
   expect(document.body.textContent).toContain('1 token updated in doop.')
+})
+
+it('previews the doop → repo patch and writes that patch', async () => {
+  const PATCH = '--- a/src/app.css\n+++ b/src/app.css\n@@ -1,1 +1,1 @@\n-a\n+b\n'
+  calls.previewTokenPatch.mockResolvedValue({
+    patch: PATCH,
+    names: ['--color-brand'],
+    skipped: [],
+    repo: 'site',
+    summary: null,
+  })
+  calls.writeTokenPatch.mockResolvedValue({ ok: true, result: { written: ['src/app.css'], repo: 'site' } })
+  await act(async () => root.render(<TokenSyncModal canvasId="c1" onClose={() => {}} />))
+  const toRepo = [...document.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Write 2 to repo'))!
+  await act(async () => toRepo.click())
+  expect(calls.previewTokenPatch).toHaveBeenCalledWith('c1', ['--color-brand', '--color-extra'])
+  expect((document.querySelector('textarea') as HTMLTextAreaElement).value).toBe(PATCH)
+  const write = [...document.querySelectorAll('button')].find((b) => b.textContent === 'Write to repo')!
+  await act(async () => write.click())
+  expect(calls.writeTokenPatch).toHaveBeenCalledWith('c1', ['--color-brand', '--color-extra'], PATCH)
+  expect(document.body.textContent).toContain('Written to site:')
 })

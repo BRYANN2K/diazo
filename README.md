@@ -123,7 +123,9 @@ to upstream's.
   mapping. Agents call `set_code_link` and `suggest_code_links`. Read-only on the repo.
 - **Token sync with the repo** — the Tokens panel reads the linked repo's CSS variables
   (`:root`, `@theme`, dark blocks as a theme) and Tailwind v3 theme, parsed without running them,
-  shows the diff, and applies the ticked values in doop.
+  shows the diff, and applies the ticked values in doop. The other way, doop's values become a
+  unified patch against the repo's style files, written by the desktop app's `repo_apply_patch`
+  only after its native dialog lists every file and the diff (needs a desktop release).
 - **Self-hosting** — Docker image `ghcr.io/bryann2k/doop:bryann2k-main` built on every push, k3s
   manifests in `deploy/k3s/` with a persistent volume for uploads, exposed through Tailscale
   Serve only (no ingress, no Funnel).

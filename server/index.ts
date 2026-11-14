@@ -31,7 +31,9 @@ import { deleteLink, linkFor, localRepo, localRepoRouter, putLink, repoToolCall 
 import { buildHandoffPack, HandoffError } from './handoff.ts'
 import { CodeLinkError, deleteCodeLink, listCodeLinks, putCodeLink } from './codeLinks.ts'
 import { suggestCodeLinks } from './codeSuggest.ts'
-import { applyRepoTokens, previewTokenSync, TokenSyncError } from './tokenSync.ts'
+import { applyRepoTokens, previewTokenPatch, previewTokenSync, TokenSyncError } from './tokenSync.ts'
+import { applyRepoPatch, checkPatch, RepoPatchError } from './repoPatch.ts'
+import { PATCH_MAX_BYTES } from '../shared/patch.ts'
 import {
   CODE_LINK_KINDS,
   CODE_LINK_MAX_EXPORT,
@@ -1349,6 +1351,46 @@ app.post('/api/canvases/:id/token-sync/apply', (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: 'Invalid tokens' })
   const results = applyRepoTokens(c.id, parsed.data.tokens, userActor(req))
   res.json({ results, tokens: store.getTokens(c.id) })
+})
+
+const tokenNames = z.object({ names: z.array(z.string().max(200)).min(1).max(200) })
+
+/* doop → repo: the patch the canvas's values make against the repo's style
+   files — previewed here, written only through the desktop app's dialog */
+app.post('/api/canvases/:id/token-sync/patch', async (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'edit')
+  if (!c) return
+  const parsed = tokenNames.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid token names' })
+  try {
+    const plan = await previewTokenPatch(req.user!.id, c.id, parsed.data.names)
+    res.json({ ...plan, summary: plan.patch ? checkPatch(plan.patch) : null })
+  } catch (e) {
+    if (e instanceof TokenSyncError || e instanceof RepoPatchError)
+      return res.status(e.status).json({ error: e.message })
+    throw e
+  }
+})
+
+/* the write rebuilds the patch from a fresh read: it must be the one the
+   person previewed, else the repo or the canvas moved in between */
+app.post('/api/canvases/:id/token-sync/write', async (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'edit')
+  if (!c) return
+  const parsed = tokenNames.extend({ patch: z.string().max(PATCH_MAX_BYTES) }).safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid write request' })
+  try {
+    const plan = await previewTokenPatch(req.user!.id, c.id, parsed.data.names)
+    if (!plan.patch) return res.status(409).json({ error: 'nothing to write — the repo already has these values' })
+    if (plan.patch !== parsed.data.patch)
+      return res.status(409).json({ error: 'the repo or the tokens changed since the preview — preview again' })
+    const result = await applyRepoPatch(req.user!.id, c.id, plan.patch, `Token sync: ${plan.names.length} token(s)`)
+    res.json({ ok: true, result })
+  } catch (e) {
+    if (e instanceof TokenSyncError || e instanceof RepoPatchError)
+      return res.status(e.status).json({ error: e.message })
+    throw e
+  }
 })
 
 app.use('/api/admin', adminRouter)

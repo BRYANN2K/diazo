@@ -9,6 +9,7 @@ import type { DriftComparison, DriftFetchRequest, DriftFetchResult } from '../..
 import type { CodeLink, CodeLinkInput, CodeLinkKind } from '../../shared/codeLinks'
 import type { CodeSuggestion } from '../../shared/codeSuggest'
 import type { TokenDiff } from '../../shared/tokenSync'
+import type { PatchSummary } from '../../shared/patch'
 import type { ImageDescriptionMode, ImageDescriptionPreference } from '../../shared/imageDescriptions'
 import type { AgentRunners, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
 import type { CanvasFindResult } from '../../shared/canvasFind'
@@ -494,6 +495,19 @@ export const api = {
     req<{ results: TokenResult[] }>(`/api/canvases/${canvasId}/token-sync/apply`, {
       method: 'POST',
       body: JSON.stringify({ tokens }),
+    }),
+  previewTokenPatch: (canvasId: string, names: string[]) =>
+    req<{
+      patch: string
+      names: string[]
+      skipped: { name: string; reason: string }[]
+      repo: string
+      summary: PatchSummary | null
+    }>(`/api/canvases/${canvasId}/token-sync/patch`, { method: 'POST', body: JSON.stringify({ names }) }),
+  writeTokenPatch: (canvasId: string, names: string[], patch: string) =>
+    req<{ ok: boolean; result: { written: string[]; repo: string } }>(`/api/canvases/${canvasId}/token-sync/write`, {
+      method: 'POST',
+      body: JSON.stringify({ names, patch }),
     }),
   /* drift review: compare a frame with the page shipped at a URL */
   compareDrift: (frameId: string, url: string) =>

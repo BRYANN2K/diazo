@@ -10,11 +10,13 @@
 //! never descended. The caps below mirror `shared/localRepo.ts`; keep the two
 //! in step.
 //!
-//! `repo_write_change` is the single write surface, for the "Ready for dev →
-//! Stip" handoff: it creates a brand-new `.workflow/changes/<id>/` folder —
-//! never an overwrite, never outside it — and only after the person confirms
-//! a native dialog listing every file. Same sandbox as the reads, stricter:
-//! no symlink anywhere on a write path is followed.
+//! Two write surfaces, both behind a native dialog. `repo_write_change`, for
+//! the "Ready for dev → Stip" handoff, creates a brand-new
+//! `.workflow/changes/<id>/` folder — never an overwrite, never outside it.
+//! `repo_apply_patch`, for token sync and frame → code, applies a unified
+//! patch whose context must match the files exactly, listing every file and
+//! the diff first; it never deletes. Same sandbox as the reads, stricter: no
+//! symlink anywhere on a write path is followed.
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -791,6 +793,335 @@ pub async fn repo_write_change(
 }
 
 /* ------------------------------------------------------------------ */
+/* apply_patch — edits to existing files, as a unified patch            */
+/* ------------------------------------------------------------------ */
+
+/* `repo_apply_patch` — mirror shared/patch.ts, keep in step. */
+const MAX_PATCH_FILES: usize = 24;
+const MAX_PATCH_BYTES: usize = 1024 * 1024;
+const MAX_PATCHED_FILE_BYTES: usize = 512 * 1024;
+/// How many diff lines the native dialog shows before "… and N more".
+const DIALOG_DIFF_LINES: usize = 40;
+
+/// One file of a parsed patch: its hunks, in order.
+struct PatchFile {
+    rel: String,
+    create: bool,
+    hunks: Vec<Hunk>,
+    added: usize,
+    removed: usize,
+}
+
+struct Hunk {
+    /// 0-based index of the first old line the hunk covers
+    old_start: usize,
+    /// ' ' context, '-' removed, '+' added — with the line's text
+    lines: Vec<(char, String)>,
+}
+
+/// The file a patch edits, resolved for writing: same shape rules as the
+/// reads plus write_change's no-symlink rule. `create` wants nothing there
+/// yet; an edit wants a regular file.
+fn resolve_patch_target(root: &Path, rel: &str, create: bool) -> Result<PathBuf, &'static str> {
+    if rel.is_empty() || rel.chars().count() > MAX_PATH_CHARS {
+        return Err("denied");
+    }
+    let mut clean = PathBuf::new();
+    for c in Path::new(rel).components() {
+        match c {
+            Component::Normal(name) => clean.push(name),
+            _ => return Err("denied"),
+        }
+    }
+    if denied_rel(&clean) {
+        return Err("denied");
+    }
+    let target = root.join(&clean);
+    let mut probe = root.to_path_buf();
+    let mut deepest = root.to_path_buf();
+    for c in clean.components() {
+        probe.push(c.as_os_str());
+        match fs::symlink_metadata(&probe) {
+            Ok(meta) => {
+                if meta.file_type().is_symlink() {
+                    return Err("denied");
+                }
+                if probe == target {
+                    if create {
+                        return Err("exists");
+                    }
+                    if !meta.is_file() {
+                        return Err("not a file");
+                    }
+                }
+                deepest = probe.clone();
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if !create {
+                    return Err("missing");
+                }
+                break;
+            }
+            Err(_) => return Err("denied"),
+        }
+    }
+    let canonical = deepest.canonicalize().map_err(|_| "denied")?;
+    if !canonical.starts_with(root) {
+        return Err("denied");
+    }
+    Ok(target)
+}
+
+fn parse_hunk_header(line: &str) -> Option<(usize, usize, usize)> {
+    let rest = line.strip_prefix("@@ -")?;
+    let (old, rest) = rest.split_once(" +")?;
+    let (new, _) = rest.split_once(" @@")?;
+    let (old_start, old_count) = old.split_once(',')?;
+    let (_, new_count) = new.split_once(',')?;
+    Some((old_start.parse().ok()?, old_count.parse().ok()?, new_count.parse().ok()?))
+}
+
+/// Parse the unified patch shared/patch.ts writes: `--- a/<p>` (or
+/// `--- /dev/null`), `+++ b/<p>`, then `@@ -s,n +s,n @@` hunks whose counts
+/// must add up. Anything else is refused before the person is asked.
+fn parse_patch(patch: &str) -> Result<Vec<PatchFile>, String> {
+    if patch.len() > MAX_PATCH_BYTES {
+        return Err(format!("the patch is over the {}-byte cap", MAX_PATCH_BYTES));
+    }
+    let lines: Vec<&str> = patch.strip_suffix('\n').unwrap_or(patch).split('\n').collect();
+    let mut files: Vec<PatchFile> = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        let minus = lines[i];
+        let plus = lines.get(i + 1).copied().unwrap_or("");
+        let rel = plus
+            .strip_prefix("+++ b/")
+            .ok_or_else(|| format!("line {}: expected a +++ b/ header", i + 2))?
+            .to_string();
+        let create = minus == "--- /dev/null";
+        if !create && minus != format!("--- a/{}", rel) {
+            return Err(format!("line {}: the --- and +++ paths differ", i + 1));
+        }
+        if files.iter().any(|f| f.rel == rel) {
+            return Err(format!("{}: appears twice", rel));
+        }
+        i += 2;
+        let mut file = PatchFile { rel, create, hunks: Vec::new(), added: 0, removed: 0 };
+        while i < lines.len() && lines[i].starts_with("@@") {
+            let (old_start, mut old_left, mut new_left) =
+                parse_hunk_header(lines[i]).ok_or_else(|| format!("line {}: malformed hunk header", i + 1))?;
+            if create && old_left != 0 {
+                return Err(format!("{}: a new file's hunk must start empty", file.rel));
+            }
+            let old_start = if old_left == 0 { old_start } else { old_start.saturating_sub(1) };
+            i += 1;
+            let mut hunk = Hunk { old_start, lines: Vec::new() };
+            while old_left > 0 || new_left > 0 {
+                let line = *lines.get(i).ok_or_else(|| format!("{}: hunk ends early", file.rel))?;
+                let mut chars = line.chars();
+                let tag = chars.next().unwrap_or('?');
+                let text: String = chars.collect();
+                match tag {
+                    ' ' if old_left > 0 && new_left > 0 => {
+                        old_left -= 1;
+                        new_left -= 1;
+                    }
+                    '-' if old_left > 0 => {
+                        old_left -= 1;
+                        file.removed += 1;
+                    }
+                    '+' if new_left > 0 => {
+                        new_left -= 1;
+                        file.added += 1;
+                    }
+                    _ => return Err(format!("line {}: hunk counts do not add up", i + 1)),
+                }
+                hunk.lines.push((tag, text));
+                i += 1;
+            }
+            file.hunks.push(hunk);
+        }
+        if file.hunks.is_empty() {
+            return Err(format!("{}: no hunks", file.rel));
+        }
+        files.push(file);
+        if files.len() > MAX_PATCH_FILES {
+            return Err(format!("at most {} files per patch", MAX_PATCH_FILES));
+        }
+    }
+    if files.is_empty() {
+        return Err("the patch is empty".to_string());
+    }
+    Ok(files)
+}
+
+/// The file's new text: every hunk applied in order, context and removed
+/// lines matched exactly against `current` — no fuzz, so a file edited since
+/// the patch was made refuses instead of landing somewhere wrong.
+fn apply_file(file: &PatchFile, current: &str) -> Result<String, String> {
+    let src: Vec<&str> = if current.is_empty() {
+        Vec::new()
+    } else {
+        current.strip_suffix('\n').unwrap_or(current).split('\n').collect()
+    };
+    let mut out: Vec<String> = Vec::with_capacity(src.len() + file.added);
+    let mut cursor = 0usize;
+    for hunk in &file.hunks {
+        if hunk.old_start < cursor || hunk.old_start > src.len() {
+            return Err(format!("{}: hunks out of order or past the end", file.rel));
+        }
+        out.extend(src[cursor..hunk.old_start].iter().map(|s| s.to_string()));
+        cursor = hunk.old_start;
+        for (tag, text) in &hunk.lines {
+            match tag {
+                '+' => out.push(text.clone()),
+                _ => {
+                    if src.get(cursor) != Some(&text.as_str()) {
+                        return Err(format!(
+                            "{}: the file changed since the patch was made (line {})",
+                            file.rel,
+                            cursor + 1
+                        ));
+                    }
+                    if *tag == ' ' {
+                        out.push(text.clone());
+                    }
+                    cursor += 1;
+                }
+            }
+        }
+    }
+    out.extend(src[cursor..].iter().map(|s| s.to_string()));
+    let text = if out.is_empty() { String::new() } else { out.join("\n") + "\n" };
+    if text.len() > MAX_PATCHED_FILE_BYTES {
+        return Err(format!("{}: over the {}-byte file cap", file.rel, MAX_PATCHED_FILE_BYTES));
+    }
+    Ok(text)
+}
+
+/// Every file of the patch resolved, read and applied in memory — BEFORE
+/// the person is asked, so the dialog only ever lists a patch that applies.
+fn prepare_patch(root: &Path, patch: &str) -> Result<Vec<(PatchFile, PathBuf, String)>, String> {
+    let mut ready = Vec::new();
+    for file in parse_patch(patch)? {
+        let target = resolve_patch_target(root, &file.rel, file.create).map_err(|e| format!("{}: {}", file.rel, e))?;
+        let current = if file.create {
+            String::new()
+        } else {
+            let meta = fs::metadata(&target).map_err(|_| format!("{}: missing", file.rel))?;
+            if meta.len() > MAX_PATCHED_FILE_BYTES as u64 {
+                return Err(format!("{}: too large to patch", file.rel));
+            }
+            String::from_utf8(fs::read(&target).map_err(|e| format!("{}: {}", file.rel, e))?)
+                .map_err(|_| format!("{}: binary", file.rel))?
+        };
+        let next = apply_file(&file, &current)?;
+        ready.push((file, target, next));
+    }
+    Ok(ready)
+}
+
+/// Write each patched file through a sibling temp file and a rename, so a
+/// crash never leaves a half-written source file. New files are created
+/// with `create_new`; a race that lands one first fails instead.
+fn write_patched(ready: &[(PatchFile, PathBuf, String)]) -> Result<Vec<String>, String> {
+    let mut written = Vec::new();
+    for (file, target, text) in ready {
+        if file.create {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(|e| format!("{}: {}", file.rel, e))?;
+            }
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(target)
+                .map_err(|e| format!("{}: {}", file.rel, e))?;
+            use std::io::Write;
+            f.write_all(text.as_bytes()).map_err(|e| format!("{}: {}", file.rel, e))?;
+        } else {
+            let tmp = target.with_file_name(format!(
+                ".{}.doop-tmp",
+                target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+            ));
+            fs::write(&tmp, text).map_err(|e| format!("{}: {}", file.rel, e))?;
+            fs::rename(&tmp, target).map_err(|e| {
+                let _ = fs::remove_file(&tmp);
+                format!("{}: {}", file.rel, e)
+            })?;
+        }
+        written.push(file.rel.clone());
+    }
+    Ok(written)
+}
+
+/// The dialog's body: each file with its line counts, then the diff itself,
+/// cut at DIALOG_DIFF_LINES so the dialog stays on screen.
+fn patch_dialog_text(ready: &[(PatchFile, PathBuf, String)], patch: &str, reason: &str) -> String {
+    let files = ready
+        .iter()
+        .map(|(f, _, _)| {
+            format!(
+                "  {}{}  +{} −{}",
+                f.rel,
+                if f.create { " (new)" } else { "" },
+                f.added,
+                f.removed
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let lines: Vec<&str> = patch.lines().collect();
+    let mut diff = lines.iter().take(DIALOG_DIFF_LINES).copied().collect::<Vec<_>>().join("\n");
+    if lines.len() > DIALOG_DIFF_LINES {
+        diff.push_str(&format!("\n… and {} more diff lines", lines.len() - DIALOG_DIFF_LINES));
+    }
+    let reason = if reason.is_empty() { String::new() } else { format!("{}\n\n", reason) };
+    format!("{}Files:\n{}\n\nDiff:\n{}", reason, files, diff)
+}
+
+/// Apply a unified patch inside the linked project — doop's token sync and
+/// frame → code export write through here, and only after the person
+/// confirms a native dialog listing every file and the diff. Same sandbox as
+/// write_change: no `..`, no denied names, no symlink anywhere on a path, no
+/// deletes. Answers `{ written, repo }`, `"cancelled"`, or why it refused.
+#[tauri::command]
+pub async fn repo_apply_patch(
+    app: AppHandle,
+    link_id: String,
+    patch: String,
+    reason: Option<String>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let grant = grant_for(&app, &link_id)?;
+        let root = PathBuf::from(&grant.path)
+            .canonicalize()
+            .map_err(|_| "The linked folder moved or was removed".to_string())?;
+        if !root.is_dir() {
+            return Err("The linked folder is not a directory".to_string());
+        }
+        let ready = prepare_patch(&root, &patch)?;
+        let reason: String = reason.unwrap_or_default().chars().take(300).collect();
+        let accepted = rfd::MessageDialog::new()
+            .set_title(&format!(
+                "Apply doop's changes to {} file{} in \"{}\"?",
+                ready.len(),
+                if ready.len() == 1 { "" } else { "s" },
+                grant.name
+            ))
+            .set_description(&patch_dialog_text(&ready, &patch, &reason))
+            .set_buttons(rfd::MessageButtons::OkCancel)
+            .show();
+        if accepted != rfd::MessageDialogResult::Ok {
+            return Err("cancelled".to_string());
+        }
+        let written = write_patched(&ready)?;
+        Ok(json!({ "written": written, "repo": grant.name }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/* ------------------------------------------------------------------ */
 /* tests                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -1073,5 +1404,75 @@ mod tests {
             "body\n"
         );
         assert!(root.join(".workflow/changes/new-change-5/assets/deep/one.png").is_file());
+    }
+
+    /* ---- repo_apply_patch's parse, sandbox and apply (the dialog stays
+       untested, like write_change's) ---- */
+
+    const CSS: &str = ":root {\n  --a: 1;\n  --b: 2;\n}\n";
+    const CSS_PATCH: &str =
+        "--- a/src/app.css\n+++ b/src/app.css\n@@ -1,4 +1,4 @@\n :root {\n   --a: 1;\n-  --b: 2;\n+  --b: 20;\n }\n";
+
+    #[test]
+    fn patch_applies_and_creates() {
+        let (dir, _outside) = fixture();
+        let root = dir.path().canonicalize().unwrap();
+        fs::write(root.join("src/app.css"), CSS).unwrap();
+        let create = "--- /dev/null\n+++ b/src/components/Hero.tsx\n@@ -0,0 +1,1 @@\n+export function Hero() {}\n";
+        let patch = format!("{}{}", CSS_PATCH, create);
+        let ready = prepare_patch(&root, &patch).unwrap();
+        assert_eq!(ready.len(), 2);
+        let written = write_patched(&ready).unwrap();
+        assert_eq!(written, vec!["src/app.css", "src/components/Hero.tsx"]);
+        assert_eq!(
+            fs::read_to_string(root.join("src/app.css")).unwrap(),
+            ":root {\n  --a: 1;\n  --b: 20;\n}\n"
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("src/components/Hero.tsx")).unwrap(),
+            "export function Hero() {}\n"
+        );
+    }
+
+    #[test]
+    fn patch_refuses_stale_context() {
+        let (dir, _outside) = fixture();
+        let root = dir.path().canonicalize().unwrap();
+        fs::write(root.join("src/app.css"), ":root {\n  --a: 1;\n  --b: 3;\n}\n").unwrap();
+        let err = prepare_patch(&root, CSS_PATCH).err().unwrap();
+        assert!(err.contains("changed since"), "{err}");
+    }
+
+    #[test]
+    fn patch_stays_in_the_sandbox() {
+        let (dir, _outside) = fixture();
+        let root = dir.path().canonicalize().unwrap();
+        for rel in ["../x.css", "/abs.css", ".env", "node_modules/pkg/index.js", "keys.pem"] {
+            assert!(resolve_patch_target(&root, rel, true).is_err(), "{rel} should fail");
+        }
+        /* an edit needs the file, a creation needs its absence */
+        assert_eq!(resolve_patch_target(&root, "src/nope.css", false).unwrap_err(), "missing");
+        assert_eq!(resolve_patch_target(&root, "src/App.tsx", true).unwrap_err(), "exists");
+        assert!(resolve_patch_target(&root, "src/App.tsx", false).is_ok());
+        #[cfg(unix)]
+        {
+            /* `inside` is a symlink back into src — writes refuse it anyway */
+            assert!(resolve_patch_target(&root, "inside/App.tsx", false).is_err());
+        }
+    }
+
+    #[test]
+    fn patch_parse_rejects_malformed() {
+        for bad in [
+            "",
+            "garbage\n",
+            "--- a/x\n+++ b/y\n@@ -1,1 +1,1 @@\n-a\n+b\n",
+            "--- a/x\n+++ b/x\n@@ -1,2 +1,1 @@\n-a\n",
+            "--- a/x\n+++ b/x\n",
+            "--- /dev/null\n+++ b/x\n@@ -1,1 +1,1 @@\n-a\n+b\n",
+        ] {
+            assert!(parse_patch(bad).is_err(), "{bad:?} should fail");
+        }
+        assert!(parse_patch(CSS_PATCH).is_ok());
     }
 }

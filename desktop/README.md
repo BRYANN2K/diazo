@@ -244,6 +244,12 @@ reply (8 levels deep, 2 000 entries, 12 files / 200 KB per read, 100 search matc
 `shared/localRepo.ts`). A linked project only answers the person who linked it, on the canvases it
 is linked to; closing the app makes the link offline until it opens again.
 
+Two writes exist, each behind a native dialog: `repo_write_change` creates a new Stip change
+folder, and `repo_apply_patch` applies a unified patch (token sync, frame → code) whose context must
+match the files exactly — the dialog lists every file with its line counts and the diff, nothing is
+deleted, and the same sandbox applies. Older shells without `__DOOP_REPO_PATCH__` answer patches with
+an update hint.
+
 The chat chip shows the link and whether reads can be served. An agent planning without an open
 device says so instead of guessing at the code.
 

@@ -106,4 +106,51 @@ describe('POST /api/canvases/:id/token-sync', () => {
     expect(byName['--radius-md']).toMatchObject({ type: 'radius', value: '8px' })
     expect((await owner.post(`/api/canvases/${canvasId}/token-sync/apply`, { tokens: [] })).status).toBe(400)
   })
+
+  it('previews the doop → repo patch, then writes exactly that through apply_patch', async () => {
+    const CSS = ':root {\n  --color-brand: #0a7cff;\n  --radius-md: 8px;\n}\n'
+    /* the "desktop app": answers each request until `ops` run out */
+    const serve = async (ops: string[], seen: { op: string; args: Record<string, unknown> }[]) => {
+      for (const want of ops) {
+        const { request } = await poll()
+        seen.push(request)
+        expect(request.op).toBe(want)
+        const result =
+          request.op === 'list'
+            ? { entries: [{ path: 'src/app.css', kind: 'file', size: 60 }], truncated: false }
+            : request.op === 'read'
+              ? { files: [{ path: 'src/app.css', text: CSS }], truncated: false }
+              : { written: ['src/app.css'], repo: 'site' }
+        await finish(request.id, result)
+      }
+    }
+    const names = ['--color-extra']
+    const seen: { op: string; args: Record<string, unknown> }[] = []
+    const device = serve(['list', 'read'], seen)
+    await new Promise((r) => setTimeout(r, 300))
+    const preview = await owner.post(`/api/canvases/${canvasId}/token-sync/patch`, { names })
+    await device
+    expect(preview.status).toBe(200)
+    const plan = await preview.json()
+    expect(plan.names).toEqual(['--color-extra'])
+    expect(plan.patch).toContain('+  --color-extra: #333333;')
+    expect(plan.summary.files).toEqual([{ path: 'src/app.css', create: false, added: 1, removed: 0 }])
+
+    /* a stale patch is refused before the device is asked to write */
+    const staleDevice = serve(['list', 'read'], [])
+    await new Promise((r) => setTimeout(r, 300))
+    const stale = await owner.post(`/api/canvases/${canvasId}/token-sync/write`, { names, patch: `${plan.patch}x` })
+    await staleDevice
+    expect(stale.status).toBe(409)
+
+    const writeSeen: { op: string; args: Record<string, unknown> }[] = []
+    const writer = serve(['list', 'read', 'apply_patch'], writeSeen)
+    await new Promise((r) => setTimeout(r, 300))
+    const write = await owner.post(`/api/canvases/${canvasId}/token-sync/write`, { names, patch: plan.patch })
+    await writer
+    expect(write.status).toBe(200)
+    expect((await write.json()).result).toEqual({ written: ['src/app.css'], repo: 'site' })
+    expect(writeSeen[2]!.args.patch).toBe(plan.patch)
+    expect(String(writeSeen[2]!.args.reason)).toMatch(/Token sync/)
+  })
 })
