@@ -1,4 +1,5 @@
 import { findInCanvas } from './canvasFind.ts'
+import { findInLibrary } from './libraryQueries.ts'
 import { env } from './env.ts'
 import { MAX_SKILL_CHARS, MAX_SKILL_DESCRIPTION_CHARS, skillSlug } from '../shared/skills.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
@@ -548,7 +549,7 @@ export function buildMcpServer(
     {
       title: 'Find in a canvas (all pages)',
       description:
-        "Search frames for a term across every page of one canvas, or of every canvas the user can open when canvas_id is omitted — the same search as ⌘F with All pages. Matches frame names, the text a person reads in the frame, and string literals in its scripts (library sheets often render their items from a JS array, so ids like cp.scb-input-otp live there). Use it to answer 'find the OTP designs' instead of paging through get_canvas. Results come in reading order (page, then top to bottom), each with its frame id, page and a snippet; open one with get_frame or link it as /c/<canvas>?frame=<frame>.",
+        "Search frames for a term across every page of one canvas, or of every canvas the user can open when canvas_id is omitted — the same search as ⌘F with All pages. Without canvas_id, a design library answers from its index: its items come back as name hits carrying item_id (read one with get_library_item). Matches frame names, the text a person reads in the frame, and string literals in its scripts (library sheets often render their items from a JS array, so ids like cp.scb-input-otp live there). Use it to answer 'find the OTP designs' instead of paging through get_canvas. Results come in reading order (page, then top to bottom), each with its frame id, page and a snippet; open one with get_frame or link it as /c/<canvas>?frame=<frame>.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         query: z.string().min(1).max(200).describe('The term to find, e.g. "OTP" or "cp.vui-otp-input"'),
@@ -568,10 +569,13 @@ export function buildMcpServer(
           if (canvas_id) return noCanvas(canvas_id)
           continue
         }
-        /* frame HTML is loaded per canvas on demand */
-        const c = await store.load(id)
+        /* everywhere, a library answers from its index; frame HTML is
+           loaded per canvas on demand */
+        const listed = store.getCanvas(id)
+        const fromIndex = !canvas_id && listed ? await findInLibrary(listed, query, { matchCase: !!match_case }) : null
+        const c = fromIndex ? listed : await store.load(id)
         if (!c) continue
-        const r = findInCanvas(c, query, { matchCase: !!match_case })
+        const r = fromIndex ?? findInCanvas(c, query, { matchCase: !!match_case })
         total += r.total
         frames += r.frames
         for (const h of r.hits) {
@@ -585,6 +589,7 @@ export function buildMcpServer(
             page_name: h.pageName,
             where: h.where,
             snippet: `${h.before}[${h.text}]${h.after}`,
+            ...(h.item ? { item_id: h.item.id, item_kind: h.item.kind } : {}),
             url: `/c/${c.id}?frame=${h.frameId}`,
           })
         }

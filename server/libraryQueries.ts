@@ -4,6 +4,7 @@
  * variants. Every answer goes through `libraryRole`.
  */
 import type { Canvas } from '../shared/types.ts'
+import type { CanvasFindHit, CanvasFindResult } from '../shared/canvasFind.ts'
 import {
   itemSummary,
   type LibraryFacet,
@@ -38,6 +39,44 @@ export function summaryOf(item: LibraryItem): LibraryItemSummary {
     ...itemSummary(item, thumbUrl(item)),
     ...(frame ? { frameSize: { w: frame.width, h: frame.height } } : {}),
   }
+}
+
+/** ⌘F everywhere on a library canvas: its items from the index, as name
+ *  hits, so its frame HTML is never loaded. Null when the canvas is not a
+ *  library, or its index is not built yet (the caller searches the HTML). */
+export async function findInLibrary(
+  canvas: Canvas,
+  query: string,
+  opts: { matchCase?: boolean; max?: number } = {},
+): Promise<CanvasFindResult | null> {
+  const record = getLibrary(canvas.id)
+  if (!record) return null
+  const index = await indexFor(canvas.id)
+  if (!index) return null
+  const q = query.trim()
+  if (!q) return { hits: [], total: 0, frames: 0 }
+  const result = searchIndex(index, q, { limit: opts.max ?? 200, synonyms: record.rules.search.synonyms })
+  const pages = new Map((canvas.pages ?? []).map((p) => [p.id, p.name]))
+  const hits: CanvasFindHit[] = []
+  for (const { item } of result.hits) {
+    if (opts.matchCase && !item.label.includes(q) && !item.itemId.includes(q)) continue
+    const frame = canvas.frames.find((f) => f.id === item.frameId)
+    if (!frame) continue
+    const pageId = frame.pageId ?? item.pageId
+    hits.push({
+      frameId: frame.id,
+      pageId,
+      pageName: pages.get(pageId) ?? '',
+      frameName: frame.name,
+      where: 'name',
+      n: -1,
+      before: '',
+      text: item.label || item.itemId,
+      after: item.label && item.label !== item.itemId ? ` · ${item.itemId}` : '',
+      item: summaryOf(item),
+    })
+  }
+  return { hits, total: opts.matchCase ? hits.length : result.total, frames: new Set(hits.map((h) => h.frameId)).size }
 }
 
 /** Where a person opens an item. */
