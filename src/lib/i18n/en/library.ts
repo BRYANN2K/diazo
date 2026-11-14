@@ -170,6 +170,12 @@ export const library = {
   hide: 'Hide',
   rerunRules: 'Re-run the rules',
   keepThisOne: 'Keep this one',
+  suggestedLabel: 'Suggested',
+  acceptSuggestion: 'Accept',
+  dismissSuggestion: 'Dismiss',
+  describeLabel: 'Describe thin items with AI',
+  describeCost:
+    "A model writes a description and tags for items left without them, on the library owner's connected model (else the server's), at most 200 items a day. Nothing you wrote is changed; suggestions wait in the inbox.",
   inboxCount: { one: 'Inbox ({count})', other: 'Inbox ({count})' },
   visibilityTitle: 'Who can use this library',
   visibility_private: 'People with access',

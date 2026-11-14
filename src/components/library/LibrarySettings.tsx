@@ -9,6 +9,7 @@ import { Button } from '../ui/button'
 import { CardHeader, CardRow, CardTitle, SettingsCard } from '../ui/card'
 import { Input } from '../ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
+import { Switch } from '../ui/switch'
 import { LibraryRulesForm } from './LibraryRulesForm'
 
 /**
@@ -23,6 +24,7 @@ export function LibrarySettings({ detail, onChanged }: { detail: LibraryDetail; 
   const [others, setOthers] = useState<LibraryListEntry[]>([])
   const [from, setFrom] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
+  const [describe, setDescribe] = useState(!!detail.library.describeItems)
 
   useEffect(() => {
     api
@@ -88,6 +90,22 @@ export function LibrarySettings({ detail, onChanged }: { detail: LibraryDetail; 
             </Button>
           }
         />
+        <CardRow label={t('library.describeLabel')}>
+          <div className="flex items-start gap-3">
+            <Switch
+              aria-label={t('library.describeLabel')}
+              checked={describe}
+              onCheckedChange={(on) => {
+                setDescribe(on)
+                void api
+                  .updateLibrary(detail.id, { describeItems: on })
+                  .then(() => onChanged?.())
+                  .catch(() => setDescribe(!on))
+              }}
+            />
+            <span className="text-caption text-ink-faint">{t('library.describeCost')}</span>
+          </div>
+        </CardRow>
         <CardRow
           label={t('library.reindexLabel')}
           action={

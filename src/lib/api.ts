@@ -32,6 +32,7 @@ import type {
   LibraryTaxonomy,
   LibraryVisibility,
   RuleFinding,
+  ItemSuggestion,
 } from '../../shared/library'
 import type { RulePresetName } from '../../shared/libraryRules'
 import type { CustomProviderConfig, CustomProviderKind } from '../../shared/customProvider'
@@ -1056,7 +1057,13 @@ export const api = {
   getLibraryDetail: (libraryId: string) => req<LibraryDetail>(`/api/libraries/${libraryId}`),
   updateLibrary: (
     libraryId: string,
-    patch: { description?: string; rules?: unknown; taxonomy?: LibraryTaxonomy; visibility?: LibraryVisibility },
+    patch: {
+      description?: string
+      rules?: unknown
+      taxonomy?: LibraryTaxonomy
+      visibility?: LibraryVisibility
+      describeItems?: boolean
+    },
   ) => req<LibraryListEntry>(`/api/libraries/${libraryId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteLibrary: (libraryId: string) => req(`/api/libraries/${libraryId}`, { method: 'DELETE' }),
   importToLibrary: (
@@ -1105,9 +1112,15 @@ export const api = {
   libraryItemUsed: (libraryId: string, itemId: string) =>
     req(`/api/libraries/${libraryId}/items/${encodeURIComponent(itemId)}/used`, { method: 'POST' }),
   libraryInbox: (libraryId: string) =>
-    req<{ drafts: number; items: (LibraryItemSummary & { findings: RuleFinding[] })[] }>(
-      `/api/libraries/${libraryId}/inbox`,
-    ),
+    req<{
+      drafts: number
+      items: (LibraryItemSummary & { findings: RuleFinding[]; suggested?: ItemSuggestion })[]
+    }>(`/api/libraries/${libraryId}/inbox`),
+  settleLibrarySuggestion: (libraryId: string, itemId: string, accept: boolean) =>
+    req<{ ok: true }>(`/api/libraries/${libraryId}/items/${encodeURIComponent(itemId)}/suggestion`, {
+      method: 'POST',
+      body: JSON.stringify({ accept }),
+    }),
   setLibraryItemsStatus: (libraryId: string, itemIds: string[], status: 'active' | 'deprecated' | 'hidden') =>
     req<{ changed: number }>(`/api/libraries/${libraryId}/items/batch`, {
       method: 'POST',

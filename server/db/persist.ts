@@ -1516,6 +1516,7 @@ export interface StoredLibrary {
   indexState: LibraryIndexState | null
   rulesVersion: number
   disabledAt: number | null
+  describeItems?: boolean
   createdAt: number
   updatedAt: number
   updatedBy: string | null
@@ -1572,6 +1573,7 @@ export function saveLibrary(record: Omit<StoredLibrary, 'counts'>): Promise<void
     indexState: record.indexState,
     rulesVersion: record.rulesVersion,
     disabledAt: record.disabledAt,
+    describeItems: record.describeItems ?? false,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     updatedBy: record.updatedBy,

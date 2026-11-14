@@ -838,6 +838,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `scripts/pull-library.ts` copies a library canvas between two instances over their `/mcp` (agent
   keys from `DOOP_FROM_KEY` / `DOOP_TO_KEY`, the source only read, `/a/` assets re-uploaded,
   resumable; `scripts/README.md`, `pullLibrary.test.ts`).
+  AI descriptions (`server/libraryDescribe.ts`, migration 0067): off per library until a manager
+  turns on Settings → "Describe thin items with AI" (`libraries.describe_items`; while off no model
+  is called). Then each item whose description or tags a person left empty gets one vision call on
+  its thumbnail, paid by the library canvas's owner as an image description is (`describerFor`:
+  their connected model, else the server's; their image-description Off stops it too), at most 200
+  a library per UTC day (in memory). Results sit in `library_item_meta.suggested`: searchable at
+  once, shown in the inbox with Accept / Dismiss, written as the item's own only when accepted.
+  Tests: `libraryDescribe.test.ts`.
   Tests: `library*.test.ts`,
   `librariesHttp.test.ts`, `findLibrary*.test.ts*`, `findRows.test.ts`, `convertLibraryUi.test.tsx`.
 - Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /

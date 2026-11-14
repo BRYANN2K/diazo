@@ -170,6 +170,12 @@ export const library = {
   hide: 'Ocultar',
   rerunRules: 'Rodar as regras de novo',
   keepThisOne: 'Ficar com este',
+  suggestedLabel: 'Sugerido',
+  acceptSuggestion: 'Aceitar',
+  dismissSuggestion: 'Descartar',
+  describeLabel: 'Descrever itens vazios com IA',
+  describeCost:
+    'Um modelo escreve uma descrição e tags para os itens que não as têm, no modelo conectado do dono da biblioteca (ou no do servidor), até 200 itens por dia. Nada do que você escreveu muda; as sugestões esperam na caixa de entrada.',
   inboxCount: { one: 'Caixa de entrada ({count})', other: 'Caixa de entrada ({count})' },
   visibilityTitle: 'Quem pode usar esta biblioteca',
   visibility_private: 'Quem tem acesso',

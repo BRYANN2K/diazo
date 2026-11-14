@@ -6,7 +6,13 @@
  * index, one item's markup from `store.renderableFrame`.
  */
 import express from 'express'
-import type { LibraryItemMeta, LibraryItemPatch, LibraryTaxonomy, LibraryVisibility } from '../shared/library.ts'
+import type {
+  ItemSuggestion,
+  LibraryItemMeta,
+  LibraryItemPatch,
+  LibraryTaxonomy,
+  LibraryVisibility,
+} from '../shared/library.ts'
 import { describeRules, parseLibraryRules, RULE_PRESETS, type RulePresetName } from '../shared/libraryRules.ts'
 import type { LibrarySort, QueryFilters } from '../shared/librarySearch.ts'
 import { canAccessCanvas, canEditCanvas, canManageCanvas } from './access.ts'
@@ -26,6 +32,7 @@ import {
 } from './libraries.ts'
 import { env } from './env.ts'
 import { itemMeta, libraryItems, previewIndex, reindexLibrary, saveMeta } from './libraryIndex.ts'
+import { settleSuggestion } from './libraryDescribe.ts'
 import { entryOf, itemDetail, libraryFor, readableLibraries, searchLibraries, summaryOf } from './libraryQueries.ts'
 import { itemThumb, NoThumbError } from './libraryThumbs.ts'
 import { RendererBusyError } from './renderBrowser.ts'
@@ -209,7 +216,8 @@ libraryRouter.get('/:id', (req, res) => {
 
 libraryRouter.patch('/:id', (req, res) => {
   const body = req.body ?? {}
-  const managing = body.rules !== undefined || body.visibility !== undefined
+  /* rules, visibility and the paid AI pass belong to the library's managers */
+  const managing = body.rules !== undefined || body.visibility !== undefined || body.describeItems !== undefined
   const found = libraryFor(req.user!.id, req.params.id, managing ? 'manage' : 'curate')
   if (!found) return notFound(res)
   const visibilities = ['private', 'workspace', 'public']
@@ -223,6 +231,7 @@ libraryRouter.patch('/:id', (req, res) => {
       ...(body.rules !== undefined ? { rules: body.rules } : {}),
       ...(body.taxonomy ? { taxonomy: body.taxonomy as LibraryTaxonomy } : {}),
       ...(body.visibility ? { visibility: body.visibility as LibraryVisibility } : {}),
+      ...(typeof body.describeItems === 'boolean' ? { describeItems: body.describeItems } : {}),
     },
     actorOf(req),
   )
@@ -486,13 +495,33 @@ export async function patchItem(
 libraryRouter.get('/:id/inbox', async (req, res) => {
   const found = libraryFor(req.user!.id, req.params.id, 'curate')
   if (!found) return notFound(res)
+  const suggestions = new Map<string, ItemSuggestion>()
+  for (const item of await libraryItems(found.canvas.id)) {
+    const s = (await itemMeta(found.canvas.id, item.itemId))?.suggested
+    if (s && (s.description || s.tags?.length)) suggestions.set(item.itemId, s)
+  }
   const items = (await libraryItems(found.canvas.id)).filter(
-    (item) => item.status === 'draft' || (item.findings.length > 0 && item.status !== 'hidden'),
+    (item) =>
+      item.status === 'draft' ||
+      (item.status !== 'hidden' && (item.findings.length > 0 || suggestions.has(item.itemId))),
   )
   res.json({
     drafts: items.filter((i) => i.status === 'draft').length,
-    items: items.slice(0, 500).map((item) => ({ ...summaryOf(item), findings: item.findings })),
+    items: items.slice(0, 500).map((item) => ({
+      ...summaryOf(item),
+      findings: item.findings,
+      ...(suggestions.has(item.itemId) ? { suggested: suggestions.get(item.itemId) } : {}),
+    })),
   })
+})
+
+/** Accept or dismiss a model's description and tags (curators). */
+libraryRouter.post('/:id/items/:itemId/suggestion', async (req, res) => {
+  const found = libraryFor(req.user!.id, req.params.id, 'curate')
+  if (!found) return notFound(res)
+  const meta = await settleSuggestion(found.canvas.id, req.params.itemId, req.body?.accept === true, req.user!.name)
+  if (!meta) return res.status(404).json({ error: 'no suggestion on this item' })
+  res.json({ ok: true })
 })
 
 /** Set the status of several items at once (Accept, Hide). */

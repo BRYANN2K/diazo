@@ -96,6 +96,8 @@ export interface LibraryInfo {
   variants: number
   index: LibraryIndexState | null
   rulesVersion: number
+  /** a model describes and tags thin items (off by default) */
+  describeItems?: boolean
 }
 
 /** One indexed item: a row of the rebuildable projection. */
@@ -147,6 +149,16 @@ export interface LibraryItemMeta {
   lastUsedAt: number | null
   updatedAt: number
   updatedBy: string | null
+  /** a model's description and tags for a thin item, until accepted */
+  suggested?: ItemSuggestion | null
+}
+
+/** What a model proposed for an item whose person left the fields empty:
+ *  searchable at once, shown as people's words only once accepted. */
+export interface ItemSuggestion {
+  description: string | null
+  tags: string[] | null
+  at: number
 }
 
 /** The item as people see it: curation over the index. */
@@ -160,7 +172,12 @@ export function effectiveItem(item: LibraryItem, meta: LibraryItemMeta | null | 
     tags: meta.tags ?? item.tags,
     status: meta.status ?? item.status,
     useCount: meta.useCount,
+    ...(meta.suggested ? { searchText: suggestedText(item.searchText, meta.suggested) } : {}),
   }
+}
+
+function suggestedText(searchText: string, s: ItemSuggestion): string {
+  return [searchText, s.description ?? '', ...(s.tags ?? [])].filter(Boolean).join(' ')
 }
 
 /** A family and its variants, in frame order. */

@@ -22,6 +22,7 @@ import type {
   ItemLocator,
   ItemMode,
   ItemStatus,
+  ItemSuggestion,
   LibraryIndexState,
   LibraryTaxonomy,
   LibraryVisibility,
@@ -1243,6 +1244,8 @@ export const libraries = pgTable('libraries', {
   indexState: jsonb('index_state').$type<LibraryIndexState>(),
   rulesVersion: integer('rules_version').notNull().default(1),
   disabledAt: bigint('disabled_at', { mode: 'number' }),
+  /** AI descriptions and tags for thin items (server/libraryDescribe.ts); off by default */
+  describeItems: boolean('describe_items').notNull().default(false),
   createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   updatedBy: text('updated_by'),
@@ -1300,6 +1303,8 @@ export const libraryItemMeta = pgTable(
     status: text('status').$type<'active' | 'deprecated' | 'hidden'>(),
     useCount: integer('use_count').notNull().default(0),
     lastUsedAt: bigint('last_used_at', { mode: 'number' }),
+    /** a model's description and tags, until a person accepts them */
+    suggested: jsonb('suggested').$type<ItemSuggestion>(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
     updatedBy: text('updated_by'),
   },

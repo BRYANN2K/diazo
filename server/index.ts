@@ -1,6 +1,7 @@
 import * as libraries from './libraries.ts'
 import * as libraryIndex from './libraryIndex.ts'
 import { libraryRouter } from './libraryRoutes.ts'
+import { wireLibraryDescribe } from './libraryDescribe.ts'
 import { env } from './env.ts'
 import {
   catalogEntry,
@@ -200,6 +201,7 @@ await libraries.hydrateLibraries() // canvas.library, before the first canvas is
 libraries.wireLibraries()
 void libraries.purgeDisabledLibraries().catch((error: unknown) => console.error('[libraries] purge failed', error))
 libraryIndex.wireIndexer()
+wireLibraryDescribe() // AI descriptions, only on libraries that turned them on
 /* full index runs a restart cut off go on in the background */
 void Promise.all(libraryIndex.resumeIndexing(libraries.allLibraries()))
 await hydrateInstanceSettings() // the sign-in policy, read on every signup

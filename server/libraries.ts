@@ -32,6 +32,8 @@ export interface LibraryRecord {
   rulesVersion: number
   /** set by "stop being a library"; the row is kept 30 days */
   disabledAt: number | null
+  /** AI descriptions and tags for thin items (server/libraryDescribe.ts) */
+  describeItems?: boolean
   createdAt: number
   updatedAt: number
   updatedBy: string | null
@@ -56,6 +58,7 @@ export function infoOf(record: LibraryRecord): LibraryInfo {
     variants: record.counts.variants,
     index: record.indexState,
     rulesVersion: record.rulesVersion,
+    describeItems: !!record.describeItems,
   }
 }
 
@@ -160,6 +163,7 @@ export interface LibraryPatch {
   rules?: unknown
   taxonomy?: LibraryTaxonomy
   visibility?: LibraryVisibility
+  describeItems?: boolean
 }
 
 export type PatchResult =
@@ -194,6 +198,7 @@ export function updateLibrary(canvasId: string, patch: LibraryPatch, actor: Acto
   if (patch.description !== undefined) record.description = patch.description.slice(0, 2000)
   if (patch.taxonomy) record.taxonomy = patch.taxonomy
   if (patch.visibility) record.visibility = patch.visibility
+  if (patch.describeItems !== undefined) record.describeItems = patch.describeItems
   if (rules && rulesChanged) {
     record.rules = rules
     record.rulesVersion++

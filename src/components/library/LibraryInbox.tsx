@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { LibraryItemSummary, RuleFinding } from '../../../shared/library'
+import type { ItemSuggestion, LibraryItemSummary, RuleFinding } from '../../../shared/library'
 import { api } from '../../lib/api'
 import { useT } from '../../lib/i18n'
 import { Button } from '../ui/button'
@@ -7,7 +7,7 @@ import { Checkbox } from '../ui/checkbox'
 import { SelectionBar, SelectionBarAction } from '../ui/selection-bar'
 import { ItemThumb } from './ItemThumb'
 
-type InboxItem = LibraryItemSummary & { findings: RuleFinding[] }
+type InboxItem = LibraryItemSummary & { findings: RuleFinding[]; suggested?: ItemSuggestion }
 
 /**
  * What the rules flagged, in one place: drafts and items with findings,
@@ -35,6 +35,23 @@ export function LibraryInbox({ libraryId, onChanged }: { libraryId: string; onCh
       await api.setLibraryItemsStatus(libraryId, ids, status)
       setItems((list) => (list ?? []).filter((i) => !ids.includes(i.id)))
       setPicked(new Set())
+      onChanged?.()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function settle(id: string, accept: boolean) {
+    setBusy(true)
+    try {
+      await api.settleLibrarySuggestion(libraryId, id, accept)
+      setItems((list) =>
+        (list ?? []).flatMap((i) => {
+          if (i.id !== id) return [i]
+          const rest = { ...i, suggested: undefined }
+          return i.status === 'draft' || i.findings.length ? [rest] : []
+        }),
+      )
       onChanged?.()
     } finally {
       setBusy(false)
@@ -98,6 +115,25 @@ export function LibraryInbox({ libraryId, onChanged }: { libraryId: string; onCh
                     {f.message}
                   </span>
                 ))}
+                {item.suggested && (
+                  <div className="flex flex-col gap-1" data-inbox-suggestion={item.id}>
+                    <span className="text-caption text-ink-faint">{t('library.suggestedLabel')}</span>
+                    {item.suggested.description && (
+                      <span className="text-caption text-ink-soft">{item.suggested.description}</span>
+                    )}
+                    {item.suggested.tags?.length ? (
+                      <span className="font-mono text-caption text-ink-soft">{item.suggested.tags.join(', ')}</span>
+                    ) : null}
+                    <div className="flex gap-2">
+                      <Button size="sm" disabled={busy} onClick={() => void settle(item.id, true)}>
+                        {t('library.acceptSuggestion')}
+                      </Button>
+                      <Button size="sm" disabled={busy} onClick={() => void settle(item.id, false)}>
+                        {t('library.dismissSuggestion')}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
               {duplicateOf && (
                 <div className="flex flex-none items-center gap-2">
