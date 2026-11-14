@@ -19,12 +19,14 @@ export const storageMode: 'bucket' | 'disk' = BUCKET ? 'bucket' : 'disk'
 
 /* keys are `<nanoid>.<ext>`, optionally under the `thumb/` prefix (derived
    frame previews — a folder of their own so they can be purged or lifecycle-
-   ruled without touching user uploads) or the `bg/` prefix (the curated
-   background library, server/backgrounds.ts). Anything else is a bug, and in
+   ruled without touching user uploads), the `bg/` prefix (the curated
+   background library, server/backgrounds.ts) or `lt/<canvasId>/` (library
+   item thumbnails, server/libraryThumbs.ts). Anything else is a bug, and in
    disk mode the check doubles as the path-traversal guard: known literal
-   prefixes, no dots or slashes in the name. */
+   prefixes, one id segment at most, no dots or slashes in the name. */
 function assertKey(key: string) {
-  if (!/^(thumb\/|bg\/)?[A-Za-z0-9_-]+\.[a-z0-9]+$/.test(key)) throw new Error(`malformed storage key: ${key}`)
+  if (!/^(thumb\/|bg\/|lt\/[A-Za-z0-9_-]+\/)?[A-Za-z0-9_-]+\.[a-z0-9]+$/.test(key))
+    throw new Error(`malformed storage key: ${key}`)
 }
 
 let s3: S3Client | undefined
@@ -63,6 +65,28 @@ export async function deleteObject(key: string): Promise<void> {
     return
   }
   await fs.rm(path.join(DISK_DIR, key), { force: true })
+}
+
+/** Whether an object exists, without reading its bytes. */
+export async function hasObject(key: string): Promise<boolean> {
+  assertKey(key)
+  if (BUCKET) {
+    try {
+      const { HeadObjectCommand } = await import('@aws-sdk/client-s3')
+      await (await client()).send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }))
+      return true
+    } catch (e) {
+      const err = e as { name?: string; $metadata?: { httpStatusCode?: number } }
+      if (err.name === 'NotFound' || err.name === 'NoSuchKey' || err.$metadata?.httpStatusCode === 404) return false
+      throw e
+    }
+  }
+  try {
+    return (await fs.stat(path.join(DISK_DIR, key))).isFile()
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw e
+  }
 }
 
 export async function getObject(key: string, signal?: AbortSignal): Promise<Buffer | null> {

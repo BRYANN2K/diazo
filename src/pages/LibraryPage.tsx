@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { LibraryDetail, LibrarySearchHit, LibrarySearchResult } from '../../shared/library'
+import type { LibraryDetail, LibrarySearchHit, LibrarySearchResult, ThumbProgress } from '../../shared/library'
 import { api } from '../lib/api'
 import { navigate } from '../lib/navigate'
 import { useT } from '../lib/i18n'
@@ -36,6 +36,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { DashContent, DashHeader, DashLayout, DashMain, DashTitle } from '../components/ui/dash'
 
 const PAGE = 60
+/** How often the gallery asks how the preview prewarm is going. */
+const PROGRESS_POLL_MS = 5000
 
 /** Where the gallery was opened from: a canvas and its selected frame. */
 export function galleryOrigin(search: string): GalleryOrigin | null {
@@ -74,6 +76,26 @@ export function LibraryPage({ libraryId, itemId }: { libraryId: string; itemId: 
       .then(setDetail)
       .catch(() => setMissing(true))
   }, [libraryId])
+
+  /* while the server prepares previews, follow its progress (apart from
+     the detail, which the item search depends on) */
+  const [thumbs, setThumbs] = useState<ThumbProgress | null>(null)
+  const [seenDetail, setSeenDetail] = useState(detail)
+  if (seenDetail !== detail) {
+    setSeenDetail(detail)
+    setThumbs(detail?.library.thumbs ?? null)
+  }
+  const preparing = thumbs?.running ? thumbs : null
+  useEffect(() => {
+    if (!preparing) return
+    const timer = window.setTimeout(() => {
+      api
+        .getLibraryDetail(libraryId)
+        .then((next) => setThumbs(next.library.thumbs ?? null))
+        .catch(() => {})
+    }, PROGRESS_POLL_MS)
+    return () => window.clearTimeout(timer)
+  }, [libraryId, preparing])
 
   /* the view in the URL, without a history entry per keystroke */
   const from = origin?.from ?? null
@@ -213,7 +235,17 @@ export function LibraryPage({ libraryId, itemId }: { libraryId: string; itemId: 
           )}
         </DashHeader>
         <DashContent className="flex min-h-0 flex-1 flex-col pt-2 md:pt-3">
-          <DashTitle className="mb-4">{detail?.name ?? (missing ? t('library.notFound') : '')}</DashTitle>
+          <DashTitle className={preparing ? 'mb-1' : 'mb-4'}>
+            {detail?.name ?? (missing ? t('library.notFound') : '')}
+          </DashTitle>
+          {preparing && (
+            <p className="mb-4 text-caption text-ink-faint" role="status" data-testid="previews-preparing">
+              {t('library.previewsPreparing', {
+                ready: preparing.ready.toLocaleString(),
+                total: preparing.total.toLocaleString(),
+              })}
+            </p>
+          )}
           <div className="flex min-h-0 flex-1 gap-6">
             <LibraryFacets
               kinds={result?.facets.kind ?? []}

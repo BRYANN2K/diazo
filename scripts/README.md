@@ -21,3 +21,17 @@ DOOP_FROM_KEY=dpk_… DOOP_TO_KEY=dpk_… npx tsx scripts/pull-library.ts \
 - A canvas holds 100 pages: for a bigger library, turn the target canvas into a library when the
   script stops, then rerun.
 - Tests: `tests/pullLibrary.test.ts` (two servers; asserts the source received only reads).
+
+## library-thumb.ts
+
+Renders a library item's thumbnail from a frame's HTML file the way the server does, next to the
+old box-plus-margin clip, to check what a gallery tile will show:
+
+```bash
+npx tsx scripts/library-thumb.ts frame.html --id mo.bencho-particles --width 760 --height 560 \
+  [--box x,y,w,h] [--out dir] [--wait interactive]
+```
+
+- Writes `<name>.after.jpg` (today's thumbnail) and `<name>.before.jpg` (the old clip).
+- Without `--box` the item is the whole frame, as a family's box is.
+- Needs a local Chrome (`CHROME_PATH` when it is not found).

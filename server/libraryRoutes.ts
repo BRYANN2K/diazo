@@ -35,8 +35,7 @@ import { env } from './env.ts'
 import { itemMeta, libraryItems, previewIndex, reindexLibrary, saveMeta } from './libraryIndex.ts'
 import { settleSuggestion } from './libraryDescribe.ts'
 import { entryOf, itemDetail, libraryFor, readableLibraries, searchLibraries, summaryOf } from './libraryQueries.ts'
-import { itemThumb, NoThumbError } from './libraryThumbs.ts'
-import { RendererBusyError } from './renderBrowser.ts'
+import { requestThumb, thumbFailure, thumbTag } from './libraryThumbs.ts'
 import { cleanCategoryPaths, CurationError, suggestCategories } from './libraryCuration.ts'
 
 export const libraryRouter = express.Router()
@@ -417,27 +416,25 @@ libraryRouter.get('/:id/items/:itemId', async (req, res) => {
   res.json(out.detail)
 })
 
-/** One item's image. Immutable when asked with its hash (`?v=`), since the
- *  hash is in the storage key; 404 while it has no box, 503 when busy. */
+/** One item's image. Immutable when asked with its tag (`?v=`), since the
+ *  tag is in the storage key; 404 when its frame is gone, 503 when busy. */
 libraryRouter.get('/:id/items/:itemId/thumb.jpg', async (req, res) => {
   const found = libraryFor(req.user!.id, req.params.id)
   if (!found) return notFound(res)
   const out = await itemDetail(found.canvas, req.params.itemId, found.role)
   if (!out) return res.status(404).json({ error: 'item not found' })
   try {
-    const jpeg = await itemThumb(out.item)
-    const current = req.query.v === out.item.hash
+    const jpeg = await requestThumb(out.item)
+    const current = req.query.v === thumbTag(out.item)
     res.set('Content-Type', 'image/jpeg')
     res.set('Cache-Control', current ? 'private, max-age=31536000, immutable' : 'private, max-age=60')
     res.send(jpeg)
   } catch (error) {
-    if (error instanceof RendererBusyError) {
-      res.set('Retry-After', '10')
-      return res.status(503).json({ error: error.message })
-    }
-    if (error instanceof NoThumbError) return res.status(404).json({ error: error.message })
-    console.error('[libraries] thumbnail failed', error)
-    res.status(500).json({ error: 'thumbnail failed' })
+    const failure = thumbFailure(error)
+    if (failure.status === 500) console.error('[libraries] thumbnail failed', error)
+    if (failure.retryAfterS !== undefined) res.set('Retry-After', String(failure.retryAfterS))
+    res.set('Cache-Control', 'no-store')
+    res.status(failure.status).json({ error: failure.message })
   }
 })
 

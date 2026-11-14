@@ -69,7 +69,7 @@ describe('the library read tools', () => {
       library_id: 'lib1',
       id: 'bk.scb-login',
       variant_count: 2,
-      thumbnail: expect.stringMatching(/^\/i\/lib1-f1\.jpg\?preview$/),
+      thumbnail: expect.stringMatching(/^\/api\/libraries\/lib1\/items\/bk\.scb-login\/thumb\.jpg\?v=[0-9a-f]{16}$/),
       url: '/l/lib1/i/bk.scb-login',
     })
   })

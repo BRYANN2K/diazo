@@ -100,6 +100,18 @@ export interface LibraryInfo {
   rulesVersion: number
   /** a model describes and tags thin items (off by default) */
   describeItems?: boolean
+  /** the thumbnail prewarm, once it has looked at this library */
+  thumbs?: ThumbProgress
+}
+
+/** How many of a library's items have their thumbnail in storage. */
+export interface ThumbProgress {
+  ready: number
+  total: number
+  /** missing ones are being rendered */
+  running: boolean
+  /** items whose thumbnail could not be rendered this run */
+  failed?: number
 }
 
 /** One indexed item: a row of the rebuildable projection. */

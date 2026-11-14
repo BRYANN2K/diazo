@@ -22,14 +22,12 @@ import { getLibraryCanvasIds } from './referenceLibrary.ts'
 import { canvasesFor } from './workspaces.ts'
 import { getLibrary, infoOf, libraryAllows, libraryRole, type LibraryRole } from './libraries.ts'
 import { indexFor, libraryItems } from './libraryIndex.ts'
+import { thumbTag } from './libraryThumbs.ts'
 
-/** The image of an item: its own thumbnail once it has a box, else the
- *  frame's preview (the client crops it to the item). */
+/** The image of an item: its own thumbnail, asked with what it depends on
+ *  (so the browser keeps it). One without a box yet pictures its frame. */
 export function thumbUrl(item: Pick<LibraryItem, 'frameId' | 'canvasId' | 'itemId' | 'hash' | 'box'>): string {
-  if (item.box) {
-    return `/api/libraries/${item.canvasId}/items/${encodeURIComponent(item.itemId)}/thumb.jpg?v=${encodeURIComponent(item.hash)}`
-  }
-  return `/i/${item.frameId}.jpg?preview`
+  return `/api/libraries/${item.canvasId}/items/${encodeURIComponent(item.itemId)}/thumb.jpg?v=${thumbTag(item)}`
 }
 
 /** An item on the wire with its image and its frame's size. */
