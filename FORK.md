@@ -1,4 +1,4 @@
-# Fork Doop — `BRYANN2K/doop`, branche `bryann2k/main`
+# redoop — `BRYANN2K/redoop`, branche `main`
 
 Fork de `kgoedecke/doop` (AGPL-3.0) axé sur la navigation et les performances
 des très grands canvases (5000+ frames), plus une poignée de fiabilisations et
@@ -110,17 +110,18 @@ les agents reçoivent le doublon au lieu d'importer, et peuvent demander d'abord
 
 ```bash
 git fetch upstream
-git checkout bryann2k/main
+git checkout main
 git merge upstream/main
 # résoudre les conflits en gardant les intentions ci-dessus, puis :
 bun install && bun run typecheck && bun run lint && bun run test
-git push origin bryann2k/main   # jamais vers upstream
+git push origin main   # jamais vers upstream
 ```
 
 ## Image Docker
 
 Buildée en CI (`.github/workflows/docker.yml`) et publiée sur
-`ghcr.io/bryann2k/doop:bryann2k-main` à chaque push sur `bryann2k/main`.
+`ghcr.io/bryann2k/redoop` à chaque push sur `main`, avec les tags `main`, `latest`
+et `sha-<commit court>` (le nom vient du dépôt, en minuscules).
 Multi-arch : `linux/amd64` (le VPS k3s) et `linux/arm64` (l'install locale
 sur Mac Apple silicon). Chaque arch est buildée sur un runner natif
 (`ubuntu-latest`, `ubuntu-24.04-arm`), poussée par digest, puis un job
@@ -164,14 +165,14 @@ curl -sk https://bryann2k-infra-prod.tail35c61f.ts.net:8850/mcp   # 405 = endpoi
 
 ### Image GHCR
 
-Le package `ghcr.io/bryann2k/doop` est **public** : le cluster le tire
+Le package `ghcr.io/bryann2k/redoop` doit être **public** : le cluster le tire
 directement (`imagePullPolicy: Always`). Au premier déploiement, le package
 était encore privé (défaut GHCR) et l'image avait été importée à la main dans
 containerd — si cela devait se reproduire :
 
 ```bash
-docker build --platform linux/amd64 -t ghcr.io/bryann2k/doop:bryann2k-main .
-docker save ghcr.io/bryann2k/doop:bryann2k-main | gzip > doop-image.tar.gz
+docker build --platform linux/amd64 -t ghcr.io/bryann2k/redoop:main .
+docker save ghcr.io/bryann2k/redoop:main | gzip > doop-image.tar.gz
 scp doop-image.tar.gz <vps>:/tmp/
 ssh <vps> 'sudo k3s ctr -n k8s.io images import /tmp/doop-image.tar.gz'
 ```
@@ -182,7 +183,7 @@ Deux façons de faire tourner doop : **local** (une personne, un Mac) et
 **hébergé** (k3s + Tailscale ci-dessus, ou `docker compose up`).
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/BRYANN2K/doop/bryann2k/main/scripts/install-local.sh | sh
+curl -fsSL https://raw.githubusercontent.com/BRYANN2K/redoop/main/scripts/install-local.sh | sh
 ```
 
 - `scripts/install-local.sh` (POSIX sh) : vérifie macOS + Apple silicon +
@@ -204,5 +205,5 @@ curl -fsSL https://raw.githubusercontent.com/BRYANN2K/doop/bryann2k/main/scripts
 - URL (tailnet only): https://bryann2k-infra-prod.tail35c61f.ts.net:8850
 - MCP: https://bryann2k-infra-prod.tail35c61f.ts.net:8850/mcp
 - Exposure: `tailscale serve --bg --https=8850 http://<doop ClusterIP>:4400` on bryann2k-infra. No Funnel, no cloudflared.
-- k3s namespace `doop`: `postgres-0` + `deploy/doop` (image `ghcr.io/bryann2k/doop:bryann2k-main`, public).
+- k3s namespace `doop`: `postgres-0` + `deploy/doop` (image `ghcr.io/bryann2k/redoop:main`, public).
 - Dropped PR: #299 (component library). It would have added a second, parallel component system.

@@ -119,7 +119,7 @@ describe('install-local.sh', () => {
     expect(line).toContain(`--volume ${home}/.doop/data:/app/data`)
     expect(line).toContain('--env BETTER_AUTH_URL=http://localhost:4400')
     expect(line).not.toContain('--rosetta')
-    expect(line.endsWith('ghcr.io/bryann2k/doop:bryann2k-main')).toBe(true)
+    expect(line.endsWith('ghcr.io/bryann2k/redoop:main')).toBe(true)
   })
 
   it('keeps the secrets and replaces the container on a re-run', async () => {
@@ -151,7 +151,7 @@ describe('install-local.sh', () => {
 
     expect((await run(['--uninstall'])).out).toMatch(/kept/)
     expect(existsSync(envFile())).toBe(true)
-    expect(calls()).toMatch(/^image delete ghcr\.io\/bryann2k\/doop:bryann2k-main$/m)
+    expect(calls()).toMatch(/^image delete ghcr\.io\/bryann2k\/redoop:main$/m)
 
     expect((await run(['uninstall', '--yes'])).code).toBe(0)
     expect(existsSync(path.join(home, '.doop'))).toBe(false)

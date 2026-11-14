@@ -2,7 +2,7 @@
 
 What this fork adds on top of [kgoedecke/doop](https://github.com/kgoedecke/doop), and the
 upstream pull requests it merged ahead of upstream. Resync notes and the deploy recipe are in
-[FORK.md](../FORK.md).
+[FORK.md](../FORK.md). Screenshots of most of these are in the [README](../README.md#what-it-does).
 
 ## Features added in this fork
 
@@ -143,9 +143,14 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
 - **Model duel** — Duel in the agents composer sends one brief to 2-3 models, each into its own
   sibling frame; a comparison card shows each render with its cost, time and lint score, and the
   one you keep is saved as a canvas decision while the others are archived (hidden, not deleted).
-- **Self-hosting** — Docker image `ghcr.io/bryann2k/doop:bryann2k-main` (amd64 + arm64) built on every push, k3s
-  manifests in `deploy/k3s/` with a persistent volume for uploads, exposed through Tailscale
-  Serve only (no ingress, no Funnel).
+- **Self-hosting** — Docker image `ghcr.io/bryann2k/redoop:main` (also `:latest` and
+  `:sha-<commit>`; amd64 + arm64) built on every push to `main`, k3s manifests in `deploy/k3s/`
+  with a persistent volume for uploads, exposed through Tailscale Serve only (no ingress, no
+  Funnel).
+- **Demo and README screenshots** — `scripts/seed-demo.ts` boots a local instance seeded with an
+  invented product (Fieldnote), with a scripted stand-in for the model API and a fake desktop
+  device serving a demo repo, so the agent, usage, duel, curation and repo features run without a
+  provider. `scripts/readme-shots.ts` takes the README screenshots from it.
 
 ## Merged upstream PRs
 

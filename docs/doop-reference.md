@@ -87,7 +87,7 @@ OpenRouter brings Qwen, GLM, MiniMax and more ([details](#past-the-free-tasks-co
 ## Develop from source
 
 ```bash
-git clone https://github.com/BRYANN2K/doop && cd doop
+git clone https://github.com/BRYANN2K/redoop && cd redoop
 bun install
 bun run dev
 ```
