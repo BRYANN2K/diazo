@@ -35,7 +35,7 @@ type Scope = 'page' | 'canvas' | 'all'
 const isRemote = (scope: Scope) => scope !== 'page'
 
 /** One frame in the all-pages results, with every match found in it. */
-interface FrameGroup {
+export interface FrameGroup {
   frameId: string
   pageId: string
   pageName: string
@@ -111,6 +111,47 @@ const SCOPE_LABEL = {
   canvas: { short: 'actions.findAllPagesShort', long: 'actions.findAllPages' },
   all: { short: 'actions.findEverywhereShort', long: 'actions.findEverywhere' },
 } as const
+
+/** How long the pointer rests on a row before the preview follows it, so
+ *  sweeping across the list does not flicker the preview. */
+const HOVER_INTENT_MS = 70
+
+/** Frames listed in the all-pages results. */
+const MAX_GROUPS = 300
+
+/** Variants listed under an expanded frame. */
+const MAX_INSIDE = 40
+
+/** One line of the all-pages results: a frame, or a variant listed under it. */
+export interface ResultRow {
+  key: string
+  group: FrameGroup
+  groupIndex: number
+  variant?: { label: string; hit: CanvasFindHit }
+}
+
+const rowKey = (g: FrameGroup, variant?: string) => (variant === undefined ? g.frameId : `${g.frameId}\n${variant}`)
+const rowDomId = (key: string) => `find-row-${key.replace(/[^\w-]/g, '_')}`
+
+/** Every visible row in list order: each frame, then its variants when expanded. */
+export function resultRows(groups: FrameGroup[], open: ReadonlySet<string>): ResultRow[] {
+  return groups
+    .slice(0, MAX_GROUPS)
+    .flatMap((group, groupIndex) => [
+      { key: rowKey(group), group, groupIndex },
+      ...(open.has(group.frameId)
+        ? group.inside
+            .slice(0, MAX_INSIDE)
+            .map((variant) => ({ key: rowKey(group, variant.label), group, groupIndex, variant }))
+        : []),
+    ])
+}
+
+/** What the preview frames when a frame row (not a variant) is shown. */
+function defaultFocus(g: FrameGroup, query: string): string {
+  const q = query.trim()
+  return variantIds(g)[0]?.label ?? (g.id && g.id.toLowerCase().includes(q.toLowerCase()) ? g.id : q)
+}
 
 /** How long typing settles before an all-pages search asks the server. */
 const CANVAS_FIND_DEBOUNCE_MS = 220
@@ -213,11 +254,32 @@ export function FindBar({
   /* all pages: one row per frame, stepped frame by frame */
   const groups = useMemo(() => groupByFrame(remoteHits, query), [remoteHits, query])
   const [open, setOpen] = useState<Set<string>>(() => new Set())
-  const [hovered, setHovered] = useState<string | null>(null)
-  /* a variant picked in an expanded row: the preview frames that one */
-  const [focusPick, setFocusPick] = useState<{ frameId: string; label: string } | null>(null)
+  /* the row the preview shows: hovered (after an intent delay) or reached
+     with ↑/↓; leaving the list keeps it, so the pointer can reach the preview */
+  const [pointed, setPointed] = useState<string | null>(null)
+  const intent = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(intent.current), [])
+  const rows = useMemo(() => resultRows(groups, open), [groups, open])
   const listLength = isRemote(scope) ? groups.length : hits.length
   const active = listLength ? Math.min(cursor, listLength - 1) : -1
+  const pointedRow = rows.find((r) => r.key === pointed) ?? null
+
+  function hover(key: string) {
+    window.clearTimeout(intent.current)
+    intent.current = window.setTimeout(() => setPointed(key), HOVER_INTENT_MS)
+  }
+
+  /* ↑/↓ walk every visible row, variants of an expanded frame included */
+  function point(dir: 1 | -1) {
+    if (!rows.length) return
+    const at = rows.findIndex((r) => r.key === pointed)
+    const from = at === -1 ? rows.findIndex((r) => r.groupIndex === active && !r.variant) : at
+    const next = rows[from === -1 ? 0 : (from + dir + rows.length) % rows.length]!
+    window.clearTimeout(intent.current)
+    setPointed(next.key)
+    setCursor(next.groupIndex)
+    document.getElementById(rowDomId(next.key))?.scrollIntoView({ block: 'nearest' })
+  }
 
   function flyToHit(hit: CanvasFindHit) {
     const s = useStore.getState()
@@ -235,7 +297,7 @@ export function FindBar({
     const group = groups[index]
     if (!group) return
     setCursor(index)
-    setFocusPick(null)
+    setPointed(rowKey(group))
     /* the frame's first readable match is picked; a name match just frames it */
     flyToHit(group.hits.find((h) => h.where === 'text') ?? group.hits[0]!)
   }
@@ -288,6 +350,9 @@ export function FindBar({
     if (e.key === 'Escape') {
       e.preventDefault()
       onClose()
+    } else if (isRemote(scope) && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault()
+      point(e.key === 'ArrowDown' ? 1 : -1)
     } else if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
       e.preventDefault()
       move(e.shiftKey ? -1 : 1)
@@ -404,14 +469,9 @@ export function FindBar({
         <>
           {/* the frame under the pointer, else the active one, live and framed on what matched */}
           {(() => {
-            const shown = groups.find((g) => g.frameId === hovered) ?? groups[Math.max(active, 0)]
+            const shown = pointedRow?.group ?? groups[Math.max(active, 0)]
             if (!shown) return null
-            const q = query.trim()
-            const focus =
-              focusPick?.frameId === shown.frameId
-                ? focusPick.label
-                : (variantIds(shown)[0]?.label ??
-                  (shown.id && shown.id.toLowerCase().includes(q.toLowerCase()) ? shown.id : q))
+            const focus = pointedRow?.variant?.label ?? defaultFocus(shown, query)
             return <FindPreview frameId={shown.frameId} focus={focus} />
           })()}
           <p className="px-1 text-caption text-ink-faint">
@@ -420,19 +480,20 @@ export function FindBar({
           <ul
             className="max-h-80 overflow-y-auto"
             aria-label={t('actions.findLabel')}
-            onMouseLeave={() => setHovered(null)}
+            onMouseLeave={() => window.clearTimeout(intent.current)}
           >
-            {groups.slice(0, 300).map((g, i) => {
+            {groups.slice(0, MAX_GROUPS).map((g, i) => {
               const expanded = open.has(g.frameId)
               const variants = variantIds(g).length
               return (
                 <li key={g.frameId}>
                   <div
+                    id={rowDomId(rowKey(g))}
                     className={cn(
                       'flex items-center gap-2 rounded-row px-1.5 py-1',
-                      i === active ? 'bg-paper-deep' : 'hover:bg-sub',
+                      pointed === rowKey(g) || (!pointedRow && i === active) ? 'bg-paper-deep' : 'hover:bg-sub',
                     )}
-                    onMouseEnter={() => setHovered(g.frameId)}
+                    onMouseEnter={() => hover(rowKey(g))}
                   >
                     <Pressable
                       focus="none"
@@ -483,16 +544,20 @@ export function FindBar({
                   </div>
                   {expanded && (
                     <ul className="pb-1 pl-[62px]">
-                      {g.inside.slice(0, 40).map((x) => (
-                        <li key={x.label}>
+                      {g.inside.slice(0, MAX_INSIDE).map((x) => (
+                        <li key={x.label} id={rowDomId(rowKey(g, x.label))}>
                           <Pressable
                             focus="none"
+                            onMouseEnter={() => hover(rowKey(g, x.label))}
                             onClick={() => {
                               setCursor(i)
-                              setFocusPick({ frameId: g.frameId, label: x.label })
+                              setPointed(rowKey(g, x.label))
                               flyToHit(x.hit)
                             }}
-                            className="w-full truncate rounded-row px-1.5 py-0.5 text-left font-mono text-caption text-ink-soft hover:bg-sub"
+                            className={cn(
+                              'w-full truncate rounded-row px-1.5 py-0.5 text-left font-mono text-caption text-ink-soft',
+                              pointed === rowKey(g, x.label) ? 'bg-paper-deep' : 'hover:bg-sub',
+                            )}
                           >
                             {x.label}
                           </Pressable>
