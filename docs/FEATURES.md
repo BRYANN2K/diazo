@@ -43,6 +43,31 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   UI synonyms ("login" finds "sign in") and ranks what is used most first. A library can let a
   model describe and tag its thin items (off by default, 200 a day, suggestions wait in the inbox).
   `scripts/pull-library.ts` copies a library from another Doop (see FORK.md).
+  The category tree the convert wizard proposes drops page numbers ("16 "), alphabetical splits
+  ("· A–L") and continuations, and folds the categories that then collide.
+- **Organise a library with AI** — Libraries → Organise with AI (also offered by the convert
+  wizard): tick several canvases, and a model on your own connected account reads their items,
+  folds the duplicates (same markup, or the same name and text across canvases; the first canvas
+  ticked wins), proposes ONE category tree of up to three levels from the items themselves (no
+  numbers, no A–L splits) and files every item, a family's cards together. You review it: counts and
+  thumbnails per category, rename, merge, move, remove, add, move items, see what stayed
+  unclassified and what is already in another of your libraries. Create library then makes a new
+  canvas with one page per category, the frames copied there in a tidy grid, and turns it into a
+  library with that tree; the canvases you picked are never changed. About one model call per 60
+  frames (7,000 frames ≈ 120 calls), resumable after a restart, retry from where a failed run
+  stopped. Agents can start one (`start_library_curation`) and read it (`get_library_curation`);
+  the human applies it.
+- **Start a library from scratch** — New library → Start empty: a name, what it is for, and starting
+  categories typed one per line (`Components/Buttons`) or suggested by your model from one line.
+  The gallery of an empty library says how to fill it: Add to library… on any frame (now with a
+  category), a website import then Add to library…, or an agent with `import_to_library`.
+- **"We already have it"** — every import into a library is checked against all your libraries
+  first: the same page (a website import's address, normalised: no tracking, scheme or `www`), a
+  copy of the same frame (every copy records where it came from) or the same content, or a near
+  copy (name and text sharing 80% of their words). Add to library… then shows "Already in
+  <library> → <category>: <item>" with Open, Import anyway and Add as a variant. Agents get the
+  match back from `import_to_library` instead of a second copy (with `force` / `as_variant_of` once
+  the human decides) and can ask first with `check_library`.
 - **Reference library** — store design-library items as references, find them with
   `find_references`, and attach them to plan cards (thumbnails, remove button, Settings card). Up to
   20 canvases; the workspace's design libraries come along without being picked. On a design

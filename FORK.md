@@ -70,6 +70,36 @@ relancer la même commande.
    relire `matched`, `onlyFrom`, `onlyTo`, puis relancer sans `dryRun`. Seule la curation de « Design
    Library » est écrite ; une seconde exécution ne change rien. Archiver ensuite « by function ».
 
+## Bibliothèques : en faire une seule avec l'IA (les 4 canvases)
+
+But : une bibliothèque propre à partir de « Design Library », « Design Library · A UI components »,
+« Design Library · B Sections & screens » et « Design Library · C Motion, type & effects ». Les
+quatre canvases ne sont jamais modifiés.
+
+1. Connecter un compte de modèle à soi (Settings → Doop Agent : clé Claude, ChatGPT…). La curation
+   tourne sur ce compte, jamais sur le tier serveur. Coût indicatif pour ~7 000 frames : environ
+   120 appels (1 pour l'arbre, 1 par lot de 60 items sur le petit modèle du compte, plus quelques
+   reprises).
+2. Rail → Libraries → « Organise with AI ». Cocher « Design Library » en premier (c'est sa copie
+   qui est gardée quand un design est en double), puis A, B, C. Nommer la bibliothèque, Start.
+3. Suivre la progression (lecture des canvases, arbre, classement). La fenêtre peut être fermée :
+   la tâche continue côté serveur et reprend après un redémarrage. Une erreur de compte la met en
+   échec : « Retry from where it stopped ».
+4. Relire l'arbre : renommer, fusionner (« Merge into… »), déplacer, supprimer une catégorie (ses
+   items deviennent non classés), déplacer des items. Onglets « Unclassified » et « Duplicates »
+   (doublons écartés, items déjà présents dans une autre bibliothèque).
+5. « Create library » : nouveau canvas, une page par catégorie, frames copiés en grille, puis
+   bibliothèque indexée. Option « Unsorted » pour garder les non classés.
+
+Par API (session) : `POST /api/library-curations { sourceIds: [...] }`, `GET /:id`,
+`GET /:id/plan`, `PATCH /:id/plan { edits }`, `POST /:id/apply`. Un agent peut lancer
+`start_library_curation` et lire `get_library_curation`, mais c'est l'humain qui applique.
+
+Avant tout import dans une bibliothèque, Doop vérifie qu'elle (ou une autre de tes bibliothèques)
+n'a pas déjà l'élément : même page importée, copie du même frame, même contenu, ou nom et texte
+presque identiques. « Add to library… » propose alors Open / Import anyway / Add as a variant ;
+les agents reçoivent le doublon au lieu d'importer, et peuvent demander d'abord avec `check_library`.
+
 ## PRs abandonnées
 
 | PR   | Raison                                                                                                                                                                                                                                                                                                                                                                                                                                        |

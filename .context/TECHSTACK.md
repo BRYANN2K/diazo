@@ -786,6 +786,32 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   linked by id, so they follow); an instance's row is not renamed on its own. Stored in `components`
   (migration `0052_components`). Tests: `components.test.ts`, `componentsEdgeCases.test.ts`,
   `componentTools.test.ts`, `componentsRoutes.test.ts`, `componentsBrowser.test.ts`.
+- AI library curation (`shared/libraryCuration.ts`, `server/libraryCuration.ts`,
+  `server/libraryCurationApply.ts`, `server/libraryCurationRoutes.ts`, spec section "AI curation"):
+  several source canvases become ONE proposed library. Gathering reads frames one at a time
+  (`renderableFrame`), drops section/title/index frames by the source's rules, folds duplicates
+  (`htmlSignature`, or label + text across sources) and groups a family's cards. The person's own
+  account (`accountTurnModels` in `server/agentModel.ts`: default connection, else the first one on;
+  never the server tier) proposes the tree (`parseTree`: three levels, cleaned names, capped
+  leaves; one retry, else `heuristicPlan` from the tidied page names) and its small tier files 60
+  items a call, three at once (`parseAssignments`; retry, split, second pass, then unclassified;
+  400 calls at most). Jobs live in `library_curations` (migration 0068, one JSON document), resumed
+  at boot. Review edits are pure (`editPlan`), the view is `planView`. Apply makes a new canvas,
+  pages named by category path (the page rule reads them back), shelf-packed copies, then
+  `createLibrary`; recorded per copy, idempotent. REST `/api/library-curations`; tools
+  `start_library_curation` / `get_library_curation`. "Start empty": `POST /api/libraries/new`,
+  `POST /api/libraries/suggest-categories` (`suggestCategories`). Tests: `libraryCuration.test.ts`,
+  `libraryCurationApply.test.ts`, `libraryCurationHttp.test.ts` (real server, the owner's Claude key on a
+  stub Messages API via `ANTHROPIC_BASE_URL`), `libraryCurationTools.test.ts`,
+  `libraryStartEmpty.test.ts`, `curateLibraryUi.test.tsx`, `newLibraryUi.test.tsx`.
+- Library duplicates (`shared/libraryProvenance.ts`, `server/libraryDuplicates.ts`): items carry
+  `source_key` (normalised page URL from `doop-import-source` / `data-doop-source-url`) and `origin`
+  (`data-doop-origin`, written on every import and curation copy) in `library_items` (migration
+  0069). `findDuplicates` checks candidates against every library the person can use: same-url,
+  same-content (origin, or the family hash under that library's rules), similar (word Jaccard ≥
+  0.8). `runImport` leaves matches out (`report.duplicates`) unless `force` / `asVariantOf`; `POST
+/api/libraries/check` and the read-only tool `check_library` answer "do we have it?". Tests:
+  `libraryDuplicates.test.ts`, `addToLibraryUi.test.tsx`.
 - Design libraries (`.context/specs/design-libraries.md`, plan in `.context/plans/design-libraries.md`):
   a canvas is a library when it has a `libraries` row (migration 0066: `libraries`, the rebuildable
   projection `library_items`, the curation `library_item_meta`), mirrored on `canvas.library`
