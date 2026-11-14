@@ -31,6 +31,7 @@ import { deleteLink, linkFor, localRepo, localRepoRouter, putLink, repoToolCall 
 import { buildHandoffPack, HandoffError } from './handoff.ts'
 import { CodeLinkError, deleteCodeLink, listCodeLinks, putCodeLink } from './codeLinks.ts'
 import { suggestCodeLinks } from './codeSuggest.ts'
+import { previewTokenSync, TokenSyncError } from './tokenSync.ts'
 import {
   CODE_LINK_KINDS,
   CODE_LINK_MAX_EXPORT,
@@ -1309,6 +1310,21 @@ app.delete('/api/canvases/:id/code-links/:kind/:targetId', async (req, res) => {
   const kind = req.params.kind
   if (!isCodeLinkKind(kind)) return res.status(400).json({ error: "kind must be 'component' or 'frame'" })
   res.json({ ok: await deleteCodeLink(c.id, kind, req.params.targetId!) })
+})
+
+/* ---- two-way token sync (shared/tokenSync.ts): the repo's CSS variables and
+   Tailwind theme, read through the caller's linked project and diffed
+   against the canvas's tokens. Reading only — nothing is applied here. */
+
+app.post('/api/canvases/:id/token-sync', async (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'edit')
+  if (!c) return
+  try {
+    res.json(await previewTokenSync(req.user!.id, c.id))
+  } catch (e) {
+    if (e instanceof TokenSyncError) return res.status(e.status).json({ error: e.message })
+    throw e
+  }
 })
 
 app.use('/api/admin', adminRouter)
