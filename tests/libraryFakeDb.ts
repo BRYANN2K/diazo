@@ -11,7 +11,9 @@ export const fakeDb = {
   meta: new Map<string, Map<string, LibraryItemMeta>>(),
   html: new Map<string, string>(),
   savedLibraries: [] as unknown[],
+  versions: [] as { frameId: string; html: string }[],
   reset() {
+    this.versions.length = 0
     this.items.clear()
     this.meta.clear()
     this.html.clear()
@@ -38,7 +40,9 @@ export function fakePersist() {
     saveFrame: () => {},
     saveFramePage: () => {},
     saveActivity: () => {},
-    saveFrameVersion: () => {},
+    saveFrameVersion: (v: { frameId: string; html: string }) => {
+      fakeDb.versions.push({ frameId: v.frameId, html: v.html })
+    },
     deleteFrame: () => {},
     deleteCanvas: () => {},
     frameWritePending: () => false,

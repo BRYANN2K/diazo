@@ -9,7 +9,8 @@ import express from 'express'
 import type { LibraryItemMeta, LibraryItemPatch, LibraryTaxonomy } from '../shared/library.ts'
 import { describeRules, parseLibraryRules, RULE_PRESETS, type RulePresetName } from '../shared/libraryRules.ts'
 import type { QueryFilters } from '../shared/librarySearch.ts'
-import { canManageCanvas } from './access.ts'
+import { canEditCanvas, canManageCanvas } from './access.ts'
+import { countUse, insertItem, InsertError } from './librarySnapshot.ts'
 import { resolveActor } from './actions.ts'
 import { store } from './store.ts'
 import { createLibrary, disableLibrary, getLibrary, libraryAllows, presetFor, updateLibrary } from './libraries.ts'
@@ -220,6 +221,49 @@ libraryRouter.get('/:id/items/:itemId/thumb.jpg', async (req, res) => {
     console.error('[libraries] thumbnail failed', error)
     res.status(500).json({ error: 'thumbnail failed' })
   }
+})
+
+/** Insert an item into a frame the caller may edit: the server snapshots
+ *  it (rendered, else static) and writes the frame. */
+libraryRouter.post('/:id/items/:itemId/insert', async (req, res) => {
+  const userId = req.user!.id
+  const found = libraryFor(userId, req.params.id)
+  if (!found) return notFound(res)
+  const out = await itemDetail(found.canvas, req.params.itemId, found.role)
+  if (!out) return res.status(404).json({ error: 'item not found' })
+  const frameId = String(req.body?.frameId ?? '')
+  const target = store.getFrame(frameId)
+  const targetCanvas = target && store.getCanvas(target.canvasId)
+  if (!target || !targetCanvas || !canEditCanvas(userId, targetCanvas))
+    return res.status(404).json({ error: 'frame not found' })
+  try {
+    const done = await insertItem({
+      item: out.item,
+      frameId,
+      ...(typeof req.body?.afterElementId === 'string' ? { afterElementId: req.body.afterElementId } : {}),
+      actor: actorOf(req),
+    })
+    res.json({
+      elementId: done.elementId,
+      fidelity: done.fidelity,
+      frameId: done.frame.id,
+      canvasId: done.frame.canvasId,
+      approvalWithdrawn: done.approvalWithdrawn,
+    })
+  } catch (error) {
+    if (error instanceof InsertError) return res.status(error.status).json({ error: error.message })
+    throw error
+  }
+})
+
+/** A browser insert counts as a use too. */
+libraryRouter.post('/:id/items/:itemId/used', async (req, res) => {
+  const found = libraryFor(req.user!.id, req.params.id)
+  if (!found) return notFound(res)
+  const out = await itemDetail(found.canvas, req.params.itemId, found.role)
+  if (!out) return res.status(404).json({ error: 'item not found' })
+  await countUse(out.item, req.user!.name)
+  res.json({ ok: true })
 })
 
 /** One item's frame HTML (one frame read, never the canvas). */

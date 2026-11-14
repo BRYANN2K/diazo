@@ -807,6 +807,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   background priority, stored under `lt/<canvasId>/<itemId>-<hash>.jpg` and served immutable for
   its hash; 404 while the item has no box, 503 when the renderer is busy, and the client
   (`src/components/library/ItemThumb.tsx`) then crops the frame preview with CSS.
+  Two insert paths, one block (`shared/libraryBlock.ts`, `data-doop-ref` / `-ref-lib` / `-ref-rev`):
+  ⌘F snapshots in the browser's preview iframe; the gallery and agents call
+  `POST /api/libraries/:id/items/:itemId/insert` (`server/librarySnapshot.ts`), which runs the same
+  preview runtime and snapshot (`shared/findPreviewRuntime.ts`, `shared/librarySnapshot.ts`) in the
+  headless browser, or, without one, reads the element by parse5 and keeps the frame's `<style>`
+  blocks whole under the scope (`fidelity: 'static'`). Either is one ordinary design write.
   REST under `/api/libraries` (`server/libraryRoutes.ts`, 30 searches per 10 s per account; never
   `store.load`); agent tools in `server/libraryTools.ts`, registered for MCP and the resident agent
   under the same names. ⌘F's Library scope (`src/lib/findLibrary.ts`, `src/lib/findRows.ts`,

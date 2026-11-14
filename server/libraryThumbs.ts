@@ -48,9 +48,9 @@ export interface ThumbDeps {
 }
 
 const serverDeps: ThumbDeps = {
-  render: renderFrame,
+  render: (frame, scale, opts) => renderFrame(frame, scale, opts),
   get: (key) => getObject(key),
-  put: putObject,
+  put: (key, body, mime) => putObject(key, body, mime),
   frame: (frameId) => store.renderableFrame(frameId),
 }
 

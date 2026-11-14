@@ -13,6 +13,7 @@ import type { ItemFocus } from './findPreviewRuntime'
 import { libraryBlock, REF_ATTR, REF_LIB_ATTR, REF_REV_ATTR, refId } from '../../shared/libraryBlock'
 import { snapshotLibraryItem } from './findSnapshot'
 import { saveFrameHtml } from './layerEdits'
+import { api } from './api'
 import type { LibraryItemSummary } from '../../shared/library'
 import { isInsertable } from './findLibrary'
 
@@ -170,6 +171,7 @@ export async function insertLibraryItem(opts: {
   const done = insertLibraryBlock(frame.html, opts.target.at, block)
   if (!done) return null
   saveFrameHtml(frame, done.html)
+  if (opts.libraryId) void api.libraryItemUsed(opts.libraryId, opts.ref).catch(() => {})
   s.select(frame.id)
   s.pickElement({ frameId: frame.id, selector: done.selector }, true)
   return {

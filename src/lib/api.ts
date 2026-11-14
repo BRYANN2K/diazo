@@ -1057,6 +1057,19 @@ export const api = {
     req<{ html: string; width: number; height: number; locator: ItemLocator; fidelity: string }>(
       `/api/libraries/${libraryId}/items/${encodeURIComponent(itemId)}/html`,
     ),
+  insertLibraryItem: (libraryId: string, itemId: string, target: { frameId: string; afterElementId?: string }) =>
+    req<{
+      elementId: string
+      fidelity: 'rendered' | 'static'
+      frameId: string
+      canvasId: string
+      approvalWithdrawn: boolean
+    }>(`/api/libraries/${libraryId}/items/${encodeURIComponent(itemId)}/insert`, {
+      method: 'POST',
+      body: JSON.stringify(target),
+    }),
+  libraryItemUsed: (libraryId: string, itemId: string) =>
+    req(`/api/libraries/${libraryId}/items/${encodeURIComponent(itemId)}/used`, { method: 'POST' }),
   setLibraryItemMeta: (libraryId: string, itemId: string, patch: LibraryItemPatch) =>
     req<LibraryItemDetail>(`/api/libraries/${libraryId}/items/${encodeURIComponent(itemId)}`, {
       method: 'PATCH',

@@ -168,6 +168,31 @@ describe('roles', () => {
   })
 })
 
+describe('inserting from the server', () => {
+  it('inserts into a frame the caller may edit, and 404s one they may not', async () => {
+    const project = (await (await owner.post('/api/canvases', { name: 'Project' })).json()).id
+    const frame = await (
+      await owner.post(`/api/canvases/${project}/frames`, {
+        name: 'Login',
+        html: '<!doctype html><html><body><main>Hi</main></body></html>',
+      })
+    ).json()
+    const res = await owner.post(`/api/libraries/${canvasId}/items/bk.scb-login-minimal-email-password/insert`, {
+      frameId: frame.id,
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(['rendered', 'static']).toContain(body.fidelity)
+    const after = await (await owner.get(`/api/frames/${frame.id}`)).json()
+    expect(after.html).toContain(`data-doop-id="${body.elementId}"`)
+    expect(after.html).toContain(`data-doop-ref-lib="${canvasId}"`)
+    /* the member reads the library but cannot edit the project */
+    const refused = await member.post(`/api/libraries/${canvasId}/items/bk.scb-login/insert`, { frameId: frame.id })
+    expect(refused.status).toBe(404)
+    expect((await owner.post(`/api/libraries/${canvasId}/items/bk.scb-login/used`)).status).toBe(200)
+  }, 60_000)
+})
+
 describe('no route loads a canvas', () => {
   it('reads one frame at a time', () => {
     for (const file of ['libraryRoutes.ts', 'libraryQueries.ts', 'libraryIndex.ts']) {

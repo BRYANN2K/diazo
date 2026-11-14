@@ -447,7 +447,7 @@ export const RENDER_SETTLE_MS = 1700
 const MAX_RENDERS = 2
 
 const serverRenderer: LibraryRenderer = {
-  available: rendererAvailable,
+  available: () => rendererAvailable(),
   async collect(frame, expression) {
     const loaded = await loadFramePage(frame, { priority: 'background' })
     try {
