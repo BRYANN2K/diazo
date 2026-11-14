@@ -32,6 +32,20 @@ The CI build uses `bun run --bun build` to match the `oven/bun` Docker build sta
 where `node` commands run with Bun. Extension tests also build with both runtimes
 and run the Bun-built archive under Node, including its nested runtime dependencies.
 
+## Local install on a Mac (Apple `container`, this fork)
+
+`scripts/install-local.sh` (POSIX sh, served from `raw.githubusercontent.com` on
+`bryann2k/main` as `curl -fsSL … | sh`) runs one container of
+`ghcr.io/bryann2k/doop:bryann2k-main` with Apple's `container` CLI on `127.0.0.1:4400`.
+No `DATABASE_URL`: PGlite and uploads live in `~/.doop/data`, mounted at `/app/data`;
+`BETTER_AUTH_SECRET` and `SECRETS_ENCRYPTION_KEYS` are generated on the Mac into
+`~/.doop/doop.env` (mode 600). Re-running it updates the image and recreates the container,
+keeping both. It copies itself to `~/.doop/bin/doop-local` (start, stop, restart, status, logs,
+update, uninstall). `.github/workflows/docker.yml` builds the image for `linux/amd64` and
+`linux/arm64` on native runners and merges the digests; without an arm64 manifest the script
+runs the amd64 image under Rosetta, and `--build` builds it locally. Tests:
+`installLocal.test.ts` (stub `container`, `uname`, `curl`; no container is started).
+
 ## Desktop app (Tauri: macOS DMG + Windows NSIS installer + Linux AppImage/.deb/.rpm)
 
 Driven by `.github/workflows/desktop-release.yml`; every desktop job shares the toolchain setup
