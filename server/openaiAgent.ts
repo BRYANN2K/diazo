@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type Anthropic from '@anthropic-ai/sdk'
 import type { ModelAccount } from './modelAccounts.ts'
 import { ModelStreamInterruptedError } from './modelTurnRetry.ts'
+import { fromResponsesUsage, type TokenUsage } from '../shared/usage.ts'
 
 /**
  * Runs one Doop Agent turn on OpenAI, speaking the Anthropic message shape
@@ -87,6 +88,8 @@ export interface TurnRequest {
 export interface TurnResult {
   content: TurnBlock[]
   stop_reason: StopReason
+  /** what the call consumed; absent when the provider reported nothing */
+  usage?: TokenUsage
 }
 
 /** The connection is no longer usable (revoked, expired past refresh, or the
@@ -231,6 +234,9 @@ function toTools(tools: Anthropic.Tool[]): unknown[] {
 
 interface ResponseBody {
   status?: string
+  /** the model that ran; the requested id stands in when absent */
+  model?: string
+  usage?: unknown
   incomplete_details?: { reason?: string }
   error?: { message?: string } | null
   output?: {
@@ -246,7 +252,7 @@ interface ResponseBody {
   }[]
 }
 
-function fromResponse(body: ResponseBody): TurnResult {
+function fromResponse(body: ResponseBody, model = ''): TurnResult {
   const content: TurnBlock[] = []
   let refused = false
   let toolCalls = 0
@@ -279,7 +285,8 @@ function fromResponse(body: ResponseBody): TurnResult {
   /* a response with nothing in it would end the loop silently; make it a
      visible failure instead */
   if (content.length === 0 && !refused) throw new Error('OpenAI returned an empty response')
-  return { content, stop_reason: stop }
+  const ran = body.model || model
+  return { content, stop_reason: stop, ...(body.usage && ran ? { usage: fromResponsesUsage(ran, body.usage) } : {}) }
 }
 
 /* ---------------------------------------------------------------- */
@@ -381,7 +388,7 @@ async function runChatgpt(account: ModelAccount, req: TurnRequest): Promise<Turn
     signal: req.signal,
   })
   if (!res.ok) throw await responseError(res, 'ChatGPT')
-  return fromResponse(await readEventStream(res))
+  return fromResponse(await readEventStream(res), modelFor(account))
 }
 
 /** One turn against a plain OpenAI API key. */
@@ -403,7 +410,7 @@ async function runApiKey(account: ModelAccount, req: TurnRequest): Promise<TurnR
     signal: req.signal,
   })
   if (!res.ok) throw await responseError(res, 'OpenAI')
-  return fromResponse((await res.json()) as ResponseBody)
+  return fromResponse((await res.json()) as ResponseBody, modelFor(account))
 }
 
 /** Everything one Azure OpenAI call needs, straight from the AZURE_OPENAI_*
@@ -443,7 +450,7 @@ export async function runAzureTurn(config: AzureConfig, req: TurnRequest): Promi
     signal: req.signal,
   })
   if (!res.ok) throw await responseError(res, 'Azure OpenAI')
-  return fromResponse((await res.json()) as ResponseBody)
+  return fromResponse((await res.json()) as ResponseBody, config.deployment)
 }
 
 const transports: Record<

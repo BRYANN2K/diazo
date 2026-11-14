@@ -12,6 +12,7 @@ import {
 } from './openaiAgent.ts'
 import type { StopReason, TurnBlock, TurnRequest, TurnResult } from './openaiAgent.ts'
 import type { CustomTokenParam } from '../shared/customProvider.ts'
+import { fromChatCompletionsUsage } from '../shared/usage.ts'
 
 /**
  * Runs one Doop Agent turn against an OpenAI-compatible Chat Completions
@@ -69,6 +70,8 @@ export interface ChatCompletionsConfig {
   echoReasoning?: boolean
   /** the field the output budget goes in; `max_tokens` when unset */
   tokenParam?: CustomTokenParam
+  /** true = ask for OpenRouter's usage accounting, which adds the billed cost */
+  usageAccounting?: boolean
   /** the transport for the request; the global fetch when unset */
   fetch?: (url: string, init: RequestInit) => Promise<Response>
 }
@@ -81,6 +84,7 @@ export function openrouterConfig(apiKey: string, model: string, vision: boolean)
     model,
     label: 'OpenRouter',
     vision,
+    usageAccounting: true,
   }
 }
 
@@ -247,6 +251,9 @@ function toTools(tools: Anthropic.Tool[]): unknown[] {
 /* ---------------------------------------------------------------- */
 
 interface CompletionBody {
+  /** the model that ran (OpenRouter names the routed one) */
+  model?: string
+  usage?: unknown
   /* OpenRouter reports some failures as an error object on a 200 */
   error?: { message?: string } | null
   choices?: {
@@ -260,7 +267,7 @@ interface CompletionBody {
   }[]
 }
 
-function fromCompletion(body: CompletionBody, label: string): TurnResult {
+function fromCompletion(body: CompletionBody, label: string, model = ''): TurnResult {
   if (body.error?.message) {
     throw isModelUnavailable(body.error.message)
       ? new ModelUnavailableError(`${label}: ${body.error.message}`)
@@ -300,7 +307,12 @@ function fromCompletion(body: CompletionBody, label: string): TurnResult {
      visible failure instead */
   if (!content.some((block) => block.type !== 'thinking') && !refused)
     throw new Error(`${label} returned an empty response`)
-  return { content, stop_reason: stop }
+  const ran = body.model || model
+  return {
+    content,
+    stop_reason: stop,
+    ...(body.usage && ran ? { usage: fromChatCompletionsUsage(ran, body.usage) } : {}),
+  }
 }
 
 /* ---------------------------------------------------------------- */
@@ -318,11 +330,12 @@ export async function runChatCompletionsTurn(config: ChatCompletionsConfig, req:
       tools: toTools(req.tools),
       tool_choice: 'auto',
       [config.tokenParam ?? 'max_tokens']: req.maxTokens,
+      ...(config.usageAccounting ? { usage: { include: true } } : {}),
     }),
     ...(req.signal ? { signal: req.signal } : {}),
   })
   if (!res.ok) throw await responseError(res, config.label)
-  return fromCompletion((await res.json()) as CompletionBody, config.label)
+  return fromCompletion((await res.json()) as CompletionBody, config.label, config.model)
 }
 
 /* exported for tests */

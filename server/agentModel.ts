@@ -5,6 +5,7 @@ import { geminiCloudRuns, geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
 import { isClaudeEffort, isClaudeModel, type LocalAgentResult } from '../shared/localAgent.ts'
 import type { RunnerPick } from '../shared/agentRunner.ts'
+import { fromAnthropicUsage, type TokenUsage } from '../shared/usage.ts'
 import Anthropic from '@anthropic-ai/sdk'
 import { withFreshToken, accountModelFor, accountVisionFor, accountWithPick, customModelFor } from './modelAccounts.ts'
 import type { AccountKind, BuiltinAccountKind, ModelAccount } from './modelAccounts.ts'
@@ -57,6 +58,8 @@ export interface AgentTurnRequest {
 export interface AgentTurnResult {
   content: TurnBlock[]
   stop_reason: StopReason
+  /** what the turn consumed, for the usage meter (shared/usage.ts) */
+  usage?: TokenUsage
 }
 
 export interface AgentModel {
@@ -140,7 +143,11 @@ export async function runAnthropicTurn(
         : res.stop_reason === 'tool_use'
           ? 'tool_use'
           : 'end_turn'
-  return { content: res.content as TurnBlock[], stop_reason: stop }
+  return {
+    content: res.content as TurnBlock[],
+    stop_reason: stop,
+    ...(res.usage ? { usage: fromAnthropicUsage(res.model || model, res.usage) } : {}),
+  }
 }
 
 function azureTier(): AgentModel | null {

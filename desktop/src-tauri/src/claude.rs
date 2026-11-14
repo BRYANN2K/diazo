@@ -838,8 +838,10 @@ fn run_cli(app: &AppHandle, job: &Value, cancel: Arc<AtomicBool>) -> Result<Valu
                 return;
             };
             if event["type"] == "result" {
+                // Token counts and cost only, never content: the usage meter prices the run.
+                let cli_usage = json!({"modelUsage":event["modelUsage"], "usage":event["usage"], "total_cost_usd":event["total_cost_usd"]});
                 final_result = Some(
-                    json!({"success":event["is_error"] == false && event["subtype"] == "success", "text":event["result"].as_str().unwrap_or("Claude did not complete the task. Check your login and usage limits, then retry.")}),
+                    json!({"success":event["is_error"] == false && event["subtype"] == "success", "text":event["result"].as_str().unwrap_or("Claude did not complete the task. Check your login and usage limits, then retry."), "cliUsage":cli_usage}),
                 );
             }
             // Send only human-readable progress; MCP headers and tool payloads stay out of UI events.

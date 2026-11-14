@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { api, ApiError } from './api'
 import { useStore } from './store'
-import type { LocalAgentJob, LocalAgentPreference, LocalAgentResult } from '../../shared/localAgent'
+import type { ClaudeRunOutput, LocalAgentJob, LocalAgentPreference, LocalAgentResult } from '../../shared/localAgent'
+import { fromClaudeCliResult } from '../../shared/usage'
 
 type NativeStatus = {
   installed: boolean
@@ -105,7 +106,9 @@ export function startLocalAgent(userId: string): () => void {
     useLocalAgent.setState({ running: true, progress: '', error: '' })
     let result: LocalAgentResult
     try {
-      result = await invokeClaude<LocalAgentResult>('claude_run', { userId, job })
+      const { cliUsage, ...output } = await invokeClaude<ClaudeRunOutput>('claude_run', { userId, job })
+      const usage = fromClaudeCliResult(cliUsage, job.model)
+      result = usage.length > 0 ? { ...output, usage } : output
     } catch (error) {
       result = { success: false, text: String(error) }
     }

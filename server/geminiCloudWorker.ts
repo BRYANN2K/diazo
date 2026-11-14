@@ -11,9 +11,14 @@ import {
   type GeminiCloudJob,
 } from '../shared/geminiCloud.ts'
 import { matchesSecret } from './geminiCloudRuns.ts'
+import { fromGeminiCliStats, type TokenUsage } from '../shared/usage.ts'
 
-const cliResultSchema = z.object({ response: z.string().max(100_000), error: z.unknown().optional() })
-type Result = { success: boolean; text: string }
+const cliResultSchema = z.object({
+  response: z.string().max(100_000),
+  error: z.unknown().optional(),
+  stats: z.unknown().optional(),
+})
+type Result = { success: boolean; text: string; usage?: TokenUsage[] }
 type Runner = (job: GeminiCloudJob, origin: string, signal: AbortSignal) => Promise<Result>
 
 /** Highest-precedence CLI settings. Only the run's Doop tools are available. */
@@ -119,10 +124,17 @@ export async function runGeminiCli(
         }
         try {
           const result = cliResultSchema.parse(JSON.parse(output))
+          /* counts only: the stats also hold tool names and timings, which stay here */
+          const usage = fromGeminiCliStats(result.stats)
+          const metered = usage.length > 0 ? { usage } : {}
           resolve(
             result.error
-              ? { success: false, text: 'Gemini CLI reported an error. Check the worker sign-in and quota.' }
-              : { success: true, text: result.response },
+              ? {
+                  success: false,
+                  text: 'Gemini CLI reported an error. Check the worker sign-in and quota.',
+                  ...metered,
+                }
+              : { success: true, text: result.response, ...metered },
           )
         } catch {
           resolve({ success: false, text: 'Gemini CLI returned an invalid result.' })
