@@ -244,7 +244,7 @@ function toComparison(row: typeof driftComparisons.$inferSelect): DriftCompariso
   }
 }
 
-async function saveComparison(record: DriftComparison): Promise<DriftComparison> {
+export async function saveComparison(record: DriftComparison): Promise<DriftComparison> {
   await db.insert(driftComparisons).values({
     id: record.id,
     canvasId: record.canvasId,
