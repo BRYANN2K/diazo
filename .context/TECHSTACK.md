@@ -325,7 +325,8 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - Server-side renderer (`server/renderBrowser.ts`, used by `server/screenshot.ts`): every headless
   Chromium page (frame images, MCP screenshots, the resident's checks, PDF
   exports, website imports) goes through one gate of `RENDER_CONCURRENCY` pages (default 4;
-  background thumbnails get at most 2, a waiting agent goes before a waiting thumbnail), a bounded
+  background work gets at most `RENDER_BACKGROUND_CONCURRENCY`, default 2 and always one below
+  the total, a waiting agent goes before a waiting thumbnail), a bounded
   queue that refuses with `RendererBusyError` (HTTP 503 + Retry-After) and a lease that closes a
   page held past 120s. A browser that cannot open a page within 15s is killed with its process
   group and the open retried once on a fresh launch; a render that fails like a browser failure
@@ -829,11 +830,30 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   2 background pages, 1.7 s for late scripts) runs `shared/libraryCollect.ts` in the headless page
   to read a scripted sheet's variants and every item's box. Variants only the page shows carry an
   `r:` hash and are kept across static reindexes until the next rendered pass.
-  Item images: `GET /api/libraries/:id/items/:itemId/thumb.jpg?v=<hash>` (`server/libraryThumbs.ts`):
-  the frame rendered clipped to the item's box plus 12 px, JPEG, 640 px on its longest side, at
-  background priority, stored under `lt/<canvasId>/<itemId>-<hash>.jpg` and served immutable for
-  its hash; 404 while the item has no box, 503 when the renderer is busy, and the client
-  (`src/components/library/ItemThumb.tsx`) then crops the frame preview with CSS.
+  Item images: `GET /api/libraries/:id/items/:itemId/thumb.jpg?v=<tag>` (`server/libraryThumbs.ts`),
+  the tag a digest of `THUMB_VERSION`, the item's hash and its box, stored under
+  `lt/<canvasId>/<safe id>-<id digest>-<tag>.jpg` (storage's key check admits that one folder) and
+  served immutable for its tag. What it shows (`server/libraryThumbClip.ts`,
+  `server/libraryThumbRender.ts`): a page probe (source string) finds the item's element (box,
+  `data-doop-id` or anchor; no box pictures the frame) and walks down past text-only rows naming
+  the item and short caption rows to the demo; the viewport widens when the demo lies past it (a
+  card cut from a wider sheet); fonts, a settle (1.8 s background, 1.2 s interactive), a pointer
+  brought to the demo's centre, CSS and Web Animations moved past their first frame; then sharp
+  trims the demo's own background (corner colour, edge band ignored) and frames the rest at 4:3
+  on it, 640x480 JPEG. A key being rendered is one shared promise; the items of a frame render on
+  one page. The prewarm (`server/libraryThumbQueue.ts`) renders what storage lacks
+  (`hasObject`) after an index run settles (`onLibraryIndexed`: full run and its rendered passes)
+  and at boot: one job per library, gallery order first, at background priority across every
+  library (`RENDER_BACKGROUND_CONCURRENCY`, default 2, always below `RENDER_CONCURRENCY`), a busy
+  renderer waited out; progress rides on `LibraryInfo.thumbs` (`{ ready, total, running }`).
+  The route's `requestThumb` awaits a render in flight or renders at interactive priority, a few
+  at once, else 503 with Retry-After 2 (10 when the renderer itself is busy); 404 when the frame
+  is gone. `ItemThumb` fetches only while on screen, six at a time (`src/lib/thumbLoader.ts`),
+  shows a skeleton, retries a 503 after Retry-After with backoff (five tries) and crops the frame
+  preview only on a real failure; the gallery polls "Preparing previews · N / M".
+  `scripts/library-thumb.ts` renders one item from an HTML file, before and after. Tests:
+  `libraryThumbs.test.ts`, `libraryThumbQueue.test.ts`, `libraryThumbClip.test.ts`,
+  `itemThumb.test.tsx`.
   Two insert paths, one block (`shared/libraryBlock.ts`, `data-doop-ref` / `-ref-lib` / `-ref-rev`):
   ⌘F snapshots in the browser's preview iframe; the gallery and agents call
   `POST /api/libraries/:id/items/:itemId/insert` (`server/librarySnapshot.ts`), which runs the same

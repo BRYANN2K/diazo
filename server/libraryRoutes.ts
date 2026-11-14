@@ -35,8 +35,7 @@ import { env } from './env.ts'
 import { itemMeta, libraryItems, previewIndex, reindexLibrary, saveMeta } from './libraryIndex.ts'
 import { settleSuggestion } from './libraryDescribe.ts'
 import { entryOf, itemDetail, libraryFor, readableLibraries, searchLibraries, summaryOf } from './libraryQueries.ts'
-import { NoThumbError, requestThumb, thumbTag, ThumbsBusyError } from './libraryThumbs.ts'
-import { RendererBusyError } from './renderBrowser.ts'
+import { requestThumb, thumbFailure, thumbTag } from './libraryThumbs.ts'
 import { cleanCategoryPaths, CurationError, suggestCategories } from './libraryCuration.ts'
 
 export const libraryRouter = express.Router()
@@ -431,14 +430,11 @@ libraryRouter.get('/:id/items/:itemId/thumb.jpg', async (req, res) => {
     res.set('Cache-Control', current ? 'private, max-age=31536000, immutable' : 'private, max-age=60')
     res.send(jpeg)
   } catch (error) {
-    if (error instanceof RendererBusyError) {
-      res.set('Retry-After', error instanceof ThumbsBusyError ? String(error.retryAfterS) : '10')
-      res.set('Cache-Control', 'no-store')
-      return res.status(503).json({ error: error.message })
-    }
-    if (error instanceof NoThumbError) return res.status(404).json({ error: error.message })
-    console.error('[libraries] thumbnail failed', error)
-    res.status(500).json({ error: 'thumbnail failed' })
+    const failure = thumbFailure(error)
+    if (failure.status === 500) console.error('[libraries] thumbnail failed', error)
+    if (failure.retryAfterS !== undefined) res.set('Retry-After', String(failure.retryAfterS))
+    res.set('Cache-Control', 'no-store')
+    res.status(failure.status).json({ error: failure.message })
   }
 })
 

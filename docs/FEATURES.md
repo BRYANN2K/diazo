@@ -68,6 +68,14 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   <library> → <category>: <item>" with Open, Import anyway and Add as a variant. Agents get the
   match back from `import_to_library` instead of a second copy (with `force` / `as_variant_of` once
   the human decides) and can ask first with `check_library`.
+- **Library previews that are ready** — after a library is indexed, and at boot, the server renders
+  the item thumbnails it does not have yet in the background (gallery order first, a few at a time,
+  never in the way of a person or an agent), and the gallery says "Preparing previews · N / M"
+  meanwhile. A thumbnail shows the item's demo, not its sheet card: the label strip and caption are
+  left out, scripted and animated demos are given time, a pointer over them and their animations
+  moved past the first frame, and the result is trimmed and framed at the tile's 4:3 on the demo's
+  own background. A tile loads only on screen, shows a skeleton, and waits out a busy renderer
+  instead of breaking. `RENDER_BACKGROUND_CONCURRENCY` sets how many pages that work may hold.
 - **Reference library** — store design-library items as references, find them with
   `find_references`, and attach them to plan cards (thumbnails, remove button, Settings card). Up to
   20 canvases; the workspace's design libraries come along without being picked. On a design

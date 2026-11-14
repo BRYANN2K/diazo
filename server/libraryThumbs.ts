@@ -188,7 +188,7 @@ export class ThumbsBusyError extends RendererBusyError {
 
 /** Thumbnails a person is waiting for, rendered at once at most: the rest
  *  of the pages stay for agents and screenshots. */
-export const GALLERY_RENDERS = Math.max(1, backgroundConcurrency)
+export const galleryRenderLimit = () => Math.max(1, backgroundConcurrency)
 let galleryRenders = 0
 
 /**
@@ -201,7 +201,7 @@ let galleryRenders = 0
 export async function requestThumb(
   item: LibraryItem,
   deps: ThumbDeps = serverThumbDeps,
-  limit = GALLERY_RENDERS,
+  limit = galleryRenderLimit(),
 ): Promise<Buffer> {
   const key = thumbKey(item.canvasId, item)
   const running = inflight.get(key)
@@ -217,4 +217,16 @@ export async function requestThumb(
   } finally {
     galleryRenders--
   }
+}
+
+/** How the gallery route answers a thumbnail it could not have: a busy
+ *  renderer is a 503 the client retries after Retry-After (2s when the
+ *  gallery's own share is full, 10s when the whole renderer is); a gone
+ *  frame is a 404 and anything else a 500, both final for the client,
+ *  which falls back on the frame's preview. */
+export function thumbFailure(error: unknown): { status: 503 | 404 | 500; retryAfterS?: number; message: string } {
+  if (error instanceof ThumbsBusyError) return { status: 503, retryAfterS: error.retryAfterS, message: error.message }
+  if (error instanceof RendererBusyError) return { status: 503, retryAfterS: 10, message: error.message }
+  if (error instanceof NoThumbError) return { status: 404, message: error.message }
+  return { status: 500, message: 'thumbnail failed' }
 }
