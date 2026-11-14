@@ -35,6 +35,7 @@ import type {
   ItemSuggestion,
 } from '../../shared/library'
 import type { RulePresetName } from '../../shared/libraryRules'
+import type { CurationEdit, CurationJobView, CurationPlanView, CurationSample } from '../../shared/libraryCuration'
 import type { CustomProviderConfig, CustomProviderKind } from '../../shared/customProvider'
 import type { NotificationPrefs, NotificationSettings } from '../../shared/notifications'
 import type { WebhookDeliveryResult, WebhookEventType, WebhookInfo } from '../../shared/webhooks'
@@ -1130,6 +1131,36 @@ export const api = {
     req<LibraryItemDetail>(`/api/libraries/${libraryId}/items/${encodeURIComponent(itemId)}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
+    }),
+  /* AI library curation (shared/libraryCuration.ts) */
+  curationSources: () =>
+    req<{ sources: { id: string; name: string; frames: number; library: boolean }[]; max: number }>(
+      '/api/library-curations/sources',
+    ),
+  listCurations: () => req<{ curations: CurationJobView[] }>('/api/library-curations'),
+  startCuration: (sourceIds: string[], name?: string) =>
+    req<CurationJobView>('/api/library-curations', {
+      method: 'POST',
+      body: JSON.stringify({ sourceIds, ...(name ? { name } : {}) }),
+    }),
+  curation: (id: string) => req<CurationJobView>(`/api/library-curations/${id}`),
+  curationPlan: (id: string) => req<CurationPlanView>(`/api/library-curations/${id}/plan`),
+  curationItems: (id: string, category: string, cursor?: string) =>
+    req<{
+      items: (CurationSample & { text: string; variants: number })[]
+      total: number
+      cursor?: string
+    }>(
+      `/api/library-curations/${id}/items?category=${encodeURIComponent(category)}${cursor ? `&cursor=${cursor}` : ''}`,
+    ),
+  editCuration: (id: string, edits: CurationEdit[]) =>
+    req<CurationPlanView>(`/api/library-curations/${id}/plan`, { method: 'PATCH', body: JSON.stringify({ edits }) }),
+  retryCuration: (id: string) => req<CurationJobView>(`/api/library-curations/${id}/retry`, { method: 'POST' }),
+  cancelCuration: (id: string) => req<CurationJobView>(`/api/library-curations/${id}/cancel`, { method: 'POST' }),
+  applyCuration: (id: string, includeUnclassified: boolean) =>
+    req<CurationJobView>(`/api/library-curations/${id}/apply`, {
+      method: 'POST',
+      body: JSON.stringify({ includeUnclassified }),
     }),
   findInCanvas: (canvasId: string, q: string, matchCase: boolean) =>
     req<CanvasFindResult>(`/api/canvases/${canvasId}/find?q=${encodeURIComponent(q)}${matchCase ? '&case=1' : ''}`),
