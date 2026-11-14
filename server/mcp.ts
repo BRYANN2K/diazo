@@ -1,5 +1,6 @@
 import { findInCanvas } from './canvasFind.ts'
 import { env } from './env.ts'
+import { MAX_SKILL_CHARS, MAX_SKILL_DESCRIPTION_CHARS, skillSlug } from '../shared/skills.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import packageJson from '../package.json' with { type: 'json' }
 import { createHash } from 'node:crypto'
@@ -675,6 +676,11 @@ export function buildMcpServer(
               'This canvas has style guides. Call get_guidelines for each relevant one BEFORE designing — every frame must follow them.',
             ]
           : []),
+        ...(c.skills?.length
+          ? [
+              'This canvas has skills: named know-how for tasks like yours. When your task matches a skill’s description, call get_skill with its name before you start and follow it.',
+            ]
+          : []),
         ...(library.length ? [libraryBrief(library)] : []),
         webFontsBrief(),
         ...(tokens.length ? [tokensBrief(tokens, tokenThemes)] : []),
@@ -702,6 +708,9 @@ export function buildMcpServer(
               summary: actions.guidelineSummary(d),
               bytes: d.markdown.length,
             })),
+            ...(c.skills?.length
+              ? { skills: c.skills.map((skill) => ({ name: skill.name, description: skill.description })) }
+              : {}),
             references: refs.map((r) => ({
               id: r.id,
               title: r.title,
@@ -723,6 +732,113 @@ export function buildMcpServer(
         canvas_id,
         shown,
       )
+    },
+  )
+
+  server.registerTool(
+    'list_skills',
+    {
+      title: 'List canvas skills',
+      description:
+        "List a canvas's skills: named know-how for recurring work (a saved brief, the house way to do a pricing page). Each has a description saying when to use it; load the matching one with get_skill before you start.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { canvas_id: z.string(), agent_name: agentName.optional() },
+    },
+    async ({ canvas_id, agent_name }) => {
+      if (!canvasFor(canvas_id, 'view')) return noCanvas(canvas_id)
+      const skills = store.getSkills(canvas_id)
+      return withFeedbackNotice(
+        text(
+          skills.length
+            ? {
+                skills: skills.map((skill) => ({
+                  name: skill.name,
+                  description: skill.description,
+                  bytes: skill.markdown.length,
+                  updatedAt: new Date(skill.updatedAt).toISOString(),
+                  updatedBy: skill.updatedBy,
+                })),
+              }
+            : { skills: [], note: 'No skills on this canvas yet. People add them in the canvas’s Memory panel.' },
+        ),
+        canvas_id,
+        agent_name ? actorFrom(agent_name) : undefined,
+      )
+    },
+  )
+
+  server.registerTool(
+    'get_skill',
+    {
+      title: 'Read a canvas skill',
+      description:
+        "Read one of the canvas's skills in full: instructions for a kind of task on this canvas. Call it when get_canvas or list_skills shows a skill whose description matches your task, and follow it.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        name: z.string().describe('Skill name from get_canvas / list_skills, e.g. "pricing-page"'),
+        agent_name: agentName.optional(),
+      },
+    },
+    async ({ canvas_id, name, agent_name }) => {
+      if (!canvasFor(canvas_id, 'view')) return noCanvas(canvas_id)
+      const skills = store.getSkills(canvas_id)
+      const skill = skills.find((s) => s.name === skillSlug(name.replace(/^\//, '')))
+      if (!skill)
+        return err(
+          skills.length
+            ? `no skill named “${name}” — this canvas has: ${skills.map((s) => s.name).join(', ')}`
+            : 'no skills on this canvas yet',
+        )
+      return withFeedbackNotice(
+        text(`# /${skill.name}\n\n${skill.description}\n\n${skill.markdown}`),
+        canvas_id,
+        agent_name ? actorFrom(agent_name) : undefined,
+      )
+    },
+  )
+
+  server.registerTool(
+    'set_skill',
+    {
+      title: 'Create or replace a canvas skill',
+      description:
+        'Create, replace or delete a named skill on a canvas: instructions agents load when their task matches the description. Use it when a human asks you to save how something is done here. An empty markdown deletes the skill.',
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        name: z.string().describe('Skill slug, e.g. "pricing-page" (a-z, 0-9, hyphens)'),
+        description: z
+          .string()
+          .max(MAX_SKILL_DESCRIPTION_CHARS)
+          .optional()
+          .describe('One line saying when to use it; required for a new skill'),
+        markdown: z.string().max(MAX_SKILL_CHARS).describe('The full instructions; empty string deletes the skill'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, name, description, markdown, agent_name }) => {
+      if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      if (!env.AGENT_GUIDELINE_WRITES)
+        return err(
+          'skills on this instance are written by people (AGENT_GUIDELINE_WRITES=false); propose the skill in a comment instead',
+        )
+      const actor = actorFrom(agent_name)
+      try {
+        const skill = actions.setSkill(
+          canvas_id,
+          { name, ...(description !== undefined ? { description } : {}), markdown },
+          actor,
+        )
+        if (skill === undefined) return noCanvas(canvas_id)
+        return withFeedback(
+          text(skill ? { ok: true, name: skill.name, bytes: skill.markdown.length } : { ok: true, deleted: true }),
+          canvas_id,
+          actor,
+        )
+      } catch (e) {
+        return err(e instanceof Error ? e.message : 'invalid skill')
+      }
     },
   )
 

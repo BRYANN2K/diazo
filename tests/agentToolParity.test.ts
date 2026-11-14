@@ -45,6 +45,9 @@ const MISSING = [
   'list_linear_issues', // integration tools, registered by their connections
   'get_linear_issue',
   'create_handoff', // the ready-for-dev pack lives behind the UI's write flow
+  'list_skills', // canvas skills: the resident's side lands with its skills brief
+  'get_skill',
+  'set_skill',
 ]
 
 async function mcpToolNames(): Promise<string[]> {

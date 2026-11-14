@@ -18,6 +18,15 @@ import {
 import { canvasPages } from '../shared/pages.ts'
 import { FRAME_COMMENT_SELECTOR, isCanvasComment, type CommentAnchorInput } from '../shared/comments.ts'
 import { isElementId } from '../shared/elementId.ts'
+import {
+  MAX_SKILL_CHARS,
+  MAX_SKILL_DESCRIPTION_CHARS,
+  MAX_SKILLS,
+  SKILL_NAME_RE,
+  invokedSkills,
+  skillSlug,
+  type CanvasSkill,
+} from '../shared/skills.ts'
 import { parseRunnerPick, runnerKey, type RunnerPick } from '../shared/agentRunner.ts'
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
@@ -2674,6 +2683,66 @@ export function patchGuideline(
   broadcast(canvasId, { type: 'guidelines', name: doc.name, doc, actor })
   if (clean.title !== undefined) logActivity(canvasId, actor, `renamed a design guide to “${guidelineTitle(doc)}”`)
   return true
+}
+
+/* ------------------------------------------------------------------ */
+/* Canvas skills (shared/skills.ts): named know-how agents load on     */
+/* demand. Same write gate as guidelines: they become instructions.    */
+/* ------------------------------------------------------------------ */
+
+/** Upsert a skill, or delete it with an empty body. Returns the skill, null
+ *  for a deletion, undefined when the canvas is missing; throws with a
+ *  message meant for the caller on invalid input. */
+export function setSkill(
+  canvasId: string,
+  input: { name: string; description?: string; markdown: string },
+  actor: Actor,
+): CanvasSkill | null | undefined {
+  const name = skillSlug(input.name)
+  if (!SKILL_NAME_RE.test(name))
+    throw new Error(`invalid skill name “${input.name}” — use a lowercase slug like "pricing-page"`)
+  const markdown = input.markdown.replace(/\r\n/g, '\n').trim()
+  const existing = store.getSkills(canvasId).find((s) => s.name === name)
+  if (!markdown) {
+    if (!store.deleteSkill(canvasId, name)) return store.getCanvas(canvasId) ? null : undefined
+    broadcast(canvasId, { type: 'skill', name, skill: null, actor })
+    logActivity(canvasId, actor, `deleted the skill /${name}`)
+    touch(canvasId, actor)
+    return null
+  }
+  if (markdown.length > MAX_SKILL_CHARS)
+    throw new Error(`skill is ${markdown.length} chars — the limit is ${MAX_SKILL_CHARS}`)
+  const description = (input.description ?? existing?.description ?? '').replace(/\s+/g, ' ').trim()
+  if (!description) throw new Error('a skill needs a description: one line saying when to use it')
+  if (description.length > MAX_SKILL_DESCRIPTION_CHARS)
+    throw new Error(`the description is ${description.length} chars — the limit is ${MAX_SKILL_DESCRIPTION_CHARS}`)
+  if (!existing && store.getSkills(canvasId).length >= MAX_SKILLS)
+    throw new Error(`this canvas already has ${MAX_SKILLS} skills — delete one first`)
+  const skill = store.setSkill(canvasId, { name, description, markdown }, actor.name)
+  if (!skill) return undefined
+  broadcast(canvasId, { type: 'skill', name, skill, actor })
+  logActivity(canvasId, actor, `${existing ? 'updated' : 'added'} the skill /${name}`)
+  touch(canvasId, actor)
+  return skill
+}
+
+/** The `# Canvas skills` block an agent's prompt carries: the list it picks
+ *  from, then the full text of the skills the ask names as `/name`. */
+export function skillsBrief(canvasId: string, askText: string): string {
+  const skills = store.getSkills(canvasId)
+  if (!skills.length) return ''
+  const invoked = invokedSkills(askText, skills)
+  const list = skills.map((s) => `- ${s.name}: ${s.description}`).join('\n')
+  const loaded = invoked
+    .map((name) => skills.find((s) => s.name === name))
+    .filter((s): s is CanvasSkill => !!s)
+    .map((s) => `## /${s.name}\n\n${s.markdown}`)
+    .join('\n\n')
+  return (
+    `# Canvas skills\nThis canvas keeps named know-how for its agents. When your task matches a skill's description, ` +
+    `call get_skill with its name before you start and follow it.\n\n${list}` +
+    (loaded ? `\n\nThe person asked for these skills, already loaded — follow them:\n\n${loaded}` : '')
+  )
 }
 
 /* Per-process memory of which agents have read a canvas's design docs —

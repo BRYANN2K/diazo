@@ -1,3 +1,4 @@
+import type { CanvasSkill } from '../shared/skills.ts'
 import { nanoid } from 'nanoid'
 import { canvasPages, copyPageName, pageFrames, samePages } from '../shared/pages.ts'
 import * as persist from './db/persist.ts'
@@ -347,6 +348,7 @@ class Store {
       updatedBy: by,
     }))
     const guidelines = source.guidelines?.map((doc) => ({ ...doc, updatedAt: now, updatedBy: by }))
+    const skills = source.skills?.map((skill) => ({ ...skill, updatedAt: now, updatedBy: by }))
     const tokens = source.tokens?.map((token) => ({ ...token, updatedAt: now, updatedBy: by }))
     const references = source.references?.map((ref) => ({
       ...ref,
@@ -369,6 +371,7 @@ class Store {
       ...(source.guides?.length ? { guides: source.guides.map((guide) => ({ ...guide })) } : {}),
       ...(options.workspaceId ? { workspaceId: options.workspaceId } : {}),
       ...(guidelines?.length ? { guidelines } : {}),
+      ...(skills?.length ? { skills } : {}),
       /* same ids: the markers in the copied frames keep pointing at them */
       ...(source.components?.length
         ? {
@@ -725,6 +728,39 @@ class Store {
     if (!c?.components || at === -1) return false
     c.components.splice(at, 1)
     persist.deleteComponent(canvasId, id)
+    return true
+  }
+
+  getSkills(canvasId: string): CanvasSkill[] {
+    return this.canvases.get(canvasId)?.skills ?? []
+  }
+
+  /** Upsert a skill by name, kept sorted by name. */
+  setSkill(canvasId: string, skill: Omit<CanvasSkill, 'updatedAt' | 'updatedBy'>, by: string): CanvasSkill | undefined {
+    const c = this.canvases.get(canvasId)
+    if (!c) return undefined
+    const skills = (c.skills ??= [])
+    const now = Date.now()
+    const next: CanvasSkill = { ...skill, updatedAt: now, updatedBy: by }
+    const at = skills.findIndex((s) => s.name === skill.name)
+    if (at === -1) {
+      skills.push(next)
+      skills.sort((a, b) => a.name.localeCompare(b.name))
+    } else skills[at] = next
+    c.updatedAt = now
+    persist.saveSkill(canvasId, next)
+    persist.saveCanvas(c)
+    return next
+  }
+
+  deleteSkill(canvasId: string, name: string): boolean {
+    const c = this.canvases.get(canvasId)
+    const at = c?.skills?.findIndex((s) => s.name === name) ?? -1
+    if (!c?.skills || at === -1) return false
+    c.skills.splice(at, 1)
+    c.updatedAt = Date.now()
+    persist.deleteSkill(canvasId, name)
+    persist.saveCanvas(c)
     return true
   }
 
