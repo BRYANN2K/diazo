@@ -91,4 +91,11 @@ export const library = {
   status: 'Status',
   save: 'Salvar',
   noFindings: 'Nenhuma regra sinalizou este item.',
+  useIn: 'Usar em « {name} »',
+  useInCanvas: 'Usar num canvas…',
+  useFailed: 'Não foi possível inserir este item.',
+  pickFrameTitle: 'Qual frame?',
+  pickFramePlaceholder: 'Escolha um frame',
+  insert: 'Inserir',
+  openLibraries: 'Abrir as bibliotecas de design',
 } as const

@@ -16,6 +16,7 @@ import { LibraryFacets } from '../components/library/LibraryFacets'
 import { LibraryGrid } from '../components/library/LibraryGrid'
 import { LibraryItemTile } from '../components/library/LibraryItemTile'
 import { LibraryItemView } from '../components/library/LibraryItemView'
+import { UseItemButton, type GalleryOrigin } from '../components/library/UseItemButton'
 import { Button } from '../components/ui/button'
 import { Kbd } from '../components/ui/kbd'
 import { SearchField } from '../components/ui/search-field'
@@ -25,10 +26,10 @@ import { DashContent, DashHeader, DashLayout, DashMain, DashTitle } from '../com
 const PAGE = 60
 
 /** Where the gallery was opened from: a canvas and its selected frame. */
-export function galleryOrigin(search: string): { from: string; frame: string | null } | null {
+export function galleryOrigin(search: string): GalleryOrigin | null {
   const p = new URLSearchParams(search)
   const from = p.get('from')
-  return from ? { from, frame: p.get('frame') } : null
+  return from ? { from, frame: p.get('frame'), frameName: p.get('fname') } : null
 }
 
 /**
@@ -63,9 +64,14 @@ export function LibraryPage({ libraryId, itemId }: { libraryId: string; itemId: 
   /* the view in the URL, without a history entry per keystroke */
   const from = origin?.from ?? null
   const fromFrame = origin?.frame ?? null
+  const fromName = origin?.frameName ?? null
   useEffect(() => {
-    history.replaceState(null, '', `${location.pathname}${galleryQueryString(query, { from, frame: fromFrame })}`)
-  }, [query, from, fromFrame])
+    history.replaceState(
+      null,
+      '',
+      `${location.pathname}${galleryQueryString(query, { from, frame: fromFrame, fname: fromName })}`,
+    )
+  }, [query, from, fromFrame, fromName])
 
   const fetchPage = useCallback(
     (cursor?: string) => {
@@ -188,6 +194,7 @@ export function LibraryPage({ libraryId, itemId }: { libraryId: string; itemId: 
               itemId={itemId}
               curator={curator}
               onClose={() => navigate(`/l/${libraryId}${location.search}`)}
+              renderUse={(item) => <UseItemButton libraryId={libraryId} item={item} origin={origin} />}
             />
           )}
         </DashContent>

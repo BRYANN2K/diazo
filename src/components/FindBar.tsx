@@ -656,7 +656,11 @@ export function FindBar({
             const frame = useStore.getState().selectedId
             const params = new URLSearchParams({ q: query.trim() })
             if (from && from !== lib) params.set('from', from)
-            if (from && from !== lib && frame) params.set('frame', frame)
+            if (from && from !== lib && frame) {
+              params.set('frame', frame)
+              const name = useStore.getState().canvas?.frames.find((f) => f.id === frame)?.name
+              if (name) params.set('fname', name)
+            }
             if (lib) navigate(`/l/${lib}?${params}`)
           }}
         >

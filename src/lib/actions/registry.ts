@@ -56,6 +56,7 @@ import {
   ungroupSelection,
 } from './edits'
 import { promptMakeComponent } from '../components'
+import { navigate } from '../navigate'
 
 /** What the canvas page lends the registry: its own modals and panels. */
 export interface ActionHost {
@@ -225,6 +226,17 @@ export const ACTIONS: readonly CanvasAction[] = [
     section: 0,
     enabled: () => !h()?.guest,
     run: () => h()?.duplicateCanvas(),
+  },
+  {
+    id: 'library-open',
+    label: 'library.openLibraries',
+    menu: 'file',
+    section: 0,
+    enabled: () => !h()?.guest,
+    run: () => {
+      const canvas = store().canvas
+      navigate(canvas?.library ? `/l/${canvas.id}` : '/libraries')
+    },
   },
   {
     id: 'library-convert',

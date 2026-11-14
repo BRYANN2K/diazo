@@ -63,6 +63,7 @@ import { ShortcutsSheet } from '../components/ShortcutsSheet'
 import { ConvertToLibraryModal } from '../components/library/ConvertToLibraryModal'
 import { FindBar } from '../components/FindBar'
 import { InsertedBlockBox } from '../components/InsertedBlockBox'
+import { pickInsertedBlock } from '../lib/insertedBox'
 import { LinkDialog } from '../components/LinkDialog'
 import { FrameHistoryModal } from '../components/FrameHistoryModal'
 import { getIdentity, setName } from '../lib/identity'
@@ -316,6 +317,29 @@ export function CanvasPage({
       live = false
     }
   }, [driftLink, driftLinkReady])
+  /* ?inserted=<element id>&ref=<item> (the gallery's "Use"): once the block
+     is on the canvas it is picked and its box opens; the flags then go */
+  const [insertedLink] = useState(() => {
+    const params = new URLSearchParams(location.search)
+    const elementId = params.get('inserted')
+    const frameId = params.get('frame')
+    return elementId && frameId ? { elementId, frameId, ref: params.get('ref') ?? elementId } : null
+  })
+  const insertedReady = useStore(
+    (s) =>
+      !!insertedLink &&
+      !!s.canvas?.frames.some(
+        (f) => f.id === insertedLink.frameId && f.html.includes(`data-doop-id="${insertedLink.elementId}"`),
+      ),
+  )
+  useEffect(() => {
+    if (!insertedLink || !insertedReady) return
+    const url = new URL(location.href)
+    url.searchParams.delete('inserted')
+    url.searchParams.delete('ref')
+    history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`)
+    pickInsertedBlock(insertedLink)
+  }, [insertedLink, insertedReady])
   const [showShare, setShowShare] = useState(false)
   /* the frame the player was launched on, while presenting */
   const [presenting, setPresenting] = useState<string | null>(null)

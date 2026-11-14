@@ -22,7 +22,10 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   the frame names (`<id> — <label>`), `§` section frames and the sheets' cells, or from
   `data-doop-item` / `data-doop-variant` markers. Converting changes no frame. ⌘F has a Library
   scope answered by the index: one row per family, its variants under it, kind chips, and insert
-  as before. The Libraries page (rail → Libraries, `/libraries`) lists them as tiles.
+  as before. The Libraries page (rail → Libraries, `/libraries`) lists them as tiles; a library's gallery
+  (`/l/<id>`) filters by kind, category and search and opens an item with every variant side by side;
+  "Use" inserts it into the frame the gallery was opened from (⌘F → Open in gallery), or into a
+  canvas and frame picked there, and the canvas opens with the block picked.
   Agents call `list_libraries`, `get_library`, `search_library` and `get_library_item`.
 - **Reference library** — store design-library items as references, find them with
   `find_references`, and attach them to plan cards (thumbnails, remove button, Settings card).
