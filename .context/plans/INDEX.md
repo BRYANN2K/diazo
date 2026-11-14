@@ -12,3 +12,6 @@ lists every file in this folder.
 - [ai-dev-features.md](ai-dev-features.md) - Build order for the AI-dev ideas 2-16 (canvas skills, frame
   checks, usage meter, run replay, model duel, code mapping, token sync, frame → code, Built page, CLI, Pad
   link): one `feat/*` branch each, and what depends on what.
+- [design-libraries.md](design-libraries.md) - Nine phases, 40 test-first steps on `feat/design-libraries`:
+  convert + index + ⌘F as the first slice, then rendered extraction, the gallery, import rules, agent tools,
+  sharing, migration and scale, with the executor rules, dependencies and risk register.
