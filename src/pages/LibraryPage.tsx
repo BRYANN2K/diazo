@@ -18,6 +18,15 @@ import { LibraryItemTile } from '../components/library/LibraryItemTile'
 import { LibraryItemView } from '../components/library/LibraryItemView'
 import { UseItemButton, type GalleryOrigin } from '../components/library/UseItemButton'
 import { Button } from '../components/ui/button'
+import { MenuButton } from '../components/ui/menu-button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../components/ui/dropdown-menu'
+import { Sheet, SheetContent, SheetTitle } from '../components/ui/sheet'
+import { LibrarySettings } from '../components/library/LibrarySettings'
 import { Kbd } from '../components/ui/kbd'
 import { SearchField } from '../components/ui/search-field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
@@ -49,6 +58,7 @@ export function LibraryPage({ libraryId, itemId }: { libraryId: string; itemId: 
     cursor?: string
   } | null>(null)
   const [live, setLive] = useState<string | null>(null)
+  const [panel, setPanel] = useState<'settings' | 'inbox' | null>(null)
   const guard = useRef(staleGuard())
   const asked = useRef(new Set<string>())
   const searchRef = useRef<HTMLInputElement>(null)
@@ -159,6 +169,22 @@ export function LibraryPage({ libraryId, itemId }: { libraryId: string; itemId: 
           <Button size="bar" onClick={() => navigate(`/c/${libraryId}`)}>
             {t('library.openCanvas')}
           </Button>
+          {curator && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <MenuButton aria-label={t('library.menu')}>{t('library.menu')}</MenuButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent width="md" align="end">
+                {detail?.role === 'manage' && (
+                  <DropdownMenuItem onSelect={() => setPanel('settings')}>{t('library.settings')}</DropdownMenuItem>
+                )}
+                <DropdownMenuItem onSelect={() => setPanel('inbox')}>{t('library.inbox')}</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void api.reindexLibrary(libraryId)}>
+                  {t('library.reindex')}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </DashHeader>
         <DashContent className="flex min-h-0 flex-1 flex-col pt-2 md:pt-3">
           <DashTitle className="mb-4">{detail?.name ?? (missing ? t('library.notFound') : '')}</DashTitle>
@@ -188,6 +214,18 @@ export function LibraryPage({ libraryId, itemId }: { libraryId: string; itemId: 
               )}
             />
           </div>
+          {panel && detail && (
+            <Sheet open onOpenChange={(open) => !open && setPanel(null)}>
+              <SheetContent side="right" className="w-[min(1100px,100vw)] overflow-y-auto p-5 sm:max-w-none">
+                <SheetTitle>{panel === 'settings' ? t('library.settings') : t('library.inbox')}</SheetTitle>
+                {panel === 'settings' ? (
+                  <LibrarySettings detail={detail} onChanged={() => void fetchPage().catch(() => {})} />
+                ) : (
+                  <span data-inbox />
+                )}
+              </SheetContent>
+            </Sheet>
+          )}
           {itemId && (
             <LibraryItemView
               libraryId={libraryId}

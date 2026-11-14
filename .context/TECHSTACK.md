@@ -819,6 +819,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   a windowed grid through `src/hooks/use-windowed-grid.ts`) and the Layers panel's Library tab
   (`LibraryPanel.tsx`, shown once the person has a library; its pick is kept per browser under
   `doop:library-panel`).
+  Rules live on the library row (`libraries.rules`, versioned, read through `parseLibraryRules`); only
+  a manager (`canManageCanvas`) changes them, from the gallery's Settings sheet
+  (`LibrarySettings.tsx`, `LibraryRulesForm.tsx`: one card per rule group, a dry run of the edited
+  rules 400 ms after the last edit), and a change bumps `rules_version` and reindexes.
   REST under `/api/libraries` (`server/libraryRoutes.ts`, 30 searches per 10 s per account; never
   `store.load`); agent tools in `server/libraryTools.ts`, registered for MCP and the resident agent
   under the same names. ⌘F's Library scope (`src/lib/findLibrary.ts`, `src/lib/findRows.ts`,
