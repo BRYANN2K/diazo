@@ -40,6 +40,8 @@ import { capture, captureThrottled } from './analytics.ts'
 import { renderFrame } from './screenshot.ts'
 import { lintAndStore } from './lint.ts'
 import { buildHandoffPack, HandoffError } from './handoff.ts'
+import { CodeLinkError, SET_CODE_LINK_DESCRIPTION, setCodeLinkTool } from './codeLinks.ts'
+import { CODE_LINK_MAX_EXPORT, CODE_LINK_MAX_PATH } from '../shared/codeLinks.ts'
 import { imagesForFrames } from './assets.ts'
 import type { FrameImage } from '../shared/imageDescriptions.ts'
 import { renderedHeight } from './renderLimits.ts'
@@ -2447,6 +2449,37 @@ export function buildMcpServer(
       } catch (e) {
         if (e instanceof HandoffError) return err(e.message)
         return err(`handoff failed: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    },
+  )
+
+  server.registerTool(
+    'set_code_link',
+    {
+      title: 'Map a component or frame to its file',
+      description: SET_CODE_LINK_DESCRIPTION,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        component: z.string().optional().describe('Component name or id — or pass frame_id'),
+        frame_id: z.string().optional().describe('A frame (a screen or a page) — or pass component'),
+        path: z
+          .string()
+          .max(CODE_LINK_MAX_PATH)
+          .nullable()
+          .describe('Repo-relative file, e.g. "src/components/Button.tsx"; null clears the mapping'),
+        export_name: z.string().max(CODE_LINK_MAX_EXPORT).optional().describe('The export, e.g. "Button" or "default"'),
+        agent_name: agentName.optional(),
+      },
+    },
+    async (input) => {
+      if (!canvasFor(input.canvas_id, 'edit')) return noCanvas(input.canvas_id)
+      arrive(input.canvas_id, input.agent_name)
+      try {
+        return text(await setCodeLinkTool(input.canvas_id, input, actorFrom(input.agent_name).name))
+      } catch (e) {
+        if (e instanceof CodeLinkError) return err(e.message)
+        throw e
       }
     },
   )

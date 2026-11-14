@@ -1083,6 +1083,27 @@ export const driftComparisons = pgTable(
   (t) => [index('drift_comparisons_frame_idx').on(t.frameId)],
 )
 
+/** Where a component or a frame lives in the linked repo (shared/codeLinks.ts):
+ *  a repo-relative path plus the export name. Canvas-level, one row per
+ *  target; the repo itself is never read to store it. */
+export const codeLinks = pgTable(
+  'code_links',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    /** 'component' | 'frame' */
+    targetKind: text('target_kind').notNull(),
+    targetId: text('target_id').notNull(),
+    path: text('path').notNull(),
+    exportName: text('export_name'),
+    /** 'manual' | 'suggested' | 'generated' — how the mapping was made */
+    source: text('source').notNull(),
+    updatedBy: text('updated_by').notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [uniqueIndex('code_links_target_idx').on(t.canvasId, t.targetKind, t.targetId)],
+)
+
 /** The instance's sign-in policy (shared/instanceSettings.ts): one row, id
  *  'instance', written by admins in Admin → Sign-in and read into memory at
  *  boot. Absent row = the defaults. */
