@@ -250,6 +250,9 @@ function handle(msg: ServerMessage) {
     case 'frame:lint':
       s.patchFrameLocal(msg.frameId, { lint: msg.lint })
       break
+    case 'frame:checks':
+      s.patchFrameLocal(msg.frameId, { checks: msg.checks })
+      break
     case 'frame:deleted':
       s.removeFrame(msg.frameId)
       break

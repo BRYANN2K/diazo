@@ -22,6 +22,7 @@ import { ui } from './ui'
 import { components } from './components'
 import { actions } from './actions'
 import { lint } from './lint'
+import { checks } from './checks'
 import { handoff } from './handoff'
 
 /** The source catalog, one namespace per area of the app. */
@@ -50,5 +51,6 @@ export const en = {
   components,
   actions,
   lint,
+  checks,
   handoff,
 }

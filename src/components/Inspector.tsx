@@ -22,6 +22,7 @@ import { Textarea } from './ui/textarea'
 import { NumberField, PropertyScrubContext } from './ui/property-field'
 import { normalizeRotation } from '../../shared/frameRotation'
 import { MIN_FRAME_SIZE } from '../lib/frameResize'
+import { checksAreCurrent, runFrameChecksNow } from '../lib/frameChecks'
 import { t as translate, useT } from '../lib/i18n'
 
 const HTML_OPEN_KEY = 'doop:inspector-html'
@@ -302,6 +303,7 @@ export function Inspector({
         </PropertyScrubContext.Provider>
         <InspectorGroup title={t('lint.groupQuality')}>
           <FrameLintIssues frame={frame} />
+          <FrameChecksSummary frame={frame} canRun={canEdit} />
         </InspectorGroup>
         <InspectorGroup title={t('inspector.groupExport')}>
           <div className="grid grid-cols-2 gap-1.5">
@@ -477,6 +479,101 @@ function FrameLintIssues({ frame }: { frame: Frame }) {
         </li>
       ))}
     </ul>
+  )
+}
+
+/** The frame checks (375 / 768 / 1440 + keyboard walk): one line per width,
+ *  the keyboard summary, then each issue — clicking one selects the element
+ *  it blames, as with the lint. */
+function FrameChecksSummary({ frame, canRun }: { frame: Frame; canRun: boolean }) {
+  const t = useT()
+  const pickElement = useStore((s) => s.pickElement)
+  const [running, setRunning] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const checks = frame.checks
+  const run = async () => {
+    setRunning(true)
+    setFailed(false)
+    const ok = await runFrameChecksNow(frame.id)
+    setRunning(false)
+    setFailed(!ok)
+  }
+  return (
+    <div className="mt-2 flex flex-col gap-1 border-t border-line-soft pt-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[12px] font-medium text-ink">{t('checks.heading')}</span>
+        {canRun && (
+          <Button variant="bare" size="inline" disabled={running} onClick={() => void run()}>
+            {running ? t('checks.running') : t('checks.run')}
+          </Button>
+        )}
+      </div>
+      {failed && <p className="m-0 text-[12px] text-warning-ink">{t('checks.runFailed')}</p>}
+      {!checks ? (
+        <p className="m-0 text-[12px] text-ink-faint">{t('checks.notChecked')}</p>
+      ) : (
+        <>
+          {!checksAreCurrent(frame) && <p className="m-0 text-[12px] text-ink-faint">{t('checks.stale')}</p>}
+          <ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-[12px] text-ink-soft">
+            {checks.viewports.map((vp) => (
+              <li key={vp.width} className="flex justify-between gap-2">
+                <span className="font-medium text-ink">{t('checks.widthRow', { width: vp.width })}</span>
+                <span>
+                  {vp.issues === 0 ? t('checks.widthClean') : t('checks.widthIssues', { count: vp.issues })}
+                  {vp.overflowPx > 0 && ` · ${t('checks.widthOverflow', { px: vp.overflowPx })}`}
+                </span>
+              </li>
+            ))}
+            <li>
+              {checks.focus
+                ? t('checks.focusSummary', {
+                    reached: checks.focus.reached,
+                    focusables: checks.focus.focusables,
+                    hidden: checks.focus.withoutVisibleFocus,
+                  })
+                : t('checks.focusUnavailable')}
+            </li>
+          </ul>
+          {checks.issues.length === 0 ? (
+            <p className="m-0 text-[12px] text-success-ink">{t('checks.noIssues')}</p>
+          ) : (
+            <ul className="m-0 flex list-none flex-col gap-1 p-0">
+              {checks.issues.map((issue, i) => (
+                <li key={`${issue.ruleId}-${i}`}>
+                  <button
+                    type="button"
+                    className="flex w-full items-start gap-1.5 rounded-[6px] px-1 py-0.5 text-left text-[12px] hover:bg-sub"
+                    title={issue.selector ? t('lint.pickIssueTitle') : undefined}
+                    onClick={() => issue.selector && pickElement({ frameId: frame.id, selector: issue.selector })}
+                  >
+                    <span
+                      className={cn(
+                        'mt-0.5 shrink-0 rounded-tag px-1 py-px text-micro font-medium',
+                        issue.severity === 'error' ? 'bg-warning/[0.12] text-warning-ink' : 'bg-sub text-ink-faint',
+                      )}
+                    >
+                      {issue.severity === 'error' ? t('lint.issueSeverityError') : t('lint.issueSeverityWarning')}
+                    </span>
+                    <span className="min-w-0 flex-1 text-ink-soft">
+                      <span className="font-medium text-ink">{issue.ruleId}</span> {issue.message}{' '}
+                      <span className="text-ink-faint">
+                        (
+                        {issue.widths.length === 0
+                          ? t('checks.keyboard')
+                          : issue.widths.length === checks.viewports.length
+                            ? t('checks.allWidths')
+                            : issue.widths.join(' / ')}
+                        )
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
   )
 }
 

@@ -654,6 +654,11 @@ export const api = {
       finish()
     }
   },
+  runFrameChecks: (frameId: string, force = false) =>
+    req<{ ok: boolean; checks: NonNullable<Frame['checks']>; reused: boolean }>(`/api/frames/${frameId}/checks`, {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    }),
   setFrameLint: (frameId: string, lint: Frame['lint']) =>
     req<{ ok: boolean }>(`/api/frames/${frameId}/lint`, {
       method: 'PUT',

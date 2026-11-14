@@ -33,6 +33,8 @@ import { FrameContextMenu } from './FrameContextMenu'
 import { FrameApprovalBadge } from './FrameApproval'
 import { FrameLintBadge } from './FrameLintBadge'
 import { scheduleFrameLint } from '../lib/frameLint'
+import { FrameChecksBadge } from './FrameChecksBadge'
+import { scheduleFrameChecks } from '../lib/frameChecks'
 import { ElementContextMenu, type LiveHit } from './ElementContextMenu'
 import { CodePanel } from './CodePanel'
 import { TextFormatToolbar } from './TextFormatToolbar'
@@ -965,6 +967,7 @@ export const FrameView = memo(function FrameView({
   useEffect(() => {
     if (!runtimeDocument || runtimeDocument.html !== frame.html || streaming || editing) return
     scheduleFrameLint(frame)
+    scheduleFrameChecks(frame)
   }, [runtimeDocument, frame, streaming, editing])
 
   /* ---- element comments ---- */
@@ -1820,6 +1823,7 @@ export const FrameView = memo(function FrameView({
               <span className="min-w-0 overflow-hidden text-ellipsis">{frame.name}</span>
               <FrameApprovalBadge frame={frame} />
               <FrameLintBadge frame={frame} />
+              <FrameChecksBadge frame={frame} />
               <span className="flex shrink-0 gap-1 @max-[180px]/title:order-first">
                 {stream && (
                   <span
