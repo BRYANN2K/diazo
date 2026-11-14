@@ -151,3 +151,38 @@ export async function checkAndStore(
     return { ok: false, reason: 'failed', error: error instanceof Error ? error.message : String(error) }
   }
 }
+
+const OUTCOME_ERRORS: Record<Exclude<CheckOutcome, { ok: true }>['reason'], string> = {
+  not_found: 'frame not found',
+  no_renderer: 'frame checks need the server renderer (Chromium or REMOTE_BROWSER_URL), and this server has none',
+  failed: 'the renderer could not check this frame',
+}
+
+/** The JSON an agent gets back from check_frame (MCP and resident alike). */
+export function checkOutcomeForAgent(outcome: CheckOutcome): Record<string, unknown> {
+  if (!outcome.ok) {
+    return { ok: false, error: OUTCOME_ERRORS[outcome.reason], ...(outcome.error ? { detail: outcome.error } : {}) }
+  }
+  const c = outcome.checks
+  return {
+    ok: true,
+    reused: outcome.reused,
+    checks: {
+      score: c.score,
+      errors: c.errors,
+      warnings: c.warnings,
+      checkedAt: c.checkedAt,
+      viewports: c.viewports,
+      focus: c.focus,
+      issues: c.issues.map((i) => ({
+        rule: i.ruleId,
+        severity: i.severity,
+        message: i.message,
+        widths: i.widths,
+        ...(i.elementId ? { element: i.elementId } : {}),
+        ...(i.selector ? { selector: i.selector } : {}),
+        ...(i.detail ? { detail: i.detail } : {}),
+      })),
+    },
+  }
+}

@@ -39,6 +39,7 @@ import { compareFrameWithUrl } from './drift.ts'
 import { capture, captureThrottled } from './analytics.ts'
 import { renderFrame } from './screenshot.ts'
 import { lintAndStore } from './lint.ts'
+import { checkAndStore, checkOutcomeForAgent } from './frameChecks.ts'
 import { buildHandoffPack, HandoffError } from './handoff.ts'
 import { imagesForFrames } from './assets.ts'
 import type { FrameImage } from '../shared/imageDescriptions.ts'
@@ -1655,6 +1656,27 @@ export function buildMcpServer(
           issues: lint.issues,
         },
       })
+    },
+  )
+
+  server.registerTool(
+    'check_frame',
+    {
+      title: 'Check a frame for responsive and accessibility problems',
+      description:
+        'Render the frame at 375, 768 and 1440px wide and walk it with the Tab key, then get a score (0-100) and findings: horizontal overflow (FC-OVERFLOW), clipped text (FC-CLIP), tap targets under 44px on touch widths (FC-TAP), text contrast below WCAG AA (FC-CONTRAST), focusable elements without a visible focus state (FC-FOCUS-VISIBLE), tab order against the visual order or positive tabindex (FC-TAB-ORDER), and elements Tab never reaches (FC-TAB-REACH). Each issue lists the widths it shows at and the element it blames. Unchanged html returns the stored result unless force is true. The result persists on the frame and shows in the editor. Needs the server renderer.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        frame_id: z.string(),
+        force: z.boolean().optional().describe('re-run even when the html has not changed since the last check'),
+        agent_name: agentName,
+      },
+    },
+    async ({ frame_id, force, agent_name }) => {
+      const f = frameFor(frame_id, 'view')
+      if (!f) return noFrame(frame_id)
+      const outcome = await checkAndStore(frame_id, actorFrom(agent_name), { force: force === true })
+      return text({ frame: frameSummary(f), ...checkOutcomeForAgent(outcome) })
     },
   )
 

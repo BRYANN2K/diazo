@@ -86,6 +86,7 @@ import {
 import { recordAgentFeedback } from './agentFeedback.ts'
 import { AGENT_IDEA_CATEGORIES, AGENT_ISSUE_CATEGORIES, type AgentFeedbackCategory } from '../shared/agentFeedback.ts'
 import { lintAndStore } from './lint.ts'
+import { checkAndStore, checkOutcomeForAgent } from './frameChecks.ts'
 import type { FrameLint } from '../shared/slopRules.ts'
 
 /**
@@ -2359,6 +2360,16 @@ const TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'check_frame',
+    description:
+      'Render a frame at 375, 768 and 1440px and walk it with the Tab key: horizontal overflow, clipped text, tap targets under 44px, WCAG AA text contrast, visible keyboard focus and tab order. Returns a score and findings, each with the widths it shows at. Unchanged html returns the stored result unless force is true.',
+    input_schema: {
+      type: 'object',
+      properties: { frame_id: { type: 'string' }, force: { type: 'boolean' } },
+      required: ['frame_id'],
+    },
+  },
+  {
     name: 'lint_frame',
     description:
       'Re-run the anti-slop checks on a frame and get its score and findings. Edits lint automatically — call this to re-check without changing the design, or to read the findings on a frame you did not touch.',
@@ -3297,6 +3308,13 @@ export async function execTool(
           runState.verifiedFrames.add(input.frame_id)
         }
         return ok(blocks)
+      }
+      case 'check_frame': {
+        const f = store.getFrame(input.frame_id)
+        if (!f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
+        const outcome = await checkAndStore(input.frame_id, actor, { force: String(input.force) === 'true' })
+        if (!outcome.ok) return fail(String(checkOutcomeForAgent(outcome).error))
+        return ok(JSON.stringify(checkOutcomeForAgent(outcome)))
       }
       case 'lint_frame': {
         const f = store.getFrame(input.frame_id)
