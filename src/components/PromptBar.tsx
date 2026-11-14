@@ -11,6 +11,7 @@ import { Tooltip } from './ui/tooltip'
 import { DoopMark } from './Logo'
 import { ArrowUpIcon, AttachmentIcon, FrameIcon, XIcon } from './ui/icons'
 import { ModelPicker } from './ModelPicker'
+import { DuelDialog } from './DuelDialog'
 import { currentRunnerPick, useRunnerPick } from '../lib/runnerPick'
 import { resolveRunnerPick } from '../../shared/agentRunner'
 import { LayerKindIcon } from './LayerKindIcon'
@@ -204,6 +205,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   const focusAt = useStore((s) => s.composerFocusAt)
   const text = useStore((s) => s.composerDrafts[canvasId] ?? '')
   const setDraft = useStore((s) => s.setComposerDraft)
+  const [duelOpen, setDuelOpen] = useState(false)
   /* this canvas's send only: another canvas's outcome is not ours to show */
   const send = useStore((s) => (s.composerSend?.canvasId === canvasId ? s.composerSend : null))
   const busy = send?.status === 'busy'
@@ -446,6 +448,16 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
             <AttachmentIcon className="size-3.5" />
           </Button>
           <span className="flex-1" />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-[11.5px] text-ink-faint hover:text-ink"
+            title={t('duel.openTitle')}
+            disabled={busy}
+            onClick={() => setDuelOpen(true)}
+          >
+            {t('duel.open')}
+          </Button>
           <ModelPicker disabled={busy} />
           {/* the meter rides on the send button; a disabled button takes no
               pointer events, so the span under it is what the tooltip hangs on */}
@@ -471,6 +483,14 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
           </Tooltip>
         </div>
       </form>
+      {duelOpen && (
+        <DuelDialog
+          canvasId={canvasId}
+          brief={text}
+          onClose={() => setDuelOpen(false)}
+          onStarted={() => setDraft(canvasId, '')}
+        />
+      )}
       {(error || sent) && (
         <div className="text-[11px] leading-[1.4]">
           {error ? (

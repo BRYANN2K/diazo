@@ -1121,6 +1121,23 @@ export const agentRuns = pgTable(
   (t) => [index('agent_runs_canvas_idx').on(t.canvasId, t.startedAt)],
 )
 
+/** Model duels (server/duels.ts): one brief sent to 2-3 model picks, each
+ *  entry a sibling frame and its scoped card (`entries`, DuelEntry[]). */
+export const modelDuels = pgTable(
+  'model_duels',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    brief: text('brief').notNull(),
+    createdBy: text('created_by').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    entries: jsonb('entries').notNull(),
+    pickedFrameId: text('picked_frame_id'),
+    decidedAt: bigint('decided_at', { mode: 'number' }),
+  },
+  (t) => [index('model_duels_canvas_idx').on(t.canvasId, t.createdAt)],
+)
+
 /** The instance's sign-in policy (shared/instanceSettings.ts): one row, id
  *  'instance', written by admins in Admin → Sign-in and read into memory at
  *  boot. Absent row = the defaults. */
