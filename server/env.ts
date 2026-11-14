@@ -179,6 +179,12 @@ const schema = {
      accepts); the set_guidelines tool refuses for agents, so a prompt-injected
      agent cannot plant instructions every later run inherits. */
   AGENT_GUIDELINE_WRITES: bool({ default: true }),
+  /* Whether agents may add frames to a design library (import_to_library)
+     and curate its items (set_library_item). Library items are inserted into
+     everyone's designs, so on a shared instance set this to false and let
+     people curate. Rules, visibility and whether a canvas is a library stay
+     people-only whatever this says. */
+  AGENT_LIBRARY_WRITES: bool({ default: true }),
   CHATGPT_OAUTH_ISSUER: origin({ default: 'https://auth.openai.com' }),
   CHATGPT_OAUTH_CLIENT_ID: str({ default: 'app_EMoamEEZ73f0CkXaXp7hrann' }),
   CHATGPT_OAUTH_REDIRECT_URI: str({ default: 'http://localhost:1455/auth/callback' }),

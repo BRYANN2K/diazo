@@ -10,7 +10,10 @@ import type { Actor, Canvas } from '../shared/types.ts'
 import type { LibraryItemSummary } from '../shared/library.ts'
 import { describeRules, NON_INSERTABLE_KINDS } from '../shared/libraryRules.ts'
 import { store } from './store.ts'
-import { getLibrary, libraryRole } from './libraries.ts'
+import { getLibrary, libraryAllows, libraryRole } from './libraries.ts'
+import { env } from './env.ts'
+import { runImport } from './libraryImport.ts'
+import { cleanItemPatch, patchItem } from './libraryRoutes.ts'
 import { libraryItems } from './libraryIndex.ts'
 import { itemDetail, itemUrl, readableLibraries, searchLibraries } from './libraryQueries.ts'
 import { insertItem, InsertError, snapshotItem } from './librarySnapshot.ts'
@@ -26,6 +29,8 @@ export interface LibraryToolContext {
   canvas?: Canvas
   /** may this caller write that canvas? (an insert's target) */
   canEdit(canvasId: string): boolean
+  /** may this caller read that canvas? (an import's source) */
+  canRead?(canvasId: string): boolean
 }
 
 export type LibraryToolResult =
@@ -321,6 +326,113 @@ DESIGN_LIBRARY_TOOLS.push({
     }
   },
 })
+
+/** The refusal when the instance keeps library writes to people. */
+export const LIBRARY_WRITES_REFUSAL =
+  'libraries on this instance are curated by people (AGENT_LIBRARY_WRITES=false); propose the item in a comment instead'
+
+/** A write tool's library: the flag, the caller's curate role, and for a
+ *  resident run, its own canvas. */
+async function writableLibrary(
+  context: LibraryToolContext,
+  libraryId: string,
+): Promise<{ ok: true; canvas: Canvas } | { ok: false; error: string }> {
+  if (!env.AGENT_LIBRARY_WRITES) return { ok: false, error: LIBRARY_WRITES_REFUSAL }
+  if (context.canvas && context.canvas.id !== libraryId) {
+    return { ok: false, error: "this run's canvas is not that library: a run curates only the library it works on" }
+  }
+  const canvas = await readable(context, libraryId)
+  if (!canvas) return missing(libraryId) as { ok: false; error: string }
+  const role = context.canvas?.id === libraryId ? 'curate' : libraryRole(context.userId, canvas)
+  if (!libraryAllows(role, 'curate')) {
+    return { ok: false, error: 'you may use this library but not change it' }
+  }
+  return { ok: true, canvas }
+}
+
+DESIGN_LIBRARY_TOOLS.push(
+  {
+    name: 'import_to_library',
+    title: 'Add frames to a design library',
+    description:
+      'Bring up to 20 frames into a design library through its rules: each gets an id, its variants marked, the SVG definitions it points at, a category, a page and a status (a low lint score can keep it a draft). Frames from another canvas are copied, never moved. Always returns the report; with dry_run nothing is written. When authoring library content, mark items with data-doop-item / data-doop-variant.',
+    readOnly: false,
+    shape: {
+      library_id: LIBRARY_ID,
+      frame_ids: z.array(z.string()).min(1).max(20).describe('Frames to add, from any canvas you can read'),
+      category: z.string().optional().describe('Put them in this category, over every rule'),
+      tags: z.array(z.string()).max(12).optional(),
+      dry_run: z.boolean().optional().describe('Report what would happen, write nothing'),
+    },
+    async run(input, context) {
+      const libraryId = String(input.library_id ?? '')
+      const allowed = await writableLibrary(context, libraryId)
+      if (!allowed.ok) return allowed
+      const frameIds = Array.isArray(input.frame_ids) ? (input.frame_ids as unknown[]).map(String).slice(0, 20) : []
+      for (const frameId of frameIds) {
+        const frame = store.getFrame(frameId)
+        const from = frame && store.getCanvas(frame.canvasId)
+        if (!from || !(context.canRead?.(from.id) ?? libraryRole(context.userId, from) !== null)) {
+          return { ok: false, error: `no frame "${frameId}" you can read` }
+        }
+      }
+      const outcome = await runImport({
+        libraryId,
+        frameIds,
+        ...(typeof input.category === 'string' ? { category: input.category } : {}),
+        ...(Array.isArray(input.tags) ? { tags: (input.tags as unknown[]).map(String) } : {}),
+        dryRun: input.dry_run === true,
+        actor: context.actor,
+      })
+      return {
+        ok: true,
+        data: {
+          dry_run: input.dry_run === true,
+          totals: outcome.report.totals,
+          frames: outcome.report.frames.map((f) => ({
+            frame_id: f.frameId,
+            item_id: f.item?.itemId,
+            status: f.item?.status,
+            category: f.item?.category,
+            variants: f.variants,
+            ignored: f.ignored || undefined,
+            findings: f.findings.map((x) => `${x.kind}: ${x.message}`),
+          })),
+          applied: outcome.applied,
+        },
+        frames: outcome.applied.flatMap((a) => (a.libraryFrameId ? [a.libraryFrameId] : [])),
+      }
+    },
+  },
+  {
+    name: 'set_library_item',
+    title: 'Curate a library item',
+    description:
+      'Change what people see of one library item without touching its HTML: its label, description, category, tags or status (active accepts a draft; deprecated sinks it in search; hidden takes it out).',
+    readOnly: false,
+    shape: {
+      library_id: LIBRARY_ID,
+      item_id: z.string(),
+      label: z.string().max(200).optional(),
+      description: z.string().max(2000).optional(),
+      category: z.string().max(200).optional(),
+      tags: z.array(z.string()).max(12).optional(),
+      status: z.enum(['active', 'deprecated', 'hidden']).optional(),
+    },
+    async run(input, context) {
+      const libraryId = String(input.library_id ?? '')
+      const allowed = await writableLibrary(context, libraryId)
+      if (!allowed.ok) return allowed
+      const out = await itemDetail(allowed.canvas, String(input.item_id ?? ''), 'curate')
+      if (!out) return { ok: false, error: `no item "${String(input.item_id)}" in this library` }
+      const cleaned = cleanItemPatch(input)
+      if (!cleaned.ok) return { ok: false, error: cleaned.error }
+      await patchItem(libraryId, out.item.itemId, cleaned.patch, context.actor.name)
+      const after = await itemDetail(allowed.canvas, out.item.itemId, 'curate')
+      return { ok: true, data: after ? brief(libraryId, after.detail.item) : null }
+    },
+  },
+)
 
 export const DESIGN_LIBRARY_TOOL_NAMES = DESIGN_LIBRARY_TOOLS.map((tool) => tool.name)
 

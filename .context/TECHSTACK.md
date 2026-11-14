@@ -823,6 +823,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   a manager (`canManageCanvas`) changes them, from the gallery's Settings sheet
   (`LibrarySettings.tsx`, `LibraryRulesForm.tsx`: one card per rule group, a dry run of the edited
   rules 400 ms after the last edit), and a change bumps `rules_version` and reindexes.
+  Agents write to a library through `import_to_library` and `set_library_item` only while
+  `AGENT_LIBRARY_WRITES` is true (the default; false answers with the same "curated by people"
+  refusal as `AGENT_GUIDELINE_WRITES`), with the curate role, and a resident run only on the library
+  it works on; no tool changes rules, visibility or whether a canvas is a library.
   REST under `/api/libraries` (`server/libraryRoutes.ts`, 30 searches per 10 s per account; never
   `store.load`); agent tools in `server/libraryTools.ts`, registered for MCP and the resident agent
   under the same names. ⌘F's Library scope (`src/lib/findLibrary.ts`, `src/lib/findRows.ts`,

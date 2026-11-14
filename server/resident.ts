@@ -3532,6 +3532,7 @@ export async function execTool(
             canvas,
             libraries: () => librariesOf(reader, canvas),
             canEdit: (id) => id === canvasId,
+            canRead: (id) => id === canvasId || (!!reader && canReadCanvas(reader, id)),
           })
           if (!outcome.ok) return fail(outcome.error)
           /* an insert is a design write: the run's delivery check and its lint pass see it */

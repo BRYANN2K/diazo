@@ -2543,6 +2543,7 @@ export function buildMcpServer(
           actor,
           libraries: () => librariesOf(ownerId),
           canEdit: (canvasId) => !!canvasFor(canvasId, 'edit'),
+          canRead: (canvasId) => !!canvasFor(canvasId, 'view'),
         })
         if (!outcome.ok) return err(outcome.error)
         const result = outcome.note ? textWithNudge(outcome.data, outcome.note) : text(outcome.data)
