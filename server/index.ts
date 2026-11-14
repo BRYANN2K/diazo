@@ -1,6 +1,7 @@
 import * as libraries from './libraries.ts'
 import * as libraryIndex from './libraryIndex.ts'
 import { libraryRouter } from './libraryRoutes.ts'
+import { curationRouter } from './libraryCurationRoutes.ts'
 import { wireLibraryDescribe } from './libraryDescribe.ts'
 import { hydrateCurations, resumeCurations } from './libraryCuration.ts'
 import { env } from './env.ts'
@@ -1162,6 +1163,7 @@ app.use('/api/notifications', notificationsRouter)
 app.use('/api/webhooks', webhooksRouter)
 app.use('/api/fonts', fontsRouter)
 app.use('/api/libraries', libraryRouter)
+app.use('/api/library-curations', curationRouter)
 
 /* the font library a canvas designs with: its workspace's, or its owner's */
 app.get('/api/canvases/:id/fonts', (req, res) => {

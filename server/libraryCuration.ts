@@ -455,6 +455,14 @@ export async function hydrateCurations(): Promise<void> {
   for (const job of await persist.loadCurations()) jobs.set(job.id, job)
 }
 
+/** Save a job (throttled unless `force`): for the apply, which runs apart. */
+export const saveCurationJob = save
+
+/** Every job (the boot resume of applies). */
+export function allCurations(): CurationJob[] {
+  return [...jobs.values()]
+}
+
 export function getCuration(id: string): CurationJob | undefined {
   return jobs.get(id)
 }
