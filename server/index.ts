@@ -1,4 +1,5 @@
 import * as libraries from './libraries.ts'
+import * as libraryThumbQueue from './libraryThumbQueue.ts'
 import * as libraryIndex from './libraryIndex.ts'
 import { libraryRouter } from './libraryRoutes.ts'
 import { curationRouter } from './libraryCurationRoutes.ts'
@@ -207,6 +208,15 @@ libraryIndex.wireIndexer()
 wireLibraryDescribe() // AI descriptions, only on libraries that turned them on
 /* full index runs a restart cut off go on in the background */
 void Promise.all(libraryIndex.resumeIndexing(libraries.allLibraries()))
+/* thumbnails missing from storage: after each index run, and once at boot
+   for every library already indexed */
+libraryIndex.onLibraryIndexed((canvasId) => libraryThumbQueue.schedulePrewarm(canvasId))
+libraryThumbQueue.prewarmAtBoot(
+  libraries
+    .allLibraries()
+    .filter((record) => record.indexState?.status === 'done')
+    .map((record) => record.canvasId),
+)
 await hydrateCurations() // AI library curations; the ones a restart cut off go on
 resumeCurations()
 resumeApplies()

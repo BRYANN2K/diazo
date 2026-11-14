@@ -6,7 +6,13 @@
  * Spec: .context/specs/design-libraries.md.
  */
 import type { Actor, Canvas } from '../shared/types.ts'
-import type { LibraryIndexState, LibraryInfo, LibraryTaxonomy, LibraryVisibility } from '../shared/library.ts'
+import type {
+  LibraryIndexState,
+  LibraryInfo,
+  LibraryTaxonomy,
+  LibraryVisibility,
+  ThumbProgress,
+} from '../shared/library.ts'
 import { EMPTY_TAXONOMY } from '../shared/library.ts'
 import {
   detectPreset,
@@ -49,8 +55,17 @@ export type LibraryRole = 'read' | 'curate' | 'manage'
 export const DISABLED_KEEP_MS = 30 * 24 * 60 * 60 * 1000
 
 const records = new Map<string, LibraryRecord>()
+/** the thumbnail prewarm's progress (server/libraryThumbQueue.ts), in memory only */
+const thumbs = new Map<string, ThumbProgress>()
+
+/** Record the thumbnail prewarm's progress; null forgets it. */
+export function setThumbProgress(canvasId: string, progress: ThumbProgress | null): void {
+  if (progress) thumbs.set(canvasId, progress)
+  else thumbs.delete(canvasId)
+}
 
 export function infoOf(record: LibraryRecord): LibraryInfo {
+  const progress = thumbs.get(record.canvasId)
   return {
     description: record.description,
     visibility: record.visibility,
@@ -59,6 +74,7 @@ export function infoOf(record: LibraryRecord): LibraryInfo {
     index: record.indexState,
     rulesVersion: record.rulesVersion,
     describeItems: !!record.describeItems,
+    ...(progress ? { thumbs: { ...progress } } : {}),
   }
 }
 

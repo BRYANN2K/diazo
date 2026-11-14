@@ -83,7 +83,7 @@ describe('converting and reading', () => {
   it('searches families with their variants', async () => {
     const r = (await (await owner.get(`/api/libraries/search?q=login`)).json()) as LibrarySearchResult
     expect(r.hits[0]).toMatchObject({ libraryId: canvasId, item: { id: 'bk.scb-login' }, variantCount: 2 })
-    expect(r.hits[0]!.item.thumb).toMatch(/^\/i\/.+\.jpg\?preview$/)
+    expect(r.hits[0]!.item.thumb).toMatch(/^\/api\/libraries\/.+\/thumb\.jpg\?v=[0-9a-f]{16}$/)
   })
 
   it('reads one item and its frame html', async () => {

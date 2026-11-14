@@ -47,10 +47,22 @@ describe('storage keys', () => {
     'no-extension',
     'thumb/dir/',
     'a b.png',
+    'lt/../escape.jpg',
+    'lt/lib1/sub/item.jpg',
+    'lt/lib1/cp.item.jpg',
+    'lt/item.jpg',
   ])('rejects malformed key %s everywhere', async (key) => {
     await expect(storage.putObject(key, Buffer.from('x'), 'image/png')).rejects.toThrow(/malformed storage key/)
     await expect(storage.getObject(key)).rejects.toThrow(/malformed storage key/)
     await expect(storage.deleteObject(key)).rejects.toThrow(/malformed storage key/)
+  })
+
+  it('round-trips a library thumbnail key and answers whether it exists', async () => {
+    const key = 'lt/lib_1-x/cp_scb-login-1a2b3c4d-hash-v2.jpg'
+    expect(await storage.hasObject(key)).toBe(false)
+    await storage.putObject(key, Buffer.from('lt'), 'image/jpeg')
+    expect(await storage.hasObject(key)).toBe(true)
+    expect((await storage.getObject(key))?.toString()).toBe('lt')
   })
 
   it('keeps thumbs in their own folder on disk', async () => {

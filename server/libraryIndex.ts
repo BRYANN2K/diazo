@@ -359,6 +359,7 @@ async function runFull(canvasId: string, resume: boolean): Promise<void> {
   setIndexState(canvasId, { ...state, status: 'done', finishedAt: Date.now() }, countsOf(rows))
   announceLibrary(canvasId, SYSTEM)
   queueRenderedPasses(canvasId, rows)
+  if (!pendingPasses.get(canvasId)) indexed(canvasId)
 }
 
 /* ---- one frame at a time ---- */
@@ -467,6 +468,23 @@ export function setLibraryRenderer(next: LibraryRenderer | null): void {
   renderer = next ?? serverRenderer
 }
 
+/** Listeners told when a library's items and boxes are settled: its full
+ *  run and the rendered passes it queued are done (the thumbnail prewarm). */
+type IndexedListener = (canvasId: string) => void
+const indexedListeners: IndexedListener[] = []
+export function onLibraryIndexed(listener: IndexedListener): () => void {
+  indexedListeners.push(listener)
+  return () => {
+    const at = indexedListeners.indexOf(listener)
+    if (at >= 0) indexedListeners.splice(at, 1)
+  }
+}
+function indexed(canvasId: string) {
+  for (const listener of indexedListeners) listener(canvasId)
+}
+/** rendered passes queued or running, per library */
+const pendingPasses = new Map<string, number>()
+
 const renderQueue: { canvasId: string; frameId: string }[] = []
 const queued = new Set<string>()
 let rendering = 0
@@ -484,6 +502,7 @@ function queueRenderedPass(canvasId: string, frameId: string) {
   if (queued.has(key)) return
   if (!rendering && !renderQueue.length) renderIdle = new Promise((resolve) => (renderIdleDone = resolve))
   queued.add(key)
+  pendingPasses.set(canvasId, (pendingPasses.get(canvasId) ?? 0) + 1)
   renderQueue.push({ canvasId, frameId })
   pumpRenders()
 }
@@ -513,6 +532,12 @@ function pumpRenders() {
       .catch((error: unknown) => console.error('[library-index] rendered pass failed', next.frameId, error))
       .finally(() => {
         rendering--
+        const left = (pendingPasses.get(next.canvasId) ?? 1) - 1
+        if (left > 0) pendingPasses.set(next.canvasId, left)
+        else {
+          pendingPasses.delete(next.canvasId)
+          if (!running.has(next.canvasId)) indexed(next.canvasId)
+        }
         if (!rendering && !renderQueue.length) renderIdleDone?.()
         pumpRenders()
       })
@@ -663,6 +688,7 @@ export function resetIndexerForTest(): void {
   timers.clear()
   rerun.clear()
   afterRun.clear()
+  pendingPasses.clear()
 }
 
 /* ---- the dry run ---- */

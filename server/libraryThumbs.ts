@@ -2,19 +2,28 @@
  * Item thumbnails: an image per library item, so lists and the gallery
  * never mount an iframe. The frame is rendered clipped to the item's box
  * (from the rendered pass) plus a margin, as a JPEG whose longest side is
- * 640 px, at background priority, and kept in storage under a key that
- * carries the item's content hash, so a changed item gets a new image.
+ * 640 px, and kept in storage under a key that carries the item's content
+ * hash, its box and the thumbnail version, so a changed item gets a new
+ * image.
+ *
+ * A thumbnail being rendered is a promise every asker shares (the gallery
+ * route and the prewarm queue never render the same key twice), and the
+ * items of one frame render together on one page.
  */
+import { createHash } from 'node:crypto'
 import type { Frame } from '../shared/types.ts'
 import type { ItemBox, LibraryItem } from '../shared/library.ts'
-import { getObject, putObject } from './storage.ts'
-import { renderFrame, type RenderOptions } from './screenshot.ts'
+import { getObject, hasObject, putObject } from './storage.ts'
+import { renderFrame } from './screenshot.ts'
+import type { RenderPriority } from './renderBrowser.ts'
 import { store } from './store.ts'
 
 export const THUMB_MARGIN = 12
 export const THUMB_MAX = 640
+/** Bumped when thumbnails are drawn differently: every key changes. */
+export const THUMB_VERSION = 1
 
-/** The item has no box yet: the client crops the frame preview instead. */
+/** The item cannot have a thumbnail (its frame is gone): the client falls back. */
 export class NoThumbError extends Error {}
 
 export interface Clip {
@@ -33,39 +42,124 @@ export function thumbClip(box: ItemBox, frame: Pick<Frame, 'width' | 'height'>):
   return { x, y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) }
 }
 
-/** Where a thumbnail is kept: changes with the item's content. */
-export function thumbKey(canvasId: string, item: Pick<LibraryItem, 'itemId' | 'hash'>): string {
-  const safe = item.itemId.replace(/[^\w.-]/g, '_').slice(0, 120)
-  const hash = item.hash.replace(/[^\w-]/g, '_')
-  return `lt/${canvasId}/${safe}-${hash}.jpg`
+type Keyed = Pick<LibraryItem, 'itemId' | 'hash' | 'box'>
+
+const digest = (text: string, length: number) => createHash('sha1').update(text).digest('hex').slice(0, length)
+
+/** What the picture depends on: the version, the content and the box. The
+ *  gallery asks with it (`?v=`), so a browser keeps a picture forever. */
+export function thumbTag(item: Keyed): string {
+  const box = item.box ? `${item.box.x},${item.box.y},${item.box.w},${item.box.h}` : 'none'
+  return digest(`${THUMB_VERSION}|${item.hash}|${box}`, 16)
+}
+
+/** Where a thumbnail is kept: storage keys allow no dots in a name, so the
+ *  id is spelled safely and told apart from its look-alikes by a digest. */
+export function thumbKey(canvasId: string, item: Keyed): string {
+  const safe = item.itemId.replace(/[^\w-]/g, '_').slice(0, 100)
+  return `lt/${canvasId}/${safe}-${digest(item.itemId, 8)}-${thumbTag(item)}.jpg`
 }
 
 export interface ThumbDeps {
-  render(frame: Frame, scale: number, opts: RenderOptions): Promise<Buffer>
+  /** the pictures of several items of one frame, in order */
+  render(frame: Frame, items: LibraryItem[], priority: RenderPriority): Promise<(Buffer | Error)[]>
   get(key: string): Promise<Buffer | null>
+  has(key: string): Promise<boolean>
   put(key: string, body: Buffer, mime: string): Promise<void>
   frame(frameId: string): Promise<Frame | undefined>
 }
 
-const serverDeps: ThumbDeps = {
-  render: (frame, scale, opts) => renderFrame(frame, scale, opts),
+async function renderClipped(frame: Frame, items: LibraryItem[], priority: RenderPriority) {
+  const out: (Buffer | Error)[] = []
+  for (const item of items) {
+    try {
+      const box = item.box ?? { x: 0, y: 0, w: frame.width, h: frame.height }
+      const clip = thumbClip(box, frame)
+      const scale = Math.min(1, THUMB_MAX / Math.max(clip.width, clip.height))
+      out.push(await renderFrame(frame, scale, { type: 'jpeg', quality: 82, clip, priority }))
+    } catch (error) {
+      out.push(error instanceof Error ? error : new Error(String(error)))
+    }
+  }
+  return out
+}
+
+export const serverThumbDeps: ThumbDeps = {
+  render: renderClipped,
   get: (key) => getObject(key),
+  has: (key) => hasObject(key),
   put: (key, body, mime) => putObject(key, body, mime),
   frame: (frameId) => store.renderableFrame(frameId),
 }
 
-/** The JPEG of one item: from storage, else rendered and stored. A busy
- *  renderer throws RendererBusyError (the route answers 503). */
-export async function itemThumb(item: LibraryItem, deps: ThumbDeps = serverDeps): Promise<Buffer> {
-  if (!item.box) throw new NoThumbError(`item ${item.itemId} has no box yet`)
+/** Keys being rendered right now, and the promise of each. */
+const inflight = new Map<string, Promise<Buffer>>()
+
+/** Whether a thumbnail is being rendered (tests, the prewarm). */
+export function isRendering(key: string): boolean {
+  return inflight.has(key)
+}
+
+/**
+ * Render the thumbnails of some items of ONE frame and store them. A key
+ * already being rendered is shared, never rendered twice; the rest render
+ * together on one page. One promise per item, in order.
+ */
+export function renderThumbs(
+  items: LibraryItem[],
+  priority: RenderPriority,
+  deps: ThumbDeps = serverThumbDeps,
+): Promise<Buffer>[] {
+  const out: Promise<Buffer>[] = []
+  const fresh: { item: LibraryItem; at: number; key: string }[] = []
+  items.forEach((item, at) => {
+    const key = thumbKey(item.canvasId, item)
+    const running = inflight.get(key)
+    if (running) out[at] = running
+    else if (fresh.some((f) => f.key === key)) out[at] = Promise.resolve().then(() => inflight.get(key)!)
+    else fresh.push({ item, at, key })
+  })
+  if (!fresh.length) return out
+  const frameId = fresh[0]!.item.frameId
+  const batch = (async () => {
+    const frame = await deps.frame(frameId)
+    if (!frame) throw new NoThumbError(`frame ${frameId} is gone`)
+    return deps.render(
+      frame,
+      fresh.map((f) => f.item),
+      priority,
+    )
+  })()
+  fresh.forEach((f, n) => {
+    const done: Promise<Buffer> = batch
+      .then(async (pictures) => {
+        const picture = pictures[n]
+        if (!picture) throw new Error(`no picture for ${f.item.itemId}`)
+        if (picture instanceof Error) throw picture
+        await deps.put(f.key, picture, 'image/jpeg')
+        return picture
+      })
+      .finally(() => {
+        if (inflight.get(f.key) === done) inflight.delete(f.key)
+      })
+    inflight.set(f.key, done)
+    out[f.at] = done
+  })
+  return out
+}
+
+/** The JPEG of one item: from storage, else rendered (or awaited, when it
+ *  is being rendered already) and stored. A busy renderer throws
+ *  RendererBusyError (the route answers 503). */
+export async function itemThumb(
+  item: LibraryItem,
+  opts: { priority?: RenderPriority } = {},
+  deps: ThumbDeps = serverThumbDeps,
+): Promise<Buffer> {
   const key = thumbKey(item.canvasId, item)
+  const running = inflight.get(key)
+  if (running) return running
   const cached = await deps.get(key)
   if (cached) return cached
-  const frame = await deps.frame(item.frameId)
-  if (!frame) throw new NoThumbError(`frame ${item.frameId} is gone`)
-  const clip = thumbClip(item.box, frame)
-  const scale = Math.min(1, THUMB_MAX / Math.max(clip.width, clip.height))
-  const jpeg = await deps.render(frame, scale, { type: 'jpeg', quality: 82, clip, priority: 'background' })
-  await deps.put(key, jpeg, 'image/jpeg')
-  return jpeg
+  return renderThumbs([item], opts.priority ?? 'background', deps)[0]!
 }

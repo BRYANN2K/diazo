@@ -274,6 +274,10 @@ const schema = {
   CHROME_NO_SANDBOX: bool({ default: false }),
   /* pages the shared Chromium renders at once (renderBrowser.ts) */
   RENDER_CONCURRENCY: nonNegativeInt({ default: 4 }),
+  /* of those, how many background work (library thumbnails, the library
+     index's rendered pass, frame preview revalidation) may hold; kept below
+     RENDER_CONCURRENCY so a person or an agent always finds a page */
+  RENDER_BACKGROUND_CONCURRENCY: nonNegativeInt({ default: 2 }),
   /* a remote Chrome over the DevTools protocol instead of the local one
      (Cloudflare Browser Run, browserless, a renderer service) */
   REMOTE_BROWSER_URL: str({ default: undefined }),

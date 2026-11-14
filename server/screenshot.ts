@@ -120,13 +120,18 @@ export function connectRemoteBrowser(url: string, token: string | undefined): Pr
 
 const remoteBrowserUrl = env.REMOTE_BROWSER_URL
 
+const maxConcurrent = Math.max(1, env.RENDER_CONCURRENCY)
+/** Background work never holds every page: one stays for interactive callers. */
+export const backgroundConcurrency = Math.max(1, Math.min(env.RENDER_BACKGROUND_CONCURRENCY, maxConcurrent - 1))
+
 const renderer = createRenderer({
   launch: () =>
     remoteBrowserUrl
       ? connectRemoteBrowser(remoteBrowserUrl, env.REMOTE_BROWSER_TOKEN)
       : launchBrowser(undefined, PROTOCOL_TIMEOUT_MS),
   tuning: {
-    maxConcurrent: Math.max(1, env.RENDER_CONCURRENCY),
+    maxConcurrent,
+    maxBackground: backgroundConcurrency,
     ...(remoteBrowserUrl ? { idleCloseMs: REMOTE_IDLE_CLOSE_MS, closeTimeoutMs: REMOTE_CLOSE_TIMEOUT_MS } : {}),
   },
 })
