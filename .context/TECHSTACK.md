@@ -68,6 +68,16 @@
   feedback), 50 at a time with `kind`, `q` (searched on the server, account email included) and a
   `before=<at>:<id>` cursor for older pages. They never reach the humans on a canvas. Tests:
   `agentFeedback.test.ts`, `agentFeedbackHttp.test.ts` (separate HTTP requests).
+- Canvas skills (`shared/skills.ts`, upstream issue #380): named know-how per canvas (name, a
+  one-line "when to use it" description, markdown), in `canvas_skills` (migration 0060), mirrored
+  in memory and copied with the canvas. Unlike guidelines, which every run carries in full, agents
+  see only the list and load a skill with `get_skill` when the task matches. An ask naming one as
+  `/name` gets its text in the resident's `# Canvas skills` block (`actions.skillsBrief`). REST
+  `GET`/`PUT`/`DELETE /api/canvases/:id/skills/:name`, MCP `list_skills` / `get_skill` /
+  `set_skill`, the resident's `get_skill` (chat too) and `set_skill`; writes by agents follow
+  `AGENT_GUIDELINE_WRITES`. Memory panel section and `SkillModal.tsx`; the chat composer's `/`
+  menu writes `/name` into the ask. Tests: `canvasSkills.test.ts`, `residentSkills.test.ts`,
+  `skillsUi.test.tsx`.
 - Claude Code on the desktop (`shared/localAgent.ts`, `server/localAgent.ts`,
   `desktop/src-tauri/src/claude.rs`): the model menu is the CLI's aliases (`CLAUDE_MODEL_ALIASES`),
   which `claude --model` resolves to the newest model the installed CLI knows, plus a pinned

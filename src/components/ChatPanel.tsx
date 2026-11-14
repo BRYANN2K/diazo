@@ -10,6 +10,14 @@ import { isComposingEnter } from '../lib/keys'
 import { isResidentLimit } from './TeamAllowance'
 import { refreshLocalRepo, useLocalRepo } from '../lib/localRepo'
 import { ModelPicker } from './ModelPicker'
+import { MenuButton } from './ui/menu-button'
+import {
+  DropdownMenu,
+  DropdownMenuCaption,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu'
 import { currentRunnerPick } from '../lib/runnerPick'
 import { Button } from './ui/button'
 import { IconButton } from './ui/icon-button'
@@ -648,6 +656,12 @@ function ChatComposer({
     }
   }
 
+  /* a picked skill goes in front of the ask as /name, once */
+  function pickSkill(name: string) {
+    setText((current) => (current.includes(`/${name}`) ? current : `/${name} ${current}`.trimEnd() + ' '))
+    inputRef.current?.focus()
+  }
+
   const ready = !!text.trim() && !sending
   return (
     <form
@@ -694,6 +708,7 @@ function ChatComposer({
           onChange={(e) => setText(e.target.value)}
         />
         <div className="flex items-center gap-1">
+          {canEdit && <SkillMenu disabled={sending} onPick={pickSkill} />}
           {canEdit && <ModelPicker disabled={sending} />}
           <span className="flex-1" />
           <IconButton
@@ -715,5 +730,30 @@ function ChatComposer({
         </Note>
       )}
     </form>
+  )
+}
+
+/** The composer's "/" menu: the canvas's skills, each with when to use it.
+ *  Picking one writes /name into the ask, which loads it for the agent. */
+function SkillMenu({ disabled, onPick }: { disabled: boolean; onPick: (name: string) => void }) {
+  const skills = useStore((s) => s.canvas?.skills ?? [])
+  const t = useT()
+  if (!skills.length) return null
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <MenuButton variant="quiet" disabled={disabled} aria-label={t('panels.skillMenu')}>
+          <span className="font-mono">/</span>
+        </MenuButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="start" width="lg">
+        <DropdownMenuCaption>{t('panels.skills')}</DropdownMenuCaption>
+        {skills.map((skill) => (
+          <DropdownMenuItem key={skill.name} description={skill.description} onSelect={() => onPick(skill.name)}>
+            <span className="font-mono">/{skill.name}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
