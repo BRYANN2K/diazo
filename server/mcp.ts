@@ -111,6 +111,7 @@ import {
 } from '../shared/agentFeedback.ts'
 import { catalogEntry, compactFrameHtml, findComponent, instancesIn } from './componentActions.ts'
 import { COMPONENT_TOOLS, componentWriteNotes, runComponentTool } from './componentTools.ts'
+import { DESIGN_LIBRARY_TOOLS, librariesOf, runLibraryTool } from './libraryTools.ts'
 import { previewFrame } from './componentPreview.ts'
 import { INSTANCE_ATTR } from '../shared/components.ts'
 
@@ -2513,6 +2514,32 @@ export function buildMcpServer(
         return tool.readOnly
           ? withFeedbackNotice(result, canvasId, agent ? actor : undefined)
           : withFeedback(result, canvasId, actor)
+      }) as never,
+    )
+  }
+
+  for (const tool of DESIGN_LIBRARY_TOOLS) {
+    server.registerTool(
+      tool.name,
+      {
+        title: tool.title,
+        description: tool.description,
+        annotations: {
+          readOnlyHint: tool.readOnly,
+          destructiveHint: false,
+          idempotentHint: tool.readOnly,
+          openWorldHint: false,
+        },
+        inputSchema: { ...tool.shape, agent_name: agentName.optional() } as never,
+      },
+      (async (raw: Record<string, unknown>) => {
+        const outcome = await runLibraryTool(tool.name, raw, {
+          userId: ownerId,
+          actor: actorFrom(raw.agent_name as string | undefined),
+          libraries: () => librariesOf(ownerId),
+        })
+        if (!outcome.ok) return err(outcome.error)
+        return outcome.note ? textWithNudge(outcome.data, outcome.note) : text(outcome.data)
       }) as never,
     )
   }

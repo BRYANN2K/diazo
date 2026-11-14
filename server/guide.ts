@@ -158,6 +158,15 @@ get_canvas and list_components show a canvas's components with their props.
   from another canvas: list_components with libraries=true, import_component, and sync_component
   when list_components says library_update_available.`
 
+export const LIBRARIES = `A design library is a canvas of reusable, already-designed components and blocks, indexed as
+items. A family is one design (a login block); its variants are alternative versions of it, each
+with its own id (bk.scb-login-minimal-email-password).
+
+- Before you draw a common pattern (log in, pricing, OTP input, data table, toast…), call
+  search_library. A good match beats an improvised one; start from it and adapt it to the frame.
+- list_libraries shows what you can use; get_library shows one library's categories and rules;
+  get_library_item gives one item, its variants, its source and licence.`
+
 export const DOOP_GUIDE = `# Doop Agent Guide
 
 ## The room you're in
@@ -511,6 +520,10 @@ ${PROTOTYPES}
 ## Components — design once, use everywhere
 
 ${COMPONENTS}
+
+## Design libraries — search before you draw
+
+${LIBRARIES}
 
 ## Exporting frames (images, PDF)
 

@@ -37,11 +37,12 @@ import * as backgrounds from './backgrounds.ts'
 import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
 import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageImport.ts'
-import { COMPONENTS, DESIGN_BRIEF, DESIGN_QUALITY, FRAME_STYLES, PROTOTYPES } from './guide.ts'
+import { COMPONENTS, DESIGN_BRIEF, DESIGN_QUALITY, FRAME_STYLES, LIBRARIES, PROTOTYPES } from './guide.ts'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import { z } from 'zod'
 import { catalogEntry, compactFrameHtml, findComponent } from './componentActions.ts'
 import { COMPONENT_TOOLS, COMPONENT_TOOL_NAMES, componentWriteNotes, runComponentTool } from './componentTools.ts'
+import { DESIGN_LIBRARY_TOOLS, DESIGN_LIBRARY_TOOL_NAMES, librariesOf, runLibraryTool } from './libraryTools.ts'
 import { CodeLinkError, SET_CODE_LINK_DESCRIPTION, componentCodeLink, setCodeLinkTool } from './codeLinks.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
@@ -218,7 +219,10 @@ ${PROTOTYPES}
 - Frame ids are the id= values in the frame list of your request.
 
 Components:
-${COMPONENTS}`
+${COMPONENTS}
+
+Design libraries:
+${LIBRARIES}`
 
 /** The system prompt for one agent: the shared harness rules plus its specialty. */
 export function systemFor(role: AgentRole): string {
@@ -1176,6 +1180,7 @@ export const CHAT_READ_TOOL_NAMES = new Set([
   'get_reference',
   'view_website',
   'search_inspiration',
+  ...DESIGN_LIBRARY_TOOL_NAMES,
 ])
 
 const CHAT_SYSTEM = `You are a resident agent of the Doop canvas — a multiplayer design tool where humans and AI agents design HTML frames together — answering in the canvas CHAT, not editing. Humans talk the next design over with you here; the canvas only changes after an editor presses "Go design" on a plan card, which queues one board card per screen.
@@ -2439,6 +2444,13 @@ for (const tool of COMPONENT_TOOLS) {
     input_schema: zodToJsonSchema(z.object(tool.shape)) as Anthropic.Tool['input_schema'],
   })
 }
+for (const tool of DESIGN_LIBRARY_TOOLS) {
+  TOOLS.push({
+    name: tool.name,
+    description: tool.description,
+    input_schema: zodToJsonSchema(z.object(tool.shape)) as Anthropic.Tool['input_schema'],
+  })
+}
 TOOLS.push({
   name: 'set_code_link',
   description: SET_CODE_LINK_DESCRIPTION,
@@ -3461,6 +3473,19 @@ export async function execTool(
         return ok(await frameImageBlocks(previewFrame(canvasId, def)))
       }
       default: {
+        if (DESIGN_LIBRARY_TOOL_NAMES.includes(block.name)) {
+          const canvas = store.getCanvas(canvasId)
+          /* libraries are read as the person who asked, plus this canvas when it is one */
+          const reader = runState.payerId ?? canvas?.ownerId
+          const outcome = await runLibraryTool(block.name, block.input as Record<string, unknown>, {
+            userId: reader,
+            actor,
+            canvas,
+            libraries: () => librariesOf(reader, canvas),
+          })
+          if (!outcome.ok) return fail(outcome.error)
+          return ok([JSON.stringify(outcome.data), ...(outcome.note ? [outcome.note] : [])].join('\n'))
+        }
         if (!COMPONENT_TOOL_NAMES.includes(block.name)) return fail(`unknown tool ${block.name}`)
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
