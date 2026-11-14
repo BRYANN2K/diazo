@@ -16,7 +16,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import type { Request, Response } from 'express'
 import { fromNodeHeaders } from 'better-auth/node'
 import { z } from 'zod'
-import { store } from './store.ts'
+import { store, MAX_LIBRARY_PAGES } from './store.ts'
 import { addPage, savePages, updateFrameMeta } from './pageTools.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { describeLibrary, libraryBrief } from '../shared/fonts.ts'
@@ -1503,7 +1503,8 @@ export function buildMcpServer(
         pages: z
           .array(z.object({ id: z.string().trim().min(1).max(100), name: z.string().trim().min(1).max(100) }))
           .min(1)
-          .max(100),
+          .max(MAX_LIBRARY_PAGES)
+          .describe('At most 100 pages, 1,000 on a design library'),
         agent_name: agentName,
       },
     },

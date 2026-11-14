@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import { prepareChunk, prepareFrameHtml, referencesComponent } from './components.ts'
 import { COMPONENT_ATTR, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
-import { MAX_PAGES, PageLimitError, store } from './store.ts'
+import { maxPages, PageLimitError, store } from './store.ts'
 import * as persist from './db/persist.ts'
 import * as thumbs from './thumbs.ts'
 import { colorFor } from '../shared/types.ts'
@@ -2325,7 +2325,7 @@ export function createCanvasPage(canvasId: string, name: string, actor: Actor) {
   const canvas = store.canvases.get(canvasId)
   if (!canvas) return undefined
   const pages = canvasPages(canvas)
-  if (pages.length >= MAX_PAGES) throw new PageLimitError()
+  if (pages.length >= maxPages(canvas)) throw new PageLimitError(maxPages(canvas))
   const page = { id: nanoid(10), name }
   return { page, pages: setCanvasPages(canvasId, [...pages, page], actor) }
 }

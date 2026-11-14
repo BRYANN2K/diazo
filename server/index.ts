@@ -73,7 +73,7 @@ import { eq, inArray } from 'drizzle-orm'
 import { toNodeHandler, fromNodeHeaders } from 'better-auth/node'
 import { oAuthDiscoveryMetadata } from 'better-auth/plugins'
 import { WebSocketServer, WebSocket } from 'ws'
-import { GuideLimitError, PageLimitError, store } from './store.ts'
+import { GuideLimitError, maxPages, PageLimitError, store } from './store.ts'
 import { parseGuide } from '../shared/guides.ts'
 import { getImage } from './previews.ts'
 import * as actions from './actions.ts'
@@ -2652,7 +2652,7 @@ app.put('/api/canvases/:id/pages', (req, res) => {
   if (
     !Array.isArray(pages) ||
     !pages.length ||
-    pages.length > 100 ||
+    pages.length > maxPages(canvas) ||
     pages.some(
       (p) =>
         !p ||
@@ -2665,7 +2665,9 @@ app.put('/api/canvases/:id/pages', (req, res) => {
     ) ||
     new Set(pages.map((p) => p.id)).size !== pages.length
   ) {
-    return res.status(400).json({ error: 'Provide 1–100 pages with unique IDs and names of up to 100 characters.' })
+    return res.status(400).json({
+      error: `Provide 1–${maxPages(canvas).toLocaleString('en-US')} pages with unique IDs and names of up to 100 characters.`,
+    })
   }
   if (!samePages(req.body?.expectedPages, canvasPages(canvas)))
     return res

@@ -286,3 +286,27 @@ it('paints a page for editors only, as a hex colour or back to the theme paper',
   expect(await renamed.json()).toEqual([{ id: page.id, name: 'Dark', background: '#1e1e1e' }])
   expect(await (await paint(null)).json()).toEqual([{ id: page.id, name: 'Dark' }])
 })
+
+it('lets a library hold a thousand pages, and any other canvas a hundred', async () => {
+  const lib = await (await owner.post('/api/canvases', { name: 'Big library' })).json()
+  expect((await owner.post('/api/libraries', { canvasId: lib.id, preset: 'blank' })).status).toBe(201)
+  const plain = await (await owner.post('/api/canvases', { name: 'Plain' })).json()
+  const put = async (canvasId: string, count: number) => {
+    const current = await (await owner.get(`/api/canvases/${canvasId}`)).json()
+    const pages = [
+      current.pages[0],
+      ...Array.from({ length: count - 1 }, (_, i) => ({ id: `p${i}`, name: `Page ${i + 2}` })),
+    ]
+    return owner.req(`/api/canvases/${canvasId}/pages`, {
+      method: 'PUT',
+      body: JSON.stringify({ pages, expectedPages: current.pages }),
+    })
+  }
+  expect((await put(plain.id, 101)).status).toBe(400)
+  expect((await put(lib.id, 600)).status).toBe(200)
+  const full = await put(lib.id, 1001)
+  expect(full.status).toBe(400)
+  expect((await full.json()).error).toContain('1,000')
+  const read = await (await owner.get(`/api/canvases/${lib.id}`)).json()
+  expect(read.pages).toHaveLength(600)
+}, 60_000)

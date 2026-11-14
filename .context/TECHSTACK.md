@@ -183,7 +183,8 @@
 - Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and
   every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
   empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)
-  and returns it for `create_frame`'s `pageId`; `set_canvas_pages` stays the whole-list call for
+  and returns it for `create_frame`'s `pageId` (a canvas holds 100 pages, a design library 1,000:
+  `maxPages` in `server/store.ts`; past 100 the Pages panel gets a filter and a windowed list); `set_canvas_pages` stays the whole-list call for
   rename, reorder and delete; `update_frame` moves a frame between pages (it keeps its x/y; an
   unknown `pageId` is refused with the canvas's page list). The guide's "Frames and HTML" section says when a page beats a
   frame. The resident agent has the same three tools under the same names; both surfaces run

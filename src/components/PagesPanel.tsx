@@ -11,6 +11,13 @@ import { cn } from '../lib/utils'
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from './ui/context-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select'
 import { useT } from '@/lib/i18n'
+import { useWindowedGrid } from '../hooks/use-windowed-grid'
+import { SearchField } from './ui/search-field'
+
+/** Past this many pages the list gets a filter and renders only what is in view. */
+const LONG_LIST = 100
+/** A page row's height (h-[27px]). */
+const PAGE_ROW_PX = 27
 
 /** The small grey sub-heading over a section of the Layers panel, shared with
  *  its "Layers" row: the two must read as one family (a browser test checks
@@ -37,8 +44,18 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
   const stopDrag = useRef<(() => void) | null>(null)
   useEffect(() => () => stopDrag.current?.(), [])
   const t = useT()
+  const [filter, setFilter] = useState('')
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const allPages = canvas ? canvasPages(canvas) : []
+  /* a library may hold a thousand pages: past a hundred they get a filter
+     and only the rows in view are rendered */
+  const long = allPages.length > LONG_LIST
+  const needle = filter.trim().toLowerCase()
+  const shownPages = long && needle ? allPages.filter((p) => p.name.toLowerCase().includes(needle)) : allPages
+  const slice = useWindowedGrid(shownPages.length, scrollRef, { rowHeight: PAGE_ROW_PX, enabled: long })
   if (!canvas) return null
-  const pages = canvasPages(canvas)
+  const pages = allPages
+  const pageLimit = canvas.library ? 1000 : 100
   const movableIds = canvas.frames.filter((f) => selectedIds.includes(f.id) && !f.locked).map((f) => f.id)
 
   async function moveSelection(pageId: string) {
@@ -199,7 +216,8 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
 
   const list = (
     <>
-      {pages.map((page) => (
+      {slice.before > 0 && <div aria-hidden style={{ height: slice.before }} />}
+      {shownPages.slice(slice.start, slice.end).map((page) => (
         <ContextMenu key={page.id}>
           <ContextMenuTrigger asChild disabled={readOnly}>
             <div
@@ -282,7 +300,7 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
             <ContextMenuItem disabled={busy} onSelect={() => startRename(page)}>
               {t('panels.pagesRename')}
             </ContextMenuItem>
-            <ContextMenuItem disabled={busy || pages.length >= 100} onSelect={() => void duplicate(page.id)}>
+            <ContextMenuItem disabled={busy || pages.length >= pageLimit} onSelect={() => void duplicate(page.id)}>
               {t('panels.pagesDuplicate')}
             </ContextMenuItem>
             <ContextMenuItem
@@ -297,6 +315,7 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
           </ContextMenuContent>
         </ContextMenu>
       ))}
+      {slice.after > 0 && <div aria-hidden style={{ height: slice.after }} />}
     </>
   )
 
@@ -308,7 +327,23 @@ export function PagesPanel({ fill = false }: { fill?: boolean }) {
         </span>
         {!readOnly && addPage}
       </div>
-      <div className={cn('overflow-y-auto px-2 pb-1', fill ? 'min-h-0 flex-1' : 'max-h-[30vh]')}>{list}</div>
+      {long && (
+        <div className="px-2 pb-1">
+          <SearchField
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder={t('library.pagesFilter')}
+            aria-label={t('library.pagesFilter')}
+          />
+        </div>
+      )}
+      <div
+        ref={scrollRef}
+        data-testid="pages-list"
+        className={cn('overflow-y-auto px-2 pb-1', fill ? 'min-h-0 flex-1' : 'max-h-[30vh]')}
+      >
+        {list}
+      </div>
       {!readOnly && selectedIds.length > 0 && pages.length > 1 && (
         /* the canvas shortcuts listen on window: ⌫ would delete the frames
            being moved and typed letters would switch tools, so the picker's

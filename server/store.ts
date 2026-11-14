@@ -21,10 +21,17 @@ import type {
 } from '../shared/types.ts'
 
 export const MAX_PAGES = 100
+/** A library's pages are its sections: it may hold ten times more. */
+export const MAX_LIBRARY_PAGES = 1000
+
+/** How many pages this canvas may hold. */
+export function maxPages(canvas: Pick<Canvas, 'library'> | undefined): number {
+  return canvas?.library ? MAX_LIBRARY_PAGES : MAX_PAGES
+}
 
 export class PageLimitError extends Error {
-  constructor() {
-    super(`A canvas holds at most ${MAX_PAGES} pages.`)
+  constructor(limit = MAX_PAGES) {
+    super(`A canvas holds at most ${limit.toLocaleString('en-US')} pages.`)
   }
 }
 
@@ -437,7 +444,7 @@ class Store {
     const pages = canvasPages(canvas)
     const source = pages.find((page) => page.id === pageId)
     if (!source) return undefined
-    if (pages.length >= MAX_PAGES) throw new PageLimitError()
+    if (pages.length >= maxPages(canvas)) throw new PageLimitError(maxPages(canvas))
     const now = Date.now()
     const sourceFrames = pageFrames(canvas, pageId)
     const frameIds = new Map(sourceFrames.map((frame) => [frame.id, nanoid(10)]))

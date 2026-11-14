@@ -3,7 +3,7 @@ import { skillSlug } from '../shared/skills.ts'
 import { DRIFT_SEVERITIES, isDriftSeverity } from '../shared/drift.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import type Anthropic from '@anthropic-ai/sdk'
-import { store } from './store.ts'
+import { store, maxPages } from './store.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { libraryBrief } from '../shared/fonts.ts'
 import { webFontsBrief } from '../shared/webFonts.ts'
@@ -3400,7 +3400,7 @@ export async function execTool(
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
         const raw = block.input as { expectedPages?: unknown; pages?: unknown }
-        const pages = parsePageList(raw.pages)
+        const pages = parsePageList(raw.pages, maxPages(store.getCanvas(canvasId)))
         if (typeof pages === 'string') return fail(pages)
         const previous = pageList(canvas)
         const saved = savePages(canvas, raw.expectedPages, pages, actor)

@@ -48,4 +48,5 @@ export const library = {
   removeCategory: 'Remover esta categoria',
   back: 'Voltar',
   next: 'Próximo',
+  pagesFilter: 'Filtrar páginas',
 } as const
