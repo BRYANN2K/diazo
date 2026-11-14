@@ -10,7 +10,7 @@ import type { LibraryItemMeta, LibraryItemPatch, LibraryTaxonomy, LibraryVisibil
 import { describeRules, parseLibraryRules, RULE_PRESETS, type RulePresetName } from '../shared/libraryRules.ts'
 import type { LibrarySort, QueryFilters } from '../shared/librarySearch.ts'
 import { canAccessCanvas, canEditCanvas, canManageCanvas } from './access.ts'
-import { countUse, insertItem, InsertError } from './librarySnapshot.ts'
+import { countUse, insertItem, InsertError, promoteItem } from './librarySnapshot.ts'
 import { applyTransfer, MAX_IMPORT_FRAMES, runImport } from './libraryImport.ts'
 import { resolveActor } from './actions.ts'
 import { store } from './store.ts'
@@ -383,6 +383,20 @@ libraryRouter.post('/:id/items/:itemId/insert', async (req, res) => {
       canvasId: done.frame.canvasId,
       approvalWithdrawn: done.approvalWithdrawn,
     })
+  } catch (error) {
+    if (error instanceof InsertError) return res.status(error.status).json({ error: error.message })
+    throw error
+  }
+})
+
+/** Make an item a component on its library canvas (curators). */
+libraryRouter.post('/:id/items/:itemId/promote', async (req, res) => {
+  const found = libraryFor(req.user!.id, req.params.id, 'curate')
+  if (!found) return notFound(res)
+  const out = await itemDetail(found.canvas, req.params.itemId, found.role)
+  if (!out) return res.status(404).json({ error: 'item not found' })
+  try {
+    res.json(await promoteItem(out.item, actorOf(req)))
   } catch (error) {
     if (error instanceof InsertError) return res.status(error.status).json({ error: error.message })
     throw error

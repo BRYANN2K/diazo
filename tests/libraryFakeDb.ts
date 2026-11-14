@@ -51,6 +51,8 @@ export function fakePersist() {
       fakeDb.versions.push({ frameId: v.frameId, html: v.html })
     },
     deleteFrame: () => {},
+    saveComponent: () => {},
+    deleteComponent: () => {},
     deleteCanvas: () => {},
     frameWritePending: () => false,
     pendingVersionWrites: async () => {},

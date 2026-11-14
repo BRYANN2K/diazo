@@ -117,6 +117,20 @@ export function LibraryItemView({
           <Button size="sm" onClick={() => navigate(`/c/${libraryId}?frame=${item.frameId}`)}>
             {t('library.openInCanvas')}
           </Button>
+          {curator && item.mode !== 'component' && (
+            <Button
+              size="sm"
+              onClick={() =>
+                void api
+                  .promoteLibraryItem(libraryId, item.id)
+                  .then(() => setCopied(null))
+                  .then(() => api.libraryItem(libraryId, itemId).then(setDetail))
+                  .catch(() => {})
+              }
+            >
+              {t('library.promote')}
+            </Button>
+          )}
         </div>
         {copied && <p className="text-caption text-ink-faint">{t('library.copiedId', { id: copied })}</p>}
       </header>

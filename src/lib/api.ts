@@ -1098,6 +1098,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(target),
     }),
+  promoteLibraryItem: (libraryId: string, itemId: string) =>
+    req<{ componentId: string }>(`/api/libraries/${libraryId}/items/${encodeURIComponent(itemId)}/promote`, {
+      method: 'POST',
+    }),
   libraryItemUsed: (libraryId: string, itemId: string) =>
     req(`/api/libraries/${libraryId}/items/${encodeURIComponent(itemId)}/used`, { method: 'POST' }),
   libraryInbox: (libraryId: string) =>

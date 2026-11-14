@@ -189,4 +189,5 @@ export const library = {
   updateTitle: 'Trocar este bloco pela versão mais nova da biblioteca?',
   updateDescription:
     'O bloco é copiado de novo do seu item, no mesmo lugar. As mudanças feitas nele aqui se perdem. ⌘Z desfaz.',
+  promote: 'Promover a componente',
 } as const

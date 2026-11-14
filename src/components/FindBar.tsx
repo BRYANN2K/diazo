@@ -337,7 +337,9 @@ export function FindBar({
         focus: source.item ? libraryFocus(row) : textFocus(focusOf(row, query)),
         ref,
         target,
-        ...(source.item && row.group.libraryId ? { libraryId: row.group.libraryId, rev: source.item.rev } : {}),
+        ...(source.item && row.group.libraryId
+          ? { libraryId: row.group.libraryId, rev: source.item.rev, mode: source.item.mode }
+          : {}),
       })
       if (!done) return notice(t('actions.findInsertFailed', { ref }))
       const parts = [

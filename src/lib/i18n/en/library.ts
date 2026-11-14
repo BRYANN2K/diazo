@@ -189,4 +189,5 @@ export const library = {
   updateTitle: 'Replace this block with the library’s newer version?',
   updateDescription:
     'The block is copied again from its item, in the same place. Changes made to it here are lost. ⌘Z undoes it.',
+  promote: 'Promote to component',
 } as const

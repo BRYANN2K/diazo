@@ -21,6 +21,14 @@ import { loadFramePage, rendererAvailable } from './screenshot.ts'
 import { getLibrary } from './libraries.ts'
 import { itemMeta, saveMeta } from './libraryIndex.ts'
 import { findCells } from './libraryExtract.ts'
+import { addAttributes } from './libraryImportPlan.ts'
+import {
+  ComponentError,
+  createComponentFromElement,
+  findComponent,
+  importComponent,
+  insertInstance,
+} from './componentActions.ts'
 import {
   attr,
   bodyOf,
@@ -320,6 +328,88 @@ export async function countUse(item: LibraryItem, by: string): Promise<void> {
   await saveMeta(meta)
 }
 
+/** The component a component item's frame holds (its main's id). */
+async function componentOf(item: LibraryItem): Promise<string | null> {
+  const frame = await store.renderableFrame(item.frameId)
+  const doc = parseHtml(frame?.html ?? '')
+  const main = findElement(doc, (el) => attr(el, 'data-doop-component') !== undefined)
+  return main ? (attr(main, 'data-doop-component') ?? null) : null
+}
+
+/** A component item goes in as a linked instance: its component is
+ *  imported into the target canvas (once; a second insert reuses it), then
+ *  an instance is placed where a copy would go. */
+async function insertComponentItem(input: {
+  item: LibraryItem
+  frameId: string
+  afterElementId?: string
+  actor: Actor
+}): Promise<InsertResult> {
+  const { item, actor } = input
+  const target = store.getFrame(input.frameId)
+  if (!target) throw new InsertError('frame not found', 404)
+  const componentId = await componentOf(item)
+  if (!componentId) throw new InsertError(`${item.itemId} has no component main in its frame`)
+  return store.withCanvas(target.canvasId, async () => {
+    const current = store.getFrame(input.frameId)
+    if (!current || current.locked) throw new InsertError('this frame is locked', 409)
+    const approvalWithdrawn = current.approval?.status === 'ready_for_dev'
+    try {
+      const def =
+        target.canvasId === item.canvasId
+          ? findComponent(item.canvasId, componentId)
+          : importComponent(target.canvasId, item.canvasId, componentId, actor)
+      if (!def) throw new InsertError('the component is gone', 404)
+      const placed = insertInstance(
+        target.canvasId,
+        {
+          frameId: current.id,
+          component: def.id,
+          ...(input.afterElementId ? { target: input.afterElementId, position: 'after' as const } : {}),
+        },
+        actor,
+      )
+      await countUse(item, actor.name)
+      return { elementId: placed.instanceId, fidelity: 'rendered', frame: placed.frame, approvalWithdrawn }
+    } catch (error) {
+      if (error instanceof ComponentError) throw new InsertError(error.message)
+      throw error
+    }
+  })
+}
+
+/** "Promote to component": the item's element becomes a component main on
+ *  its library canvas, under the item's label, so the item reindexes as a
+ *  component with the same id. */
+export async function promoteItem(item: LibraryItem, actor: Actor): Promise<{ componentId: string }> {
+  if (item.mode === 'component') throw new InsertError(`${item.itemId} is already a component`)
+  return store.withCanvas(item.canvasId, async () => {
+    const frame = store.getFrame(item.frameId)
+    if (!frame) throw new InsertError('frame not found', 404)
+    const doc = parseHtml(frame.html)
+    const body = bodyOf(doc)
+    const el =
+      locate(doc, item) ?? (body ? elementChildren(body).find((c) => c.tagName !== 'script') : undefined) ?? null
+    if (!el) throw new InsertError('no element to make a component of')
+    let elementId = attr(el, ELEMENT_ID_ATTR)
+    if (!elementId) {
+      elementId = newElementId()
+      actions.annotateFrame(frame.id, addAttributes(frame.html, [{ el, attrs: [[ELEMENT_ID_ATTR, elementId]] }]), actor)
+    }
+    try {
+      const created = createComponentFromElement(
+        item.canvasId,
+        { name: item.label.slice(0, 80) || item.itemId, frameId: frame.id, element: elementId },
+        actor,
+      )
+      return { componentId: created.component.id }
+    } catch (error) {
+      if (error instanceof ComponentError) throw new InsertError(error.message)
+      throw error
+    }
+  })
+}
+
 /** Insert `item` into `frameId`: a scoped copy, placed after an element or at
  *  the end of the body, written as an ordinary design write (one version,
  *  sign-off withdrawn). */
@@ -332,6 +422,7 @@ export async function insertItem(input: {
   const { item, actor } = input
   if (NON_INSERTABLE_KINDS.has(item.kind))
     throw new InsertError(`${item.itemId} is a reference, not a design to insert`)
+  if (item.mode === 'component') return insertComponentItem(input)
   const targetMeta = store.getFrame(input.frameId)
   if (!targetMeta) throw new InsertError('frame not found', 404)
   return store.withCanvas(targetMeta.canvasId, async () => {

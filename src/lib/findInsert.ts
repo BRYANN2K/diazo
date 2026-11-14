@@ -155,7 +155,10 @@ export async function insertLibraryItem(opts: {
   target: InsertTarget
   libraryId?: string
   rev?: number
+  /** a component item becomes a linked instance, through the server */
+  mode?: 'snapshot' | 'component'
 }): Promise<InsertedItem | null> {
+  if (opts.mode === 'component' && opts.libraryId) return insertComponentItem(opts as Required<typeof opts>)
   const snap = await snapshotLibraryItem(opts.sourceFrameId, opts.focus)
   if (!snap) return null
   const s = useStore.getState()
@@ -212,6 +215,37 @@ export async function replaceLibraryBlock(frameId: string, block: LibraryRef): P
   if (!html) return false
   saveFrameHtml(frame, html)
   return true
+}
+
+/** A component item: the server imports its component and places an
+ *  instance; the room brings the frame back. */
+async function insertComponentItem(opts: {
+  ref: string
+  target: InsertTarget
+  libraryId: string
+}): Promise<InsertedItem | null> {
+  const at = typeof opts.target.at === 'string' ? opts.target.at : null
+  const s = useStore.getState()
+  const frame = s.canvas?.frames.find((f) => f.id === opts.target.frame.id)
+  if (!frame) return null
+  const afterId = at
+    ? new DOMParser().parseFromString(frame.html, 'text/html').querySelector(at)?.getAttribute('data-doop-id')
+    : null
+  const r = await api.insertLibraryItem(opts.libraryId, opts.ref, {
+    frameId: frame.id,
+    ...(afterId ? { afterElementId: afterId } : {}),
+  })
+  return {
+    frameId: frame.id,
+    selector: `[data-doop-id="${r.elementId}"]`,
+    elementId: r.elementId,
+    ref: opts.ref,
+    libraryId: opts.libraryId,
+    found: true,
+    scripted: false,
+    approvalWithdrawn: r.approvalWithdrawn,
+    before: frame.html,
+  }
 }
 
 /** Take an inserted block out again (the box's Undo), found by its own id so

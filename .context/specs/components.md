@@ -92,3 +92,8 @@ instance; description and make-a-prop / make-a-slot on a main. Right-click and â
   state and upgrades.
 - `@scope` is not used, so a host frame's own rules for the same class still apply to an instance.
 - Resident agents cannot import libraries: their run is scoped to one canvas.
+- Design libraries reach instances through their items: an item whose frame holds a main
+  (`mode: 'component'`, or a snapshot item promoted with "Promote to component") is inserted as a
+  linked instance, its component imported into the target canvas once (`insertComponentItem` in
+  `server/librarySnapshot.ts`), so `sync_component` follows the library afterwards. Every other
+  item is inserted as a snapshot, which no main tracks.
