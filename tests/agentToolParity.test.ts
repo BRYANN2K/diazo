@@ -29,6 +29,7 @@ const BY_CONTEXT = [
   'list_canvases', // a resident run is scoped to its canvas
   'create_canvas',
   'get_profile',
+  'get_usage', // the harness meters a resident run itself; the ledger is for the humans and connected agents
 ]
 
 /** Real gaps: MCP agents can do these and resident agents cannot yet. */

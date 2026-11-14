@@ -117,6 +117,9 @@ to upstream's.
 - **Drift review** — compare a frame with a live URL: pixel score, drift cards, a compare modal
   and a CI webhook. Agents call `compare_with_url`; the desktop app fetches local URLs
   (loopback GET/HEAD only).
+- **Usage meter** — every model transport reports its tokens, each resident run lands in an
+  `agent_runs` ledger with its time and cost (the provider's figure, else a per-model price
+  table), and a Usage tab shows the totals per run and per model. Agents call `get_usage`.
 - **Self-hosting** — Docker image `ghcr.io/bryann2k/doop:bryann2k-main` built on every push, k3s
   manifests in `deploy/k3s/` with a persistent volume for uploads, exposed through Tailscale
   Serve only (no ingress, no Funnel).
