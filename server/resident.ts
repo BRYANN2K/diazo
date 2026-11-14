@@ -1155,7 +1155,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       }
     }
   } finally {
-    void meter.finish(canceled() ? 'stopped' : delivered ? 'done' : 'failed')
+    /* `stopped` as latched before the run settled its cards: completing or
+       failing them sets endedAt / failedAt too, which canceled() would now
+       read as a stop */
+    void meter.finish(delivered ? 'done' : stopped ? 'stopped' : 'failed')
     checks.delete(stopCheck)
     if (checks.size === 0) stopChecks.delete(canvasId)
     clearInterval(heartbeat)
