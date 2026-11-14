@@ -65,4 +65,21 @@ describe('insertLibraryBlock', () => {
     expect(after.querySelector('p')!.outerHTML).toBe('<p data-doop-id="aaaaaa">Hello <span>you</span></p>')
     expect(after.body.lastElementChild?.getAttribute('data-doop-ref')).toBe('cp.btn')
   })
+
+  it('takes a drop slot: before an element, or inside a container', () => {
+    const before = insertLibraryBlock(
+      FRAME,
+      { selector: 'body > main', place: 'before' },
+      libraryBlock(snap(), 'cp.btn'),
+    )!
+    let doc = new DOMParser().parseFromString(before.html, 'text/html')
+    expect(doc.querySelector(before.selector)!.nextElementSibling?.tagName).toBe('MAIN')
+    const inside = insertLibraryBlock(
+      FRAME,
+      { selector: 'body > main', place: 'inside' },
+      libraryBlock(snap(), 'cp.btn'),
+    )!
+    doc = new DOMParser().parseFromString(inside.html, 'text/html')
+    expect(doc.querySelector('main')!.firstElementChild?.getAttribute('data-doop-ref')).toBe('cp.btn')
+  })
 })

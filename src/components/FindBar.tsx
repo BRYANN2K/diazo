@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type { Frame } from '../../shared/types'
 import { readingOrder } from '../../shared/frameOrder'
 import { useT } from '../lib/i18n'
@@ -20,6 +20,7 @@ import { Pressable } from './ui/pressable'
 import { SearchField } from './ui/search-field'
 import { FramePreview } from './FramePreview'
 import { FindPreview } from './FindPreview'
+import { useFindDrag } from './FindDrag'
 
 interface Hit {
   frame: Frame
@@ -322,8 +323,18 @@ export function FindBar({
     flyToHit(row.variant.hit)
   }
 
+  const drag = useFindDrag()
+
+  /* a library row drags onto any frame; the click stays the fallback */
+  function pressRow(e: ReactPointerEvent<HTMLElement>, row: ResultRow) {
+    const item = itemOf(row)
+    if (!canEdit || !isLibraryItem(item.id, item.canvasName ?? useStore.getState().canvas?.name)) return
+    drag.start(e, item.id ?? row.group.label, row.group.frameId, (target) => void insertRow(row, target))
+  }
+
   /* a click, or ↩: insert a library item into the selected frame, else go */
   function activate(row: ResultRow, shift: boolean) {
+    if (drag.swallowClick()) return
     const action = rowAction(useStore.getState(), itemOf(row), shift)
     if (action.kind === 'insert') void insertRow(row, action.target)
     else goRow(row)
@@ -591,6 +602,7 @@ export function FindBar({
                   >
                     <Pressable
                       focus="none"
+                      onPointerDown={(e) => pressRow(e, { key: rowKey(g), group: g, groupIndex: i })}
                       onClick={(e) => activate({ key: rowKey(g), group: g, groupIndex: i }, e.shiftKey)}
                       className="flex min-w-0 flex-1 items-center gap-2 text-left"
                     >
@@ -643,6 +655,9 @@ export function FindBar({
                           <Pressable
                             focus="none"
                             onMouseEnter={() => hover(rowKey(g, x.label))}
+                            onPointerDown={(e) =>
+                              pressRow(e, { key: rowKey(g, x.label), group: g, groupIndex: i, variant: x })
+                            }
                             onClick={(e) =>
                               activate({ key: rowKey(g, x.label), group: g, groupIndex: i, variant: x }, e.shiftKey)
                             }
@@ -698,6 +713,7 @@ export function FindBar({
           ))}
         </ul>
       )}
+      {drag.overlay}
     </div>
   )
 }

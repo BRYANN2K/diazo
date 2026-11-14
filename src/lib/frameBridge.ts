@@ -22,6 +22,13 @@ export async function elementMoveTarget(frameId: string, selector: string, x: nu
   return reply?.result as { free: boolean; drop: LayoutDrop | null } | undefined
 }
 
+/** Where a block dragged in from outside the frame would land at a design
+ *  point: the slot between elements a moved layer is offered. */
+export async function insertDropTarget(frameId: string, x: number, y: number) {
+  const reply = await requestFrame(frameId, 'doop:insert-target', { x, y })
+  return reply?.result as { free: boolean; drop: LayoutDrop | null } | undefined
+}
+
 /** The runtime's summary of one element: computed styles resolved to what
  *  the Design panel shows, plus the inline styles the element already carries.
  *  Mirrors `inspect()` in frameRuntime.ts — keep the two in lockstep. */

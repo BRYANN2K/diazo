@@ -52,10 +52,10 @@ describe('rowAction', () => {
 
   it('inserts a library item into the selected frame, after the picked element', () => {
     useStore.setState({ selectedId: 'login' })
-    expect(rowAction(useStore.getState(), lib, false)).toMatchObject({ kind: 'insert', target: { after: null } })
+    expect(rowAction(useStore.getState(), lib, false)).toMatchObject({ kind: 'insert', target: { at: null } })
     expect(footerHint(useStore.getState(), lib)).toEqual({ kind: 'insert', frameName: 'Login' })
     useStore.setState({ selectedElement: { frameId: 'login', selector: 'body > p' }, selectedElements: ['body > p'] })
-    expect(insertTarget(useStore.getState())?.after).toBe('body > p')
+    expect(insertTarget(useStore.getState())?.at).toBe('body > p')
   })
 
   it('goes on ⇧, for a text hit, into a locked frame, or into the item’s own frame', () => {

@@ -7,7 +7,7 @@
 import type { Frame } from '../../shared/types'
 import { isCanvasElement } from './drawing'
 import { canEditOpenCanvas, pickedSelectors, useStore } from './store'
-import { freshElementId, insertElements } from './layers'
+import { freshElementId, insertElements, placeElement, type DropTarget } from './layers'
 import { ELEMENT_ID_ATTR } from '../../shared/elementId'
 import type { LibrarySnapshot } from './findPreviewRuntime'
 import { snapshotLibraryItem } from './findSnapshot'
@@ -24,24 +24,28 @@ export function isLibraryItem(id: string | null | undefined, canvasName: string 
   return (!!id && LIBRARY_ID.test(id)) || (!!canvasName && LIBRARY_CANVAS.test(canvasName))
 }
 
-/** Where an insert lands: the selected frame, after the picked element
- *  (null: at the end of the body). */
+/** Where an insert lands: a frame, and in it a slot (a drop between
+ *  elements), the picked element to follow, or null for the end of the body. */
 export interface InsertTarget {
   frame: Frame
-  after: string | null
+  at: DropTarget | string | null
+}
+
+/** May a library item be copied into this frame? */
+export function canInsertInto(s: StoreState, frame: Frame | undefined, sourceFrameId?: string): frame is Frame {
+  if (!frame || !s.canvas || !canEditOpenCanvas(s)) return false
+  return frame.id !== sourceFrameId && !frame.locked && !frame.htmlDeferred && !isCanvasElement(frame.html)
 }
 
 /** The frame a click would insert into: the selected one on the open
  *  canvas, editable, unlocked, a real frame (not a standalone shape), and
  *  not the frame the item comes from. */
 export function insertTarget(s: StoreState, sourceFrameId?: string): InsertTarget | null {
-  if (!s.canvas || !canEditOpenCanvas(s)) return null
   const frameId = s.selectedElement?.frameId ?? s.selectedId
-  if (!frameId || frameId === sourceFrameId) return null
-  const frame = s.canvas.frames.find((f) => f.id === frameId)
-  if (!frame || frame.locked || frame.htmlDeferred || isCanvasElement(frame.html)) return null
+  const frame = frameId ? s.canvas?.frames.find((f) => f.id === frameId) : undefined
+  if (!canInsertInto(s, frame, sourceFrameId)) return null
   const picked = s.selectedElement?.frameId === frame.id ? pickedSelectors(s) : []
-  return { frame, after: picked.at(-1) ?? null }
+  return { frame, at: picked.at(-1) ?? null }
 }
 
 /** What a click on a result row does. */
@@ -127,18 +131,25 @@ export function libraryBlock(snap: LibrarySnapshot, ref: string): string {
    component instances */
 const KEPT_DOOP_ATTRS = new Set([REF_ATTR, 'data-doop-name', 'data-doop-ref-style'])
 
-/** Insert the block after `after` (else at the end of the body), give every
- *  element in it a fresh `data-doop-id`, and return the new HTML with the
- *  block's selector. An anchor that cannot take a block (a `<p>`) falls back
- *  to the end of the body. */
+function placeBlock(html: string, at: DropTarget | string | null, block: string) {
+  if (at && typeof at !== 'string') return placeElement(html, at, block)
+  const inserted = insertElements(html, at, block)
+  const selector = inserted?.selectors[0]
+  return inserted && selector ? { html: inserted.html, selector } : null
+}
+
+/** Insert the block at `at` (a drop slot, after a selector, else at the end
+ *  of the body), give every element in it a fresh `data-doop-id`, and
+ *  return the new HTML with the block's selector. A slot that cannot take a
+ *  block (inside a `<p>`) falls back to the end of the body. */
 export function insertLibraryBlock(
   html: string,
-  after: string | null,
+  at: DropTarget | string | null,
   block: string,
 ): { html: string; selector: string } | null {
-  const inserted = insertElements(html, after, block) ?? (after ? insertElements(html, null, block) : null)
-  const selector = inserted?.selectors[0]
-  if (!inserted || !selector) return null
+  const inserted = placeBlock(html, at, block) ?? (at ? placeBlock(html, null, block) : null)
+  if (!inserted) return null
+  const selector = inserted.selector
   const doc = new DOMParser().parseFromString(inserted.html, 'text/html')
   const root = doc.querySelector(selector)
   if (!root) return null
@@ -185,7 +196,7 @@ export async function insertLibraryItem(opts: {
   const frame = s.canvas?.frames.find((f) => f.id === opts.target.frame.id)
   if (!frame || frame.locked || frame.htmlDeferred) return null
   const ref = refId(opts.ref)
-  const done = insertLibraryBlock(frame.html, opts.target.after, libraryBlock(snap, ref))
+  const done = insertLibraryBlock(frame.html, opts.target.at, libraryBlock(snap, ref))
   if (!done) return null
   saveFrameHtml(frame, done.html)
   s.select(frame.id)

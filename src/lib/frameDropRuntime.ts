@@ -37,7 +37,16 @@ export const FRAME_DROP_RUNTIME = `
   }
 
   function moveTarget(selector, x, y) {
-    var source = styleTarget(selector)
+    return moveTargetFor(styleTarget(selector), x, y)
+  }
+
+  // A block arriving from outside the frame (⌘F's library insert): the same
+  // slots a moved layer is offered, for an element that is nowhere yet.
+  function insertTarget(x, y) {
+    return moveTargetFor(document.createElement('div'), x, y)
+  }
+
+  function moveTargetFor(source, x, y) {
     var empty = { free: false, drop: null }
     if (!source || isLocked(source)) return empty
     var position = getComputedStyle(source).position
