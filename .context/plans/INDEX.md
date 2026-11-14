@@ -9,3 +9,6 @@ lists every file in this folder.
 - [image-descriptions.md](image-descriptions.md) - Three phases, test-first: storage and the
   describer worker, the agent read paths (`get_canvas`, `get_frame`, the resident kickoff), the
   Settings → Agents switch.
+- [ai-dev-features.md](ai-dev-features.md) - Build order for the AI-dev ideas 2-16 (canvas skills, frame
+  checks, usage meter, run replay, model duel, code mapping, token sync, frame → code, Built page, CLI, Pad
+  link): one `feat/*` branch each, and what depends on what.

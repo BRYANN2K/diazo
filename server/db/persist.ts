@@ -10,6 +10,7 @@ import { isCommunityCategory } from '../../shared/types.ts'
 import { storedLinkAccess } from '../../shared/canvasRole.ts'
 import type { ComponentDef } from '../../shared/components.ts'
 import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
+import type { CanvasSkill } from '../../shared/skills.ts'
 import { parseRunnerPick } from '../../shared/agentRunner.ts'
 import { cleanPlanReferences } from '../../shared/chat.ts'
 import { byStack } from '../../shared/frameStack.ts'
@@ -115,6 +116,10 @@ export async function saveCanvasCopy(c: Canvas): Promise<void> {
           y: doc.y ?? null,
         })),
       )
+    }
+
+    if (c.skills?.length) {
+      await tx.insert(t.canvasSkills).values(c.skills.map((skill) => ({ canvasId: c.id, ...skill })))
     }
 
     if (c.components?.length) {
@@ -223,6 +228,28 @@ export function saveGuideline(canvasId: string, doc: GuidelineDoc) {
         },
       }),
   )
+}
+
+export function saveSkill(canvasId: string, skill: CanvasSkill) {
+  const row = { canvasId, ...skill }
+  swallow(
+    db
+      .insert(t.canvasSkills)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [t.canvasSkills.canvasId, t.canvasSkills.name],
+        set: {
+          description: row.description,
+          markdown: row.markdown,
+          updatedAt: row.updatedAt,
+          updatedBy: row.updatedBy,
+        },
+      }),
+  )
+}
+
+export function deleteSkill(canvasId: string, name: string) {
+  swallow(db.delete(t.canvasSkills).where(and(eq(t.canvasSkills.canvasId, canvasId), eq(t.canvasSkills.name, name))))
 }
 
 export function deleteGuideline(canvasId: string, name: string) {
@@ -733,6 +760,7 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.comments).where(eq(t.comments.canvasId, canvasId)))
   swallow(db.delete(t.activity).where(eq(t.activity.canvasId, canvasId)))
   swallow(db.delete(t.guidelines).where(eq(t.guidelines.canvasId, canvasId)))
+  swallow(db.delete(t.canvasSkills).where(eq(t.canvasSkills.canvasId, canvasId)))
   swallow(db.delete(t.components).where(eq(t.components.canvasId, canvasId)))
   swallow(db.delete(t.guidelineVersions).where(eq(t.guidelineVersions.canvasId, canvasId)))
   swallow(
@@ -1063,6 +1091,7 @@ export async function hydrate(): Promise<Hydrated> {
     chatRows,
     activityRows,
     guidelineRows,
+    skillRows,
     componentRows,
     tokenRows,
     referenceRows,
@@ -1080,6 +1109,7 @@ export async function hydrate(): Promise<Hydrated> {
     db.select().from(t.chatMessages).orderBy(desc(t.chatMessages.at)),
     db.select().from(t.activity).orderBy(desc(t.activity.at)),
     db.select().from(t.guidelines).orderBy(t.guidelines.name),
+    db.select().from(t.canvasSkills).orderBy(t.canvasSkills.name),
     db.select().from(t.components).orderBy(t.components.name),
     db.select().from(t.designTokens).orderBy(t.designTokens.order, t.designTokens.name),
     db.select().from(t.memoryReferences).orderBy(desc(t.memoryReferences.pinnedAt)),
@@ -1158,6 +1188,10 @@ export async function hydrate(): Promise<Hydrated> {
       ...(g.x != null ? { x: g.x } : {}),
       ...(g.y != null ? { y: g.y } : {}),
     })
+  }
+  for (const { canvasId, ...skill } of skillRows) {
+    const c = byId.get(canvasId)
+    if (c) (c.skills ??= []).push(skill)
   }
   for (const row of tokenRows) {
     const c = byId.get(row.canvasId)

@@ -1,5 +1,6 @@
 import { findInCanvas } from './canvasFind.ts'
 import { env } from './env.ts'
+import { MAX_SKILL_CHARS, MAX_SKILL_DESCRIPTION_CHARS, skillSlug } from '../shared/skills.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import packageJson from '../package.json' with { type: 'json' }
 import { createHash } from 'node:crypto'
@@ -121,6 +122,7 @@ You MUST call get_guide({ topic: "doop-instructions" }) once before using other 
 ${extensionGuideLines()}- Feedback: humans reply to your tasks; their notes arrive inside your tool results as HUMAN FEEDBACK blocks (read-only tools only announce them: claim those with get_feedback) — address them before continuing.
 - Comments: call get_comments to read comments and replies on a canvas — pinned to an element inside a frame, or to a point on the canvas (pageId, x, y) — optionally filtered by frame; reply_to_comment answers a thread and resolve_comment closes it. Reading does not claim feedback or comments. A reply that @mentions a resident role is metered like a comment left in the browser.
 - Guidelines: canvases can carry named style guides (brand rules, style recipes). get_canvas lists them with one-line summaries — read the relevant ones with get_guidelines BEFORE designing and follow them.
+- Skills: canvases can carry named know-how (a saved brief, how a pricing page is done here). get_canvas lists each with a description of when to use it — when your task matches one, read it with get_skill before you start and follow it.
 - Design tokens: canvases can carry typed design tokens (colour, spacing, radius, type scale — CSS custom properties), each with a value per theme (light, dark, …) where it differs. get_canvas lists them; use one by writing var(--name) in CSS, never the literal, so a token change restyles every frame; switch a frame's theme with data-doop-theme="dark" on its <html>. create_tokens adds them when a brief names a palette or scale; set_tokens changes, renames or deletes; set_token_themes declares the themes; get_tokens exports them as JSON, CSS or a Tailwind @theme block.
 - Memory: canvases can also carry pinned style references — exemplar designs humans marked as "more like this". get_canvas lists them; read the relevant one with get_reference and match its look. When your human gives you design feedback in conversation and you address it, record it with save_decision so the canvas remembers their taste.
 - Problems with Doop itself: when a Doop tool errors, misbehaves or lacks something you need, or the guide leaves you guessing, call report_issue with what you tried and what happened, then carry on. Ideas for making Doop better for agents, or something that worked well, go to share_feedback. Both reach the Doop team, not the humans on the canvas.`
@@ -675,6 +677,11 @@ export function buildMcpServer(
               'This canvas has style guides. Call get_guidelines for each relevant one BEFORE designing — every frame must follow them.',
             ]
           : []),
+        ...(c.skills?.length
+          ? [
+              'This canvas has skills: named know-how for tasks like yours. When your task matches a skill’s description, call get_skill with its name before you start and follow it.',
+            ]
+          : []),
         ...(library.length ? [libraryBrief(library)] : []),
         webFontsBrief(),
         ...(tokens.length ? [tokensBrief(tokens, tokenThemes)] : []),
@@ -702,6 +709,9 @@ export function buildMcpServer(
               summary: actions.guidelineSummary(d),
               bytes: d.markdown.length,
             })),
+            ...(c.skills?.length
+              ? { skills: c.skills.map((skill) => ({ name: skill.name, description: skill.description })) }
+              : {}),
             references: refs.map((r) => ({
               id: r.id,
               title: r.title,
@@ -723,6 +733,113 @@ export function buildMcpServer(
         canvas_id,
         shown,
       )
+    },
+  )
+
+  server.registerTool(
+    'list_skills',
+    {
+      title: 'List canvas skills',
+      description:
+        "List a canvas's skills: named know-how for recurring work (a saved brief, the house way to do a pricing page). Each has a description saying when to use it; load the matching one with get_skill before you start.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { canvas_id: z.string(), agent_name: agentName.optional() },
+    },
+    async ({ canvas_id, agent_name }) => {
+      if (!canvasFor(canvas_id, 'view')) return noCanvas(canvas_id)
+      const skills = store.getSkills(canvas_id)
+      return withFeedbackNotice(
+        text(
+          skills.length
+            ? {
+                skills: skills.map((skill) => ({
+                  name: skill.name,
+                  description: skill.description,
+                  bytes: skill.markdown.length,
+                  updatedAt: new Date(skill.updatedAt).toISOString(),
+                  updatedBy: skill.updatedBy,
+                })),
+              }
+            : { skills: [], note: 'No skills on this canvas yet. People add them in the canvas’s Memory panel.' },
+        ),
+        canvas_id,
+        agent_name ? actorFrom(agent_name) : undefined,
+      )
+    },
+  )
+
+  server.registerTool(
+    'get_skill',
+    {
+      title: 'Read a canvas skill',
+      description:
+        "Read one of the canvas's skills in full: instructions for a kind of task on this canvas. Call it when get_canvas or list_skills shows a skill whose description matches your task, and follow it.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        name: z.string().describe('Skill name from get_canvas / list_skills, e.g. "pricing-page"'),
+        agent_name: agentName.optional(),
+      },
+    },
+    async ({ canvas_id, name, agent_name }) => {
+      if (!canvasFor(canvas_id, 'view')) return noCanvas(canvas_id)
+      const skills = store.getSkills(canvas_id)
+      const skill = skills.find((s) => s.name === skillSlug(name.replace(/^\//, '')))
+      if (!skill)
+        return err(
+          skills.length
+            ? `no skill named “${name}” — this canvas has: ${skills.map((s) => s.name).join(', ')}`
+            : 'no skills on this canvas yet',
+        )
+      return withFeedbackNotice(
+        text(`# /${skill.name}\n\n${skill.description}\n\n${skill.markdown}`),
+        canvas_id,
+        agent_name ? actorFrom(agent_name) : undefined,
+      )
+    },
+  )
+
+  server.registerTool(
+    'set_skill',
+    {
+      title: 'Create or replace a canvas skill',
+      description:
+        'Create, replace or delete a named skill on a canvas: instructions agents load when their task matches the description. Use it when a human asks you to save how something is done here. An empty markdown deletes the skill.',
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        name: z.string().describe('Skill slug, e.g. "pricing-page" (a-z, 0-9, hyphens)'),
+        description: z
+          .string()
+          .max(MAX_SKILL_DESCRIPTION_CHARS)
+          .optional()
+          .describe('One line saying when to use it; required for a new skill'),
+        markdown: z.string().max(MAX_SKILL_CHARS).describe('The full instructions; empty string deletes the skill'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, name, description, markdown, agent_name }) => {
+      if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
+      if (!env.AGENT_GUIDELINE_WRITES)
+        return err(
+          'skills on this instance are written by people (AGENT_GUIDELINE_WRITES=false); propose the skill in a comment instead',
+        )
+      const actor = actorFrom(agent_name)
+      try {
+        const skill = actions.setSkill(
+          canvas_id,
+          { name, ...(description !== undefined ? { description } : {}), markdown },
+          actor,
+        )
+        if (skill === undefined) return noCanvas(canvas_id)
+        return withFeedback(
+          text(skill ? { ok: true, name: skill.name, bytes: skill.markdown.length } : { ok: true, deleted: true }),
+          canvas_id,
+          actor,
+        )
+      } catch (e) {
+        return err(e instanceof Error ? e.message : 'invalid skill')
+      }
     },
   )
 

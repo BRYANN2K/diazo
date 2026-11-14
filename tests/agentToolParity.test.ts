@@ -24,6 +24,7 @@ const BY_CONTEXT = [
   'get_guide', // the system prompt carries the guide's sections
   'get_guidelines', // canvas guidelines ride as a system block
   'list_guidelines',
+  'list_skills', // the skill list rides in the # Canvas skills system block
   'get_feedback', // feedback, cards and comments arrive in the kickoff
   'get_comments',
   'list_canvases', // a resident run is scoped to its canvas

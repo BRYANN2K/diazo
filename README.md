@@ -107,8 +107,15 @@ to upstream's.
   chat (**Adapt**, through the plan → Go flow) or removes the copy (**Undo**).
 - **Reference library** — store design-library items as references, find them with
   `find_references`, and attach them to plan cards (thumbnails, remove button, Settings card).
-- **Plan-first Chat tab** — thread list, composer, plan card and repo chip. An editor's line in
-  the Chat tab asks Doop without an `@mention`, with a model picker per ask.
+- **Plan-first Chat tab** — thread list, one composer, plan card and repo chip. An editor's line
+  in the Chat tab asks Doop without an `@mention`, with a model picker per ask. A thread's Reply
+  action points the composer at that thread. The composer and the message bubbles follow the
+  design library's chat sections.
+- **Canvas skills** (upstream issue #380) — named know-how per canvas: a saved brief, or "how we
+  do a pricing page here". Agents see each skill's "when to use it" line and load the matching
+  one on their own (`list_skills`, `get_skill`, `set_skill` over MCP, and the same tools for the
+  resident agent). Typing `/name` in an ask, or picking it from the composer's `/` menu, loads it
+  for sure. You manage skills in the Memory panel.
 - **Link a local project** (desktop app) — link a canvas to a folder on your Mac. The agent can
   only list, read and search it (`repo_list`, `repo_read`, `repo_search`); the path stays on the
   machine.

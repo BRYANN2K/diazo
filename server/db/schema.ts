@@ -548,6 +548,22 @@ export const guidelines = pgTable(
   (t) => [primaryKey({ columns: [t.canvasId, t.name] })],
 )
 
+/** Canvas skills (shared/skills.ts): named know-how agents load on demand,
+ *  by description or when an ask names one as `/name`. Small; hydrated with
+ *  the canvas like guidelines. */
+export const canvasSkills = pgTable(
+  'canvas_skills',
+  {
+    canvasId: text('canvas_id').notNull(),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    markdown: text('markdown').notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+    updatedBy: text('updated_by').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.canvasId, t.name] })],
+)
+
 /** Reusable designs. Keyed per canvas: a copied canvas keeps its ids, so the
  *  instance markers in its copied frames still point at the right rows. Mirrored
  *  in memory like guidelines. `history` holds recent revisions inline because

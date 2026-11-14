@@ -1,3 +1,4 @@
+import type { CanvasSkill } from './skills'
 import type { BillingInterval, WorkspaceStatus } from './billing.ts'
 import type { CanvasRole, LinkAccess } from './canvasRole.ts'
 import type { ComponentDef } from './components.ts'
@@ -203,6 +204,8 @@ export interface Canvas {
   guides?: CanvasGuide[]
   /** named design docs (brand rules, style recipes) every actor on the canvas follows */
   guidelines?: GuidelineDoc[]
+  /** named know-how agents load when the work matches (shared/skills.ts) */
+  skills?: CanvasSkill[]
   /** design tokens (shared/designTokens.ts): the CSS custom properties frames use as var(--name) */
   tokens?: DesignToken[]
   /** the token themes (light, dark, …) in display order; a token may carry a value per theme */
@@ -749,6 +752,7 @@ export type ServerMessage =
   | { type: 'component'; id: string; component: ComponentDef | null; actor: Actor }
   /** a style-guide doc was written, moved (doc set) or deleted (doc null) */
   | { type: 'guidelines'; name: string; doc: GuidelineDoc | null; actor: Actor }
+  | { type: 'skill'; name: string; skill: CanvasSkill | null; actor: Actor }
   /** the canvas's design tokens changed: the whole list after the change */
   | { type: 'tokens'; tokens: DesignToken[]; themes: string[]; actor: Actor }
   /** a frame was pinned to (reference set) or unpinned from (null) Memory */

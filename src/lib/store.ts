@@ -1,3 +1,4 @@
+import type { CanvasSkill } from '../../shared/skills'
 import { create } from 'zustand'
 import { canvasPages, framePageId } from '../../shared/pages'
 import { sortByStack } from '../../shared/frameStack'
@@ -214,6 +215,7 @@ interface State {
   renameCanvasLocal(name: string): void
   /** upsert (doc set) or remove (doc null) a style guide on the open canvas */
   setGuidelineLocal(name: string, doc: GuidelineDoc | null): void
+  setSkillLocal(name: string, skill: CanvasSkill | null): void
   /** a component changed in the room, or was deleted (null) */
   setComponentLocal(id: string, component: import('../../shared/components').ComponentDef | null): void
   /** replace the open canvas's design tokens and themes (the room sends the whole list) */
@@ -578,6 +580,16 @@ export const useStore = create<State>((set, get) => ({
       if (!s.canvas) return {}
       const others = (s.canvas.components ?? []).filter((def) => def.id !== id)
       return { canvas: { ...s.canvas, components: component ? [...others, component] : others } }
+    }),
+  setSkillLocal: (name, skill) =>
+    set((s) => {
+      if (!s.canvas) return {}
+      const skills = (s.canvas.skills ?? []).filter((x) => x.name !== name)
+      if (skill) {
+        skills.push(skill)
+        skills.sort((a, b) => a.name.localeCompare(b.name))
+      }
+      return { canvas: { ...s.canvas, skills } }
     }),
   setGuidelineLocal: (name, doc) =>
     set((s) => {

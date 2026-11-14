@@ -1,3 +1,4 @@
+import type { CanvasSkill } from '../../shared/skills'
 import { useStore } from './store'
 import type { InstanceSettings, InstanceSettingsPatch } from '../../shared/instanceSettings'
 import { beginFrameSave } from './frameSaves'
@@ -550,6 +551,19 @@ export const api = {
     req(`/api/canvases/${canvasId}/guidelines/${encodeURIComponent(name)}`, {
       method: 'PUT',
       body: JSON.stringify({ markdown, ...(title !== undefined ? { title } : {}) }),
+    }),
+  /* canvas skills: an empty markdown deletes one */
+  setSkill: (canvasId: string, name: string, input: { description?: string; markdown: string }) =>
+    req<{ ok: true; skill?: CanvasSkill; deleted?: true }>(
+      `/api/canvases/${canvasId}/skills/${encodeURIComponent(name)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(input),
+      },
+    ),
+  deleteSkill: (canvasId: string, name: string) =>
+    req<{ ok: true; deleted: boolean }>(`/api/canvases/${canvasId}/skills/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
     }),
   /* design tokens */
   createTokens: (canvasId: string, tokens: DesignTokenInput[]) =>

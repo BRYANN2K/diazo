@@ -256,6 +256,7 @@ const GUEST_HIDDEN: ReadonlySet<ServerMessage['type']> = new Set([
   'proposal',
   'reference',
   'guidelines',
+  'skill',
   /* an agent's status line is its task's summary (setAgentStatus) */
   'status',
 ] satisfies ServerMessage['type'][])
@@ -2265,6 +2266,38 @@ app.put('/api/canvases/:id/guidelines/:name', (req, res) => {
   }
 })
 
+/* canvas skills (shared/skills.ts): read by anyone who may view the canvas,
+   as guideline history is, written by editors */
+app.get('/api/canvases/:id/skills', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'view')) return
+  res.json({ skills: store.getSkills(req.params.id) })
+})
+
+app.put('/api/canvases/:id/skills/:name', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  const { description, markdown } = req.body ?? {}
+  if (typeof markdown !== 'string' || (description !== undefined && typeof description !== 'string'))
+    return res.status(400).json({ error: 'markdown (string) and an optional description (string) are expected' })
+  try {
+    const skill = actions.setSkill(req.params.id, { name: req.params.name, description, markdown }, userActor(req))
+    if (skill === undefined) return res.status(404).json({ error: 'not found' })
+    res.json(skill ? { ok: true, skill } : { ok: true, deleted: true })
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : 'invalid skill' })
+  }
+})
+
+app.delete('/api/canvases/:id/skills/:name', (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  try {
+    const gone = actions.setSkill(req.params.id, { name: req.params.name, markdown: '' }, userActor(req))
+    if (gone === undefined) return res.status(404).json({ error: 'not found' })
+    res.json({ ok: true, deleted: gone === null })
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : 'invalid skill' })
+  }
+})
+
 /* design memory: pin/unpin reference frames, accept/dismiss rule proposals */
 app.post('/api/canvases/:id/references', (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
@@ -3549,7 +3582,7 @@ function joinAsGuest(ws: WebSocket, canvasId: string, clientId: string, canvas: 
   }
   const presence: Presence = { clientId, name: '', color: colorFor(clientId), kind: 'user', activeFrameId: null }
   conns.set(ws, { ws, canvasId, presence, silent: true })
-  const { guidelines: _guidelines, references: _references, memberIds: _memberIds, ...shown } = canvas
+  const { guidelines: _guidelines, skills: _skills, references: _references, memberIds: _memberIds, ...shown } = canvas
   send(ws, {
     type: 'init',
     canvas: { ...shown, role },

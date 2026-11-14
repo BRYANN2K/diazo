@@ -22,6 +22,7 @@ import { ListHint, ListItem, ListMeta, ListRow, ListSection, ListSummary, ListTi
 import { MarkdownBlock, Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/modal'
 import { ConfirmDialog } from './ui/alert-dialog'
 import { DoopMark } from './Logo'
+import { SkillModal } from './SkillModal'
 import { getLocale, t as translate, useT } from '@/lib/i18n'
 
 const MAX_GUIDELINE_CHARS = 24_000
@@ -59,6 +60,7 @@ function slugify(title: string): string {
 export function MemoryPanel() {
   const canvasId = useStore((s) => s.canvas?.id)
   const docs = useStore((s) => s.canvas?.guidelines ?? [])
+  const skills = useStore((s) => s.canvas?.skills ?? [])
   const references = useStore((s) => s.canvas?.references ?? [])
   const decisions = useStore((s) => s.decisions)
   const proposals = useStore((s) => s.proposals)
@@ -67,6 +69,8 @@ export function MemoryPanel() {
   /** slug of the open guide, '' = create a new one, null = closed */
   const [openGuide, setOpenGuide] = useState<string | null>(null)
   const [openRef, setOpenRef] = useState<string | null>(null)
+  /** name of the open skill, '' = create a new one, null = closed */
+  const [openSkill, setOpenSkill] = useState<string | null>(null)
   const t = useT()
 
   if (!canvasId) return null
@@ -167,6 +171,30 @@ export function MemoryPanel() {
         </ListRow>
       ))}
 
+      <ListSection>
+        <span>{t('panels.skills')}</span>
+        {!readOnly && (
+          <Button
+            variant="solid"
+            size="sm"
+            className="flex-none text-[11.5px] font-bold"
+            onClick={() => setOpenSkill('')}
+          >
+            {t('panels.memoryNew')}
+          </Button>
+        )}
+      </ListSection>
+      {skills.length === 0 && <ListHint>{t('panels.skillsHint')}</ListHint>}
+      {skills.map((skill) => (
+        <ListRow key={skill.name} onClick={() => setOpenSkill(skill.name)}>
+          <ListTitle>/{skill.name}</ListTitle>
+          <ListSummary>{skill.description}</ListSummary>
+          <ListMeta>
+            {skill.updatedBy} · {timeAgo(skill.updatedAt)}
+          </ListMeta>
+        </ListRow>
+      ))}
+
       {decisions.length > 0 && (
         <>
           <ListSection>
@@ -187,6 +215,9 @@ export function MemoryPanel() {
 
       {openGuide !== null && (
         <GuideModal canvasId={canvasId} name={openGuide || null} onClose={() => setOpenGuide(null)} />
+      )}
+      {openSkill !== null && (
+        <SkillModal canvasId={canvasId} name={openSkill || null} onClose={() => setOpenSkill(null)} />
       )}
       {openRef !== null && (
         <RefModal
