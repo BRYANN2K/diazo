@@ -22,7 +22,8 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   the frame names (`<id> — <label>`), `§` section frames and the sheets' cells, or from
   `data-doop-item` / `data-doop-variant` markers. Converting changes no frame. ⌘F has a Library
   scope answered by the index: one row per family, its variants under it, kind chips, and insert
-  as before. Agents call `list_libraries`, `get_library`, `search_library` and `get_library_item`.
+  as before. The Libraries page (rail → Libraries, `/libraries`) lists them as tiles.
+  Agents call `list_libraries`, `get_library`, `search_library` and `get_library_item`.
 - **Reference library** — store design-library items as references, find them with
   `find_references`, and attach them to plan cards (thumbnails, remove button, Settings card).
 - **Plan-first Chat tab** — thread list, one composer, plan card and repo chip. An editor's line

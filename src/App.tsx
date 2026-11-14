@@ -1,3 +1,5 @@
+import { Libraries } from './pages/Libraries'
+import { LibraryPage } from './pages/LibraryPage'
 import { startLocalAgent } from './lib/localAgent'
 import { startLocalRepo } from './lib/localRepo'
 import { startLocalDrift } from './lib/localDrift'
@@ -229,6 +231,14 @@ export function App() {
     <Integrations />
   ) : path.match(/^\/w\/([^/]+)/) ? (
     <Workspace workspaceId={path.match(/^\/w\/([^/]+)/)![1]!} key={path} />
+  ) : path.match(/^\/l\/([^/]+)/) ? (
+    <LibraryPage
+      libraryId={path.match(/^\/l\/([^/]+)/)![1]!}
+      itemId={decodeURIComponent(path.match(/^\/l\/[^/]+\/i\/([^/?]+)/)?.[1] ?? '') || null}
+      key={path.match(/^\/l\/([^/]+)/)![1]!}
+    />
+  ) : path.startsWith('/libraries') ? (
+    <Libraries />
   ) : path.match(/^\/automations\/([^/]+)/) ? (
     <AutomationEditor automationId={path.match(/^\/automations\/([^/]+)/)![1]!} key={path} />
   ) : path.startsWith('/automations') ? (

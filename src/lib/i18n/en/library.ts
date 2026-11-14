@@ -49,4 +49,15 @@ export const library = {
   back: 'Back',
   next: 'Next',
   pagesFilter: 'Filter pages',
+  newLibrary: 'New library',
+  emptyTitle: 'No design library yet',
+  emptyDescription:
+    'A library is a canvas whose frames become items you search from ⌘F, browse here and insert into any frame.',
+  emptyAction: 'Turn a canvas into a library',
+  pickCanvasTitle: 'Which canvas?',
+  pickCanvasLede: 'Its frames become the library’s items. Nothing in it is changed.',
+  pickCanvasPlaceholder: 'Pick a canvas',
+  role_read: 'Can use',
+  role_curate: 'Can curate',
+  role_manage: 'Owner',
 } as const

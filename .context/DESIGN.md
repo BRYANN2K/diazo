@@ -164,6 +164,9 @@ density="rail"` (the group caption with its chevron) and `DashNavItem density="r
   their own group as children; Settings draws its own rail from the same parts.
   `src/components/FramePreview.tsx` is the one frame-image-with-fallbacks (empty / failed, failure
   keyed per frame id) every thumbnail, card cover and gallery figure renders through. Its
+  `src/components/library/ItemThumb.tsx` is a library item's image (its own thumbnail, else the
+  frame preview cropped to the item's box, else `FramePreview`), and `LibraryTile.tsx` a library on
+  the Libraries page (four item thumbnails as the `TileCover`, families · variants · role).
   `FrameThumb` is the boxed well a row or menu item leads with (`rounded-row`, `shadow-ring`,
   paper-deep fill): `size` xs 34x22 (table rows, menu items), sm 64x40 (list rows, the search
   palette, the export checklist), md 96px tall at its column's width (frame strips).

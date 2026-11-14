@@ -34,6 +34,7 @@ import {
   UsersIcon,
   WebIcon,
   WorkflowIcon,
+  LibraryIcon,
 } from './ui/icons'
 
 /**
@@ -60,7 +61,7 @@ import {
 
 /** which row is lit: a home scope, a workspace, or one of the other pages */
 export type RailActive =
-  'all' | 'mine' | 'shared' | 'automations' | 'integrations' | 'community' | `ws:${string}` | null
+  'all' | 'mine' | 'shared' | 'automations' | 'integrations' | 'community' | 'libraries' | `ws:${string}` | null
 
 /** the Workspace page's panes, in the order the rail lists them */
 export type WorkspacePane = 'members' | 'fonts' | 'billing' | 'general'
@@ -329,6 +330,9 @@ export function AppRail({
       <IconButton aria-label={t('rail.community')} on={active === 'community'} onClick={() => go('/community')}>
         <WebIcon size="rail" />
       </IconButton>
+      <IconButton aria-label={t('rail.libraries')} on={active === 'libraries'} onClick={() => go('/libraries')}>
+        <LibraryIcon size="rail" />
+      </IconButton>
       <IconButton aria-label={t('rail.automations')} on={active === 'automations'} onClick={() => go('/automations')}>
         <WorkflowIcon size="rail" />
       </IconButton>
@@ -481,6 +485,14 @@ export function AppRail({
 
       <DashSectionLabel density="rail">{t('rail.resources')}</DashSectionLabel>
       <nav className="flex flex-col gap-0.5">
+        <DashNavItem
+          density="rail"
+          icon={<LibraryIcon size="rail" />}
+          active={active === 'libraries'}
+          onClick={() => go('/libraries')}
+        >
+          {t('rail.libraries')}
+        </DashNavItem>
         <DashNavItem
           density="rail"
           icon={<WorkflowIcon size="rail" />}

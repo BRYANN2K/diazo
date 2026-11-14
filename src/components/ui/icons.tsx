@@ -43,6 +43,7 @@ import {
   Component as LucideComponent,
   Calendar,
   BookOpen,
+  Library,
   Brain,
   Building2,
   Check,
@@ -300,6 +301,8 @@ export const MoonIcon = icon(Moon)
 /* the editor chrome's own glyphs */
 export const FolderIcon = icon(Folder)
 export const BookOpenIcon = icon(BookOpen)
+/** Design libraries: the rail row and the gallery. */
+export const LibraryIcon = icon(Library)
 export const SlidersIcon = icon(SlidersHorizontal)
 /** How a prototype screen is scaled to the viewer (the player's scaling menu). */
 export const ScalingIcon = icon(Scaling)

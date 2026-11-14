@@ -49,4 +49,15 @@ export const library = {
   back: 'Voltar',
   next: 'Próximo',
   pagesFilter: 'Filtrar páginas',
+  newLibrary: 'Nova biblioteca',
+  emptyTitle: 'Ainda não há biblioteca de design',
+  emptyDescription:
+    'Uma biblioteca é um canvas cujos frames viram itens que você busca pelo ⌘F, navega aqui e insere em qualquer frame.',
+  emptyAction: 'Transformar um canvas em biblioteca',
+  pickCanvasTitle: 'Qual canvas?',
+  pickCanvasLede: 'Os frames dele viram os itens da biblioteca. Nada nele é alterado.',
+  pickCanvasPlaceholder: 'Escolha um canvas',
+  role_read: 'Pode usar',
+  role_curate: 'Pode curar',
+  role_manage: 'Dono',
 } as const
