@@ -59,6 +59,10 @@ git push origin bryann2k/main   # jamais vers upstream
 
 Buildée en CI (`.github/workflows/docker.yml`) et publiée sur
 `ghcr.io/bryann2k/doop:bryann2k-main` à chaque push sur `bryann2k/main`.
+Multi-arch : `linux/amd64` (le VPS k3s) et `linux/arm64` (l'install locale
+sur Mac Apple silicon). Chaque arch est buildée sur un runner natif
+(`ubuntu-latest`, `ubuntu-24.04-arm`), poussée par digest, puis un job
+`merge` assemble le tag multi-arch.
 
 ## Déploiement k3s (Tailscale only)
 
