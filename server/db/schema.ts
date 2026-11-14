@@ -223,8 +223,14 @@ export const frameVersions = pgTable(
     /** 'user' | 'agent'; null when the author's kind was not known (a state
      *  authored before the server last booted) */
     savedByKind: text('saved_by_kind'),
+    /** the resident run whose write filed (replaced) this state */
+    runId: text('run_id'),
   },
-  (t) => [index('frame_versions_frame_idx').on(t.frameId), index('frame_versions_canvas_idx').on(t.canvasId)],
+  (t) => [
+    index('frame_versions_frame_idx').on(t.frameId),
+    index('frame_versions_canvas_idx').on(t.canvasId),
+    index('frame_versions_run_idx').on(t.runId),
+  ],
 )
 
 /** Design-sync keys: the write-only capability behind the /ingest endpoint.
@@ -684,8 +690,10 @@ export const activity = pgTable(
     message: text('message').notNull(),
     frameId: text('frame_id'),
     at: bigint('at', { mode: 'number' }).notNull(),
+    /** the resident run that did it */
+    runId: text('run_id'),
   },
-  (t) => [index('activity_canvas_idx').on(t.canvasId)],
+  (t) => [index('activity_canvas_idx').on(t.canvasId), index('activity_run_idx').on(t.runId)],
 )
 
 /* free-tier metering: how many resident-team tasks each user has initiated */

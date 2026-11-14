@@ -531,6 +531,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
   /* from here on every model call is metered into this run's ledger row */
   const meter = startRun(picked, { canvasId, kind: 'design', agent: role.name })
   const model = meter.model
+  /* every frame write and activity line of this run carries its id */
+  actor.runId = meter.id
   let delivered = false
   /* structured repo cards (the GitHub import) have their own runner with
      repo-reading tools; drift-review cards ride the loop below like prompt

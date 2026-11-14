@@ -606,12 +606,24 @@ async function appendFrameVersion(version: FrameVersion) {
      snapshot the same state twice — the newest row already holds it. Size
      counts: the same document at another frame size is a state of its own */
   const [latest] = await db
-    .select({ html: t.frameVersions.html, width: t.frameVersions.width, height: t.frameVersions.height })
+    .select({
+      html: t.frameVersions.html,
+      width: t.frameVersions.width,
+      height: t.frameVersions.height,
+      runId: t.frameVersions.runId,
+    })
     .from(t.frameVersions)
     .where(eq(t.frameVersions.frameId, version.frameId))
     .orderBy(desc(t.frameVersions.savedAt))
     .limit(1)
-  if (latest && latest.html === version.html && latest.width === version.width && latest.height === version.height)
+  /* a run's first write still files its row: it is that run's "before" */
+  if (
+    latest &&
+    latest.html === version.html &&
+    latest.width === version.width &&
+    latest.height === version.height &&
+    (latest.runId ?? undefined) === version.runId
+  )
     return
   await db.insert(t.frameVersions).values({
     id: version.id,
@@ -623,6 +635,7 @@ async function appendFrameVersion(version: FrameVersion) {
     savedAt: version.savedAt,
     savedBy: version.savedBy,
     savedByKind: version.savedByKind ?? null,
+    runId: version.runId ?? null,
   })
   const excess = await db
     .select({ id: t.frameVersions.id })
@@ -660,6 +673,7 @@ export async function listFrameVersions(frameId: string): Promise<FrameVersionIn
       savedAt: t.frameVersions.savedAt,
       savedBy: t.frameVersions.savedBy,
       savedByKind: t.frameVersions.savedByKind,
+      runId: t.frameVersions.runId,
       htmlBytes: sql<number>`length(${t.frameVersions.html})`,
     })
     .from(t.frameVersions)
@@ -675,6 +689,7 @@ export async function listFrameVersions(frameId: string): Promise<FrameVersionIn
     savedBy: row.savedBy,
     savedByKind: frameVersionKind(row.savedByKind),
     htmlBytes: Number(row.htmlBytes),
+    ...(row.runId ? { runId: row.runId } : {}),
   }))
 }
 
@@ -698,6 +713,7 @@ export async function getFrameVersion(frameId: string, versionId: string): Promi
     savedByKind: frameVersionKind(row.savedByKind),
     htmlBytes: row.html.length,
     html: row.html,
+    ...(row.runId ? { runId: row.runId } : {}),
   }
 }
 
@@ -1014,6 +1030,7 @@ export function saveActivity(canvasId: string, item: ActivityItem) {
       message: item.message,
       frameId: item.frameId ?? null,
       at: item.at,
+      runId: item.runId ?? null,
     }),
   )
 }
@@ -1339,6 +1356,7 @@ export async function hydrate(): Promise<Hydrated> {
       message: row.message,
       frameId: row.frameId ?? undefined,
       at: row.at,
+      ...(row.runId ? { runId: row.runId } : {}),
     })
     activity.set(row.canvasId, list)
   }
