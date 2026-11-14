@@ -15,6 +15,8 @@ import { store } from './store.ts'
 import { createLibrary, disableLibrary, getLibrary, libraryAllows, presetFor, updateLibrary } from './libraries.ts'
 import { itemMeta, previewIndex, reindexLibrary, saveMeta } from './libraryIndex.ts'
 import { entryOf, itemDetail, libraryFor, readableLibraries, searchLibraries } from './libraryQueries.ts'
+import { itemThumb, NoThumbError } from './libraryThumbs.ts'
+import { RendererBusyError } from './renderBrowser.ts'
 
 export const libraryRouter = express.Router()
 
@@ -194,6 +196,30 @@ libraryRouter.get('/:id/items/:itemId', async (req, res) => {
   const out = await itemDetail(found.canvas, req.params.itemId, found.role)
   if (!out) return res.status(404).json({ error: 'item not found' })
   res.json(out.detail)
+})
+
+/** One item's image. Immutable when asked with its hash (`?v=`), since the
+ *  hash is in the storage key; 404 while it has no box, 503 when busy. */
+libraryRouter.get('/:id/items/:itemId/thumb.jpg', async (req, res) => {
+  const found = libraryFor(req.user!.id, req.params.id)
+  if (!found) return notFound(res)
+  const out = await itemDetail(found.canvas, req.params.itemId, found.role)
+  if (!out) return res.status(404).json({ error: 'item not found' })
+  try {
+    const jpeg = await itemThumb(out.item)
+    const current = req.query.v === out.item.hash
+    res.set('Content-Type', 'image/jpeg')
+    res.set('Cache-Control', current ? 'private, max-age=31536000, immutable' : 'private, max-age=60')
+    res.send(jpeg)
+  } catch (error) {
+    if (error instanceof RendererBusyError) {
+      res.set('Retry-After', '10')
+      return res.status(503).json({ error: error.message })
+    }
+    if (error instanceof NoThumbError) return res.status(404).json({ error: error.message })
+    console.error('[libraries] thumbnail failed', error)
+    res.status(500).json({ error: 'thumbnail failed' })
+  }
 })
 
 /** One item's frame HTML (one frame read, never the canvas). */

@@ -428,6 +428,8 @@ export interface RenderOptions extends PageOptions {
   type?: 'png' | 'jpeg'
   quality?: number
   maxHeight?: number
+  /** capture this region of the frame only (frame px), e.g. a library item's box */
+  clip?: { x: number; y: number; width: number; height: number }
 }
 
 export function renderFrame(
@@ -456,7 +458,7 @@ async function screenshotOn(page: Page, frame: Frame, scale: number, opts: Rende
      pixel budget bounds only the captured image below */
   await page.setViewport({ width, height: fullHeight, deviceScaleFactor: scale })
   const type = opts.type ?? 'png'
-  const clip = height < fullHeight ? { x: 0, y: 0, width, height } : undefined
+  const clip = opts.clip ?? (height < fullHeight ? { x: 0, y: 0, width, height } : undefined)
   const buf = await page.screenshot({
     type,
     ...(type === 'jpeg' ? { quality: opts.quality ?? 90 } : {}),

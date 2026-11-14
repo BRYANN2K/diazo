@@ -802,6 +802,11 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   2 background pages, 1.7 s for late scripts) runs `shared/libraryCollect.ts` in the headless page
   to read a scripted sheet's variants and every item's box. Variants only the page shows carry an
   `r:` hash and are kept across static reindexes until the next rendered pass.
+  Item images: `GET /api/libraries/:id/items/:itemId/thumb.jpg?v=<hash>` (`server/libraryThumbs.ts`):
+  the frame rendered clipped to the item's box plus 12 px, JPEG, 640 px on its longest side, at
+  background priority, stored under `lt/<canvasId>/<itemId>-<hash>.jpg` and served immutable for
+  its hash; 404 while the item has no box, 503 when the renderer is busy, and the client
+  (`src/components/library/ItemThumb.tsx`) then crops the frame preview with CSS.
   REST under `/api/libraries` (`server/libraryRoutes.ts`, 30 searches per 10 s per account; never
   `store.load`); agent tools in `server/libraryTools.ts`, registered for MCP and the resident agent
   under the same names. ⌘F's Library scope (`src/lib/findLibrary.ts`, `src/lib/findRows.ts`,

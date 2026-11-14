@@ -10,6 +10,7 @@ import {
   type LibraryFacetName,
   type LibraryItem,
   type LibraryItemDetail,
+  type LibraryItemSummary,
   type LibraryListEntry,
   type LibrarySearchHit,
   type LibrarySearchResult,
@@ -21,9 +22,22 @@ import { canvasesFor } from './workspaces.ts'
 import { getLibrary, infoOf, libraryAllows, libraryRole, type LibraryRole } from './libraries.ts'
 import { indexFor, libraryItems } from './libraryIndex.ts'
 
-/** The image of an item. Until variant thumbnails exist, the frame's preview. */
-export function thumbUrl(item: Pick<LibraryItem, 'frameId'>): string {
+/** The image of an item: its own thumbnail once it has a box, else the
+ *  frame's preview (the client crops it to the item). */
+export function thumbUrl(item: Pick<LibraryItem, 'frameId' | 'canvasId' | 'itemId' | 'hash' | 'box'>): string {
+  if (item.box) {
+    return `/api/libraries/${item.canvasId}/items/${encodeURIComponent(item.itemId)}/thumb.jpg?v=${encodeURIComponent(item.hash)}`
+  }
   return `/i/${item.frameId}.jpg?preview`
+}
+
+/** An item on the wire with its image and its frame's size. */
+export function summaryOf(item: LibraryItem): LibraryItemSummary {
+  const frame = store.getFrame(item.frameId)
+  return {
+    ...itemSummary(item, thumbUrl(item)),
+    ...(frame ? { frameSize: { w: frame.width, h: frame.height } } : {}),
+  }
 }
 
 /** Where a person opens an item. */
@@ -120,8 +134,8 @@ export async function searchLibraries(canvases: Canvas[], req: SearchRequest): P
       merged.push({
         libraryId: canvas.id,
         libraryName: canvas.name,
-        item: itemSummary(hit.item, thumbUrl(hit.item)),
-        variants: hit.variants.map((v) => itemSummary(v, thumbUrl(v))),
+        item: summaryOf(hit.item),
+        variants: hit.variants.map(summaryOf),
         variantCount: hit.variantCount,
         score: hit.score,
       })
@@ -157,15 +171,15 @@ export async function itemDetail(
       libraryId: canvas.id,
       libraryName: canvas.name,
       item: {
-        ...itemSummary(item, thumbUrl(item)),
+        ...summaryOf(item),
         description: item.description,
         sourceUrl: item.sourceUrl,
         license: item.license,
         findings: item.findings,
         useCount: item.useCount ?? 0,
       },
-      variants: variants.map((v) => itemSummary(v, thumbUrl(v))),
-      family: family ? itemSummary(family, thumbUrl(family)) : null,
+      variants: variants.map(summaryOf),
+      family: family ? summaryOf(family) : null,
     },
   }
 }

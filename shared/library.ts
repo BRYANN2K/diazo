@@ -205,6 +205,8 @@ export interface LibraryItemSummary {
   rev: number
   /** the image URL of the item */
   thumb: string
+  /** the size of its frame, for cropping the frame preview to the item */
+  frameSize?: { w: number; h: number }
 }
 
 export function itemSummary(item: LibraryItem, thumb = ''): LibraryItemSummary {
