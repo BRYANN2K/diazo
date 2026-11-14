@@ -26,6 +26,7 @@ import { Modal, ModalEyebrow, ModalTitle } from '../components/ui/modal'
 import { CopyIcon } from '../components/ui/icons'
 import { Toast } from '../components/ui/toast'
 import { DashContent, DashHeader, DashLayout, DashMain, DashSubtitle, DashTitle } from '../components/ui/dash'
+import { PublicLibrariesShelf } from '../components/library/PublicLibrariesShelf'
 import { useT, type PlainMessageKey } from '../lib/i18n'
 
 type Shelf = 'all' | CommunityCategory
@@ -144,6 +145,7 @@ export function Community() {
         </DashHeader>
 
         <DashContent>
+          <PublicLibrariesShelf />
           <div className="flex items-start gap-4 md:items-end">
             <div>
               <DashTitle>{t('community.title')}</DashTitle>

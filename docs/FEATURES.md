@@ -29,6 +29,10 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   A frame's menu has "Add to library…": the library's rules give each copy an id, its variants'
   markers, the SVG definitions it points at, a category, a page and a status (a low lint score can
   keep it a draft), shown as a dry run first; the frames themselves are not changed.
+  Who can use a library is set in its share dialog: the people with access, its workspace, or —
+  only with `DOOP_PUBLIC_LIBRARIES=true`, off by default — every account on the instance, after a
+  warning that library content is often a vendor's. A public library is searched, browsed and
+  inserted from (Community has a Libraries shelf: Use, Copy), never opened as a canvas.
   Agents call `list_libraries`, `get_library`, `search_library`, `get_library_item` (with the item as
   a scoped block) and `insert_library_item`, which places the copy for them.
 - **Reference library** — store design-library items as references, find them with
