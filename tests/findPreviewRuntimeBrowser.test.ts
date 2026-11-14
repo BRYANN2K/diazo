@@ -5,10 +5,17 @@ import { withFindPreviewScript } from '../src/lib/findPreviewRuntime'
 import { pagePerTest } from './browser'
 import { fixture } from './libraryFixtures'
 
-/* A library sheet: two cards, the second rendered by a script after load. */
+/* A library sheet: two cards, the second rendered by a script after load.
+   The page is its own parent here: the script posts to itself, and the
+   sheet's first script keeps the boxes it posts. (An init script would not
+   see them: setContent writes into the page's open document, and
+   evaluateOnNewDocument only runs in a new one.) */
 const SHEET = `<!doctype html><html><head><style>
   .card{width:240px;height:140px;margin:20px;display:block}
-</style></head><body>
+</style><script>
+  window.boxes = []
+  addEventListener('message', function (e) { if (e.data && e.data.type === 'box') window.boxes.push(e.data) })
+</script></head><body>
   <div class="card" id="a"><span>cp.vui-button-primary</span></div>
   <div id="later"></div>
   <script>setTimeout(function(){document.getElementById('later').innerHTML='<div class="card" id="b"><span>cp.vui-badge</span></div>'},200)</script>
@@ -20,17 +27,11 @@ describe.skipIf(!findBrowserPath())('⌘F preview runtime', () => {
 
   beforeEach(async () => {
     page = await pages.open()
-    /* the page is its own parent here: the script posts to itself */
-    await page.evaluateOnNewDocument(() => {
-      const w = window as unknown as { boxes: unknown[]; loads: number }
-      w.boxes = []
-      w.loads = (w.loads ?? 0) + 1
-      window.addEventListener('message', (e) => {
-        const data = e.data as { type?: string }
-        if (data?.type === 'box') w.boxes.push(data)
-      })
-    })
     await page.setContent(withFindPreviewScript(SHEET, 't1'), { waitUntil: 'load' })
+    /* a reload would start a new window, without this mark */
+    await page.evaluate(() => {
+      ;(window as unknown as { kept: boolean }).kept = true
+    })
   })
 
   const send = (focus: string) =>
@@ -52,7 +53,7 @@ describe.skipIf(!findBrowserPath())('⌘F preview runtime', () => {
     expect(await outlined()).toEqual(['b'])
     /* the previous element's inline style is back as it was */
     expect(await page.evaluate(() => document.getElementById('a')!.getAttribute('style'))).toBeFalsy()
-    expect(await page.evaluate(() => (window as unknown as { loads: number }).loads)).toBe(1)
+    expect(await page.evaluate(() => (window as unknown as { kept?: boolean }).kept)).toBe(true)
   })
 
   it('ignores messages carrying another token', async () => {
