@@ -101,4 +101,13 @@ export const library = {
   panelTab: 'Biblioteca',
   panelLibrary: 'Biblioteca',
   badge: 'biblioteca',
+  addToLibrary: 'Adicionar à biblioteca…',
+  addTitle: { one: 'Adicionar {count} frame a uma biblioteca', other: 'Adicionar {count} frames a uma biblioteca' },
+  addLede: 'As regras da biblioteca dão a cada cópia um id, uma categoria e um status. Os frames daqui não mudam.',
+  noLibraryToAdd: 'Nenhuma biblioteca onde você possa adicionar. Transforme um canvas em uma antes.',
+  notAnItem: 'não é item',
+  noItem: 'sem id',
+  add: 'Adicionar',
+  importFailed: 'Não foi possível adicionar estes frames.',
+  added: { one: '{count} frame adicionado à biblioteca', other: '{count} frames adicionados à biblioteca' },
 } as const

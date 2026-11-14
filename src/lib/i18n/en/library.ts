@@ -101,4 +101,13 @@ export const library = {
   panelTab: 'Library',
   panelLibrary: 'Library',
   badge: 'library',
+  addToLibrary: 'Add to library…',
+  addTitle: { one: 'Add {count} frame to a library', other: 'Add {count} frames to a library' },
+  addLede: 'The library’s rules give each copy an id, a category and a status. The frames here are not changed.',
+  noLibraryToAdd: 'No library you can add to. Turn a canvas into one first.',
+  notAnItem: 'not an item',
+  noItem: 'no id',
+  add: 'Add',
+  importFailed: 'Could not add these frames.',
+  added: { one: 'Added {count} frame to the library', other: 'Added {count} frames to the library' },
 } as const

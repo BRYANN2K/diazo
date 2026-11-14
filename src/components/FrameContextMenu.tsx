@@ -15,6 +15,7 @@ import { openExternal } from '../lib/desktop'
 import { MOD_KEY } from '../lib/keys'
 import { t as translate, useT } from '../lib/i18n'
 import { ContextMenuContent, ContextMenuItem, ContextMenuSeparator } from './ui/context-menu'
+import { AddToLibraryModal } from './library/AddToLibraryModal'
 import { MenuHint } from './ui/menu'
 import { DriftModal } from './DriftModal'
 import { FrameExportModal } from './FrameExportModal'
@@ -47,6 +48,7 @@ export function FrameContextMenu({
   const [exportFrames, setExportFrames] = useState<Frame[] | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [driftOpen, setDriftOpen] = useState(false)
+  const [addingToLibrary, setAddingToLibrary] = useState<string[] | null>(null)
   const [savingApproval, setSavingApproval] = useState(false)
   /* a right-click inside a multi-selection acts on the whole group */
   const selectedIds = useStore((s) => s.selectedIds)
@@ -116,7 +118,7 @@ export function FrameContextMenu({
             onRename?.()
           }
           // The export dialog owns focus once the menu closes.
-          if (exportFrames || historyOpen) event.preventDefault()
+          if (exportFrames || historyOpen || addingToLibrary) event.preventDefault()
         }}
       >
         <ContextMenuItem
@@ -143,6 +145,9 @@ export function FrameContextMenu({
             >
               {groupSize > 1 ? t('stage.cutFrames', { count: groupSize }) : t('common.cut')}
               <MenuHint>{MOD_KEY}X</MenuHint>
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => setAddingToLibrary(groupFrames().map((f) => f.id))}>
+              {t('library.addToLibrary')}
             </ContextMenuItem>
             {onRename && (
               <ContextMenuItem disabled={isStackLocked(frame)} onSelect={() => (renameRequested.current = true)}>
@@ -227,6 +232,13 @@ export function FrameContextMenu({
       )}
       {historyOpen && <FrameHistoryModal frame={frame} onClose={() => setHistoryOpen(false)} />}
       {driftOpen && <DriftModal frame={frame} onClose={() => setDriftOpen(false)} />}
+      {addingToLibrary && (
+        <AddToLibraryModal
+          frameIds={addingToLibrary}
+          onClose={() => setAddingToLibrary(null)}
+          onAdded={(count) => useStore.getState().pushNotice(t('library.added', { count }))}
+        />
+      )}
     </>
   )
 }

@@ -9,9 +9,9 @@ import express from 'express'
 import type { LibraryItemMeta, LibraryItemPatch, LibraryTaxonomy } from '../shared/library.ts'
 import { describeRules, parseLibraryRules, RULE_PRESETS, type RulePresetName } from '../shared/libraryRules.ts'
 import type { LibrarySort, QueryFilters } from '../shared/librarySearch.ts'
-import { canEditCanvas, canManageCanvas } from './access.ts'
+import { canAccessCanvas, canEditCanvas, canManageCanvas } from './access.ts'
 import { countUse, insertItem, InsertError } from './librarySnapshot.ts'
-import { applyTransfer } from './libraryImport.ts'
+import { applyTransfer, MAX_IMPORT_FRAMES, runImport } from './libraryImport.ts'
 import { resolveActor } from './actions.ts'
 import { store } from './store.ts'
 import { createLibrary, disableLibrary, getLibrary, libraryAllows, presetFor, updateLibrary } from './libraries.ts'
@@ -169,6 +169,49 @@ libraryRouter.delete('/:id', (req, res) => {
   if (!libraryFor(req.user!.id, req.params.id, 'manage')) return notFound(res)
   disableLibrary(req.params.id, actorOf(req))
   res.json({ ok: true })
+})
+
+/* imports: 6 a minute per account */
+const IMPORT_WINDOW_MS = 60_000
+const IMPORT_LIMIT = 6
+const imports = new Map<string, number[]>()
+function importLimited(userId: string, now = Date.now()): boolean {
+  const recent = (imports.get(userId) ?? []).filter((at) => now - at < IMPORT_WINDOW_MS)
+  const limited = recent.length >= IMPORT_LIMIT
+  if (!limited) recent.push(now)
+  imports.set(userId, recent)
+  return limited
+}
+
+/** Bring frames into a library through its rules (a dry run reports only).
+ *  Frames from another canvas are copied; the caller must be able to read
+ *  them and curate the library. */
+libraryRouter.post('/:id/import', async (req, res) => {
+  const userId = req.user!.id
+  if (!libraryFor(userId, req.params.id, 'curate')) return notFound(res)
+  const frameIds = Array.isArray(req.body?.frameIds) ? (req.body.frameIds as unknown[]).map(String) : []
+  if (!frameIds.length || frameIds.length > MAX_IMPORT_FRAMES) {
+    return res.status(400).json({ error: `send 1 to ${MAX_IMPORT_FRAMES} frame ids` })
+  }
+  for (const frameId of frameIds) {
+    const frame = store.getFrame(frameId)
+    const from = frame && store.getCanvas(frame.canvasId)
+    if (!from || !canAccessCanvas(userId, from)) return res.status(404).json({ error: `frame ${frameId} not found` })
+  }
+  if (importLimited(userId)) {
+    res.setHeader('Retry-After', '60')
+    return res.status(429).json({ error: 'too many imports; wait a minute' })
+  }
+  const tags = Array.isArray(req.body?.tags) ? (req.body.tags as unknown[]).map(String).slice(0, 12) : undefined
+  const outcome = await runImport({
+    libraryId: req.params.id,
+    frameIds,
+    ...(typeof req.body?.category === 'string' ? { category: req.body.category.slice(0, 200) } : {}),
+    ...(tags ? { tags } : {}),
+    dryRun: req.body?.dryRun === true,
+    actor: actorOf(req),
+  })
+  res.json(outcome)
 })
 
 /** Take the categories of another library for the items both hold (by id).

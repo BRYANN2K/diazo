@@ -2165,6 +2165,14 @@ export function broadcastComponent(canvasId: string, component: ComponentDef, ac
   broadcast(canvasId, { type: 'component', id: component.id, component, actor })
 }
 
+/** Write markup that only marks the frame up (ids, library markers):
+ *  sign-off stands, no version is filed; viewers get the frame. */
+export function annotateFrame(frameId: string, html: string, actor: Actor): Frame | undefined {
+  const frame = store.updateFrame(frameId, { html }, actor.name, { annotation: true })
+  if (frame) broadcast(frame.canvasId, { type: 'frame:updated', frame, actor })
+  return frame
+}
+
 /** A library started, changed or stopped (server/libraries.ts). */
 export function broadcastLibrary(canvasId: string, library: LibraryInfo | null, actor: Actor) {
   broadcast(canvasId, { type: 'library', library, actor })

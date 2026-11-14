@@ -193,6 +193,28 @@ describe('inserting from the server', () => {
   }, 60_000)
 })
 
+describe('importing', () => {
+  it('takes 20 frames at most, and copies what it takes', async () => {
+    const tooMany = Array.from({ length: 21 }, (_, i) => `f${i}`)
+    expect((await owner.post(`/api/libraries/${canvasId}/import`, { frameIds: tooMany })).status).toBe(400)
+    const project = (await (await owner.post('/api/canvases', { name: 'Import source' })).json()).id
+    const frame = await (
+      await owner.post(`/api/canvases/${project}/frames`, {
+        name: 'cp.imp-card — Imported card',
+        html: '<!doctype html><html><body><p>card</p></body></html>',
+      })
+    ).json()
+    const dry = await (
+      await owner.post(`/api/libraries/${canvasId}/import`, { frameIds: [frame.id], dryRun: true })
+    ).json()
+    expect(dry.report.frames[0].item.itemId).toBe('cp.imp-card')
+    expect(dry.applied).toEqual([])
+    const done = await (await owner.post(`/api/libraries/${canvasId}/import`, { frameIds: [frame.id] })).json()
+    expect(done.applied[0].libraryFrameId).toBeTruthy()
+    expect(done.applied[0].libraryFrameId).not.toBe(frame.id)
+  }, 60_000)
+})
+
 describe('no route loads a canvas', () => {
   it('reads one frame at a time', () => {
     for (const file of ['libraryRoutes.ts', 'libraryQueries.ts', 'libraryIndex.ts']) {

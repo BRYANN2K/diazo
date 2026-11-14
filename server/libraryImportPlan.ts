@@ -133,7 +133,7 @@ export function stageNaming(d: Draft, rules: LibraryRules): Draft {
 }
 
 /** Write attributes into start tags by source offset, nothing else re-serialized. */
-function addAttributes(html: string, marks: { el: Element; attrs: [string, string][] }[]): string {
+export function addAttributes(html: string, marks: { el: Element; attrs: [string, string][] }[]): string {
   const edits = marks
     .flatMap(({ el, attrs }) => {
       const loc = el.sourceCodeLocation?.startTag
@@ -245,7 +245,7 @@ export async function stageLint(
   report: ImportReport,
   htmlOf: (frameId: string) => string,
   rules: LibraryRules,
-  lint: (html: string) => Promise<FrameLint>,
+  lint: (html: string, frameId: string) => Promise<FrameLint>,
 ): Promise<ImportReport> {
   const gate = rules.lint.gate
   if (gate === 'off') return report
@@ -256,7 +256,7 @@ export async function stageLint(
       frames.push(f)
       continue
     }
-    const result = await lint(f.changes.html ?? htmlOf(f.frameId))
+    const result = await lint(f.changes.html ?? htmlOf(f.frameId), f.frameId)
     const issues = result.issues.filter((i) => !ignored.has(i.ruleId))
     if (!issues.length || result.score >= rules.lint.minScore) {
       frames.push(f)
@@ -400,4 +400,11 @@ export function planImport(input: PlanInput): ImportReport {
       findings: reports.reduce((n, r) => n + r.findings.length, 0),
     },
   }
+}
+
+/** Mark a frame's item a draft (the import's gate): the index reads it back. */
+export function markDraft(html: string): string {
+  const doc = parseHtml(html)
+  const marked = findElement(doc, (el) => attr(el, 'data-doop-item') !== undefined) ?? bodyOf(doc)
+  return marked ? addAttributes(html, [{ el: marked, attrs: [['data-doop-status', 'draft']] }]) : html
 }

@@ -376,7 +376,11 @@ export function extractFrameItems(input: ExtractInput): ExtractResult {
     locator: markedFamily && familyRoot === markedFamily ? locatorOf(markedFamily, familyId) : { whole: true },
     box: null,
     scripted,
-    status: 'active',
+    status:
+      (markedFamily && attr(markedFamily, 'data-doop-status') === 'draft') ||
+      (body && attr(body, 'data-doop-status') === 'draft')
+        ? 'draft'
+        : 'active',
     findings,
     hash: contentHash(familyContent),
     searchText: `${label} ${textRoot ? itemText(textRoot, skipChrome) : ''}`.trim().slice(0, MAX_TEXT),

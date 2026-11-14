@@ -26,6 +26,9 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   (`/l/<id>`) filters by kind, category and search and opens an item with every variant side by side;
   "Use" inserts it into the frame the gallery was opened from (⌘F → Open in gallery), or into a
   canvas and frame picked there, and the canvas opens with the block picked.
+  A frame's menu has "Add to library…": the library's rules give each copy an id, its variants'
+  markers, the SVG definitions it points at, a category, a page and a status (a low lint score can
+  keep it a draft), shown as a dry run first; the frames themselves are not changed.
   Agents call `list_libraries`, `get_library`, `search_library`, `get_library_item` (with the item as
   a scoped block) and `insert_library_item`, which places the copy for them.
 - **Reference library** — store design-library items as references, find them with

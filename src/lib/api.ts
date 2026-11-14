@@ -20,6 +20,7 @@ import type { ImageDescriptionMode, ImageDescriptionPreference } from '../../sha
 import type { AgentRunners, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
 import type { CanvasFindResult } from '../../shared/canvasFind'
 import type {
+  ImportReport,
   ItemLocator,
   LibraryDetail,
   LibraryItemDetail,
@@ -1048,6 +1049,14 @@ export const api = {
     patch: { description?: string; rules?: unknown; taxonomy?: LibraryTaxonomy; visibility?: LibraryVisibility },
   ) => req<LibraryListEntry>(`/api/libraries/${libraryId}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteLibrary: (libraryId: string) => req(`/api/libraries/${libraryId}`, { method: 'DELETE' }),
+  importToLibrary: (
+    libraryId: string,
+    input: { frameIds: string[]; category?: string; tags?: string[]; dryRun?: boolean },
+  ) =>
+    req<{ report: ImportReport; applied: { frameId: string; libraryFrameId?: string; error?: string }[] }>(
+      `/api/libraries/${libraryId}/import`,
+      { method: 'POST', body: JSON.stringify(input) },
+    ),
   transferLibraryCategories: (libraryId: string, fromLibraryId: string, dryRun = false) =>
     req<{
       matched: number
