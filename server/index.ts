@@ -31,6 +31,11 @@ import { deleteLink, linkFor, localRepo, localRepoRouter, putLink, repoToolCall 
 import { buildHandoffPack, HandoffError } from './handoff.ts'
 import { CodeLinkError, deleteCodeLink, listCodeLinks, putCodeLink } from './codeLinks.ts'
 import { suggestCodeLinks } from './codeSuggest.ts'
+import { applyRepoTokens, previewTokenPatch, previewTokenSync, TokenSyncError } from './tokenSync.ts'
+import { applyRepoPatch, checkPatch, RepoPatchError } from './repoPatch.ts'
+import { PATCH_MAX_BYTES } from '../shared/patch.ts'
+import { FRAME_CODE_FRAMEWORKS, FrameCodeError } from './frameToCode.ts'
+import { frameCodePatch } from './frameCodePatch.ts'
 import {
   CODE_LINK_KINDS,
   CODE_LINK_MAX_EXPORT,
@@ -80,7 +85,7 @@ import { fontsRouter } from './fontRoutes.ts'
 import { AvatarInputError, clearAvatar, setAvatar } from './avatars.ts'
 import { MAX_AVATAR_BYTES, avatarUrl } from '../shared/avatar.ts'
 import { fontsForCanvas, hydrateFonts } from './fonts.ts'
-import { tokensCss, tokensMarkdown, tokensTailwind } from '../shared/designTokens.ts'
+import { MAX_TOKEN_VALUE, TOKEN_TYPES, tokensCss, tokensMarkdown, tokensTailwind } from '../shared/designTokens.ts'
 import {
   canEditCanvas,
   canManageCanvas,
@@ -1325,6 +1330,140 @@ app.delete('/api/canvases/:id/code-links/:kind/:targetId', async (req, res) => {
   const kind = req.params.kind
   if (!isCodeLinkKind(kind)) return res.status(400).json({ error: "kind must be 'component' or 'frame'" })
   res.json({ ok: await deleteCodeLink(c.id, kind, req.params.targetId!) })
+})
+
+/* ---- two-way token sync (shared/tokenSync.ts): the repo's CSS variables and
+   Tailwind theme, read through the caller's linked project and diffed
+   against the canvas's tokens. Reading only — nothing is applied here. */
+
+app.post('/api/canvases/:id/token-sync', async (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'edit')
+  if (!c) return
+  try {
+    res.json(await previewTokenSync(req.user!.id, c.id))
+  } catch (e) {
+    if (e instanceof TokenSyncError) return res.status(e.status).json({ error: e.message })
+    throw e
+  }
+})
+
+const approvedTokens = z.object({
+  tokens: z
+    .array(
+      z.object({
+        name: z.string().max(200),
+        type: z.enum(TOKEN_TYPES),
+        value: z.string().max(MAX_TOKEN_VALUE),
+        themes: z.record(z.string().max(MAX_TOKEN_VALUE)).optional(),
+      }),
+    )
+    .min(1)
+    .max(200),
+})
+
+/* the person ticked these repo values in the sync modal: take them in */
+app.post('/api/canvases/:id/token-sync/apply', (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'edit')
+  if (!c) return
+  const parsed = approvedTokens.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid tokens' })
+  const results = applyRepoTokens(c.id, parsed.data.tokens, userActor(req))
+  res.json({ results, tokens: store.getTokens(c.id) })
+})
+
+const tokenNames = z.object({ names: z.array(z.string().max(200)).min(1).max(200) })
+
+/* doop → repo: the patch the canvas's values make against the repo's style
+   files — previewed here, written only through the desktop app's dialog */
+app.post('/api/canvases/:id/token-sync/patch', async (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'edit')
+  if (!c) return
+  const parsed = tokenNames.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid token names' })
+  try {
+    const plan = await previewTokenPatch(req.user!.id, c.id, parsed.data.names)
+    res.json({ ...plan, summary: plan.patch ? checkPatch(plan.patch) : null })
+  } catch (e) {
+    if (e instanceof TokenSyncError || e instanceof RepoPatchError)
+      return res.status(e.status).json({ error: e.message })
+    throw e
+  }
+})
+
+/* the write rebuilds the patch from a fresh read: it must be the one the
+   person previewed, else the repo or the canvas moved in between */
+app.post('/api/canvases/:id/token-sync/write', async (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'edit')
+  if (!c) return
+  const parsed = tokenNames.extend({ patch: z.string().max(PATCH_MAX_BYTES) }).safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid write request' })
+  try {
+    const plan = await previewTokenPatch(req.user!.id, c.id, parsed.data.names)
+    if (!plan.patch) return res.status(409).json({ error: 'nothing to write — the repo already has these values' })
+    if (plan.patch !== parsed.data.patch)
+      return res.status(409).json({ error: 'the repo or the tokens changed since the preview — preview again' })
+    const result = await applyRepoPatch(req.user!.id, c.id, plan.patch, `Token sync: ${plan.names.length} token(s)`)
+    res.json({ ok: true, result })
+  } catch (e) {
+    if (e instanceof TokenSyncError || e instanceof RepoPatchError)
+      return res.status(e.status).json({ error: e.message })
+    throw e
+  }
+})
+
+/* ---- frame → code: the generated component as a patch against what the
+   linked repo holds at its paths — previewed here, written only through
+   the desktop app's repo_apply_patch dialog */
+
+const frameCodeBody = z.object({
+  framework: z.enum(FRAME_CODE_FRAMEWORKS),
+  path: z.string().max(CODE_LINK_MAX_PATH).optional(),
+  name: z.string().max(100).optional(),
+})
+
+function frameCodeError(res: express.Response, e: unknown) {
+  if (e instanceof RepoPatchError) return res.status(e.status).json({ error: e.message })
+  if (e instanceof FrameCodeError) return res.status(400).json({ error: e.message })
+  throw e
+}
+
+app.post('/api/frames/:id/code/preview', async (req, res) => {
+  const frame = requireFrame(req, res, req.params.id, 'edit')
+  if (!frame) return
+  const parsed = frameCodeBody.safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid export request' })
+  try {
+    res.json(await frameCodePatch(req.user!.id, frame, parsed.data))
+  } catch (e) {
+    frameCodeError(res, e)
+  }
+})
+
+/* the write rebuilds the patch from a fresh read and must match the preview;
+   once the desktop app wrote it, the frame maps to the file it now lives in */
+app.post('/api/frames/:id/code/write', async (req, res) => {
+  const frame = requireFrame(req, res, req.params.id, 'edit')
+  if (!frame) return
+  const parsed = frameCodeBody.extend({ patch: z.string().max(PATCH_MAX_BYTES) }).safeParse(req.body)
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid write request' })
+  const { patch, ...opts } = parsed.data
+  try {
+    const preview = await frameCodePatch(req.user!.id, frame, opts)
+    if (!preview.patch)
+      return res.status(409).json({ error: 'nothing to write — the repo already holds this component' })
+    if (preview.patch !== patch)
+      return res.status(409).json({ error: 'the frame or the repo changed since the preview — preview again' })
+    const result = await applyRepoPatch(req.user!.id, frame.canvasId, patch, `Frame → code: "${frame.name}"`)
+    const main = preview.code.files[0]!
+    const link = await putCodeLink(
+      frame.canvasId,
+      { targetKind: 'frame', targetId: frame.id, path: main.path, exportName: preview.code.name, source: 'generated' },
+      req.user!.name,
+    )
+    res.json({ ok: true, result, link })
+  } catch (e) {
+    frameCodeError(res, e)
+  }
 })
 
 app.use('/api/admin', adminRouter)

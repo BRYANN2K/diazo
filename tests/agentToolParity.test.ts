@@ -47,6 +47,7 @@ const MISSING = [
   'list_linear_issues', // integration tools, registered by their connections
   'get_linear_issue',
   'create_handoff', // the ready-for-dev pack lives behind the UI's write flow
+  'export_frame_code', // frame → code is written through the UI's diff preview and the desktop dialog
   'suggest_code_links', // a resident run with a linked project searches it itself with repo_search
 ]
 

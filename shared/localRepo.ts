@@ -4,8 +4,9 @@
  * read itself; the server only knows the link exists and shuttles requests
  * to the device over a long-poll. The agent's `repo_list` / `repo_read` /
  * `repo_search` tools and the canvas's link chip are the two ends of this
- * file. `write_change` is the single write: it only creates a Stip change
- * folder, after a native confirmation on the device. Caps and the denylist
+ * file. The two writes — `write_change` (a new Stip change folder) and
+ * `apply_patch` (a reviewed unified patch) — each run only after a native
+ * confirmation on the device. Caps and the denylist
  * spec mirror `desktop/src-tauri/src/repo.rs`, which enforces them
  * natively — keep the two in step.
  */
@@ -58,9 +59,10 @@ export const REPO_DENY_NAMES = [
   '*.tfvars',
 ] as const
 
-/** What a repo request asks the device to do. `write_change` is the only
- *  write — it creates a new `.workflow/changes/<id>/` folder, nothing else. */
-export type RepoOp = 'list' | 'read' | 'search' | 'write_change'
+/** What a repo request asks the device to do. `write_change` creates a new
+ *  `.workflow/changes/<id>/` folder; `apply_patch` applies a unified patch
+ *  (shared/patch.ts) to existing or new files. Both ask natively first. */
+export type RepoOp = 'list' | 'read' | 'search' | 'write_change' | 'apply_patch'
 
 /** The link as the server knows it — everything but the path it never sees. */
 export interface RepoLink {
@@ -101,6 +103,9 @@ export interface RepoRequest {
     /** `write_change`: the change id and its files (shared/handoff.ts) */
     changeId?: string
     files?: HandoffFile[]
+    /** `apply_patch`: the unified patch, and one line on why, for the dialog */
+    patch?: string
+    reason?: string
   }
 }
 
@@ -153,5 +158,7 @@ export interface RepoSearchResult {
 }
 
 export function isRepoOp(value: unknown): value is RepoOp {
-  return value === 'list' || value === 'read' || value === 'search' || value === 'write_change'
+  return (
+    value === 'list' || value === 'read' || value === 'search' || value === 'write_change' || value === 'apply_patch'
+  )
 }

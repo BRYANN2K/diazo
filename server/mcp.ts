@@ -52,6 +52,7 @@ import {
   setCodeLinkTool,
 } from './codeLinks.ts'
 import { suggestCodeLinks } from './codeSuggest.ts'
+import { FRAME_CODE_FRAMEWORKS, FrameCodeError, frameToCode } from './frameToCode.ts'
 import { CODE_LINK_MAX_EXPORT, CODE_LINK_MAX_PATH } from '../shared/codeLinks.ts'
 import { imagesForFrames } from './assets.ts'
 import type { FrameImage } from '../shared/imageDescriptions.ts'
@@ -2661,6 +2662,40 @@ export function buildMcpServer(
         return text(await suggestCodeLinks(ownerId, input.canvas_id, input))
       } catch (e) {
         if (e instanceof CodeLinkError) return err(e.message)
+        throw e
+      }
+    },
+  )
+
+  server.registerTool(
+    'export_frame_code',
+    {
+      title: 'Turn a frame into a React or Astro component',
+      description:
+        "Convert a frame's HTML into one React (.tsx + .css) or Astro component in the repo's own terms: raw values equal to a design token become var(--token), and instances of components mapped with set_code_link become imports of those files. Returns the files — nothing is written; the canvas UI writes them into the linked repo through the desktop app.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        frame_id: z.string(),
+        framework: z.enum(FRAME_CODE_FRAMEWORKS).describe('react or astro'),
+        path: z
+          .string()
+          .max(500)
+          .optional()
+          .describe("Output file; default: the frame's mapping or src/components/<Name>"),
+        name: z.string().max(100).optional().describe('Component name; default: the frame name, PascalCased'),
+        agent_name: agentName.optional(),
+      },
+    },
+    async ({ frame_id, framework, path, name, agent_name }) => {
+      const f = frameFor(frame_id, 'view')
+      if (!f) return noFrame(frame_id)
+      arrive(f.canvasId, agent_name)
+      try {
+        const canvas = store.getCanvas(f.canvasId)!
+        const links = await listCodeLinks(f.canvasId).catch(() => [])
+        return text(frameToCode(canvas, f, store.getTokens(f.canvasId), links, { framework, path, name }))
+      } catch (e) {
+        if (e instanceof FrameCodeError) return err(e.message)
         throw e
       }
     },

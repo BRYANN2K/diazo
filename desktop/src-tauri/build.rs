@@ -30,6 +30,7 @@ fn main() {
             "repo_read",
             "repo_search",
             "repo_write_change",
+            "repo_apply_patch",
             "live_snapshot",
             "live_snapshot_done",
             "server_status",
