@@ -27,7 +27,7 @@ function status(overrides: Partial<UpdateStatus> = {}): UpdateStatus {
   return {
     state: 'behind',
     install: 'docker',
-    repo: 'BRYANN2K/redoop',
+    repo: 'BRYANN2K/diazo',
     branch: 'main',
     running: '1'.repeat(40),
     latest: LATEST,
@@ -37,9 +37,9 @@ function status(overrides: Partial<UpdateStatus> = {}): UpdateStatus {
     commits: ['feat: five', 'fix: four', 'docs: three', 'chore: two', 'feat: one'].map((title, i) => ({
       sha: String(i).padStart(40, 'a'),
       title,
-      url: `https://github.com/BRYANN2K/redoop/commit/${i}`,
+      url: `https://github.com/BRYANN2K/diazo/commit/${i}`,
     })),
-    compareUrl: `https://github.com/BRYANN2K/redoop/compare/x...${LATEST}`,
+    compareUrl: `https://github.com/BRYANN2K/diazo/compare/x...${LATEST}`,
     checkedAt: '2026-11-15T10:00:00.000Z',
     ...overrides,
   }
@@ -70,7 +70,7 @@ describe('the update card', () => {
   it('names the new commits, links the compare page and says how to update', async () => {
     await render(<ServerUpdateCardView status={status()} onDismiss={() => {}} />)
     expect(container.textContent).toContain('Update available')
-    expect(container.textContent).toContain('5 new commits on BRYANN2K/redoop main.')
+    expect(container.textContent).toContain('5 new commits on BRYANN2K/diazo main.')
     const titles = [...container.querySelectorAll('li')].map((li) => li.textContent)
     expect(titles).toEqual(['feat: five', 'fix: four', 'docs: three'])
     const link = container.querySelector<HTMLAnchorElement>('a[href*="/compare/"]')!
@@ -79,7 +79,7 @@ describe('the update card', () => {
   })
 
   it.each<[InstallType, string, string]>([
-    ['local', 'doop-local update', 'Run it in Terminal'],
+    ['local', 'diazo-local update', 'Run it in Terminal'],
     ['docker', 'docker compose pull && docker compose up -d', 'docker compose up -d --build'],
     ['kubernetes', 'kubectl -n doop rollout restart deploy/doop', 'imagePullPolicy Always'],
     ['source', 'git pull && bun install && bun run build', 'restart the server'],
@@ -96,7 +96,7 @@ describe('the update card', () => {
         onDismiss={() => {}}
       />,
     )
-    expect(container.textContent).toContain('1 new commit on BRYANN2K/redoop main.')
+    expect(container.textContent).toContain('1 new commit on BRYANN2K/diazo main.')
     expect(container.querySelector('a[href*="/compare/"]')?.textContent).toBe('See changes')
   })
 
@@ -159,8 +159,8 @@ describe('in the desktop app', () => {
     await act(async () => handlers.get('update-ready')?.({ payload: { version: '0.12.0', current: '0.11.0' } }))
     const cards = [...container.querySelectorAll('section')].map((s) => s.getAttribute('aria-labelledby'))
     expect(cards).toEqual(['server-update-title', 'update-card-title'])
-    expect(container.textContent).toContain('5 new commits on BRYANN2K/redoop main.')
-    expect(container.textContent).toContain('Doop 0.12.0 is ready')
+    expect(container.textContent).toContain('5 new commits on BRYANN2K/diazo main.')
+    expect(container.textContent).toContain('Diazo 0.12.0 is ready')
   })
 })
 
@@ -173,7 +173,7 @@ describe('the About card', () => {
     expect(container.querySelector<HTMLAnchorElement>('a[href$="/commit/' + info.sha + '"]')?.textContent).toBe(
       '1111111',
     )
-    expect(container.textContent).toContain('5 new commits on BRYANN2K/redoop main')
+    expect(container.textContent).toContain('5 new commits on BRYANN2K/diazo main')
   })
 
   it('says why it does not know', async () => {

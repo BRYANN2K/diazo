@@ -28,7 +28,7 @@ export const updates: Catalog['updates'] = {
   cardMore: { one: 'e mais {count}', other: 'e mais {count}' },
   cardHowTo: 'Para atualizar',
   cardDismiss: 'Dispensar até a próxima atualização',
-  hintLocal: 'Execute no Terminal. Seus dados e segredos em ~/.doop são mantidos.',
+  hintLocal: 'Execute no Terminal. Seus dados e segredos em ~/.diazo (ou ~/.doop) são mantidos.',
   hintDocker:
     'Na pasta do seu arquivo compose. Compilado a partir deste repositório? git pull && docker compose up -d --build',
   hintKubernetes: 'O deployment baixa a imagem :main de novo (imagePullPolicy Always).',

@@ -1210,11 +1210,12 @@ dependencies = [
 
 [[package]]
 name = "doop-desktop-chromium"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "base64 0.22.1",
  "block2",
  "cef",
+ "dirs 6.0.0",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",

@@ -193,7 +193,7 @@ async function sweep(canvasId: string) {
   }
 }
 
-const SYSTEM = `You are a resident design agent of the Doop canvas — a multiplayer design tool where humans and AI agents design HTML frames together. You live in the server and your job is narrow: when work lands on the canvas for you, you do it, promptly and well.
+const SYSTEM = `You are a resident design agent of the Diazo canvas — a multiplayer design tool where humans and AI agents design HTML frames together. You live in the server and your job is narrow: when work lands on the canvas for you, you do it, promptly and well.
 
 Rules:
 - Only make the changes the request asks for, and only the ones your specialty covers. No refactors, no redesigns beyond the request, no new frames unless asked.
@@ -524,7 +524,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
   if (work.chat) return runChat(canvasId, role, payer, picked, actor, stalled, key, runnerFilter)
   if (!picked.userId && RESIDENT_TASK_LIMIT <= 0) {
     const reason =
-      'The Doop Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini, DeepSeek, Kimi or Claude API key in Settings, then retry.'
+      'The Diazo Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini, DeepSeek, Kimi or Claude API key in Settings, then retry.'
     for (const f of actions.takeFeedbackFor(canvasId, role.name, payer, runnerFilter))
       actions.failTaskFeedback(f.id, reason)
     for (const c of actions.takeAgentCommentsFor(canvasId, role.name, payer, runnerFilter))
@@ -577,7 +577,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
          failure outside any card, so none stays claimed forever */
       console.error('[resident] repo cards errored', err)
       for (const c of repoCards)
-        actions.failCard(canvasId, c.id, 'Doop hit a snag before finishing. Retry when you are ready.')
+        actions.failCard(canvasId, c.id, 'Diazo hit a snag before finishing. Retry when you are ready.')
     }
     if (claimed.length === 0 && comments.length === 0 && cards.length === 0) {
       clearInterval(heartbeat)
@@ -1130,7 +1130,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       if (staleAccount) {
         reason =
           accountError ??
-          `${model.label} turned down the connected account. Reconnect it in Doop, then retry.${blockedWebsiteAccess ? ` ${blockedWebsiteAccess}` : ''}`
+          `${model.label} turned down the connected account. Reconnect it in Diazo, then retry.${blockedWebsiteAccess ? ` ${blockedWebsiteAccess}` : ''}`
       } else if (unavailableModel) {
         reason = `${model.label} is not available on your connected account yet. Pick another model in Settings, then retry.`
       } else if (blockedWebsiteAccess) {
@@ -1196,7 +1196,7 @@ export const CHAT_READ_TOOL_NAMES = new Set([
   ...DESIGN_LIBRARY_TOOLS.filter((tool) => tool.readOnly).map((tool) => tool.name),
 ])
 
-const CHAT_SYSTEM = `You are a resident agent of the Doop canvas — a multiplayer design tool where humans and AI agents design HTML frames together — answering in the canvas CHAT, not editing. Humans talk the next design over with you here; the canvas only changes after an editor presses "Go design" on a plan card, which queues one board card per screen.
+const CHAT_SYSTEM = `You are a resident agent of the Diazo canvas — a multiplayer design tool where humans and AI agents design HTML frames together — answering in the canvas CHAT, not editing. Humans talk the next design over with you here; the canvas only changes after an editor presses "Go design" on a plan card, which queues one board card per screen.
 
 Rules:
 - You cannot change the canvas from chat: only read tools exist here. Look before you speak — find_in_canvas, inspect_frame, get_frame_html, screenshot_frame, get_tokens, get_skill, get_prototype, get_reference, view_website, search_inspiration, and the repo_* tools when the asker linked a project.
@@ -1542,7 +1542,7 @@ async function runChat(
      visibly with the fix, like claimed cards do. */
   if (!picked.userId && RESIDENT_TASK_LIMIT <= 0) {
     const reason =
-      'The Doop Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini, DeepSeek, Kimi or Claude API key in Settings, then retry.'
+      'The Diazo Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini, DeepSeek, Kimi or Claude API key in Settings, then retry.'
     for (const m of asks) actions.failChatAsk(m.id, reason)
     stalled.add(key)
     return 'no-model'
@@ -2215,7 +2215,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'report_issue',
     description:
-      'Tell the Doop team where Doop itself got in your way: a tool that errored or behaved other than described, an instruction that left you guessing, or a capability you needed and did not have. Call it after a retry fails or when you fall back to a workaround, then carry on with the task. Ideas that did not block you go to share_feedback. It never reaches the humans on the canvas. Be specific: what you tried, what happened, what you expected. Never include secrets.',
+      'Tell the Diazo team where Diazo itself got in your way: a tool that errored or behaved other than described, an instruction that left you guessing, or a capability you needed and did not have. Call it after a retry fails or when you fall back to a workaround, then carry on with the task. Ideas that did not block you go to share_feedback. It never reaches the humans on the canvas. Be specific: what you tried, what happened, what you expected. Never include secrets.',
     input_schema: {
       type: 'object',
       properties: {
@@ -2229,7 +2229,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'share_feedback',
     description:
-      'Tell the Doop team how Doop could work better for you: a tool you wish you had, a clumsy workflow, a result that should carry more, or something that worked especially well. Use it when you notice something worth saying, then carry on with the task. Something that broke or blocked you goes to report_issue. It never reaches the humans on the canvas. Never include secrets.',
+      'Tell the Diazo team how Diazo could work better for you: a tool you wish you had, a clumsy workflow, a result that should carry more, or something that worked especially well. Use it when you notice something worth saying, then carry on with the task. Something that broke or blocked you goes to report_issue. It never reaches the humans on the canvas. Never include secrets.',
     input_schema: {
       type: 'object',
       properties: {
@@ -3283,7 +3283,7 @@ export async function execTool(
           canvasId,
           userId: runState.payerId ?? store.getCanvas(canvasId)?.ownerId,
         })
-        return saved.ok ? ok('sent to the Doop team — carry on with the task') : fail(saved.error)
+        return saved.ok ? ok('sent to the Diazo team — carry on with the task') : fail(saved.error)
       }
       case 'set_guidelines': {
         if (!env.AGENT_GUIDELINE_WRITES)

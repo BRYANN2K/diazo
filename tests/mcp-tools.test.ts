@@ -27,7 +27,7 @@ describe('MCP server info', () => {
     await client.connect(clientTransport)
 
     try {
-      expect(client.getServerVersion()).toEqual({ name: 'doop-canvas', version: packageJson.version })
+      expect(client.getServerVersion()).toEqual({ name: 'diazo-canvas', version: packageJson.version })
     } finally {
       await client.close()
     }
@@ -453,7 +453,7 @@ it('create_live_frame stores a live frame for loopback URLs and refuses the rest
     expect(created.frame.height).toBe(800)
     const frame = store.canvases.get(canvasId)?.frames.find((f) => f.id === created.frame.id)
     expect(frame?.html).toContain('name="doop-live"')
-    expect(frame?.html).toContain('Open in the Doop desktop app')
+    expect(frame?.html).toContain('Open in the Diazo desktop app')
 
     /* the whole point: anything that is not this machine is refused, and
        nothing was fetched to decide that */

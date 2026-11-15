@@ -404,8 +404,8 @@ type CapturedCss = { ok: true; css: string } | { ok: false; reason: 'oversized' 
 const OVERSIZED: CapturedCss = { ok: false, reason: 'oversized' }
 const UNREACHABLE: CapturedCss = { ok: false, reason: 'unreachable' }
 
-const CSS_OVERSIZED_MESSAGE = `This page's stylesheets are larger than Doop's ${MAX_IMPORT_CSS_FETCH_BYTES / 1_000_000} MB import limit`
-const CSS_PRUNED_OVERSIZED_MESSAGE = `This page needs more than Doop's ${MAX_IMPORT_CSS_BYTES / 1_000_000} MB CSS import limit even after unused styles are removed`
+const CSS_OVERSIZED_MESSAGE = `This page's stylesheets are larger than Diazo's ${MAX_IMPORT_CSS_FETCH_BYTES / 1_000_000} MB import limit`
+const CSS_PRUNED_OVERSIZED_MESSAGE = `This page needs more than Diazo's ${MAX_IMPORT_CSS_BYTES / 1_000_000} MB CSS import limit even after unused styles are removed`
 const CSS_UNREACHABLE_MESSAGE = 'The webpage HTML was captured, but one or more stylesheets could not be fully loaded'
 
 /** Fetch a stylesheet within the bytes still available for the page's CSS,
@@ -530,7 +530,7 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
           timeout: 20_000,
         })
       } catch {
-        throw new WebsiteCaptureUnavailableError('Context.dev returned HTML that Doop could not render')
+        throw new WebsiteCaptureUnavailableError('Context.dev returned HTML that Diazo could not render')
       }
     } else {
       await navigateWebsitePage(page, requestedUrl.href, { waitUntil: 'networkidle2', timeout: 30_000 })
@@ -729,7 +729,7 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
         }
       } catch (error) {
         if (error instanceof WebsiteCaptureUnavailableError) throw error
-        throw new WebsiteCaptureUnavailableError('Doop could not render a local preview of the webpage')
+        throw new WebsiteCaptureUnavailableError('Diazo could not render a local preview of the webpage')
       } finally {
         await previewIsolated.close()
       }
@@ -744,7 +744,7 @@ export async function importPage(rawUrl: string, options: { includePreview?: boo
     }
   } catch (error) {
     if (error instanceof WebsiteCaptureUnavailableError) throw error
-    throw new WebsiteCaptureUnavailableError('Doop could not finish rendering the webpage HTML')
+    throw new WebsiteCaptureUnavailableError('Diazo could not finish rendering the webpage HTML')
   } finally {
     await releaseCapture()
   }

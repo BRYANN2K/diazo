@@ -2,10 +2,10 @@ import type { Catalog } from '..'
 
 export const connect: Catalog['connect'] = {
   blurbClaudeCode: 'Conecte pelo seu terminal',
-  blurbClaude: 'Adicione o Doop ao Claude',
+  blurbClaude: 'Adicione o Diazo ao Claude',
   blurbChatgpt: 'Conecte pelo navegador',
   blurbCodex: 'ChatGPT desktop e Codex CLI',
-  blurbCursor: 'Adicione o Doop ao Cursor',
+  blurbCursor: 'Adicione o Diazo ao Cursor',
   blurbOpencode: 'Conecte pelo terminal',
   otherClientName: 'Outro cliente MCP',
   headlessName: 'Agente headless ou servidor',
@@ -23,7 +23,7 @@ export const connect: Catalog['connect'] = {
   approveSignInTitle: 'Aprove o login',
 
   claudeCodeLede: 'Três passos, cerca de um minuto. Depois o Claude Code desenha neste canvas em seu nome.',
-  claudeCodeAddTitle: 'Adicione o Doop como servidor MCP',
+  claudeCodeAddTitle: 'Adicione o Diazo como servidor MCP',
   claudeCodeAddBefore: 'Execute isto uma vez em qualquer terminal. Isso registra o servidor ',
   claudeCodeAddAfter: ' para todos os projetos.',
   claudeCodeSignInTitle: 'Entre pelo Claude Code',
@@ -32,69 +32,69 @@ export const connect: Catalog['connect'] = {
   claudeCodeSignInThen: ' e depois ',
   claudeCodeSignInAfter: '. Uma aba do navegador se abre para você aprovar a conexão.',
 
-  claudeDesktopLede: 'Adicione o Doop pelo app desktop, confirme no Claude e comecem a desenhar juntos.',
-  claudeDesktopAddTitle: 'Adicione o Doop ao Claude Desktop',
+  claudeDesktopLede: 'Adicione o Diazo pelo app desktop, confirme no Claude e comecem a desenhar juntos.',
+  claudeDesktopAddTitle: 'Adicione o Diazo ao Claude Desktop',
   claudeDesktopAddBody:
-    'Clique em Adicionar ao Claude no app desktop do Doop e confirme a instalação no Claude. O endereço do seu servidor Doop já vem preenchido.',
-  claudeDesktopConnectTitle: 'Conecte sua conta Doop',
-  claudeDesktopConnectBody: 'Ative a extensão no Claude. Entre no Doop no navegador que se abrir e aprove a conexão.',
+    'Clique em Adicionar ao Claude no app desktop do Diazo e confirme a instalação no Claude. O endereço do seu servidor Diazo já vem preenchido.',
+  claudeDesktopConnectTitle: 'Conecte sua conta Diazo',
+  claudeDesktopConnectBody: 'Ative a extensão no Claude. Entre no Diazo no navegador que se abrir e aprove a conexão.',
   claudeDesktopPointWithPrompt:
-    'Inicie um novo chat no Claude, ative o Doop no menu de ferramentas e envie isto como sua primeira mensagem.',
+    'Inicie um novo chat no Claude, ative o Diazo no menu de ferramentas e envie isto como sua primeira mensagem.',
   claudeDesktopPointNoPrompt:
-    'Inicie um novo chat no Claude, ative o Doop no menu de ferramentas e diga em qual canvas ele deve trabalhar.',
+    'Inicie um novo chat no Claude, ative o Diazo no menu de ferramentas e diga em qual canvas ele deve trabalhar.',
 
   claudePublicLede: 'O conector online do Claude precisa de um servidor HTTPS acessível publicamente.',
   claudeLocalTitle: 'Use a conexão desktop para este servidor',
   claudeLocalBody:
-    'Este endereço do Doop é local ou usa HTTP. Escolha App desktop acima para conectar pelo seu computador, ou abra o Doop no endereço HTTPS público dele.',
+    'Este endereço do Diazo é local ou usa HTTP. Escolha App desktop acima para conectar pelo seu computador, ou abra o Diazo no endereço HTTPS público dele.',
 
-  claudeWebLede: 'Adicione o Doop à sua conta Claude, aprove a conexão e comece a desenhar. Sem download.',
-  claudeWebAddTitle: 'Adicione o Doop ao Claude',
+  claudeWebLede: 'Adicione o Diazo à sua conta Claude, aprove a conexão e comece a desenhar. Sem download.',
+  claudeWebAddTitle: 'Adicione o Diazo ao Claude',
   claudeWebAddBody:
-    'Abra o Claude com o nome e o endereço do servidor do Doop já preenchidos. Revise os detalhes e adicione o conector.',
+    'Abra o Claude com o nome e o endereço do servidor do Diazo já preenchidos. Revise os detalhes e adicione o conector.',
   addToClaude: 'Adicionar ao Claude',
   claudeWebApproveBody: 'Clique em Connect no novo conector. Uma aba do navegador se abre para você aprovar a conexão.',
   claudeWebPointWithPrompt:
-    'Em um novo chat, ative o Doop no menu de ferramentas e envie isto como sua primeira mensagem.',
+    'Em um novo chat, ative o Diazo no menu de ferramentas e envie isto como sua primeira mensagem.',
   claudeWebPointNoPrompt:
-    'Em um novo chat, ative o Doop no menu de ferramentas e diga em qual canvas ele deve trabalhar.',
+    'Em um novo chat, ative o Diazo no menu de ferramentas e diga em qual canvas ele deve trabalhar.',
 
   chatgptPublicLede:
-    'O ChatGPT precisa de um endereço HTTPS público ou de um túnel seguro para acessar este servidor Doop.',
-  chatgptReachTitle: 'Torne seu servidor Doop acessível',
+    'O ChatGPT precisa de um endereço HTTPS público ou de um túnel seguro para acessar este servidor Diazo.',
+  chatgptReachTitle: 'Torne seu servidor Diazo acessível',
   chatgptReachBody:
-    'O ChatGPT não consegue acessar este endereço diretamente. Abra o endereço HTTPS público do seu Doop e inicie esta conexão por lá, ou configure um OpenAI Secure MCP Tunnel para este servidor.',
+    'O ChatGPT não consegue acessar este endereço diretamente. Abra o endereço HTTPS público do seu Diazo e inicie esta conexão por lá, ou configure um OpenAI Secure MCP Tunnel para este servidor.',
   chatgptGuide: 'Ver guia de configuração do ChatGPT',
 
-  chatgptLede: 'Sem download. Abra o ChatGPT, cole o endereço do servidor abaixo e aprove a conexão com o Doop.',
+  chatgptLede: 'Sem download. Abra o ChatGPT, cole o endereço do servidor abaixo e aprove a conexão com o Diazo.',
   chatgptOpenTitle: 'Abra os plugins do ChatGPT',
   chatgptOpenBefore: 'Clique no botão ',
   chatgptOpenMiddle: ' na página Plugins e depois em ',
   chatgptOpenAfter: '. Sua conta ou workspace precisa permitir servidores personalizados.',
   chatgptOpenButton: 'Abrir configuração do ChatGPT',
-  chatgptAddTitle: 'Adicione o Doop e entre',
+  chatgptAddTitle: 'Adicione o Diazo e entre',
   chatgptAddBefore: 'Dê o nome ',
   chatgptAddDescribe: ', descreva-o como um canvas de design e cole isto como URL do servidor MCP. Escolha ',
   chatgptAddReview: ', revise as permissões e selecione ',
-  chatgptAddAfter: '. Entre no Doop quando solicitado e instale o plugin criado.',
+  chatgptAddAfter: '. Entre no Diazo quando solicitado e instale o plugin criado.',
   chatgptPointWithPrompt:
-    'Inicie um novo chat, digite @ e selecione Doop, depois envie isto como sua primeira mensagem.',
+    'Inicie um novo chat, digite @ e selecione Diazo, depois envie isto como sua primeira mensagem.',
   chatgptPointNoPrompt:
-    'Inicie um novo chat, digite @ e selecione Doop, depois diga em qual canvas ele deve trabalhar.',
+    'Inicie um novo chat, digite @ e selecione Diazo, depois diga em qual canvas ele deve trabalhar.',
 
-  codexLede: 'Adicione o Doop pelo app desktop, entre e comece a desenhar com o Codex.',
-  codexAddTitle: 'Adicione o Doop ao Codex',
+  codexLede: 'Adicione o Diazo pelo app desktop, entre e comece a desenhar com o Codex.',
+  codexAddTitle: 'Adicione o Diazo ao Codex',
   codexAddBody:
-    'O Doop Desktop configura o Codex para você. Funciona com o Codex CLI e com a aba Codex no app desktop do ChatGPT.',
+    'O Diazo Desktop configura o Codex para você. Funciona com o Codex CLI e com a aba Codex no app desktop do ChatGPT.',
   codexSignInTitle: 'Entre pelo Codex',
   codexSignInBody:
-    'Abra um novo chat no Codex. Se o Doop pedir autenticação, entre pelas configurações de MCP dele. No Codex CLI, execute o comando abaixo e aprove a conexão no navegador.',
+    'Abra um novo chat no Codex. Se o Diazo pedir autenticação, entre pelas configurações de MCP dele. No Codex CLI, execute o comando abaixo e aprove a conexão no navegador.',
 
-  cursorLede: 'Adicione o Doop ao Cursor, entre e comecem a desenhar juntos.',
-  cursorAddTitle: 'Adicione o Doop ao Cursor',
+  cursorLede: 'Adicione o Diazo ao Cursor, entre e comecem a desenhar juntos.',
+  cursorAddTitle: 'Adicione o Diazo ao Cursor',
   cursorAddBody: 'Abra o Cursor e revise a conexão com o servidor. Nenhum arquivo para baixar.',
   cursorApproveBody:
-    'Ative o servidor doop no Cursor e conclua o login pelo navegador. Depois disso, seu agente pode trabalhar nos canvases a que você tem acesso.',
+    'Ative o servidor Diazo no Cursor e conclua o login pelo navegador. Depois disso, seu agente pode trabalhar nos canvases a que você tem acesso.',
   cursorPointWithPrompt: 'Abra o chat do Agent e envie isto como sua primeira mensagem.',
   cursorPointNoPrompt: 'Abra o chat do Agent e diga em qual canvas ele deve trabalhar.',
 
@@ -104,7 +104,7 @@ export const connect: Catalog['connect'] = {
   opencodeSignInTitle: 'Entre pelo terminal',
   opencodeSignInBody: 'Rode isto uma vez. Uma aba do navegador abre para você aprovar a conexão.',
 
-  mcpLede: 'O Doop é um servidor MCP streamable-HTTP com OAuth. Qualquer cliente com esse suporte pode desenhar aqui.',
+  mcpLede: 'O Diazo é um servidor MCP streamable-HTTP com OAuth. Qualquer cliente com esse suporte pode desenhar aqui.',
   mcpConfigTitle: 'Adicione este servidor à configuração MCP do seu cliente',
   mcpConfigBefore: 'Windsurf, Zed, Cline e VS Code leem um arquivo JSON como este. Cole nele a entrada ',
   mcpConfigAfter: '.',
@@ -137,8 +137,8 @@ export const connect: Catalog['connect'] = {
   listening: 'aguardando {name}…',
   yourAgent: 'seu agente',
 
-  codexSetupTitle: 'Abra o servidor Doop correspondente',
+  codexSetupTitle: 'Abra o servidor Diazo correspondente',
   codexSetupBody:
-    'Este link de configuração é de outro servidor Doop ou está incompleto. Abra o Connect AI no app desktop desse servidor, ou use a configuração manual do Codex no navegador.',
-  backToDoop: 'Voltar ao Doop',
+    'Este link de configuração é de outro servidor Diazo ou está incompleto. Abra o Connect AI no app desktop desse servidor, ou use a configuração manual do Codex no navegador.',
+  backToDoop: 'Voltar ao Diazo',
 }

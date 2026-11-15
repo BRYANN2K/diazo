@@ -65,7 +65,7 @@ fn write(applications: &Path, app_data: &Path, appimage: &Path) -> std::io::Resu
 
 fn entry(appimage: &Path, icon: &Path) -> String {
     format!(
-        "[Desktop Entry]\nType=Application\nName=doop\nExec={}\nIcon={}\nStartupWMClass={WM_CLASS}\nTerminal=false\n",
+        "[Desktop Entry]\nType=Application\nName=Diazo\nExec={}\nIcon={}\nStartupWMClass={WM_CLASS}\nTerminal=false\n",
         escape_value(&exec_arg(appimage)),
         escape_value(&icon.to_string_lossy())
     )
@@ -112,11 +112,11 @@ mod tests {
     fn names_the_window_class_and_quotes_the_path() {
         let entry = entry(
             Path::new("/home/a b/$x\"100%\\doop.AppImage"),
-            Path::new("/home/a b/.local/share/design.doop.desktop/icon.png"),
+            Path::new("/home/a b/.local/share/dev.bryann2k.diazo/icon.png"),
         );
         assert!(entry.contains("Exec=\"/home/a b/\\\\$x\\\\\"100%%\\\\\\\\doop.AppImage\"\n"));
         assert!(entry.contains("StartupWMClass=doop-desktop\n"));
-        assert!(entry.contains("Icon=/home/a b/.local/share/design.doop.desktop/icon.png\n"));
+        assert!(entry.contains("Icon=/home/a b/.local/share/dev.bryann2k.diazo/icon.png\n"));
         assert!(!entry.contains("NoDisplay"));
     }
 
@@ -124,7 +124,7 @@ mod tests {
     fn writes_the_entry_and_icon_and_follows_a_moved_appimage() {
         let data = tempfile::tempdir().unwrap();
         let applications = data.path().join("applications");
-        let app_data = data.path().join("design.doop.desktop");
+        let app_data = data.path().join("dev.bryann2k.diazo");
         let appimage = Path::new("/opt/doop.AppImage");
         write(&applications, &app_data, appimage).unwrap();
         let desktop = applications.join(ENTRY);

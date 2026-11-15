@@ -23,7 +23,7 @@ export async function frameCodePatch(userId: string, frame: Frame, opts: FrameCo
   if (!link) throw new RepoPatchError('no linked project — link this canvas to a folder first', 409)
   const device = localRepo.deviceFor(userId)
   if (!device || !device.grants.has(link.id))
-    throw new RepoPatchError("the linked project is unavailable — the doop desktop app holding it isn't online", 409)
+    throw new RepoPatchError("the linked project is unavailable — the Diazo desktop app holding it isn't online", 409)
   const read = await repoToolCall(userId, link, 'read', { paths: code.files.map((f) => f.path) })
   if (!read.ok) throw new RepoPatchError(read.error ?? 'the repo read failed', 502)
   const existing = new Map<string, string | null>()

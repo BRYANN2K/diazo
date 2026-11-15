@@ -10,7 +10,7 @@ import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from '.
 import { StatusLabel } from './ui/status-label'
 
 /** The repository the fork's images are built from, for the commit link. */
-export const SOURCE_REPO_URL = 'https://github.com/BRYANN2K/redoop'
+export const SOURCE_REPO_URL = 'https://github.com/BRYANN2K/diazo'
 
 /** Settings → General → About: the build this instance runs, and for
  *  admins (and a local install's user) whether a newer one is out. */

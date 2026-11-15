@@ -31,7 +31,7 @@ spec:
     spec:
       containers:
         - name: doop
-          image: ghcr.io/bryann2k/redoop:main
+          image: ghcr.io/bryann2k/diazo:main
           imagePullPolicy: Always
           env:
             # the update card's instructions (server/updateCheck.ts)

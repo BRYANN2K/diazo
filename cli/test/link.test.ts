@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { main } from '../src/main.ts'
@@ -7,10 +7,11 @@ import { fakeIo, fakeServer, KEY, sandbox } from './helpers.ts'
 let box: ReturnType<typeof sandbox>
 afterEach(() => box?.cleanup())
 
-const readLink = () => JSON.parse(readFileSync(path.join(box.cwd, '.doop.json'), 'utf8')) as Record<string, unknown>
+const readLink = (name = '.diazo.json') =>
+  JSON.parse(readFileSync(path.join(box.cwd, name), 'utf8')) as Record<string, unknown>
 
 describe('doop link', () => {
-  it('checks the canvas and writes .doop.json', async () => {
+  it('checks the canvas and writes .diazo.json', async () => {
     box = sandbox()
     box.writeUserConfig({ url: 'https://doop.test', agentKey: KEY })
     const server = fakeServer({ list_canvases: () => [{ id: 'can1', name: 'Design Library' }] })
@@ -50,10 +51,12 @@ describe('doop link', () => {
     )
     const declined = fakeIo([false])
     expect(await main(['link', 'new'], { environment: box.environment(), io: declined.io })).toBe(1)
-    expect(readLink().canvas).toBe('old')
+    expect(readLink('.doop.json').canvas).toBe('old')
     const accepted = fakeIo([true])
     expect(await main(['link', 'new'], { environment: box.environment(), io: accepted.io })).toBe(0)
-    expect(readLink()).toEqual({ canvas: 'new', url: 'https://doop.test' })
+    /* a folder linked before the rename keeps its .doop.json, and no second file appears */
+    expect(readLink('.doop.json')).toEqual({ canvas: 'new', url: 'https://doop.test' })
+    expect(existsSync(path.join(box.cwd, '.diazo.json'))).toBe(false)
   })
 })
 
@@ -72,7 +75,7 @@ describe('doop open', () => {
     box = sandbox()
     const { io, err } = fakeIo()
     expect(await main(['open'], { environment: box.environment({ DOOP_URL: 'https://d.test' }), io })).toBe(1)
-    expect(err.join('\n')).toContain('doop link')
+    expect(err.join('\n')).toContain('diazo link')
   })
 })
 

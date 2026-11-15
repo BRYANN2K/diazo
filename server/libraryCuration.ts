@@ -452,7 +452,7 @@ export async function suggestCategories(ownerId: string, brief: string): Promise
   const models = await resolveModels(ownerId)
   if (!models) {
     throw new CurationError(
-      'connect a model account in Settings → Doop Agent first: suggestions run on your own account',
+      'connect a model account in Settings → Diazo Agent first: suggestions run on your own account',
       409,
     )
   }
@@ -558,7 +558,7 @@ export async function startCuration(input: {
   }
   if (!(await resolveModels(input.ownerId))) {
     throw new CurationError(
-      'connect a model account in Settings → Doop Agent first: curation runs on your own account',
+      'connect a model account in Settings → Diazo Agent first: curation runs on your own account',
       409,
     )
   }

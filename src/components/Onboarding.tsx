@@ -57,7 +57,7 @@ export function Onboarding({ canvasId }: { canvasId: string }) {
   /* live detection — flips only ever go false -> true */
   const live = useMemo(() => {
     /* "connected" means an OUTSIDE agent over MCP — the resident team
-       (Doop and the specialists) doesn't count towards the setup steps */
+       (Diazo and the specialists) doesn't count towards the setup steps */
     const outside = (name: string) => name !== '' && !roleByAgentName(name)
     const agentHere = Object.values(presences).some((p) => p.kind === 'agent' && outside(p.name))
     const agentWorked = tasks.some((t) => outside(t.agentName))
@@ -94,7 +94,7 @@ export function Onboarding({ canvasId }: { canvasId: string }) {
   /* the same one-line prompt the Connect AI modal hands out: the MCP server
      ships its own instructions on connect, so the prompt only needs to name
      the canvas */
-  const prompt = `Work on Doop canvas ${canvasId}. Start with get_guide({ topic: "doop-instructions" }) and follow it.`
+  const prompt = `Work on Diazo canvas ${canvasId}. Start with get_guide({ topic: "diazo-instructions" }) and follow it.`
 
   const checklist = (
     <>

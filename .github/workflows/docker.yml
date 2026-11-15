@@ -1,6 +1,6 @@
 name: docker
 
-# Builds ghcr.io/bryann2k/redoop (the repository's name, lowercased) for
+# Builds ghcr.io/bryann2k/diazo (the repository's name, lowercased) for
 # linux/amd64 (the k3s VPS) and linux/arm64 (Apple silicon Macs running the
 # local install through Apple's `container`).
 # Each architecture builds on a native runner (no QEMU: bun and Chromium are

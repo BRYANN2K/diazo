@@ -30,5 +30,5 @@ export const built = {
   unmatched: 'no designed frame',
   score: '{score}% drift',
   failed: 'Failed',
-  note: 'Signed like doop’s outbound webhooks. Payload and CI recipe: docs/built-page.md.',
+  note: 'Signed like Diazo’s outbound webhooks. Payload and CI recipe: docs/built-page.md.',
 } as const

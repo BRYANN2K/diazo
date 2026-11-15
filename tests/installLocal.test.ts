@@ -1,5 +1,16 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -45,14 +56,14 @@ function run(args: string[], env: Record<string, string> = {}): Promise<{ code: 
 }
 
 const calls = () => (existsSync(path.join(root, 'calls.log')) ? readFileSync(path.join(root, 'calls.log'), 'utf8') : '')
-const envFile = () => path.join(home, '.doop', 'doop.env')
+const envFile = () => path.join(home, '.diazo', 'diazo.env')
 const runLine = () =>
   calls()
     .split('\n')
     .find((line) => line.startsWith('run ')) ?? ''
 
 beforeEach(() => {
-  root = mkdtempSync(path.join(tmpdir(), 'doop-install-'))
+  root = mkdtempSync(path.join(tmpdir(), 'diazo-install-'))
   home = path.join(root, 'home')
   bin = path.join(root, 'bin')
   spawnSync('mkdir', ['-p', home, bin])
@@ -65,9 +76,10 @@ beforeEach(() => {
 case "$1 $2" in
   "system status") exit 0 ;;
   "image pull") case "$*" in *linux/arm64*) [ -z "$STUB_NO_ARM64" ] ;; *) exit 0 ;; esac ;;
+  "inspect doop") [ -f "$STUB_DIR/legacy" ] && cat "$STUB_DIR/legacy" ;;
   inspect*) [ -f "$STUB_DIR/exists" ] ;;
   run*) touch "$STUB_DIR/exists" ;;
-  delete*) rm -f "$STUB_DIR/exists" ;;
+  "delete --force") case "$3" in doop) rm -f "$STUB_DIR/legacy" ;; *) rm -f "$STUB_DIR/exists" ;; esac ;;
 esac`,
   )
 })
@@ -86,7 +98,7 @@ describe('install-local.sh', () => {
     const { code, out } = await run(['--help'])
     expect(code).toBe(0)
     expect(out).toMatch(/uninstall/)
-    expect(existsSync(path.join(home, '.doop'))).toBe(false)
+    expect(existsSync(path.join(home, '.diazo'))).toBe(false)
   })
 
   it('refuses anything but macOS on Apple silicon', async () => {
@@ -111,17 +123,23 @@ describe('install-local.sh', () => {
     const env = readFileSync(envFile(), 'utf8')
     expect(env).toMatch(/^BETTER_AUTH_SECRET=[0-9a-f]{64}$/m)
     expect(env).toMatch(/^SECRETS_ENCRYPTION_KEYS=local:[A-Za-z0-9+/]{43}=$/m)
-    expect(existsSync(path.join(home, '.doop', 'data'))).toBe(true)
-    expect(existsSync(path.join(home, '.doop', 'bin', 'doop-local'))).toBe(true)
+    expect(existsSync(path.join(home, '.diazo', 'data'))).toBe(true)
+    expect(existsSync(path.join(home, '.diazo', 'bin', 'diazo-local'))).toBe(true)
+    /* the pre-rename helper name still answers, as a link */
+    const link = path.join(home, '.diazo', 'bin', 'doop-local')
+    expect(lstatSync(link).isSymbolicLink()).toBe(true)
+    expect(readlinkSync(link)).toBe('diazo-local')
+    expect(existsSync(path.join(home, '.doop'))).toBe(false)
 
     const line = runLine()
     expect(line).toContain('--publish 127.0.0.1:4400:4400')
-    expect(line).toContain(`--volume ${home}/.doop/data:/app/data`)
+    expect(line).toContain(`--name diazo`)
+    expect(line).toContain(`--volume ${home}/.diazo/data:/app/data`)
     expect(line).toContain('--env BETTER_AUTH_URL=http://localhost:4400')
-    /* the update card tells this install to run `doop-local update` */
+    /* the update card tells this install how to update itself */
     expect(line).toContain('--env DOOP_INSTALL=local')
     expect(line).not.toContain('--rosetta')
-    expect(line.endsWith('ghcr.io/bryann2k/redoop:main')).toBe(true)
+    expect(line.endsWith('ghcr.io/bryann2k/diazo:main')).toBe(true)
   })
 
   it('keeps the secrets and replaces the container on a re-run', async () => {
@@ -130,8 +148,8 @@ describe('install-local.sh', () => {
     writeFileSync(path.join(root, 'calls.log'), '')
     expect((await run([], { DOOP_PORT: '4500' })).code).toBe(0)
     expect(readFileSync(envFile(), 'utf8')).toBe(before)
-    expect(calls()).toMatch(/^stop doop$/m)
-    expect(calls()).toMatch(/^delete --force doop$/m)
+    expect(calls()).toMatch(/^stop diazo$/m)
+    expect(calls()).toMatch(/^delete --force diazo$/m)
     expect(runLine()).toContain('--publish 127.0.0.1:4500:4400')
   })
 
@@ -140,7 +158,7 @@ describe('install-local.sh', () => {
     expect(runLine()).toContain('--platform linux/amd64 --rosetta')
   })
 
-  it('fails when doop never answers', async () => {
+  it('fails when Diazo never answers', async () => {
     stub('curl', 'exit 7')
     const { code, out } = await run([])
     expect(code).not.toBe(0)
@@ -153,9 +171,54 @@ describe('install-local.sh', () => {
 
     expect((await run(['--uninstall'])).out).toMatch(/kept/)
     expect(existsSync(envFile())).toBe(true)
+    expect(calls()).toMatch(/^image delete ghcr\.io\/bryann2k\/diazo:main$/m)
     expect(calls()).toMatch(/^image delete ghcr\.io\/bryann2k\/redoop:main$/m)
 
     expect((await run(['uninstall', '--yes'])).code).toBe(0)
-    expect(existsSync(path.join(home, '.doop'))).toBe(false)
+    expect(existsSync(path.join(home, '.diazo'))).toBe(false)
+  })
+
+  it('keeps a pre-rename ~/.doop where it is, with its secrets', async () => {
+    const old = path.join(home, '.doop')
+    mkdirSync(path.join(old, 'data'), { recursive: true })
+    writeFileSync(path.join(old, 'data', 'canvas'), 'kept')
+    writeFileSync(path.join(old, 'doop.env'), 'BETTER_AUTH_SECRET=old\nSECRETS_ENCRYPTION_KEYS=local:old\n', {
+      mode: 0o600,
+    })
+
+    const { code, out } = await run([])
+    expect(code, out).toBe(0)
+    expect(existsSync(path.join(home, '.diazo'))).toBe(false)
+    expect(readFileSync(path.join(old, 'data', 'canvas'), 'utf8')).toBe('kept')
+    expect(readFileSync(path.join(old, 'doop.env'), 'utf8')).toContain('BETTER_AUTH_SECRET=old')
+    expect(existsSync(path.join(old, 'diazo.env'))).toBe(false)
+    const line = runLine()
+    expect(line).toContain(`--volume ${old}/data:/app/data`)
+    expect(line).toContain(`--env-file ${old}/doop.env`)
+    expect(existsSync(path.join(old, 'bin', 'diazo-local'))).toBe(true)
+  })
+
+  it('uses ~/.diazo once it exists, even beside an old ~/.doop', async () => {
+    mkdirSync(path.join(home, '.doop', 'data'), { recursive: true })
+    mkdirSync(path.join(home, '.diazo'), { recursive: true })
+    expect((await run([])).code).toBe(0)
+    expect(runLine()).toContain(`--volume ${home}/.diazo/data:/app/data`)
+    expect(existsSync(envFile())).toBe(true)
+  })
+
+  it('replaces the pre-rename doop container, and only one this installer made', async () => {
+    writeFileSync(path.join(root, 'legacy'), '{"image":"ghcr.io/bryann2k/redoop:main"}')
+    const { code, out } = await run([])
+    expect(code, out).toBe(0)
+    expect(calls()).toMatch(/^stop doop$/m)
+    expect(calls()).toMatch(/^delete --force doop$/m)
+    expect(out).toMatch(/replacing the pre-rename container/)
+
+    writeFileSync(path.join(root, 'calls.log'), '')
+    writeFileSync(path.join(root, 'legacy'), '{"image":"docker.io/someone/else:1"}')
+    const other = await run([])
+    expect(other.code, other.out).toBe(0)
+    expect(other.out).toMatch(/left the container 'doop' alone/)
+    expect(calls()).not.toMatch(/^delete --force doop$/m)
   })
 })

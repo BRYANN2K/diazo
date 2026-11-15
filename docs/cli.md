@@ -1,15 +1,18 @@
-# The `doop` CLI
+# The `diazo` CLI
 
-Work with a redoop canvas from a project folder. The code lives in [`cli/`](../cli).
+Work with a Diazo canvas from a project folder. The code lives in [`cli/`](../cli).
 
-Inside this repo, `bun run doop <command>` runs `cli/bin/doop.ts`. For a `doop` command anywhere,
-link the bin onto your PATH (`ln -s "$PWD/cli/bin/doop.ts" ~/.local/bin/doop`). Do not use
-`bunx doop`: it fetches an unrelated npm package of the same name. The CLI talks to the MCP endpoint (`POST /mcp`, one stateless `tools/call`
+Inside this repo, `bun run diazo <command>` (or `bun run doop`, kept as an alias) runs
+`cli/bin/doop.ts`. For a `diazo` command anywhere, link the bin onto your PATH
+(`ln -s "$PWD/cli/bin/doop.ts" ~/.local/bin/diazo`). Do not use `bunx doop`: it fetches an
+unrelated npm package of the same name. A new link writes `.diazo.json`; a folder that already has
+`.doop.json` keeps it, and both are read (`.diazo.json` first). The examples below say `doop`;
+`diazo` takes the same commands. The CLI talks to the MCP endpoint (`POST /mcp`, one stateless `tools/call`
 per request), because agent keys authenticate MCP, not the cookie-based REST API.
 
 ```bash
 # once, outside every repo: ~/.config/doop/config.json holds
-#   {"url": "https://<your-doop-host>", "agentKey": "dpk_…"}   (key from Settings → Agent keys)
+#   {"url": "https://<your-diazo-host>", "agentKey": "dpk_…"}   (key from Settings → Agent keys)
 chmod 600 ~/.config/doop/config.json   # a key in a file others can read is refused
 
 doop link <canvas-id-or-link>   # writes .doop.json in this folder

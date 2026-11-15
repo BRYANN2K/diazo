@@ -1,32 +1,61 @@
 #!/bin/sh
-# doop-local: run doop on this Mac in one container, with Apple's `container`.
+# diazo-local: run Diazo on this Mac in one container, with Apple's `container`.
 #
-#   curl -fsSL https://raw.githubusercontent.com/BRYANN2K/redoop/main/scripts/install-local.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install-local.sh | sh
 #
-# One container (ghcr.io/bryann2k/redoop), its embedded Postgres (PGlite) and its
-# uploads in ~/.doop/data, its secrets in ~/.doop/doop.env (generated here, mode
-# 600). Published on 127.0.0.1 only. Re-running it updates the image and
+# One container (ghcr.io/bryann2k/diazo), its embedded Postgres (PGlite) and its
+# uploads in ~/.diazo/data, its secrets in ~/.diazo/diazo.env (generated here,
+# mode 600). Published on 127.0.0.1 only. Re-running it updates the image and
 # restarts the container; data and secrets are kept.
 #
-# The installer also copies itself to ~/.doop/bin/doop-local:
-#   doop-local [install|update|start|stop|restart|status|logs|uninstall]
+# An install made before the rename (redoop) lives in ~/.doop, with doop.env
+# and a container named doop. That folder is used where it is: nothing is
+# moved, so a container still mounting it, or an interrupted run, never loses
+# a canvas. Its container is replaced by the diazo one on the next install.
 #
-# Settings (environment): DOOP_HOME (~/.doop), DOOP_PORT (4400), DOOP_IMAGE,
-# DOOP_NAME (doop), DOOP_REF (branch built by --build), DOOP_HEALTH_TIMEOUT (s).
+# The installer also copies itself to <data folder>/bin/diazo-local
+# (doop-local is a link to it, for old habits):
+#   diazo-local [install|update|start|stop|restart|status|logs|uninstall]
+#
+# Settings (environment; the DOOP_ names are kept so existing setups still
+# apply): DOOP_HOME (~/.diazo, or ~/.doop when only that one exists), DOOP_PORT
+# (4400), DOOP_IMAGE, DOOP_NAME (diazo), DOOP_REF (branch built by --build),
+# DOOP_HEALTH_TIMEOUT (s).
 
 set -eu
 
-DOOP_HOME=${DOOP_HOME:-"$HOME/.doop"}
+# The data folder: an explicit DOOP_HOME, else ~/.diazo, else a pre-rename
+# ~/.doop kept in place.
+pick_home() {
+  if [ -n "${DOOP_HOME:-}" ]; then
+    printf '%s' "$DOOP_HOME"
+  elif [ ! -d "$HOME/.diazo" ] && [ -d "$HOME/.doop" ]; then
+    printf '%s' "$HOME/.doop"
+  else
+    printf '%s' "$HOME/.diazo"
+  fi
+}
+
+DOOP_HOME=$(pick_home)
 DOOP_PORT=${DOOP_PORT:-4400}
-DOOP_NAME=${DOOP_NAME:-doop}
-DOOP_IMAGE=${DOOP_IMAGE:-ghcr.io/bryann2k/redoop:main}
+DOOP_NAME=${DOOP_NAME:-diazo}
+DOOP_IMAGE=${DOOP_IMAGE:-ghcr.io/bryann2k/diazo:main}
 DOOP_REF=${DOOP_REF:-main}
-DOOP_REPO=${DOOP_REPO:-BRYANN2K/redoop}
+DOOP_REPO=${DOOP_REPO:-BRYANN2K/diazo}
 DOOP_HEALTH_TIMEOUT=${DOOP_HEALTH_TIMEOUT:-240}
 DOOP_SCRIPT_URL=${DOOP_SCRIPT_URL:-"https://raw.githubusercontent.com/$DOOP_REPO/$DOOP_REF/scripts/install-local.sh"}
-LOCAL_TAG=doop-local:latest
+LOCAL_TAG=diazo-local:latest
+# what the pre-rename installer made: its container and images
+LEGACY_NAME=doop
+LEGACY_IMAGE=ghcr.io/bryann2k/redoop:main
+LEGACY_TAG=doop-local:latest
 
-ENV_FILE="$DOOP_HOME/doop.env"
+# a pre-rename folder keeps its doop.env; a new one gets diazo.env
+if [ -f "$DOOP_HOME/doop.env" ] && [ ! -f "$DOOP_HOME/diazo.env" ]; then
+  ENV_FILE="$DOOP_HOME/doop.env"
+else
+  ENV_FILE="$DOOP_HOME/diazo.env"
+fi
 DATA_DIR="$DOOP_HOME/data"
 BIN_DIR="$DOOP_HOME/bin"
 
@@ -37,9 +66,9 @@ ASSUME_YES=0
 RUN_IMAGE=
 RUN_PLATFORM=
 
-say() { printf '%s\n' "doop: $*"; }
+say() { printf '%s\n' "diazo: $*"; }
 die() {
-  printf '%s\n' "doop: error: $*" >&2
+  printf '%s\n' "diazo: error: $*" >&2
   exit 1
 }
 
@@ -52,13 +81,13 @@ Commands:
   start             start the existing container
   stop              stop the container (data kept)
   restart           stop, then start
-  status            show the container and whether doop answers
+  status            show the container and whether Diazo answers
   logs              follow the container's logs
-  uninstall         remove the container and image; asks before deleting ~/.doop
+  uninstall         remove the container and image; asks before deleting the data folder
 
 Options:
   --build           build the image on this Mac from source instead of pulling it
-  --yes, -y         uninstall: delete ~/.doop without asking
+  --yes, -y         uninstall: delete the data folder without asking
   --stop, --uninstall, --start, --status, --logs, --update
                     same as the commands above
   -h, --help        this help
@@ -104,7 +133,7 @@ check_platform() {
 check_container() {
   if ! command -v container >/dev/null 2>&1; then
     cat >&2 <<'EOF'
-doop: error: Apple's `container` CLI is not installed.
+diazo: error: Apple's `container` CLI is not installed.
 
   1. Download the signed installer (container-<version>-installer-signed.pkg) from
      https://github.com/apple/container/releases/latest
@@ -129,7 +158,7 @@ start_system() {
 gen_hex() { openssl rand -hex 32; }
 gen_key() { printf 'local:%s' "$(openssl rand -base64 32)"; }
 
-# Writes ~/.doop/doop.env once; later runs only add a key that is missing, so
+# Writes the env file once; later runs only add a key that is missing, so
 # the secrets (and anything the user added) survive every update.
 write_env_file() {
   umask 077
@@ -137,10 +166,10 @@ write_env_file() {
   chmod 700 "$DOOP_HOME"
   if [ ! -f "$ENV_FILE" ]; then
     cat >"$ENV_FILE" <<EOF
-# doop local install. Generated on this Mac; never commit or share this file.
-# BETTER_AUTH_URL and PORT are set by doop-local from DOOP_PORT.
+# Diazo local install. Generated on this Mac; never commit or share this file.
+# BETTER_AUTH_URL and PORT are set by diazo-local from DOOP_PORT.
 # Add any optional setting from .env.example here (ANTHROPIC_API_KEY, SMTP_*, ...),
-# then run: doop-local restart
+# then run: diazo-local restart
 EOF
     say "created $ENV_FILE"
   fi
@@ -157,13 +186,16 @@ ensure_key() {
 
 install_helper() {
   mkdir -p "$BIN_DIR"
-  target="$BIN_DIR/doop-local"
-  if [ -f "$0" ] && grep -q '^# doop-local: run doop on this Mac' "$0" 2>/dev/null; then
+  target="$BIN_DIR/diazo-local"
+  if [ -f "$0" ] && grep -q '^# diazo-local: run Diazo on this Mac' "$0" 2>/dev/null; then
     cmp -s "$0" "$target" || cp "$0" "$target"
   else
     curl -fsSL "$DOOP_SCRIPT_URL" -o "$target.tmp" && mv "$target.tmp" "$target"
   fi
   chmod 755 "$target"
+  # the pre-rename name, as a link, so `doop-local update` keeps working
+  rm -f "$BIN_DIR/doop-local"
+  ln -s diazo-local "$BIN_DIR/doop-local"
 }
 
 # ---------------------------------------------------------------- image
@@ -190,7 +222,7 @@ pick_image() {
 }
 
 build_image() {
-  src=$(mktemp -d "${TMPDIR:-/tmp}/doop-src.XXXXXX")
+  src=$(mktemp -d "${TMPDIR:-/tmp}/diazo-src.XXXXXX")
   say "downloading $DOOP_REPO@$DOOP_REF"
   curl -fsSL "https://codeload.github.com/$DOOP_REPO/tar.gz/refs/heads/$DOOP_REF" | tar -xz -C "$src" --strip-components 1
   say "building $LOCAL_TAG (several minutes the first time)"
@@ -206,6 +238,24 @@ remove_container() {
     container stop "$DOOP_NAME" >/dev/null 2>&1 || true
     container delete --force "$DOOP_NAME" >/dev/null
   fi
+}
+
+# The pre-rename installer's container (named doop, on the same port and the
+# same data folder): removed only when it runs one of that installer's images,
+# so a container someone else named doop is left alone.
+remove_legacy_container() {
+  [ "$DOOP_NAME" != "$LEGACY_NAME" ] || return 0
+  info=$(container inspect "$LEGACY_NAME" 2>/dev/null) || return 0
+  case $info in
+    *"$LEGACY_IMAGE"* | *"$LEGACY_TAG"*) ;;
+    *)
+      say "left the container '$LEGACY_NAME' alone (not one this installer made)"
+      return 0
+      ;;
+  esac
+  say "replacing the pre-rename container '$LEGACY_NAME'"
+  container stop "$LEGACY_NAME" >/dev/null 2>&1 || true
+  container delete --force "$LEGACY_NAME" >/dev/null
 }
 
 # The `container run` invocation, one argument per line (the tests read it).
@@ -245,7 +295,7 @@ wait_healthy() {
     sleep 2
     waited=$((waited + 2))
   done
-  say "doop did not answer within ${DOOP_HEALTH_TIMEOUT}s. Last log lines:"
+  say "Diazo did not answer within ${DOOP_HEALTH_TIMEOUT}s. Last log lines:"
   container logs -n 40 "$DOOP_NAME" >&2 || true
   exit 1
 }
@@ -253,12 +303,12 @@ wait_healthy() {
 ready() {
   cat <<EOF
 
-doop is running: http://localhost:$DOOP_PORT
+Diazo is running: http://localhost:$DOOP_PORT
   MCP endpoint:  http://localhost:$DOOP_PORT/mcp
   data:          $DATA_DIR
   secrets:       $ENV_FILE
-  manage it:     $BIN_DIR/doop-local [start|stop|restart|status|logs|update|uninstall]
-After a reboot, run: $BIN_DIR/doop-local start
+  manage it:     $BIN_DIR/diazo-local [start|stop|restart|status|logs|update|uninstall]
+After a reboot, run: $BIN_DIR/diazo-local start
 EOF
 }
 
@@ -269,6 +319,7 @@ do_install() {
   write_env_file
   install_helper
   pick_image
+  remove_legacy_container
   remove_container
   say "starting $DOOP_NAME on 127.0.0.1:$DOOP_PORT"
   run_container
@@ -322,9 +373,11 @@ confirm() {
 
 do_uninstall() {
   check_container
+  remove_legacy_container
   remove_container
-  container image delete "$DOOP_IMAGE" >/dev/null 2>&1 || true
-  container image delete "$LOCAL_TAG" >/dev/null 2>&1 || true
+  for image in "$DOOP_IMAGE" "$LOCAL_TAG" "$LEGACY_IMAGE" "$LEGACY_TAG"; do
+    container image delete "$image" >/dev/null 2>&1 || true
+  done
   say "container and image removed"
   if [ -d "$DOOP_HOME" ]; then
     if confirm "Delete $DOOP_HOME (every canvas, upload and secret)?"; then

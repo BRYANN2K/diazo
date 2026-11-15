@@ -68,7 +68,7 @@ async function linkedRepo(userId: string, canvasId: string): Promise<RepoLink> {
   if (!link) throw new TokenSyncError('no linked project — link this canvas to a folder in the desktop app first', 409)
   const device = localRepo.deviceFor(userId)
   if (!device || !device.grants.has(link.id))
-    throw new TokenSyncError("the linked project is unavailable — the doop desktop app holding it isn't online", 409)
+    throw new TokenSyncError("the linked project is unavailable — the Diazo desktop app holding it isn't online", 409)
   return link
 }
 

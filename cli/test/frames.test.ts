@@ -113,7 +113,7 @@ describe('doop push', () => {
     expect(server.calls.find((c) => c.name === 'set_frame_html')?.args).toEqual({
       frame_id: 'fr1',
       html: '<main>v1 edited</main>',
-      agent_name: 'doop CLI',
+      agent_name: 'Diazo CLI',
     })
     const frames = link().frames as Record<string, { base: string }>
     expect(frames['home-page.html']?.base).toBe(hashHtml('<main>v1 edited</main>'))

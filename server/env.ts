@@ -154,7 +154,7 @@ const schema = {
   SMTP_USER: str({ default: undefined }),
   SMTP_PASS: str({ default: undefined }),
   SMTP_SECURE: bool({ default: false }),
-  EMAIL_FROM: str({ default: 'doop <no-reply@localhost>' }),
+  EMAIL_FROM: str({ default: 'Diazo <no-reply@localhost>' }),
 
   /* ------------------------------------------------------ webhooks */
   WEBHOOK_ALLOW_PRIVATE_URLS: bool({ default: false }),
@@ -332,7 +332,7 @@ const schema = {
   /* server/updateCheck.ts asks GitHub whether a newer build of REPO's BRANCH
      exists; admins (and a local install's user) see the answer */
   DOOP_UPDATE_CHECK: bool({ default: true }),
-  DOOP_UPDATE_REPO: githubRepo({ default: 'BRYANN2K/redoop' }),
+  DOOP_UPDATE_REPO: githubRepo({ default: 'BRYANN2K/diazo' }),
   DOOP_UPDATE_BRANCH: str({ default: 'main' }),
   /* GitHub's REST API; another origin for GitHub Enterprise or a test stub */
   DOOP_UPDATE_API: origin({ default: 'https://api.github.com' }),

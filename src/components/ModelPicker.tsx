@@ -1,7 +1,7 @@
 import { posthog } from '../lib/posthog'
 import { BrandMark } from './ui/brand-mark'
 import { RUNNER_BRAND } from '../lib/runnerMarks'
-import { DoopMark } from './Logo'
+import { DiazoAgentMark } from './Logo'
 import { ModelMenu } from './ModelMenu'
 import { useAgentRunners, useRunnerPick } from '../lib/runnerPick'
 import { resolveRunnerPick, type AgentRunner } from '../../shared/agentRunner'
@@ -43,7 +43,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
       onModel={choose}
       onEffort={chooseEffort}
       trigger={(picked) => {
-        const label = picked?.name ?? 'Doop Agent'
+        const label = picked?.name ?? 'Diazo Agent'
         const mark = picked ? RUNNER_BRAND[picked.runner.provider] : undefined
         return (
           <MenuButton
@@ -56,8 +56,8 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
                 {mark ? (
                   <BrandMark brand={mark} size={12} />
                 ) : (
-                  /* no connection behind it: the agent's own mark */
-                  <DoopMark size={11} className="block" />
+                  /* no connection behind it: the Diazo Agent's own face */
+                  <DiazoAgentMark size={12} className="block" />
                 )}
               </span>
             }

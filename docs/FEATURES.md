@@ -1,10 +1,18 @@
-# redoop features
+# Diazo features
 
 What this fork adds on top of [kgoedecke/doop](https://github.com/kgoedecke/doop), and the
 upstream pull requests it merged ahead of upstream. Resync notes and the deploy recipe are in
 [FORK.md](../FORK.md). Screenshots of most of these are in the [README](../README.md#what-it-does).
 
 ## Features added in this fork
+
+- **Diazo's own identity** — doop's name and logo are trademarks, so the fork is Diazo: its mark
+  (an ink-outline D and a blue print D), the "diazo" wordmark, the Diazo Agent's face in agent
+  orange (animated while it works), Diazo in every interface string, email and agent guide,
+  `@diazo` mentions (`@doop` still routes), the desktop app `Diazo.app` (`dev.bryann2k.diazo`,
+  data copied over from the doop shell on first launch) and the install scripts. Internal
+  identifiers (`data-doop-*`, `DOOP_*`, tables, MCP tool names) are unchanged
+  ([DESIGN.md, Marks](../.context/DESIGN.md#marks-diazo)).
 
 - **⌘F across every page** — a palette: This canvas (this page or all pages), Library or All as
   one segmented control, results in sections (canvas matches, then library items with their
@@ -46,7 +54,7 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   one). ⌘F everywhere answers libraries from their index, without loading them. Search knows common
   UI synonyms ("login" finds "sign in") and ranks what is used most first. A library can let a
   model describe and tag its thin items (off by default, 200 a day, suggestions wait in the inbox).
-  `scripts/pull-library.ts` copies a library from another Doop (see FORK.md).
+  `scripts/pull-library.ts` copies a library from another doop or Diazo instance (see FORK.md).
   The category tree the convert wizard proposes drops page numbers ("16 "), alphabetical splits
   ("· A–L") and continuations, and folds the categories that then collide.
 - **Organise a library with AI** — Libraries → Organise with AI (also offered by the convert
@@ -86,9 +94,9 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   library `find_references` answers from its index (families, with `item_id`), and a plan may name
   the item, which is checked and shown with its own image.
 - **Plan-first Chat tab** — thread list, one composer, plan card and repo chip. An editor's line
-  in the Chat tab asks Doop without an `@mention`, with a model picker per ask. A thread's Reply
+  in the Chat tab asks the Diazo Agent without an `@mention`, with a model picker per ask. A thread's Reply
   action points the composer at that thread. The composer and the message bubbles follow the
-  design library's chat sections. Until someone asks Doop, the tab shows a welcome with suggestion
+  design library's chat sections. Until someone asks the Diazo Agent, the tab shows a welcome with suggestion
   chips tied to the canvas (a pricing page, a landing page, an accessibility review of the selected
   frame, the canvas's first skill as `/name` in the composer). The agent's turn sits in its own
   place: a thinking row while it works, the reason and a Retry when an ask fails. The list follows
@@ -123,12 +131,12 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   its designed frame (matched by route mapping or name), scored as a drift comparison, and
   rewritten in place on the next delivery. Payload and CI recipe in
   [docs/built-page.md](built-page.md).
-- **Local install on a Mac** — one `curl … | sh` runs doop in a single Apple `container` on
-  `127.0.0.1:4400`, with PGlite and uploads in `~/.doop/data` and secrets generated on the Mac
-  ([Run doop](../README.md#install)).
-- **Desktop app from this repo** — `scripts/install-desktop.sh` (`curl … | sh`) installs the Mac
-  app from a `desktop-v*` release of this repo, checked against its SHA-256, with no Apple
-  signing needed; the app then updates itself from the same releases, signed with redoop's own
+- **Local install on a Mac** — one `curl … | sh` runs Diazo in a single Apple `container` on
+  `127.0.0.1:4400`, with PGlite and uploads in `~/.diazo/data` (an older `~/.doop` is kept in
+  place) and secrets generated on the Mac ([Install](../README.md#install)).
+- **Desktop app from this repo** — `scripts/install-desktop.sh` (`curl … | sh`) installs `Diazo.app`
+  from a `desktop-v*` release of this repo, checked against its SHA-256, with no Apple
+  signing needed; the app then updates itself from the same releases, signed with this fork's own
   updater key ([Desktop app](../README.md#desktop-app-mac)).
 - **Usage meter** — every model transport reports its tokens, each resident run lands in an
   `agent_runs` ledger with its time and cost (the provider's figure, else a per-model price
@@ -162,15 +170,15 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   flagged and hold Start back. Each designs into its own sibling frame. A comparison card
   shows each render with its cost, time, effort and lint score, and the one you keep is saved as
   a canvas decision while the others are archived (hidden, not deleted).
-- **Devin and Grok on the desktop (ACP)** — Settings → Doop Agent lists **Devin (desktop)** and
+- **Devin and Grok on the desktop (ACP)** — Settings → Diazo Agent lists **Devin (desktop)** and
   **Grok (desktop)** when the desktop app can run them: the shell starts the CLI already installed
   and signed in on the computer (`devin acp`, `grok agent stdio`) and drives it over the Agent
-  Client Protocol, with the run's Doop MCP server, the way the Claude Plan runs Claude Code. Each
+  Client Protocol, with the run's Diazo MCP server, the way the Claude Plan runs Claude Code. Each
   is a connection of its own, in the composer's model picker and the model duel, with its model
   menu (curated plus what `devin models` / `grok models` list) and effort (Grok's
   `--reasoning-effort`; Devin's effort picks the model variant, `swe-2` + Max → `swe-2-max`).
-  Permission requests are granted for Doop's canvas tools only. Needs a desktop release.
-- **Self-hosting** — Docker image `ghcr.io/bryann2k/redoop:main` (also `:latest` and
+  Permission requests are granted for Diazo's canvas tools only. Needs a desktop release.
+- **Self-hosting** — Docker image `ghcr.io/bryann2k/diazo:main` (also `:latest` and
   `:sha-<commit>`; amd64 + arm64) built on every push to `main`, k3s manifests in `deploy/k3s/`
   with a persistent volume for uploads, exposed through Tailscale Serve only (no ingress, no
   Funnel).
@@ -179,14 +187,14 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   without a token, for the newest `main` commit whose image build succeeded and compares it with
   the running one; instance admins (and a local install's user) get an "Update available · N new
   commits" card, in the browser and the desktop app, with the commit titles, a link to the compare
-  page and the command for their install (`doop-local update`, `docker compose pull && docker
+  page and the command for their install (`diazo-local update`, `docker compose pull && docker
 compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per build;
   `DOOP_UPDATE_CHECK=false` turns it off.
 - **Agents add fonts** — the `upload_font` MCP tool adds a TTF/OTF/WOFF/WOFF2 file (10 MB, one
   face) to a font library, as Settings → Fonts does: the canvas's (its workspace's, else its
   owner's) or a named workspace's, for whoever may change that library. The file comes by URL,
   as a one-time `curl` upload or as base64; the answer names the family, weight and style read
-  from the file and the CSS to write, and Doop adds the `@font-face` to the frames.
+  from the file and the CSS to write, and Diazo adds the `@font-face` to the frames.
 - **Demo and README screenshots** — `scripts/seed-demo.ts` boots a local instance seeded with an
   invented product (Fieldnote), with a scripted stand-in for the model API and a fake desktop
   device serving a demo repo, so the agent, usage, duel, curation and repo features run without a

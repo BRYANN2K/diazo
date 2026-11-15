@@ -174,7 +174,7 @@ function SidebarDemo() {
           active={pane === 'ws'}
           onClick={() => setPane('ws')}
         >
-          Doop UI
+          Diazo UI
         </DashNavItem>
         <DashSectionLabel density="rail">Agents</DashSectionLabel>
         <DashNavItem

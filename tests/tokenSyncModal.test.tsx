@@ -70,7 +70,7 @@ it('lists the diff, applies only the ticked repo values', async () => {
   expect(calls.applyTokenSync).toHaveBeenCalledWith('c1', [
     { name: '--color-brand', type: 'color', value: '#0a7cff', themes: undefined },
   ])
-  expect(document.body.textContent).toContain('1 token updated in doop.')
+  expect(document.body.textContent).toContain('1 token updated in Diazo.')
 })
 
 it('previews the doop → repo patch and writes that patch', async () => {

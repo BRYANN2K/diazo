@@ -161,7 +161,7 @@ export async function compareFrameWithUrl(
   } else {
     if (!localDrift.online(input.userId)) {
       throw new DriftLocalUnavailableError(
-        "that's a local URL — the doop desktop app on your machine fetches it for you, but it isn't online",
+        "that's a local URL — the Diazo desktop app on your machine fetches it for you, but it isn't online",
       )
     }
     via = 'desktop'

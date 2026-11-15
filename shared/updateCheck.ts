@@ -71,7 +71,7 @@ export const MAX_LISTED_COMMITS = 20
 export function updateCommand(install: InstallType): string {
   switch (install) {
     case 'local':
-      return 'doop-local update'
+      return 'diazo-local update'
     case 'docker':
       return 'docker compose pull && docker compose up -d'
     case 'kubernetes':

@@ -31,7 +31,7 @@ export const hasLiveSnapshot = () => bridge.__DOOP_LIVE_SNAPSHOT__ === true && !
 
 function invokeLive<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!bridge.__TAURI__) {
-    return Promise.reject(new Error('Snapshots need the Doop desktop app.'))
+    return Promise.reject(new Error('Snapshots need the Diazo desktop app.'))
   }
   return bridge.__TAURI__.core.invoke<T>(command, args)
 }

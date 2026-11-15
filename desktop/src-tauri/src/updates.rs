@@ -89,7 +89,7 @@ pub fn install_on_quit(app: &AppHandle) {
     let ready = state.ready.lock().ok().and_then(|mut ready| ready.take());
     if let Some((update, bytes)) = ready {
         if let Err(error) = update.install(&bytes) {
-            eprintln!("Installing doop {} on quit failed: {error}", update.version);
+            eprintln!("Installing Diazo {} on quit failed: {error}", update.version);
         }
     }
 }
@@ -108,7 +108,7 @@ async fn run(app: &AppHandle, trigger: Trigger) {
             dialog(
                 app,
                 "You’re up to date",
-                &format!("doop {current} is up to date."),
+                &format!("Diazo {current} is up to date."),
             )
             .show()
             .await;
@@ -190,15 +190,15 @@ async fn offer(app: &AppHandle, update: Update, bytes: Vec<u8>) {
         return;
     }
     let later = if cfg!(target_os = "macos") {
-        "\n\nChoose Later to install it when you quit doop."
+        "\n\nChoose Later to install it when you quit Diazo."
     } else {
         ""
     };
     let choice = dialog(
         app,
-        "A new version of doop is ready",
+        "A new version of Diazo is ready",
         &format!(
-            "doop {} is ready to install. You have {}.\n\nRestarting stops an agent run in progress.{later}",
+            "Diazo {} is ready to install. You have {}.\n\nRestarting stops an agent run in progress.{later}",
             update.version,
             app.package_info().version
         ),
@@ -232,11 +232,11 @@ async fn install(app: &AppHandle, update: Update, bytes: Vec<u8>) -> Result<(), 
     match update.install(&bytes) {
         Ok(()) => app.restart(),
         Err(error) => {
-            eprintln!("Installing doop {} failed: {error}", update.version);
+            eprintln!("Installing Diazo {} failed: {error}", update.version);
             dialog(
                 app,
                 "Couldn’t install the update",
-                "Download the latest doop from doop.design and install it over this version.",
+                "Download the latest Diazo from github.com/BRYANN2K/diazo/releases and install it over this version.",
             )
             .set_level(MessageLevel::Error)
             .show()
@@ -347,7 +347,7 @@ pub mod menu {
                 dialog(
                     &app,
                     "Custom desktop build",
-                    "This app connects to a custom Doop server or is a development build. Contact whoever provided this app for an updated desktop build.",
+                    "This app connects to a custom server or is a development build. Contact whoever provided this app for an updated desktop build.",
                 )
                 .show()
                 .await;

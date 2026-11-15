@@ -918,7 +918,7 @@ app.post('/api/canvases/:id/drift', async (req, res) => {
      to time out inside the capture */
   if (classifyDriftUrl(url).kind === 'local') {
     return res.status(422).json({
-      error: 'local URLs are fetched through the doop desktop app — run the compare from the app, not from CI',
+      error: 'local URLs are fetched through the Diazo desktop app — run the compare from the app, not from CI',
     })
   }
   try {
@@ -2148,7 +2148,7 @@ app.post('/api/canvases/:id/members', async (req, res) => {
     })
     .from(authSchema.user)
     .where(eq(authSchema.user.email, email))
-  if (!row) return res.status(404).json({ error: 'no doop account with that email — ask them to sign up first' })
+  if (!row) return res.status(404).json({ error: 'no Diazo account with that email — ask them to sign up first' })
   if (row.id === c.ownerId) return res.status(400).json({ error: 'the owner already has access' })
   const isNew = !c.memberIds?.includes(row.id)
   store.addMember(c.id, row.id, req.user!.id)
@@ -4254,7 +4254,7 @@ wss.on('connection', (ws, upgradeReq) => {
 })
 
 server.listen(PORT, () => {
-  console.log(`⟡ doop server     http://localhost:${PORT}`)
+  console.log(`⟡ diazo server    http://localhost:${PORT}`)
   /* frame HTML is loaded per canvas; a canvas nobody has used for
      CANVAS_IDLE_MS gives it back, unless a room, agent or stream is on it.
      Started here, once the room state it asks about exists. */
@@ -4301,8 +4301,8 @@ server.listen(PORT, () => {
   const tier = serverTierInfo()
   console.log(
     tier.ready
-      ? `⟡ doop agent        on — free tier on this server’s ${tier.provider === 'azure' ? 'Azure OpenAI deployment' : 'Anthropic key'}, then each user’s own model account`
-      : `⟡ doop agent        no server ${tier.provider === 'azure' ? 'Azure config' : 'key'} — runs only for users who connect their own ChatGPT subscription or OpenAI key (${tier.provider === 'azure' ? 'set the AZURE_OPENAI_* vars' : 'set ANTHROPIC_API_KEY'} for a free tier; agents connected over MCP work regardless)`,
+      ? `⟡ diazo agent       on — free tier on this server’s ${tier.provider === 'azure' ? 'Azure OpenAI deployment' : 'Anthropic key'}, then each user’s own model account`
+      : `⟡ diazo agent       no server ${tier.provider === 'azure' ? 'Azure config' : 'key'} — runs only for users who connect their own ChatGPT subscription or OpenAI key (${tier.provider === 'azure' ? 'set the AZURE_OPENAI_* vars' : 'set ANTHROPIC_API_KEY'} for a free tier; agents connected over MCP work regardless)`,
   )
   console.log(
     serverImageGenEnabled()

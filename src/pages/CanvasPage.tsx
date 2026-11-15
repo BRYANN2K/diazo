@@ -18,7 +18,7 @@ import {
   type SyncKeyInfo,
 } from '../lib/api'
 import { navigate } from '../App'
-import { DoopMark } from '../components/Logo'
+import { DiazoMark } from '../components/Logo'
 import {
   BarDivider,
   BarPill,
@@ -904,7 +904,7 @@ export function CanvasPage({
                   aria-label={t('actions.mainMenu')}
                   title={t('actions.mainMenu')}
                 >
-                  <DoopMark size={14} />
+                  <DiazoMark size={15} tone="color" className="block" />
                 </Button>
               }
             />
@@ -1069,7 +1069,7 @@ export function CanvasPage({
                     setShowActivity(true)
                   }}
                 >
-                  <DoopMark size={12} /> {t('canvas.memorySuggestionReview')}
+                  <DiazoMark size={12} /> {t('canvas.memorySuggestionReview')}
                 </Button>
                 <Button
                   variant="bare"

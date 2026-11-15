@@ -44,7 +44,8 @@ export const stage: Catalog['stage'] = {
   githubPlaceholderTip: 'Encontrado no repositório — aguardando captura',
   githubImportedTip: 'Importado de um repositório do GitHub',
   liveTip: 'Frame ao vivo do servidor de dev — recarregar, recarga automática e captura',
-  liveTipWeb: 'Frame ao vivo do servidor de dev — abra este canvas no app de desktop do Doop para ver a página ao vivo',
+  liveTipWeb:
+    'Frame ao vivo do servidor de dev — abra este canvas no app de desktop do Diazo para ver a página ao vivo',
   liveReload: 'Recarregar página ao vivo',
   liveAutoReload: 'Recarga automática',
   liveAutoOff: 'Desativada',
@@ -112,8 +113,8 @@ export const stage: Catalog['stage'] = {
   driftCompare: 'Comparar',
   driftComparing: 'Capturando…',
   driftLocalNeedsDesktop:
-    'Essa é uma URL local — ela é capturada pelo app desktop do Doop, que não está aberto. Abra-o e tente de novo.',
-  driftLocalNote: 'URL local — o app desktop do Doop a busca na sua máquina.',
+    'Essa é uma URL local — ela é capturada pelo app desktop do Diazo, que não está aberto. Abra-o e tente de novo.',
+  driftLocalNote: 'URL local — o app desktop do Diazo a busca na sua máquina.',
   driftScore: '{score}% dos pixels diferem',
   driftNoScore: 'Frame Shipped criado — pontuação indisponível',
   driftDesign: 'Design',
@@ -150,7 +151,7 @@ export const stage: Catalog['stage'] = {
   waitingFor: 'aguardando {name}',
   agentDidNotFinish: 'O agente não terminou.',
   retry: 'Tentar de novo',
-  replyAskAgent: 'Responder… (@doop para chamar o agente)',
+  replyAskAgent: 'Responder… (@diazo para chamar o agente)',
   replyEllipsis: 'Responder…',
   replyFailed: 'Essa resposta não foi enviada — talvez a conversa já esteja resolvida. Tente de novo.',
   resolve: 'Resolver',
@@ -168,7 +169,7 @@ export const stage: Catalog['stage'] = {
   resolvedBy: 'resolvido por {name}',
   replies: { one: '{count} resposta', other: '{count} respostas' },
   resolvedReplies: 'Respostas resolvidas',
-  replyPanelPlaceholder: 'Responder… @doop para chamar o agente',
+  replyPanelPlaceholder: 'Responder… @diazo para chamar o agente',
   replyTo: 'Responder a {name}',
   markResolved: 'Marcar esta conversa como resolvida',
 }

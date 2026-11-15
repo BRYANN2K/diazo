@@ -26,7 +26,7 @@ export const canChooseServer = () => bridge.__DOOP_SERVER_CHOOSE__ === true && !
 
 function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const call = canChooseServer() ? bridge.__TAURI__?.core?.invoke : undefined
-  if (!call) return Promise.reject(new Error('Update the Doop desktop app to change its server.'))
+  if (!call) return Promise.reject(new Error('Update the Diazo desktop app to change its server.'))
   return call<T>(command, args)
 }
 

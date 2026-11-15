@@ -273,7 +273,7 @@ export function LocalClaudeRow({ isDefault = false, onMakeDefault, onChange }: P
           })}
         </p>
       )}
-      {/* shown with no install found too: one Doop did not find can still be
+      {/* shown with no install found too: one Diazo did not find can still be
           picked; once connected it lives in the Claude Code settings */}
       {!connected && cliChooser}
       {supported && native && !native.installed && (

@@ -40,7 +40,7 @@ import { CodePanel } from './CodePanel'
 import { TextFormatToolbar } from './TextFormatToolbar'
 import type { TextFormatState } from '../lib/richText'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from './ui/context-menu'
-import { DEFAULT_ROLE_ID } from '../../shared/agents'
+import { DEFAULT_ROLE_ID, roleById, roleHandle } from '../../shared/agents'
 import { posthog } from '../lib/posthog'
 import { isResidentLimit } from './TeamAllowance'
 import { CommentComposer, CommentPin, CommentThread } from './CommentPopovers'
@@ -2301,7 +2301,7 @@ export const FrameView = memo(function FrameView({
                               onClick={() => {
                                 /* pre-mentioned → the comment dispatches as an agent
                              job scoped to this element's selector + snippet */
-                                setComposePrefill(`@${DEFAULT_ROLE_ID} `)
+                                setComposePrefill(`@${roleHandle(roleById(DEFAULT_ROLE_ID)!)} `)
                                 setComposing(true)
                               }}
                             >

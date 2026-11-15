@@ -54,7 +54,7 @@ export async function callTool<T = unknown>(
   try {
     body = (await response.json()) as RpcBody
   } catch {
-    throw new DoopError(`the server answered ${response.status} without JSON; is ${connection.url} a doop server?`)
+    throw new DoopError(`the server answered ${response.status} without JSON; is ${connection.url} a Diazo server?`)
   }
   if (!response.ok || body.error) {
     throw new DoopError(body.error?.message ?? `the server answered ${response.status}`)

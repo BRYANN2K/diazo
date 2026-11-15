@@ -1,9 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "doop",
+  "productName": "Diazo",
   "mainBinaryName": "doop-desktop",
-  "version": "0.14.0",
-  "identifier": "design.doop.desktop",
+  "version": "0.15.0",
+  "identifier": "dev.bryann2k.diazo",
   "build": {
     "devUrl": "http://localhost:4300",
     "frontendDist": "https://doop.design"
@@ -19,7 +19,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIxMzc1RjdFODhCOEZDNzIKUldSeS9MaUlmbDgzc2ZjNVZYMkxjYmMvaDB5SlNTTXhZMXQrSjJ0YVB3emRRQjBrY3ZYZ1BhNEwK",
       "endpoints": [
-        "https://github.com/BRYANN2K/redoop/releases/download/desktop-updates/latest.json"
+        "https://github.com/BRYANN2K/diazo/releases/download/desktop-updates/latest.json"
       ]
     }
   },

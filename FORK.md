@@ -1,9 +1,28 @@
-# redoop — `BRYANN2K/redoop`, branche `main`
+# Diazo — `BRYANN2K/diazo`, branche `main`
 
 Fork de `kgoedecke/doop` (AGPL-3.0) axé sur la navigation et les performances
 des très grands canvases (5000+ frames), plus une poignée de fiabilisations et
 de fonctionnalités. Chaque PR upstream est mergée individuellement, avec ses
 conflits résolus à la main pour préserver l'intention de chaque côté.
+
+## Renommage en Diazo (2026-11-15)
+
+doop est une marque (nom et logo, voir `docs/doop-reference.md`, « please rebrand derived
+services ») : le fork s'appelle **Diazo**, dépôt `BRYANN2K/diazo` (ex-`BRYANN2K/redoop`), image
+`ghcr.io/bryann2k/diazo`. Tout ce qu'un utilisateur voit est renommé (marques, textes, agent
+« Diazo Agent » / `@diazo`, app desktop `Diazo.app` / `dev.bryann2k.diazo` 0.15.0, scripts
+d'install). Les identifiants internes gardent `doop` pour ne casser ni données ni intégrations :
+attributs `data-doop-*`, clés `doop:`, variables `DOOP_*`, `doop-secrets`, namespace et
+déploiement k3s `doop`, tables, noms d'outils MCP, schéma `doop://`, exécutable `doop-desktop`,
+noms de crates et de paquets, police `Doop Keys`, `.doop.json` (`.diazo.json` accepté aussi).
+Alias gardés : `@doop` route vers l'agent, le sujet de guide `doop-instructions` répond comme
+`diazo-instructions`, la commande `doop` du CLI et `doop-local` restent.
+
+Après le merge, à faire à la main : renommer le dépôt GitHub en `diazo`, rendre public le
+package GHCR `diazo` (premier push de `docker.yml`), redémarrer le déploiement k3s sur la
+nouvelle image, puis taguer `desktop-v0.15.0`. Les shells ≤ 0.14 lisent l'ancien flux
+`BRYANN2K/redoop/…/latest.json` : ils ne passent à 0.15.0 que par la redirection GitHub du
+dépôt renommé (sinon : réinstaller avec le script curl).
 
 ## PRs mergées
 
@@ -76,7 +95,7 @@ But : une bibliothèque propre à partir de « Design Library », « Design Libr
 « Design Library · B Sections & screens » et « Design Library · C Motion, type & effects ». Les
 quatre canvases ne sont jamais modifiés.
 
-1. Connecter un compte de modèle à soi (Settings → Doop Agent : clé Claude, ChatGPT…). La curation
+1. Connecter un compte de modèle à soi (Settings → Diazo Agent : clé Claude, ChatGPT…). La curation
    tourne sur ce compte, jamais sur le tier serveur. Coût indicatif pour ~7 000 frames : environ
    120 appels (1 pour l'arbre, 1 par lot de 60 items sur le petit modèle du compte, plus quelques
    reprises).
@@ -95,7 +114,7 @@ Par API (session) : `POST /api/library-curations { sourceIds: [...] }`, `GET /:i
 `GET /:id/plan`, `PATCH /:id/plan { edits }`, `POST /:id/apply`. Un agent peut lancer
 `start_library_curation` et lire `get_library_curation`, mais c'est l'humain qui applique.
 
-Avant tout import dans une bibliothèque, Doop vérifie qu'elle (ou une autre de tes bibliothèques)
+Avant tout import dans une bibliothèque, Diazo vérifie qu'elle (ou une autre de tes bibliothèques)
 n'a pas déjà l'élément : même page importée, copie du même frame, même contenu, ou nom et texte
 presque identiques. « Add to library… » propose alors Open / Import anyway / Add as a variant ;
 les agents reçoivent le doublon au lieu d'importer, et peuvent demander d'abord avec `check_library`.
@@ -139,7 +158,7 @@ signature d'upstream : ne pas pousser ces tags dans le fork.
 ## Image Docker
 
 Buildée en CI (`.github/workflows/docker.yml`) et publiée sur
-`ghcr.io/bryann2k/redoop` à chaque push sur `main`, avec les tags `main`, `latest`
+`ghcr.io/bryann2k/diazo` à chaque push sur `main`, avec les tags `main`, `latest`
 et `sha-<commit court>` (le nom vient du dépôt, en minuscules).
 Multi-arch : `linux/amd64` (le VPS k3s) et `linux/arm64` (l'install locale
 sur Mac Apple silicon). Chaque arch est buildée sur un runner natif
@@ -158,7 +177,7 @@ en avance, divergé ou inconnu. Réponse gardée 1 h (échec 15 min, quota
 épuisé jusqu'au reset), revalidée par ETag : au plus ~2 requêtes/heure sur
 les 60 autorisées. Les admins de l'instance (et l'utilisateur d'une install
 locale) voient la carte « Update available » avec la commande adaptée :
-`doop-local update`, `docker compose pull && docker compose up -d`, ou
+`diazo-local update`, `docker compose pull && docker compose up -d`, ou
 `kubectl -n doop rollout restart deploy/doop`. Réglages : `DOOP_UPDATE_CHECK`,
 `DOOP_UPDATE_REPO`, `DOOP_UPDATE_BRANCH`, `DOOP_INSTALL` (`.env.example`).
 
@@ -169,27 +188,27 @@ empilée au-dessus de la carte du shell. Le shell, lui, se met à jour depuis
 **notre** dépôt (depuis la 0.14.0) :
 
 - **Flux** : `plugins.updater.endpoints` (WebKit et Chromium) =
-  `https://github.com/BRYANN2K/redoop/releases/download/desktop-updates/latest.json`,
+  `https://github.com/BRYANN2K/diazo/releases/download/desktop-updates/latest.json`,
   une prerelease fixe `desktop-updates` que `desktop-release.yml` crée puis
   réécrit à chaque tag. Choisie plutôt que `releases/latest/download/…` :
   « latest » désigne la dernière release non-prerelease du dépôt, quelle
   qu'elle soit (une release web ou iOS la détournerait), alors que la
   prerelease fixe ne bouge que pour le desktop, et le job refuse d'y remettre
   une version plus ancienne (relance d'un vieux tag).
-- **Clé** : une paire minisign propre à redoop (id `B1375F7E88B8FC72`),
+- **Clé** : une paire minisign propre au fork (id `B1375F7E88B8FC72`, créée sous le nom redoop),
   générée en mémoire le 2026-11-15 et jamais écrite sur disque : la privée et
   son mot de passe sont seulement dans les secrets `TAURI_SIGNING_PRIVATE_KEY`
-  et `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` de `BRYANN2K/redoop` (illisibles une
+  et `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` de `BRYANN2K/diazo` (illisibles une
   fois posés). La publique est `plugins.updater.pubkey`, et aussi `PUBKEY`
   dans `scripts/install-desktop.sh`. Perdre la clé = générer une nouvelle
   paire et réinstaller une fois par le script curl ; aucune perte de données.
-- **Install** : `curl -fsSL https://raw.githubusercontent.com/BRYANN2K/redoop/main/scripts/install-desktop.sh | sh`
+- **Install** : `curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install-desktop.sh | sh`
   (macOS, universel). Pas de signature Apple : un fichier téléchargé par curl
   n'a pas l'attribut de quarantaine, Gatekeeper ne bloque donc pas l'app
   (signée ad hoc). Le script vérifie `SHA256SUMS` (et la signature minisign si
-  `minisign` est installé), quitte l'app, remplace `doop.app` dans
+  `minisign` est installé), quitte l'app, remplace `Diazo.app` dans
   `/Applications` (sinon `~/Applications`), ne touche jamais
-  `~/Library/Application Support/design.doop.desktop`. Testé sans réseau par
+  `~/Library/Application Support/dev.bryann2k.diazo` ni `design.doop.desktop`. Testé sans réseau par
   `tests/installDesktop.test.ts`.
 - **Shells installés depuis doop.design** : ils gardent la clé et le flux
   d'upstream et ne passeront jamais seuls sur les nôtres. Une réinstallation
@@ -216,7 +235,7 @@ empilée au-dessus de la carte du shell. Le shell, lui, se met à jour depuis
    de secrets `APPLE_*` ni de variables `AZURE_*` ici), signe les paquets de
    mise à jour avec la clé, attache tout plus `SHA256SUMS` et `latest.json` à
    la release `desktop-vX.Y.Z`, puis copie `latest.json` sur
-   `desktop-updates`. Les apps installées le voient sous 24 h (ou doop →
+   `desktop-updates`. Les apps installées le voient sous 24 h (ou Diazo →
    Check for Updates…).
 
 ## Déploiement k3s (Tailscale only)
@@ -257,14 +276,14 @@ curl -sk https://bryann2k-infra-prod.tail35c61f.ts.net:8850/mcp   # 405 = endpoi
 
 ### Image GHCR
 
-Le package `ghcr.io/bryann2k/redoop` doit être **public** : le cluster le tire
+Le package `ghcr.io/bryann2k/diazo` doit être **public** : le cluster le tire
 directement (`imagePullPolicy: Always`). Au premier déploiement, le package
 était encore privé (défaut GHCR) et l'image avait été importée à la main dans
 containerd — si cela devait se reproduire :
 
 ```bash
-docker build --platform linux/amd64 -t ghcr.io/bryann2k/redoop:main .
-docker save ghcr.io/bryann2k/redoop:main | gzip > doop-image.tar.gz
+docker build --platform linux/amd64 -t ghcr.io/bryann2k/diazo:main .
+docker save ghcr.io/bryann2k/diazo:main | gzip > doop-image.tar.gz
 scp doop-image.tar.gz <vps>:/tmp/
 ssh <vps> 'sudo k3s ctr -n k8s.io images import /tmp/doop-image.tar.gz'
 ```
@@ -275,18 +294,20 @@ Deux façons de faire tourner doop : **local** (une personne, un Mac) et
 **hébergé** (k3s + Tailscale ci-dessus, ou `docker compose up`).
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/BRYANN2K/redoop/main/scripts/install-local.sh | sh
+curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install-local.sh | sh
 ```
 
 - `scripts/install-local.sh` (POSIX sh) : vérifie macOS + Apple silicon +
-  `container`, lance `container system start`, crée `~/.doop/` (`doop.env` en
+  `container`, lance `container system start`, crée `~/.diazo/` (`diazo.env` en
   600 avec `BETTER_AUTH_SECRET` et `SECRETS_ENCRYPTION_KEYS` générés sur le Mac,
   `data/`), tire l'image arm64, lance **un seul** conteneur sur
-  `127.0.0.1:4400` avec `~/.doop/data` monté sur `/app/data`.
+  `127.0.0.1:4400` (conteneur `diazo`) avec `~/.diazo/data` monté sur `/app/data`. Une
+  install d'avant le renommage garde `~/.doop` (et `doop.env`) là où il est : rien n'est déplacé.
 - Pas de `DATABASE_URL` : le serveur prend PGlite (`/app/data/pg`), les uploads
   vont dans `/app/data/assets`. Aucun changement de code nécessaire.
 - Relancer la commande = mise à jour (pull + recréation), données et secrets
-  gardés. `~/.doop/bin/doop-local start|stop|restart|status|logs|update|uninstall`.
+  gardés. `~/.diazo/bin/diazo-local start|stop|restart|status|logs|update|uninstall`
+  (`doop-local` reste un lien vers lui).
 - Sans image arm64 publiée, le script prend l'amd64 sous Rosetta ; `--build`
   construit l'image sur le Mac depuis les sources.
 - Testé sans conteneur par `tests/installLocal.test.ts` (stubs de `container`,
@@ -297,5 +318,5 @@ curl -fsSL https://raw.githubusercontent.com/BRYANN2K/redoop/main/scripts/instal
 - URL (tailnet only): https://bryann2k-infra-prod.tail35c61f.ts.net:8850
 - MCP: https://bryann2k-infra-prod.tail35c61f.ts.net:8850/mcp
 - Exposure: `tailscale serve --bg --https=8850 http://<doop ClusterIP>:4400` on bryann2k-infra. No Funnel, no cloudflared.
-- k3s namespace `doop`: `postgres-0` + `deploy/doop` (image `ghcr.io/bryann2k/redoop:main`, public).
+- k3s namespace `doop`: `postgres-0` + `deploy/doop` (image `ghcr.io/bryann2k/diazo:main`, public).
 - Dropped PR: #299 (component library). It would have added a second, parallel component system.

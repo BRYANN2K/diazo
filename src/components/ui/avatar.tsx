@@ -2,7 +2,8 @@ import * as React from 'react'
 import { useState, type CSSProperties } from 'react'
 
 import { cn } from '@/lib/utils'
-import { AgentIcon } from '../AgentIcon'
+import { AgentIcon, isDiazoAgent } from '../AgentIcon'
+import { DiazoAgentMark } from '../Logo'
 
 /** The one or two letters a person is shown as: first and last initial, the
  *  first two letters of a single name, a middle dot for no name at all. The
@@ -37,7 +38,8 @@ export interface AvatarProps extends Omit<React.ComponentProps<'span'>, 'color' 
   tone?: 'tint' | 'ink'
   /** the disc's diameter in px: 24 in the presence pill, 18 on a canvas card, 28–32 in menus and rows */
   size?: number
-  /** an agent at work: the silver ring and the sweeping glaze */
+  /** an agent at work: the silver ring and the sweeping glaze (the Diazo
+   *  Agent animates its own face instead) */
   glaze?: boolean
   /** seconds — a second glazed face alternates with the first */
   glazeDelay?: number
@@ -49,7 +51,8 @@ export interface AvatarProps extends Omit<React.ComponentProps<'span'>, 'color' 
 
 /** Who is here, as one face: a disc on a 2px surface collar. A person is
  *  their initials on a tint of their colour, or the photo they uploaded; an
- *  agent is its brand mark on the surface. The same face everywhere — the
+ *  agent is its brand mark on the surface, and the built-in Diazo Agent its
+ *  ringed two-D face filling the disc. The same face everywhere — the
  *  canvas's presence pill, the account menu, a card's people row, the share
  *  list. */
 function Avatar({
@@ -71,6 +74,8 @@ function Avatar({
      a new photo gets its own try */
   const [failed, setFailed] = useState<string | null>(null)
   const photo = image && failed !== image && kind === 'user' && !children ? image : undefined
+  const diazoAgent = kind === 'agent' && !children && isDiazoAgent(name)
+  const sweep = glaze && !diazoAgent
   return (
     <span
       data-slot="avatar"
@@ -78,7 +83,8 @@ function Avatar({
         'relative z-[1] grid flex-none place-items-center overflow-hidden rounded-full bg-surface font-medium text-ink',
         labelClass(size),
         'shadow-[0_0_0_2px_var(--surface),0_0_0_3px_rgba(0,0,0,0.07)] dark:shadow-[0_0_0_2px_var(--surface),0_0_0_3px_rgba(255,255,255,0.12)]',
-        glaze && 'glaze-sweep z-[2] shadow-[0_0_0_2px_var(--surface),0_0_0_3px_var(--glaze-ring)]',
+        glaze && 'z-[2] shadow-[0_0_0_2px_var(--surface),0_0_0_3px_var(--glaze-ring)]',
+        sweep && 'glaze-sweep',
         tone === 'ink' && 'bg-ink text-paper shadow-none dark:shadow-none',
         /* a gentle overlap: the collar still reads as a row, both initials stay legible */
         stacked && (size <= 20 ? '-ml-[3px] first:ml-0' : '-ml-1 first:ml-0'),
@@ -93,13 +99,15 @@ function Avatar({
         ...(kind === 'user' && tone === 'tint' && !photo
           ? { background: `color-mix(in srgb, ${color} 22%, var(--surface))` }
           : {}),
-        ...(glaze ? ({ '--glaze-delay': `${glazeDelay}s` } as CSSProperties) : {}),
+        ...(sweep ? ({ '--glaze-delay': `${glazeDelay}s` } as CSSProperties) : {}),
         ...style,
       }}
       {...props}
     >
       {photo ? (
         <img src={photo} alt="" draggable={false} className="size-full object-cover" onError={() => setFailed(photo)} />
+      ) : diazoAgent ? (
+        <DiazoAgentMark size="fill" working={glaze} className="block" />
       ) : (
         (children ?? (kind === 'agent' ? <AgentIcon name={name} size={Math.round(size * 0.58)} /> : initials(name)))
       )}

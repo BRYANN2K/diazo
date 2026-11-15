@@ -98,7 +98,7 @@ let anthropic: Anthropic | null = null
 function anthropicTier(model: string = ANTHROPIC_MODEL): AgentModel | null {
   if (!env.ANTHROPIC_API_KEY) {
     warnOnce(
-      '[doop-agent] ANTHROPIC_API_KEY not set — the free Doop Agent tier is off. Users who connect a model account of their own still get the agent; everyone else sees queued cards and @mentions go unpicked. See docs/doop-reference.md → "The Doop Agent".',
+      '[doop-agent] ANTHROPIC_API_KEY not set — the free Diazo Agent tier is off. Users who connect a model account of their own still get the agent; everyone else sees queued cards and @mentions go unpicked. See docs/doop-reference.md → "The Diazo Agent".',
     )
     return null
   }
@@ -106,7 +106,7 @@ function anthropicTier(model: string = ANTHROPIC_MODEL): AgentModel | null {
   const client = anthropic
   return {
     provider: 'anthropic',
-    label: `Doop (${model})`,
+    label: `Diazo (${model})`,
     run: (req) => runAnthropicTurn(client, model, req),
   }
 }
@@ -165,14 +165,14 @@ function azureTier(): AgentModel | null {
   const apiKey = env.AZURE_OPENAI_API_KEY
   if (!endpoint || !deployment || !apiKey) {
     warnOnce(
-      '[doop-agent] DOOP_AGENT_PROVIDER=azure needs AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT and AZURE_OPENAI_API_KEY — the free Doop Agent tier is off until all three are set.',
+      '[doop-agent] DOOP_AGENT_PROVIDER=azure needs AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT and AZURE_OPENAI_API_KEY — the free Diazo Agent tier is off until all three are set.',
     )
     return null
   }
   const config = { endpoint, deployment, apiKey }
   return {
     provider: 'azure',
-    label: `Doop (${deployment})`,
+    label: `Diazo (${deployment})`,
     async run(req) {
       try {
         return await runAzureTurn(config, {

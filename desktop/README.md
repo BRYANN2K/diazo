@@ -1,4 +1,4 @@
-# doop desktop
+# Diazo desktop
 
 A thin [Tauri](https://tauri.app) shell around the hosted app. It loads
 `https://doop.design` in a native window — there is no bundled frontend, so
@@ -15,8 +15,9 @@ native dialog (the server gets the app's IPC, Claude Code included), saves it
 as `server.json` in the app's data directory and restarts onto it
 (`src-tauri/src/server.rs`). The server gets `capabilities/default.json` for
 its own origin at runtime. If a chosen server does not answer at launch, a
-native dialog offers Try Again or Use doop.design (on every platform), and on
-macOS the app menu has "Use doop.design…" while one is chosen. Shells advertise this with
+native dialog offers Try Again or "Use doop.design (original doop)" (on every platform), and on
+macOS the app menu has "Use doop.design (original doop)…" while one is chosen. Diazo has no
+public server of its own, so upstream doop.design stays the default and the way back. Shells advertise this with
 `__DOOP_SERVER_CHOOSE__`. Debug builds keep their pick in `server-dev.json`.
 
 You can also build a shell that opens your instance by default, without
@@ -50,10 +51,10 @@ in the `init` message).
 Official release builds update themselves through `tauri-plugin-updater`
 (`src-tauri/src/updates.rs`). Fifteen seconds after launch and then once a day
 the shell reads
-`https://github.com/BRYANN2K/redoop/releases/download/desktop-updates/latest.json`, downloads a newer
+`https://github.com/BRYANN2K/diazo/releases/download/desktop-updates/latest.json`, downloads a newer
 version in the background and asks to restart into it. **Later** keeps the
 download: macOS installs it when the app quits, Windows and Linux ask again at
-the next check. On macOS, **doop → Check for Updates…** runs the same check on demand
+the next check. On macOS, **Diazo → Check for Updates…** runs the same check on demand
 and also reports "up to date" and failures; Windows and Linux have no menu bar and rely
 on the scheduled checks. Debug builds and custom `DOOP_APP_URL` builds never
 update (replacing a self-hosted shell with the official one would change its
@@ -64,19 +65,19 @@ The feed and its packages are produced by `desktop-release.yml`:
 - Both builds pass `scripts/updater-config.sh`'s override, which turns on
   `createUpdaterArtifacts` when the `TAURI_SIGNING_PRIVATE_KEY` /
   `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets are set: macOS adds a signed
-  `doop.app.tar.gz`, Windows signs the NSIS installer itself (`.exe.sig`) and
+  `Diazo.app.tar.gz`, Windows signs the NSIS installer itself (`.exe.sig`) and
   Linux signs the AppImage, .deb and .rpm (`.sig` next to each). An installed
   Linux app updates in the format it was installed from: an AppImage rewrites
   itself, a .deb or .rpm reinstalls through `pkexec`. A
   `desktop-v*` tag fails without the key; other builds skip the packages.
-- The release job renames the macOS package to `doop_X.Y.Z_universal.app.tar.gz`,
+- The release job renames the macOS package to `Diazo_X.Y.Z_universal.app.tar.gz`,
   writes `latest.json` (the platform entries point at the tag's assets),
   attaches everything to the release and then copies `latest.json` onto the
   fixed `desktop-updates` prerelease (never mark it latest, never delete it), which
   `plugins.updater.endpoints` names. It also attaches `SHA256SUMS`, which the Mac installer checks.
 
 The key's public half is `plugins.updater.pubkey` in `tauri.conf.json`; the
-plugin refuses any package that does not verify against it. redoop's key
+plugin refuses any package that does not verify against it. Diazo's key
 (minisign id `B1375F7E88B8FC72`) lives only in the repo's
 `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` secrets. Losing it means no installed app
 can be updated again without a reinstall through the curl script below. Shells
@@ -86,7 +87,7 @@ reinstall once.
 ### Install on a Mac
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BRYANN2K/redoop/main/scripts/install-desktop.sh | sh
+curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install-desktop.sh | sh
 ```
 
 `scripts/install-desktop.sh` installs the universal app of the latest
@@ -95,8 +96,8 @@ curl -fsSL https://raw.githubusercontent.com/BRYANN2K/redoop/main/scripts/instal
 release's `SHA256SUMS` (and the updater signature when `minisign` is
 installed). The app has no Apple signature (ad hoc only): a file curl downloads
 carries no quarantine flag, so Gatekeeper does not block it, and the script
-clears the flag anyway. It quits a running doop first and reopens it after.
-`--uninstall` removes the app; `~/Library/Application Support/design.doop.desktop`
+clears the flag anyway. It quits a running Diazo first and reopens it after.
+`--uninstall` removes the app; `~/Library/Application Support/dev.bryann2k.diazo`
 (sign-in, `server.json`, the Chromium profile) is kept by both.
 
 ### Cut a release
@@ -356,13 +357,29 @@ both architectures built unsigned, merged with `@electron/universal`
 (`scripts/universal-app.mjs`), then signed with the CEF entitlements,
 notarized and packed (`brew install create-dmg` to run it locally).
 
+### From doop to Diazo (0.15)
+
+Up to 0.14 this shell was `doop` (`design.doop.desktop`); from 0.15 it is
+`Diazo` (`dev.bryann2k.diazo`), so its data folders moved. First thing in
+`main()`, before the CEF runtime opens its profile,
+`src/identity_migration.rs` copies the old app data and local data folders
+(`dirs::data_dir()` / `dirs::data_local_dir()` joined with the identifier,
+as Tauri's path resolver has them) into the new ones while those are missing
+or empty: `server.json`, `cli.json`, the `cef/` profile with its
+`webkit-migrated` marker (so the WebKit migration below does not run again)
+and, on Windows, WebView2's `EBWebView`. Chromium's caches, lock files and
+symlinks are left out. It copies into a staging folder renamed into place,
+and never changes or deletes the old folder, which an official doop app keeps
+using. The executable stays `doop-desktop` and the `doop://` scheme stays, so
+existing links and the updater's relaunch keep working.
+
 ### Replacing the WebKit app
 
-The Chromium app is `doop` (`design.doop.desktop`) with the executable
-`doop-desktop`, exactly as the WebKit app was: the updater swaps the bundle in
+The Chromium app is `Diazo` (`dev.bryann2k.diazo`) with the executable
+`doop-desktop`, exactly as the WebKit app is: the updater swaps the bundle in
 place and relaunches it by the old executable's path, and macOS keeps the
 app's permissions and keychain items. Chromium keeps its profile in
-`~/Library/Application Support/design.doop.desktop/cef` (debug builds use
+`~/Library/Application Support/dev.bryann2k.diazo/cef` (debug builds use
 `cef-dev`, since they encrypt cookies with a mock keychain).
 
 On its first launch the app opens hidden on the app origin's `/favicon.ico`
@@ -382,7 +399,7 @@ without migrating and leaves the next launch to try again.
 To test it on a machine with the WebKit app installed: quit the WebKit app
 (both share the bundle id, so a running one takes the launch over), build
 the Chromium app against the same server, and launch it. Delete
-`~/Library/Application Support/design.doop.desktop/cef` (`cef-dev` for a
+`~/Library/Application Support/dev.bryann2k.diazo/cef` (`cef-dev` for a
 debug build) to run the migration again.
 
 `DOOP_CEF_DEBUG_PORT=9333 bun run dev:chromium` opens Chrome's remote

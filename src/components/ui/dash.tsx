@@ -53,7 +53,7 @@ function DashSidebar({
   )
 }
 
-/** The rail's top row: the Disc-D as the way home, and room after it for the
+/** The rail's top row: the Diazo mark as the way home, and room after it for the
  *  rail's own controls (search, hide). */
 function DashSidebarBrand({
   onHome = () => navigate('/'),
@@ -73,7 +73,7 @@ function DashSidebarBrand({
         className="size-[26px] rounded-row hover:bg-transparent"
         onClick={onHome}
       >
-        <Logo className="size-[26px] rounded-row" />
+        <Logo className="size-[24px]" />
       </IconButton>
       {children}
     </div>

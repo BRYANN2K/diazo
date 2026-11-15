@@ -5,14 +5,14 @@
  * A role IS an agent identity: `name` is what shows up in presence, in the
  * activity feed and in @mentions, and colorFor(name) gives it its colour, so
  * two roles never look like the same worker on the canvas. `color` is the
- * role's crew colour, used only to tint its Doop mark.
+ * role's crew colour, used only to tint its Diazo mark.
  */
 
 export interface AgentRole {
   id: string
   /** the identity this agent works under — presence, tasks, @mentions */
   name: string
-  /** the crew colour from doop.design's team section — tints the role's mark */
+  /** the crew colour — fills the role's badge (the Diazo role wears the agent orange) */
   color: string
   /** one line for the picker */
   blurb: string
@@ -23,13 +23,23 @@ export interface AgentRole {
   reviewer?: boolean
   /** extra @mention spellings beyond the id and the squashed name */
   aliases?: string[]
+  /** the @mention the product suggests for this role (the @-menu, the
+   *  composer's prefill, the guide); the id when unset */
+  handle?: string
+  /** names this role worked under before a rename. Rows stored under one
+   *  (a card's agent, a comment's target, a claim) still belong to the role. */
+  legacyNames?: string[]
 }
 
 export const AGENT_ROLES: AgentRole[] = [
   {
+    /* the id stays `doop`: it is stored on every card's pipeline, and `@doop`
+       keeps addressing the role as a hidden spelling after the rename */
     id: 'doop',
-    name: 'Doop',
-    color: '#E8432E',
+    name: 'Diazo',
+    handle: 'diazo',
+    legacyNames: ['Doop'],
+    color: '#E8650A',
     blurb: 'Generalist designer — makes the thing',
     brief:
       'You are the generalist designer. You originate work: new frames, layouts, full redesigns, and any change that does not belong to a specialist. Build the deliverable the card asks for, complete and presentable.',
@@ -89,14 +99,16 @@ export const DEFAULT_ROLE_ID = 'doop'
 
 /** Ready-made pipelines for the board's compose box. */
 export const PIPELINE_PRESETS: { id: string; label: string; roles: string[] }[] = [
-  { id: 'solo', label: 'Just Doop', roles: ['doop'] },
+  { id: 'solo', label: 'Just Diazo', roles: ['doop'] },
   { id: 'ship', label: 'Design → polish', roles: ['doop', 'polish'] },
   { id: 'full', label: 'Full pipeline', roles: ['doop', 'copy', 'brand', 'a11y', 'polish'] },
   { id: 'audit', label: 'Review only', roles: ['ux', 'brand', 'a11y'] },
 ]
 
 const byId = new Map(AGENT_ROLES.map((r) => [r.id, r]))
-const byName = new Map(AGENT_ROLES.map((r) => [r.name.toLowerCase(), r]))
+const byName = new Map(
+  AGENT_ROLES.flatMap((r) => [r.name, ...(r.legacyNames ?? [])].map((name) => [name.toLowerCase(), r] as const)),
+)
 
 export function roleById(id: string | undefined): AgentRole | undefined {
   return id ? byId.get(id) : undefined
@@ -105,6 +117,20 @@ export function roleById(id: string | undefined): AgentRole | undefined {
 /** The role an agent name belongs to — undefined for outside agents (MCP). */
 export function roleByAgentName(name: string | undefined): AgentRole | undefined {
   return name ? byName.get(name.toLowerCase()) : undefined
+}
+
+/** A stored agent name as the role is called now: a resident role's former
+ *  name (`Doop`) becomes its current one, anything else is returned as is. */
+export function canonicalAgentName(name: string): string
+export function canonicalAgentName(name: string | undefined): string | undefined
+export function canonicalAgentName(name: string | undefined): string | undefined {
+  const role = roleByAgentName(name)
+  return role ? role.name : name
+}
+
+/** The @mention to suggest for a role: `@diazo`, `@ux`… */
+export function roleHandle(role: AgentRole): string {
+  return role.handle ?? role.id
 }
 
 export function roleName(id: string | undefined): string {
@@ -122,9 +148,13 @@ export function normalizePipeline(ids: unknown): string[] {
   return out.length > 0 ? out.slice(0, AGENT_ROLES.length) : [DEFAULT_ROLE_ID]
 }
 
-/** Every spelling that addresses a role in a comment: @doop, @UXLead, @ux… */
+/** Every spelling that addresses a role in a comment: @diazo, @doop, @UXLead, @ux… */
 export function mentionsFor(role: AgentRole): string[] {
-  return [role.id, role.name.replace(/\s+/g, ''), ...(role.aliases ?? [])].map((m) => m.toLowerCase())
+  return [
+    ...new Set(
+      [role.id, roleHandle(role), role.name.replace(/\s+/g, ''), ...(role.aliases ?? [])].map((m) => m.toLowerCase()),
+    ),
+  ]
 }
 
 /** Every role a piece of text @mentions, in order of first appearance and

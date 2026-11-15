@@ -97,7 +97,7 @@ export class LocalDrift {
     if (!device || !this.online(userId)) {
       return Promise.resolve({
         ok: false,
-        error: "the doop desktop app isn't online — open it to capture a local URL",
+        error: "the Diazo desktop app isn't online — open it to capture a local URL",
       })
     }
     const p: Pending = { id: randomUUID(), userId, ...request, createdAt: Date.now(), resolve: () => {} }

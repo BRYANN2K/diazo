@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ElementComment } from '../../shared/types'
 import { colorFor } from '../../shared/types'
-import { AGENT_ROLES, DEFAULT_ROLE_ID, mentionedRole, roleName } from '../../shared/agents'
+import { AGENT_ROLES, DEFAULT_ROLE_ID, mentionedRole, roleHandle, roleName } from '../../shared/agents'
 import { cn } from '@/lib/utils'
 import { canCommentOpenCanvas, canEditOpenCanvas, useStore } from '../lib/store'
 import { clientToWorld, dropComment, DRAG_THRESHOLD_PX } from '../lib/commentMove'
@@ -192,9 +192,11 @@ export function CommentComposer({
               size="pill"
               className="border-dashed px-2 text-[11px] font-semibold text-ink-soft hover:border-brand hover:bg-transparent hover:text-brand"
               title={`${role.name} — ${role.blurb}`}
-              onClick={() => setText((current) => (current ? current.replace(/\s*$/, ' ') : '') + `@${role.id} `)}
+              onClick={() =>
+                setText((current) => (current ? current.replace(/\s*$/, ' ') : '') + `@${roleHandle(role)} `)
+              }
             >
-              <RoleMark role={role} size={13} /> @{role.id}
+              <RoleMark role={role} size={13} /> @{roleHandle(role)}
             </Button>
           ))}
         </div>

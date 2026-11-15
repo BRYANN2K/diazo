@@ -186,6 +186,10 @@
   --warning-ink: #a8481a;
   /* the silver hairline an active agent's avatar wears in the presence pill */
   --glaze-ring: #c9c9cd;
+  /* Diazo's marks only (Logo.tsx), never the UI accent: the print's signal
+     blue and the Diazo Agent's orange */
+  --diazo-signal: #1f5fff;
+  --diazo-agent: #e8650a;
   --font-ui: 'Inter', 'Doop Keys', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   /* Display is the SAME sans as the UI — the chrome is quiet by design. The
      home greeting's Hanken Grotesk Light is the one other face (`font-hero`). */
@@ -452,6 +456,8 @@
   --warning: #ff9a66;
   --warning-ink: #ffb58c;
   --glaze-ring: #6b6b70;
+  --diazo-signal: #5b8cff;
+  --diazo-agent: #ff8f45;
   --sidebar: #181818;
   /* Dark surfaces cannot lift on shadow alone: each tier keeps a light-catch
      ring on top of a deeper ambient drop. */
@@ -840,34 +846,139 @@ body[data-panel-resizing] * {
   }
 }
 
+/* ---- the Diazo marks (src/components/Logo.tsx) ----
+   The reveal plays once (the home greeting): the original D draws its
+   outline, then the blue print lands on it from the top left and the gap it
+   knocks out of the outline follows. The working agent: a short arc chases
+   round the ring, the original D is redrawn over its faint self and the
+   print pulses as the trace closes. Reduced motion: no movement, a fade for
+   the reveal, the agent at rest. */
+.diazo-reveal .diazo-reveal-original {
+  stroke-dasharray: 1;
+  animation: diazo-draw 0.7s cubic-bezier(0.65, 0, 0.35, 1) both;
+}
+.diazo-reveal .diazo-reveal-print {
+  animation: diazo-print 0.75s cubic-bezier(0.22, 1, 0.36, 1) 0.65s both;
+}
+.diazo-reveal .diazo-reveal-gap {
+  animation: diazo-gap 0.45s cubic-bezier(0.22, 1, 0.36, 1) 0.65s both;
+}
+@keyframes diazo-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes diazo-gap {
+  from {
+    transform: translate(-7px, -6px);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes diazo-print {
+  0% {
+    transform: translate(-7px, -6px);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  60%,
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+.diazo-agent-working .diazo-agent-ring {
+  opacity: 0.28;
+}
+.diazo-agent-working .diazo-agent-original {
+  opacity: 0.25;
+}
+.diazo-agent-working .diazo-agent-chase {
+  stroke-dasharray: 30 108.2;
+  animation: diazo-chase 1.6s linear infinite;
+}
+.diazo-agent-working .diazo-agent-trace {
+  stroke-dasharray: 53.2;
+  animation: diazo-trace 2s cubic-bezier(0.65, 0, 0.35, 1) -1.3s infinite;
+}
+.diazo-agent-working .diazo-agent-print {
+  animation: diazo-pulse 2s ease-in-out -1.3s infinite;
+}
+@keyframes diazo-chase {
+  to {
+    stroke-dashoffset: -138.2;
+  }
+}
+@keyframes diazo-trace {
+  0% {
+    stroke-dashoffset: 53.2;
+    opacity: 1;
+  }
+  50%,
+  88% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+}
+@keyframes diazo-pulse {
+  0%,
+  40% {
+    opacity: 0.2;
+  }
+  68%,
+  88% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.2;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .diazo-reveal .diazo-reveal-original,
+  .diazo-reveal .diazo-reveal-print,
+  .diazo-reveal .diazo-reveal-gap {
+    animation: none;
+  }
+  .diazo-reveal {
+    animation: diazo-fade 0.12s linear both;
+  }
+  .diazo-agent-working .diazo-agent-chase,
+  .diazo-agent-working .diazo-agent-trace {
+    display: none;
+  }
+  .diazo-agent-working .diazo-agent-print {
+    animation: none;
+  }
+  .diazo-agent-working .diazo-agent-original {
+    opacity: 1;
+  }
+  .diazo-agent-working .diazo-agent-ring {
+    opacity: 0.6;
+  }
+}
+@keyframes diazo-fade {
+  from {
+    opacity: 0;
+  }
+}
+
 /* ---- the signed-in home ----
-   The hero's three motions. The Disc-D's dot hops (the loading mark, with a
-   rest between hops); the gradient wave behind the composer is a strip of
+   The hero's two motions. The gradient wave behind the composer is a strip of
    blurred bars laid out twice and slid by one copy, so the loop is seamless,
    while each bar swells on its own clock; the suggestion chip that is "on"
    wears a beam — blurred colour blobs pinned just outside its edge, hue
    cycling and drifting, over a plain white pill. Registered properties let
    the blob offsets and the hue tween like any other value. */
-@keyframes disc-hop {
-  0%,
-  37.5%,
-  100% {
-    transform: translateY(0) scale(1, 1);
-  }
-  11.25% {
-    transform: translateY(-34px) scale(0.92, 1.08);
-  }
-  18.75% {
-    transform: translateY(0) scale(1.15, 0.85);
-  }
-  24.4% {
-    transform: translateY(-10px) scale(0.98, 1.02);
-  }
-  30% {
-    transform: translateY(0) scale(1.05, 0.95);
-  }
-}
-
 @keyframes wave-flow {
   from {
     transform: translate3d(0, 0, 0);

@@ -20,7 +20,7 @@ const terminal = ['complete', 'failed', 'canceled']
 const active = ['pending', 'preparing', 'running']
 const workInFlight = new Set<string>()
 const RUN_TIMEOUT_MS = 60 * 60_000
-const SUSPENDED = 'The Doop account behind this Linear agent is suspended, so it cannot design.'
+const SUSPENDED = 'The Diazo account behind this Linear agent is suspended, so it cannot design.'
 
 export const sessionEvent = z.object({
   type: z.literal('AgentSessionEvent'),
@@ -167,12 +167,12 @@ async function dispatch(session: Session) {
   let committed = false
   try {
     if (await isBanned(session.userId)) throw new Error(SUSPENDED)
-    if (!session.issueId) throw new Error('Delegate an issue with a design brief to Doop.')
+    if (!session.issueId) throw new Error('Delegate an issue with a design brief to Diazo.')
     if (!(await pickModel(session.userId)))
-      throw new Error('Connect a model account in Doop Settings, then delegate the issue again.')
+      throw new Error('Connect a model account in Diazo Settings, then delegate the issue again.')
     gate = await consumeResidentTask(session.userId)
     if (!gate.ok)
-      throw new Error('Connect a model account in Doop Settings or restore your task allowance, then delegate again.')
+      throw new Error('Connect a model account in Diazo Settings or restore your task allowance, then delegate again.')
     const now = Date.now()
     const canvas: Canvas = {
       id: nanoid(10),
@@ -256,9 +256,9 @@ async function dispatch(session: Session) {
         error:
           error instanceof LinearError
             ? error.message
-            : error instanceof Error && /^(Connect|Delegate|The Doop account)/.test(error.message)
+            : error instanceof Error && /^(Connect|Delegate|The Diazo account)/.test(error.message)
               ? error.message
-              : 'Doop could not start the design. Check your model account and delegate again.',
+              : 'Diazo could not start the design. Check your model account and delegate again.',
         updatedAt: Date.now(),
       })
       .where(and(eq(linearSessions.id, session.id), eq(linearSessions.status, 'preparing')))
@@ -293,7 +293,7 @@ async function processSession(session: Session) {
       await activity(
         session,
         'thought',
-        'Doop received the design request. I’ll create a canvas and post the result here. Follow-up edits can be made in Doop.',
+        'Diazo received the design request. I’ll create a canvas and post the result here. Follow-up edits can be made in Diazo.',
       )
       await db.update(linearSessions).set({ acknowledged: true }).where(eq(linearSessions.id, session.id))
     }
@@ -311,7 +311,7 @@ async function processSession(session: Session) {
           'mutation DoopSessionLink($id: String!, $input: AgentSessionUpdateInput!) { agentSessionUpdate(id: $id, input: $input) { success } }',
           {
             id: session.id,
-            input: { externalUrls: [{ label: 'Open design in Doop', url: canvasUrl(session.canvasId) }] },
+            input: { externalUrls: [{ label: 'Open design in Diazo', url: canvasUrl(session.canvasId) }] },
           },
           z.object({ agentSessionUpdate: z.object({ success: z.literal(true) }) }),
         )
@@ -329,7 +329,7 @@ async function processSession(session: Session) {
         session = {
           ...session,
           status: success ? 'complete' : 'failed',
-          error: success ? null : 'The design did not finish. Open the canvas to inspect the work and retry in Doop.',
+          error: success ? null : 'The design did not finish. Open the canvas to inspect the work and retry in Diazo.',
         }
         if (!success && card && !card.failedAt && !card.endedAt) {
           actions.failCard(session.canvasId!, card.id, 'Linear design session timed out.')
@@ -345,12 +345,12 @@ async function processSession(session: Session) {
       }
     }
     if (terminal.includes(session.status) && !session.reported) {
-      const link = session.canvasId ? `[Open the design in Doop](${canvasUrl(session.canvasId)})` : ''
+      const link = session.canvasId ? `[Open the design in Diazo](${canvasUrl(session.canvasId)})` : ''
       await activity(
         session,
         session.status === 'complete' ? 'response' : 'error',
         session.status === 'complete'
-          ? `The design is ready for review. ${link}\n\nThe canvas belongs to the Doop installer; they can invite collaborators or enable link sharing.`
+          ? `The design is ready for review. ${link}\n\nThe canvas belongs to the Diazo installer; they can invite collaborators or enable link sharing.`
           : `${session.error || 'The design was stopped.'} ${link}`,
       )
       await db.update(linearSessions).set({ reported: true }).where(eq(linearSessions.id, session.id))
@@ -418,7 +418,7 @@ export async function tickLinear() {
     .update(linearSessions)
     .set({
       status: 'failed',
-      error: 'Doop restarted before the design was queued. Delegate again.',
+      error: 'Diazo restarted before the design was queued. Delegate again.',
       updatedAt: Date.now(),
     })
     .where(and(eq(linearSessions.status, 'preparing'), lt(linearSessions.updatedAt, Date.now() - 120_000)))

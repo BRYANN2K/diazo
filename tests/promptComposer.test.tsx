@@ -56,7 +56,7 @@ async function render() {
 }
 
 function composer(): HTMLTextAreaElement {
-  const ta = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask the Doop Agent"]')
+  const ta = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask the Diazo Agent"]')
   if (!ta) throw new Error('composer not rendered')
   return ta
 }
@@ -154,7 +154,7 @@ describe('the Agents tab composer', () => {
   it('is not in the other tabs', async () => {
     useStore.setState({ panelTab: 'activity' })
     await render()
-    expect(container.querySelector('textarea[aria-label="Ask the Doop Agent"]')).toBeNull()
+    expect(container.querySelector('textarea[aria-label="Ask the Diazo Agent"]')).toBeNull()
   })
 
   it('keeps the draft across a tab switch, per canvas', async () => {

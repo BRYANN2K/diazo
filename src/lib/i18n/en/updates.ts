@@ -25,7 +25,7 @@ export const updates = {
   cardMore: { one: 'and {count} more', other: 'and {count} more' },
   cardHowTo: 'To update',
   cardDismiss: 'Dismiss until the next update',
-  hintLocal: 'Run it in Terminal. Your data and secrets in ~/.doop are kept.',
+  hintLocal: 'Run it in Terminal. Your data and secrets in ~/.diazo (or ~/.doop) are kept.',
   hintDocker:
     'In the folder of your compose file. Built from this repository instead? git pull && docker compose up -d --build',
   hintKubernetes: 'The deployment pulls the :main image again (imagePullPolicy Always).',

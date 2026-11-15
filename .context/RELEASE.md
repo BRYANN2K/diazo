@@ -35,13 +35,15 @@ and run the Bun-built archive under Node, including its nested runtime dependenc
 ## Local install on a Mac (Apple `container`, this fork)
 
 `scripts/install-local.sh` (POSIX sh, served from `raw.githubusercontent.com` on
-`main` of `BRYANN2K/redoop` as `curl -fsSL … | sh`) runs one container of
-`ghcr.io/bryann2k/redoop:main` with Apple's `container` CLI on `127.0.0.1:4400`.
-No `DATABASE_URL`: PGlite and uploads live in `~/.doop/data`, mounted at `/app/data`;
+`main` of `BRYANN2K/diazo` as `curl -fsSL … | sh`) runs one container, `diazo`, of
+`ghcr.io/bryann2k/diazo:main` with Apple's `container` CLI on `127.0.0.1:4400`.
+No `DATABASE_URL`: PGlite and uploads live in `~/.diazo/data`, mounted at `/app/data`;
 `BETTER_AUTH_SECRET` and `SECRETS_ENCRYPTION_KEYS` are generated on the Mac into
-`~/.doop/doop.env` (mode 600). Re-running it updates the image and recreates the container,
-keeping both. It copies itself to `~/.doop/bin/doop-local` (start, stop, restart, status, logs,
-update, uninstall). `.github/workflows/docker.yml` builds the image for `linux/amd64` and
+`~/.diazo/diazo.env` (mode 600). An install from before the rename keeps `~/.doop` and its
+`doop.env` where they are (nothing is moved; `DOOP_HOME` overrides), and its old `doop` container
+is replaced only when it runs this fork's former image. Re-running it updates the image and
+recreates the container, keeping both. It copies itself to `<home>/bin/diazo-local` (start, stop,
+restart, status, logs, update, uninstall), with `doop-local` as a link to it. `.github/workflows/docker.yml` builds the image for `linux/amd64` and
 `linux/arm64` on native runners and merges the digests; without an arm64 manifest the script
 runs the amd64 image under Rosetta, and `--build` builds it locally. Tests:
 `installLocal.test.ts` (stub `container`, `uname`, `curl`; no container is started).
@@ -55,7 +57,7 @@ About name the commit. A compose build gets the commit only with
 running instance announces a newer image to its admins once the `docker.yml` run of a newer
 `main` commit has succeeded (`server/updateCheck.ts`), never from a push alone. Each install
 declares how it updates through `DOOP_INSTALL`: `local` (`install-local.sh` →
-`doop-local update`), `docker` (compose → `docker compose pull && docker compose up -d`),
+`diazo-local update`), `docker` (compose → `docker compose pull && docker compose up -d`),
 `kubernetes` (`deploy/k3s/doop.yaml` → `kubectl -n doop rollout restart deploy/doop`, which
 re-pulls `:main` under `imagePullPolicy: Always`). The desktop shell's own updates come from
 this fork's releases (next section).
@@ -67,7 +69,7 @@ in `.github/actions/setup-desktop`:
 
 - Push a tag matching `desktop-v*` -> `dmg-macos` builds a universal (Apple Silicon + Intel) DMG
   with `bunx tauri build --target universal-apple-darwin --bundles app,dmg`, `nsis-windows` builds
-  `doop_<version>_x64-setup.exe` with `bunx tauri build --bundles nsis`, `linux` builds the
+  `Diazo_<version>_x64-setup.exe` with `bunx tauri build --bundles nsis`, `linux` builds the
   x64 AppImage, .deb and .rpm on `ubuntu-22.04` (the oldest runner, for a low glibc floor) with
   `bunx tauri build --bundles deb,rpm,appimage`, and a final `release` job (`needs` all three)
   attaches them to one GitHub Release - so a tag is never published with an installer missing.
@@ -81,7 +83,7 @@ in `.github/actions/setup-desktop`:
   emits signed updater packages, and the `release` job writes `latest.json` and `SHA256SUMS`,
   attaches them and copies `latest.json` onto the fixed `desktop-updates` prerelease of the repo it
   runs in, which `plugins.updater.endpoints` names directly (this fork:
-  `https://github.com/BRYANN2K/redoop/releases/download/desktop-updates/latest.json`; a fixed
+  `https://github.com/BRYANN2K/diazo/releases/download/desktop-updates/latest.json`; a fixed
   prerelease rather than `releases/latest`, which any other release would take over). A tag fails
   without the key, or when its version is not the one in both `tauri.conf.json`
   (`desktop/scripts/updater-config.sh`). Installed official
@@ -93,17 +95,20 @@ in `.github/actions/setup-desktop`:
   the claim, so an older web build still gets the dialog). Its ✕ (Not now) keeps the download for the
   next check and, on macOS, installs it on quit. This fork's key pair (minisign id
   `B1375F7E88B8FC72`) exists only in the `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` secrets of
-  `BRYANN2K/redoop`; its public half is `plugins.updater.pubkey` (and `PUBKEY` in
+  `BRYANN2K/diazo` (created as `BRYANN2K/redoop`); its public half is `plugins.updater.pubkey` (and `PUBKEY` in
   `scripts/install-desktop.sh`). Shells installed from doop.design trust upstream's key and feed:
   they move over with one run of the curl installer below.
 - Mac install (`scripts/install-desktop.sh`, POSIX sh, piped from `raw.githubusercontent.com` on
-  `main` into `sh`, the README's Desktop app line): reads the version from the feed (or `--version`), downloads `doop_<v>_universal.app.tar.gz` from
+  `main` into `sh`, the README's Desktop app line): reads the version from the feed (or `--version`), downloads `Diazo_<v>_universal.app.tar.gz` from
   `desktop-v<v>`, checks it against `SHA256SUMS` (and its `.sig` with `minisign` when installed),
-  quits a running app (`osascript`, by bundle id), swaps `doop.app` in `/Applications` or
+  quits a running app (`osascript`, by bundle id `dev.bryann2k.diazo`), swaps `Diazo.app` in `/Applications` or
   `~/Applications` through a staging folder on the same volume, clears `com.apple.quarantine` and
   relaunches the app if it was running. A file curl downloads has no quarantine flag, so the
   ad-hoc-signed app opens without Apple signing. Same version and our key in the binary: nothing
-  to do (`--force` reinstalls); `--uninstall` removes the app and keeps Application Support.
+  to do (`--force` reinstalls); `--uninstall` removes the app and keeps Application Support. A
+  `doop.app` from this fork's earlier releases (its binary carries our updater key) is removed once
+  `Diazo.app` is in place, never asked to quit (its bundle id is the official app's too); the
+  official doop app is never touched. Releases before 0.15.0 have no Diazo package.
   Tests: `installDesktop.test.ts` (stub `curl`, `uname`, `pgrep`, `osascript`, `xattr`, `open`,
   `minisign`).
 - `workflow_dispatch` or a PR touching the workflow file itself -> same builds, uploaded as
@@ -146,9 +151,11 @@ in `.github/actions/setup-desktop`:
 - Desktop app version is tracked separately from the root `package.json` and bumped by
   release-please (see above); after the release PR merges, tag as `desktop-vX.Y.Z`.
 - The macOS app is the Chromium (CEF) build in `desktop/src-tauri-chromium`; Windows and Linux
-  stay on the WebKit build. It ships as `doop` / `design.doop.desktop` with the executable
-  `doop-desktop`, exactly as the WebKit app did, so the updater swaps the bundle in place and
-  relaunches it by its old path. The Tauri 3 CLI bundles CEF for one architecture at a time
+  stay on the WebKit build. It ships as `Diazo` / `dev.bryann2k.diazo` (from 0.15.0; `doop` /
+  `design.doop.desktop` before) with the executable `doop-desktop`, as the WebKit app did, so the
+  updater swaps the bundle in place and relaunches it by its old path. On its first launch under
+  the new identifier `src/identity_migration.rs` copies `server.json`, `cli.json` and the CEF
+  profile from the old identifier's folders when the new ones are empty, never deleting them. The Tauri 3 CLI bundles CEF for one architecture at a time
   (its universal target ships one architecture's framework), so `dmg-macos` runs
   `desktop/scripts/macos-universal.sh` as Electron apps do: an unsigned app per architecture
   (`bun run build:chromium --target … --no-sign`, ninja from brew, CEF cached under
@@ -156,8 +163,8 @@ in `.github/actions/setup-desktop`:
   signed inside out (framework libraries, framework, five helpers, app) with the CEF entitlements
   (allow-jit, allow-unsigned-executable-memory, disable-library-validation) under the hardened
   runtime, notarized, packed with `create-dmg`, and tarred and signed with `tauri signer` for the
-  updater. The outputs keep the WebKit build's names (`doop_<version>_universal.dmg`,
-  `doop.app.tar.gz`), so the release job and the download link are unchanged; the app is about
+  updater. The outputs are `Diazo_<version>_universal.dmg` and `Diazo.app.tar.gz`, which the
+  release job renames `Diazo_<version>_universal.app.tar.gz`; the app is about
   600 MB, Chromium for both architectures. The first Chromium launch brings the
   WebKit app's cookies and localStorage over (`src/webkit_migration.rs`), so the switch keeps
   people signed in. Each Chromium security release needs a CEF bump (`tauri-runtime-cef`) and a
@@ -167,7 +174,7 @@ in `.github/actions/setup-desktop`:
 
 ## Claude Desktop extension
 
-`bun run build:claude-extension` packages `claude-extension/manifest.json`, the Doop logo,
+`bun run build:claude-extension` packages `claude-extension/manifest.json`, the Diazo app icon,
 license and pinned `mcp-remote` runtime into `public/claude-extension/doop.mcpb`. Both `dev`
 and `build` run it automatically; Vite copies the download into the production `dist/`.
 Connect AI → Claude offers a prefilled **Add to Claude** link for public HTTPS servers.
@@ -182,14 +189,14 @@ from a code bound to the signed-in account; `/api/mcp-consent/:code` handles app
 denial through better-auth. This also supports other MCP clients that request consent.
 
 `tests/claudeExtension.test.ts` extracts the actual archive outside the repository and checks
-tools, resources, OAuth and reconnecting against a fresh Doop server. Before releasing,
+tools, resources, OAuth and reconnecting against a fresh Diazo server. Before releasing,
 also install it in Claude Desktop on macOS and Windows. Installation, build and release
 notes live in [`claude-extension/README.md`](../claude-extension/README.md). No directory
 submission or publication is performed by the build.
 
 ## Codex desktop setup
 
-Connect AI → Codex can register Doop directly in the shared Codex config through
+Connect AI → Codex can register Diazo directly in the shared Codex config through
 `codex_add_mcp`. Browser sessions hand off to the installed app with a `doop://connect/codex`
 link; the app opens a review screen and writes only after the user clicks Add to Codex.
 The native capability marker gates older shells. Release the updated desktop binary
@@ -203,7 +210,7 @@ See [`desktop/README.md`](../desktop/README.md#add-to-codex) for release smoke c
 `cursor-plugin/` is a standalone Cursor plugin directory; `.cursor-plugin/marketplace.json` at
 repo root indexes it. It contains the hosted MCP connection, the scoped `doop-design` skill,
 metadata, logo, and license. It needs no build artifact or release download. The app's
-**Connect AI → Cursor → Add to Cursor** uses Cursor's MCP install link for the current Doop
+**Connect AI → Cursor → Add to Cursor** uses Cursor's MCP install link for the current Diazo
 instance and is available independently of marketplace publication.
 
 After local Cursor smoke testing, sync the plugin commit to public `kgoedecke/doop` through the

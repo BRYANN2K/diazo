@@ -125,7 +125,7 @@ describe('repo_list and repo_search', () => {
 
 describe('device failures', () => {
   it('surfaces the bridge error as an ordinary tool error', async () => {
-    vi.mocked(repoToolCall).mockResolvedValue({ ok: false, error: "the doop desktop app holding it isn't online" })
+    vi.mocked(repoToolCall).mockResolvedValue({ ok: false, error: "the Diazo desktop app holding it isn't online" })
     const result = await execTool(call('repo_list', {}), canvasId, actor(), run('u1'))
     expect(result.is_error).toBe(true)
     expect(String(result.content)).toContain("isn't online")

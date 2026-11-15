@@ -60,7 +60,7 @@ export const Install: Story = {
       />
       <InstallBlock
         action={<Button variant="solid">Added to Codex</Button>}
-        status="Doop is configured. Open a new Codex chat, then sign in to Doop when prompted."
+        status="Diazo is configured. Open a new Codex chat, then sign in to Diazo when prompted."
         manual={<CodeBlock text="codex mcp add doop --url https://doop.design/mcp" />}
       />
       <InstallBlock

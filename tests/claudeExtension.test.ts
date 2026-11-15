@@ -55,7 +55,7 @@ it('ships an installable manifest and all runtime files without repository crede
   expect(archive.file(manifest.icon)).not.toBeNull()
   expect(archive.file('LICENSE')).not.toBeNull()
   expect(manifest.server.mcp_config.command).toBe('node')
-  expect(manifest.user_config.server_url.default).toBe('https://doop.design/mcp')
+  expect(manifest.user_config.server_url.default).toBe('http://localhost:4400/mcp')
   expect(Object.keys(archive.files).some((name) => /(^|\/)\.env($|\.)|\.mcp-auth/.test(name))).toBe(false)
   // open uses a sibling script on Linux; bundling JS alone silently loses it.
   expect(archive.file('node_modules/open/xdg-open')).not.toBeNull()
@@ -128,7 +128,7 @@ it('completes OAuth with Doop and reuses the sign-in after restarting the extens
     const approval = new URL(response.headers.get('location')!, server.base)
     expect(approval.pathname).toBe('/oauth/consent')
     const endpoint = `/api/mcp-consent/${approval.searchParams.get('consent_code')}`
-    expect(await (await owner.get(endpoint)).json()).toEqual({ name: 'Doop for Claude Desktop' })
+    expect(await (await owner.get(endpoint)).json()).toEqual({ name: 'Diazo for Claude Desktop' })
     expect((await stranger.get(endpoint)).status).toBe(404)
     expect((await stranger.post(endpoint, { accept: true })).status).toBe(404)
     const accepted = await owner.post(endpoint, { accept: true })

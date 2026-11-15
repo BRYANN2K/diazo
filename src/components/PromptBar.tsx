@@ -8,7 +8,7 @@ import { Button } from './ui/button'
 import { Textarea } from './ui/textarea'
 import { Note } from './ui/note'
 import { Tooltip } from './ui/tooltip'
-import { DoopMark } from './Logo'
+import { DiazoMark } from './Logo'
 import { ArrowUpIcon, AttachmentIcon, FrameIcon, XIcon } from './ui/icons'
 import { ModelPicker } from './ModelPicker'
 import { DuelDialog } from './DuelDialog'
@@ -499,7 +499,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
             </Note>
           ) : (
             <Note size="sm" className="text-[11px] text-ink-soft">
-              <DoopMark size={11} /> {t('panels.promptSent')}
+              <DiazoMark size={11} /> {t('panels.promptSent')}
             </Note>
           )}
         </div>

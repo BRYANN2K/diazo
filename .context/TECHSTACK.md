@@ -37,7 +37,7 @@
   clipboard round trips, history and script-created or script-removed elements.
 - Radix UI primitives (`@radix-ui/react-*`, ^1.x-2.x) + shadcn 4.19.0 - accessible UI primitives
   generated into `src/components/ui`.
-- `@anthropic-ai/sdk` 0.115.0 and `@modelcontextprotocol/sdk` 1.12.0 - power the built-in Doop
+- `@anthropic-ai/sdk` 0.115.0 and `@modelcontextprotocol/sdk` 1.12.0 - power the built-in Diazo
   Agent and the MCP server that lets external agents (e.g. Claude Code) design on a canvas.
 - Design inspiration (`server/inspiration.ts`, `search_inspiration` in MCP and the resident agent):
   One Page Love's API (`ONEPAGELOVE_API_KEY`; unset, the tool tells agents to brief without an
@@ -140,7 +140,7 @@
   final check. OpenRouter, DeepSeek, Kimi and Kimi Code stay on their curated rosters (the
   run-time vision check knows only the roster's flags).
 - DeepSeek and Kimi keys (`deepseek-key`, `kimi-key`) and the Kimi Code plan (`kimi-code`, a
-  Kimi membership's key, sent with a `Doop/<version>` User-Agent as Kimi Code's terms require)
+  Kimi membership's key, sent with a `Diazo/<version>` User-Agent as Kimi Code's terms require)
   run on the Chat Completions transport (`server/chatCompletionsAgent.ts`) against fixed URLs
   (`DEEPSEEK_CHAT_URL`, `KIMI_CHAT_URL`, `KIMI_CODE_CHAT_URL`, an operator's override only). Both refuse a tool-calling conversation that drops an earlier turn's
   `reasoning_content`, so the transport keeps it as a `thinking` block in the run's history and
@@ -148,7 +148,7 @@
   `chatCompletionsAgent.test.ts`, `rosterRouting.test.ts`, `providerKeyAccounts.test.ts`.
 - Custom providers (`shared/customProvider.ts`, `server/customProviders.ts`,
   `server/customProviderFetch.ts`, `src/components/CustomProviderForm.tsx`): any OpenAI Chat
-  Completions or Anthropic Messages endpoint, added in Settings → Doop Agent by name, API type, base
+  Completions or Anthropic Messages endpoint, added in Settings → Diazo Agent by name, API type, base
   URL, an optional key and the models it offers (each with "Sees images" and an optional max output
   tokens, which caps the turn's budget). One is a `model_accounts` row of kind `custom:<id>` (id
   minted by the server, at most 10 per person) with its description in `custom` (jsonb) and extra
@@ -192,7 +192,7 @@
 - Connections and the default (`server/agentDefaults.ts`, `server/modelAccounts.ts`): a person can
   connect every provider at once, one `model_accounts` row per user and kind (composite key and an
   `enabled` flag, migration 0046), plus the Claude Plan on their desktop (`local_agent_preferences`,
-  whose `enabled` is the Plan's on/off). Settings → Doop Agent (`ConnectionTable.tsx`) is grouped
+  whose `enabled` is the Plan's on/off). Settings → Diazo Agent (`ConnectionTable.tsx`) is grouped
   lists: "Connected" (provider tile, name with a Default or Off badge, a short line, then the model
   dropdown with the effort as a `StepSlider`, the on/off switch and a "…" menu: Make default,
   Replace key (a modal) or Claude Code settings (a modal: which CLI, a pinned model), Disconnect),
@@ -1097,7 +1097,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `shared/updateCheck.ts`): the image carries `DOOP_BUILD_SHA` / `DOOP_BUILD_DATE` (Dockerfile
   build args from `docker.yml`; a checkout reads `git rev-parse HEAD`), served publicly at
   `GET /api/version` and shown in Settings → General → About (`AboutCard.tsx`). The server asks
-  GitHub's REST API, unauthenticated (`user-agent: redoop-update-check`), for the newest
+  GitHub's REST API, unauthenticated (`user-agent: diazo-update-check`), for the newest
   `DOOP_UPDATE_BRANCH` commit of `DOOP_UPDATE_REPO` whose `docker.yml` run succeeded (`GET
 .../actions/workflows/docker.yml/runs?status=success`: a finished image build is the one
   signal that `:main` exists for it without a GHCR token; a repository without the workflow
@@ -1133,8 +1133,10 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `tauri-runtime-cef` 3.0.0-alpha.6 (CEF 154, Chromium 154), so frame iframes render out of the
   editor's process. Same name, bundle id and executable as the WebKit app it replaces, so the
   WebKit app updates into it. Linking the CEF runtime makes `build.rs` set `cfg(chromium)`, which
-  selects the runtime in `main()`, keeps the profile in `Application Support/design.doop.desktop/cef`
-  (`cef-dev` for debug builds) and, on the first launch, moves the WebKit app's cookies and
+  selects the runtime in `main()`, keeps the profile in `Application Support/dev.bryann2k.diazo/cef`
+  (`cef-dev` for debug builds; the app is Diazo, `dev.bryann2k.diazo`, from 0.15.0, and
+  `src/identity_migration.rs` first copies the old `design.doop.desktop` folders over when the new
+  ones are empty) and, on the first launch, moves the WebKit app's cookies and
   localStorage over (`src/webkit_migration.rs`, read in-process through WebKit's own API); menu
   types go through `ShellRuntime`. Run it with `bun run dev:chromium` or `build:chromium` in
   `desktop/` (Tauri 3 CLI, needs cmake + ninja); see `desktop/README.md`.

@@ -19,6 +19,6 @@ export const handoff = {
   writeFailed: 'A gravação não foi concluída',
   cancelled: 'Gravação cancelada no app.',
   notWritable: 'O projeto vinculado não está acessível neste dispositivo',
-  notWritableHint: 'Abra o app do doop na máquina que guarda o projeto vinculado e tente de novo.',
+  notWritableHint: 'Abra o app do Diazo na máquina que guarda o projeto vinculado e tente de novo.',
   done: 'Gravado em {dir} em {repo}. A mudança está pronta para validação no Stip.',
 }

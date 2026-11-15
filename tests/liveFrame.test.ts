@@ -65,7 +65,7 @@ describe('liveFrameHtml / the live frame type', () => {
 
   it('renders the placeholder card with the LIVE badge and the desktop hint', () => {
     expect(html).toContain('LIVE · localhost:4321')
-    expect(html).toContain('Open in the Doop desktop app')
+    expect(html).toContain('Open in the Diazo desktop app')
     expect(html).toContain('http://localhost:4321/contact')
     /* the stored document is passive: nothing to run, and a CSP that keeps
        it that way anywhere a frame shows */

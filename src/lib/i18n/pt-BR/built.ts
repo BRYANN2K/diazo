@@ -30,5 +30,5 @@ export const built = {
   unmatched: 'sem frame desenhado',
   score: '{score}% de drift',
   failed: 'Falhou',
-  note: 'Assinado como os webhooks de saída do doop. Payload e receita de CI: docs/built-page.md.',
+  note: 'Assinado como os webhooks de saída do Diazo. Payload e receita de CI: docs/built-page.md.',
 } as const

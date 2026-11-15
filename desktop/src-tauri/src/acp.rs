@@ -460,8 +460,8 @@ pub async fn acp_connect(app: AppHandle, user_id: String, agent: String, enabled
         let users = all.entry(agent.id().to_string()).or_default();
         if enabled && !users.contains(&user_id) {
             let accepted = rfd::MessageDialog::new()
-                .set_title(format!("Use local {} for Doop?", agent.title()))
-                .set_description(format!("Doop will run your installed {} CLI on this computer for this Doop account's canvas tasks, using your {} login and usage limits. Doop answers its permission requests: only Doop canvas tools are allowed. Tasks run while this desktop app is open.", agent.title(), agent.title()))
+                .set_title(format!("Use local {} for Diazo?", agent.title()))
+                .set_description(format!("Diazo will run your installed {} CLI on this computer for this Doop account's canvas tasks, using your {} login and usage limits. Doop answers its permission requests: only Doop canvas tools are allowed. Tasks run while this desktop app is open.", agent.title(), agent.title()))
                 .set_buttons(rfd::MessageButtons::OkCancel)
                 .show();
             if accepted != rfd::MessageDialogResult::Ok {
@@ -904,7 +904,7 @@ pub(crate) fn run_session(
             )
             .map_err(describe)?;
         if init["agentCapabilities"]["mcpCapabilities"]["http"] != true {
-            return Err(format!("This {title} CLI cannot reach Doop's canvas tools (it has no HTTP MCP support). Update it, then retry."));
+            return Err(format!("This {title} CLI cannot reach Diazo's canvas tools (it has no HTTP MCP support). Update it, then retry."));
         }
         let session = rpc
             .call(
