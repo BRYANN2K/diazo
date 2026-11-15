@@ -221,7 +221,7 @@ export const Motion: Story = {
       </div>
       <div className="flex items-center gap-3">
         <span className="shimmer-text text-body font-medium">Reading the Pricing frame…</span>
-        <span className="agent-beam h-10 w-24 rounded-row bg-surface shadow-ring" />
+        <span className="agent-beam relative h-10 w-24 rounded-row bg-surface shadow-ring" />
       </div>
     </div>
   ),

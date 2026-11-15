@@ -30,7 +30,6 @@ import {
   barPrimaryBtn,
   barPrimaryCompactBtn,
 } from '../components/TopBar'
-import { LivePresence } from '../components/LivePresence'
 import { ensureTab, openExternal } from '../lib/desktop'
 import { Stage } from '../components/Stage'
 import { COMPONENT_DRAG_TYPE, dropComponent } from '../lib/components'
@@ -100,10 +99,10 @@ import {
   LinkIcon,
   MoreHorizontalIcon,
   PlayIcon,
+  PlugIcon,
   PlusIcon,
   PrototypeModeIcon,
   ShareIcon,
-  ShareUpIcon,
   XIcon,
 } from '../components/ui/icons'
 import { Badge, badgeVariants } from '../components/ui/badge'
@@ -151,18 +150,18 @@ const ARROW_NUDGE: Record<string, [number, number]> = {
   ArrowUp: [0, -1],
   ArrowDown: [0, 1],
 }
-const LAYERS_W = 264
+const LAYERS_W = 252
 const RAIL_W = 40
 const INSPECTOR_W = 244
 /* the bar's height on desktop */
-const BAR_H = 50
+const BAR_H = 58
 /* the docked bar is a flat strip, so it can sit a little tighter */
 const DOCKED_BAR_H = 44
 /* how far what floats over the canvas keeps from a docked column */
 const FLOAT_GAP = 10
 /* the narrowest stage docked panels squeeze it to, while their minimums allow */
 const DOCKED_STAGE_MIN = 320
-const AGENTS_W = 280
+const AGENTS_W = 360
 const PANEL_WIDTH_KEY = 'doop:canvas-panel-widths'
 
 function readPanelWidths(): { layers: number; agents: number } {
@@ -201,7 +200,7 @@ function chromeLayout({
     const island = propertiesShown ? properties + INSPECTOR_W : properties
     return { toolRail, properties, island, left: toolRail + RAIL_W, right: island + RAIL_W }
   }
-  const toolRail = layersOpen ? EDGE + layersWidth + 12 : EDGE + RAIL_W + 10
+  const toolRail = layersOpen ? EDGE + layersWidth + 6 : EDGE + RAIL_W + 10
   const properties = agentsOpen ? EDGE + agentsWidth + 8 : EDGE
   const island = propertiesShown ? properties + INSPECTOR_W + 10 : agentsOpen ? EDGE + agentsWidth + 10 : EDGE
   return { toolRail, properties, island, left: toolRail + RAIL_W + 16, right: island + RAIL_W + 10 }
@@ -346,6 +345,7 @@ export function CanvasPage({
   /* ⌘. acts only over the canvas view, outside PresentMode */
   const hideUiActive = canHideUi({ view: 'canvas', presenting: !!presenting })
   const activePageId = useStore((s) => s.activePageId)
+  const activePageName = useStore((s) => s.canvas?.pages?.find((page) => page.id === s.activePageId)?.name ?? '')
   /* Play starts on the selected frame, or on the page's flow start */
   const playFrom = useMemo(
     () => presentStartFrame(canvas, selectedId, activePageId),
@@ -893,8 +893,11 @@ export function CanvasPage({
         className={cn(uiHidden && 'hidden')}
         style={rulerInset ? { top: rulerInset, left: rulerInset } : undefined}
       >
+        {/* ShellTitle: the Diazo mark (main menu), the canvas name over its
+            page, and who is here (people in blue, agents in orange) merged
+            into one island */}
         <div className="flex min-w-0 items-center gap-2 max-xs:basis-full">
-          <BarPill className="min-w-0 gap-1 pr-3 pl-1">
+          <BarPill className="h-11 min-w-0 gap-1.5 pr-2 pl-1">
             <MainMenu
               trigger={
                 <Button
@@ -904,71 +907,70 @@ export function CanvasPage({
                   aria-label={t('actions.mainMenu')}
                   title={t('actions.mainMenu')}
                 >
-                  <DiazoMark size={15} tone="color" className="block" />
+                  <DiazoMark size={18} tone="color" className="block" />
                 </Button>
               }
             />
-            <CanvasName readOnly={readOnly} />
+            <span className="flex min-w-0 flex-col justify-center leading-none">
+              <CanvasName readOnly={readOnly} />
+              <span className="truncate px-1.5 text-caption text-ink-3">
+                {activePageName}
+                {connected ? (
+                  !readOnly && <span className="max-lg:hidden"> {t('canvas.autoSaved')}</span>
+                ) : (
+                  <span className="text-danger"> {t('canvas.reconnecting')}</span>
+                )}
+              </span>
+            </span>
             {readOnly && (
               <Badge tone="outline" title={t('canvas.readOnlyBadgeTitle')}>
                 {role === 'comment' ? t('canvas.canComment') : t('canvas.viewOnly')}
               </Badge>
             )}
             <CanvasIdMenu canvasId={canvasId} onCopied={showToast} />
-            {connected ? (
-              /* nothing to save for someone who can only look */
-              !readOnly && (
-                <span className="ml-1 whitespace-nowrap text-ink-faint max-lg:hidden">{t('canvas.autoSaved')}</span>
-              )
-            ) : (
-              <span className="ml-1 whitespace-nowrap text-accent-ink">{t('canvas.reconnecting')}</span>
-            )}
+            <BarDivider className="mx-0.5 max-sm:hidden" />
+            <span
+              className="flex h-6 items-center pr-1 max-sm:hidden"
+              title={others.map((p) => p.name).join(', ') || t('canvas.justYou')}
+            >
+              <button
+                type="button"
+                className="relative z-[1] rounded-full focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal"
+                title={t('canvas.youAre', { name: meFace.name })}
+                onClick={() => setRenaming(true)}
+              >
+                <PresenceFace name={meFace.name} image={meFace.image} color={meFace.color} kind="user" />
+              </button>
+              {others.length > 0 && (
+                <span className="-ml-[7px] flex items-center">
+                  <PeerAvatars others={others} />
+                </span>
+              )}
+            </span>
           </BarPill>
         </div>
-        <div className={cn('absolute left-1/2 -translate-x-1/2 max-[1180px]:hidden', docked ? 'top-1' : 'top-3.5')}>
-          <LivePresence me={meFace} others={others} onRenameSelf={() => setRenaming(true)} />
-        </div>
+        {/* ShellActions: Import, Export, Play and Share in one island; Share is
+            the only ink action. Connect AI lives in the agent panel's head. */}
         <div className="ml-auto flex flex-none items-center gap-2 max-md:hidden">
-          {/* the presence pill needs the bar's centre; narrower desktops keep
-              the plain avatar stack (and its follow buttons) over here */}
-          <div
-            className="mr-1 flex items-center min-[1181px]:hidden"
-            title={others.map((p) => p.name).join(', ') || t('canvas.justYou')}
-          >
-            <PresenceFace name={meFace.name} image={meFace.image} color={meFace.color} kind="user" />
-            <span className="-ml-[7px] flex items-center">
-              <PeerAvatars others={others} />
-            </span>
-          </div>
-          {!guest && (
-            <BarPill>
-              {!readOnly && (
-                <>
-                  <Button
-                    variant="bare"
-                    className={barPillBtn}
-                    onClick={() => setShowImport(true)}
-                    title={t('canvas.importTitle')}
-                  >
-                    <ImportIcon className="size-3.5" />
-                    {t('canvas.import')}
-                  </Button>
-                  <BarDivider className="mx-0.5" />
-                </>
-              )}
+          <BarPill className="h-11 gap-0.5 px-1.5">
+            {!guest && !readOnly && (
+              <Button
+                variant="bare"
+                className={barPillBtn}
+                onClick={() => setShowImport(true)}
+                title={t('canvas.importTitle')}
+              >
+                <ImportIcon className="size-3.5" />
+                {t('canvas.import')}
+              </Button>
+            )}
+            {!guest && (
               <Button variant="bare" className={barPillBtn} onClick={openExport} title={t('canvas.exportTitle')}>
                 <ExportIcon className="size-3.5" />
                 {t('canvas.export')}
               </Button>
-            </BarPill>
-          )}
-          <BarPill>
-            {!guest && (
-              <Button variant="bare" className={barPillBtn} onClick={() => setShowShare(true)}>
-                <ShareUpIcon className="size-3.5" />
-                {t('canvas.share')}
-              </Button>
             )}
+            {!guest && <BarDivider className="mx-0.5" />}
             <Tooltip
               label={
                 selectedId
@@ -992,17 +994,16 @@ export function CanvasPage({
                 </Button>
               </span>
             </Tooltip>
+            {!guest && (
+              <Button variant="primary" className="ml-1 h-[30px] px-3" onClick={() => setShowShare(true)}>
+                {t('canvas.share')}
+              </Button>
+            )}
           </BarPill>
-          {/* the bar's one black action — it opens the MCP connection modal;
-              an agent connected through a view or comment link could not
-              change anything, so readers are not offered it */}
-          {!readOnly && (
-            <Button
-              variant="primary"
-              className={cn(docked ? barPrimaryCompactBtn : barPrimaryBtn, 'shadow-ring')}
-              onClick={openConnect}
-            >
-              <PlusIcon className="size-3.5" strokeWidth={1.4} />
+          {/* with the agent panel closed, Connect AI still has a way in */}
+          {!readOnly && !showActivity && (
+            <Button variant="default" className="h-11 rounded-panel px-3.5 shadow-panel" onClick={openConnect}>
+              <PlugIcon className="size-3.5 text-ink-2" />
               {t('canvas.connectAi')}
             </Button>
           )}
@@ -1051,7 +1052,7 @@ export function CanvasPage({
         <Stage onAddFrame={addFrame} insets={stageInsets} bounds={stageBounds} docked={docked} />
         <div
           className={cn(
-            'pointer-events-none absolute inset-x-0 bottom-0 top-[50px] max-md:top-14 max-xs:top-[100px]',
+            'pointer-events-none absolute inset-x-0 bottom-0 top-[58px] max-md:top-14 max-xs:top-[100px]',
             uiHidden && 'hidden',
           )}
           /* panel offsets are measured from this layer, so moving it past
@@ -1154,6 +1155,7 @@ export function CanvasPage({
             <ActivityPanel
               canvasId={canvasId}
               onClose={() => setShowActivity(false)}
+              onConnect={readOnly ? undefined : openConnect}
               surface={panelSurface}
               style={{ right: docked ? 0 : EDGE }}
               resize={{

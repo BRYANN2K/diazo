@@ -61,6 +61,7 @@ import {
   CreditCard,
   Download,
   Ellipsis,
+  Plug,
   Eye,
   EyeOff,
   ExternalLink,
@@ -192,6 +193,7 @@ export const VerticalPaddingIcon = icon(AlignVerticalSpaceAround)
 export const WrapTextIcon = icon(WrapText)
 export const SquareDashedIcon = icon(SquareDashed)
 export const MoreHorizontalIcon = icon(Ellipsis)
+export const PlugIcon = icon(Plug)
 export const ShareIcon = icon(Share2)
 export const CopyIcon = icon(Copy)
 export const ClipboardIcon = icon(Clipboard)

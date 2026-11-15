@@ -1189,7 +1189,6 @@ body[data-panel-resizing] * {
 /* a 1px conic beam of agent orange travelling round the element's edge:
    the frame an agent is writing into */
 @utility agent-beam {
-  position: relative;
   &::before {
     content: '';
     position: absolute;

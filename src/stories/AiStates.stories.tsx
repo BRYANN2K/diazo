@@ -59,7 +59,7 @@ export const Tags: Story = {
 export const Beam: Story = {
   name: 'Agent writing beam',
   render: () => (
-    <div className="agent-beam grid h-[180px] w-[280px] place-items-center rounded-row bg-surface shadow-ring">
+    <div className="agent-beam relative grid h-[180px] w-[280px] place-items-center rounded-row bg-surface shadow-ring">
       <span className="text-caption text-ink-3">Diazo is writing this frame</span>
     </div>
   ),

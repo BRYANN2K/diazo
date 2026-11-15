@@ -13,7 +13,6 @@ import {
   type PanelResize,
   type PanelSurface,
   PanelBody,
-  PanelClose,
   PanelHeader,
   PanelIconTab,
   PanelTabPanel,
@@ -28,9 +27,20 @@ import {
   CommentIcon,
   CreditCardIcon,
   MessageSquareIcon,
+  MoreHorizontalIcon,
+  PlugIcon,
   PulseIcon,
   SparkIcon,
+  XIcon,
 } from './ui/icons'
+import { IconButton } from './ui/icon-button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu'
 import { DotMatrix } from './ui/dot-matrix'
 import { Dot } from './ui/dot'
 import { isResidentLimit } from './TeamAllowance'
@@ -66,6 +76,7 @@ function duration(t: AgentTask): string {
 export function ActivityPanel({
   canvasId,
   onClose,
+  onConnect,
   surface = 'floating',
   className,
   style,
@@ -73,6 +84,8 @@ export function ActivityPanel({
 }: {
   canvasId: string
   onClose: () => void
+  /** opens Connect AI (an editor's only; readers get no button) */
+  onConnect?: () => void
   /* 'inline' when the panel is filling a mobile Sheet rather than floating */
   surface?: PanelSurface
   className?: string
@@ -100,60 +113,92 @@ export function ActivityPanel({
       surface={surface}
       resize={resize}
       className={cn(
-        surface === 'floating' && 'top-2.5 bottom-3.5 w-[280px] transition-[right] duration-150',
-        surface === 'docked' && 'w-[280px] border-l',
+        surface === 'floating' && 'top-2.5 bottom-3.5 w-[360px] transition-[right] duration-150',
+        surface === 'docked' && 'w-[360px] border-l',
         className,
       )}
       style={style}
     >
       <PanelTabsRoot value={tab} onValueChange={(next) => setTab(next as typeof tab)}>
-        <PanelHeader className="pl-2">
-          <PanelTabs aria-label={t('panels.activityPanelAria')}>
+        {/* AgentPanelHead: Chat, Agents and Activity as icon + label tabs on a
+            gliding surface, the rest (Comments, Memory, Usage) behind More,
+            and Connect AI moved here from the top bar */}
+        <PanelHeader className="gap-1 pr-1.5">
+          <PanelTabs aria-label={t('panels.activityPanelAria')} className="min-w-0 flex-none">
+            <PanelIconTab value="chat" icon={<MessageSquareIcon />} title={t('panels.activityChatTitle')}>
+              {t('panels.activityChat')}
+            </PanelIconTab>
             {canEdit && (
               <PanelIconTab value="tasks" icon={<SparkIcon />} title={t('panels.activityAgents')}>
                 {t('panels.activityAgents')}
                 {working > 0 && (
-                  <em className="ml-[7px] text-[11px] font-normal not-italic text-ink-faint">{working}</em>
+                  <em className="ml-1.5 text-caption font-normal not-italic text-agent-ink">{working}</em>
                 )}
               </PanelIconTab>
             )}
-            <PanelIconTab value="chat" icon={<MessageSquareIcon />} title={t('panels.activityChatTitle')}>
-              {t('panels.activityChat')}
-            </PanelIconTab>
-            <PanelIconTab
-              value="comments"
-              icon={<CommentIcon />}
-              title={
-                openThreads
-                  ? t('panels.activityCommentsOpen', { count: openThreads })
-                  : t('panels.activityCommentsTitle')
-              }
-              /* open threads on this page: a count on the tab itself */
-              badge={
-                openThreads > 0 && (
-                  <span className="absolute -top-1 -right-1 grid h-[14px] min-w-[14px] place-items-center rounded-lg bg-brand px-[3px] font-mono text-[8px] font-medium text-white">
-                    {openThreads > 99 ? '99+' : openThreads}
-                  </span>
-                )
-              }
-            >
-              {t('panels.activityComments')}
-            </PanelIconTab>
             {canEdit && (
-              <>
-                <PanelIconTab value="activity" icon={<PulseIcon />} title={t('panels.activityActivity')}>
-                  {t('panels.activityActivity')}
-                </PanelIconTab>
-                <PanelIconTab value="memory" icon={<BookOpenIcon />} title={t('panels.activityMemoryTitle')}>
-                  {t('panels.activityMemory')}
-                </PanelIconTab>
-                <PanelIconTab value="usage" icon={<CreditCardIcon />} title={t('usage.tabTitle')}>
-                  {t('usage.tab')}
-                </PanelIconTab>
-              </>
+              <PanelIconTab value="activity" icon={<PulseIcon />} title={t('panels.activityActivity')}>
+                {t('panels.activityActivity')}
+              </PanelIconTab>
+            )}
+            {/* a tab picked from More joins the strip while it is open */}
+            {tab === 'comments' && (
+              <PanelIconTab value="comments" icon={<CommentIcon />} title={t('panels.activityCommentsTitle')}>
+                {t('panels.activityComments')}
+              </PanelIconTab>
+            )}
+            {canEdit && tab === 'memory' && (
+              <PanelIconTab value="memory" icon={<BookOpenIcon />} title={t('panels.activityMemoryTitle')}>
+                {t('panels.activityMemory')}
+              </PanelIconTab>
+            )}
+            {canEdit && tab === 'usage' && (
+              <PanelIconTab value="usage" icon={<CreditCardIcon />} title={t('usage.tabTitle')}>
+                {t('usage.tab')}
+              </PanelIconTab>
             )}
           </PanelTabs>
-          <PanelClose label={t('panels.activityClosePanel')} onClick={onClose} />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <IconButton size="sm" aria-label={t('panels.activityMore')} className="relative size-7 flex-none">
+                <MoreHorizontalIcon className="size-4" />
+                {openThreads > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 grid h-[14px] min-w-[14px] place-items-center rounded-full bg-signal px-[3px] font-mono text-[8px] font-medium text-white">
+                    {openThreads > 99 ? '99+' : openThreads}
+                  </span>
+                )}
+              </IconButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent width="md" align="end">
+              <DropdownMenuItem onSelect={() => setTab('comments')}>
+                <CommentIcon className="size-3.5 text-ink-2" />
+                {openThreads ? t('panels.activityCommentsOpen', { count: openThreads }) : t('panels.activityComments')}
+              </DropdownMenuItem>
+              {canEdit && (
+                <>
+                  <DropdownMenuItem onSelect={() => setTab('memory')}>
+                    <BookOpenIcon className="size-3.5 text-ink-2" />
+                    {t('panels.activityMemory')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setTab('usage')}>
+                    <CreditCardIcon className="size-3.5 text-ink-2" />
+                    {t('usage.tab')}
+                  </DropdownMenuItem>
+                </>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={onClose}>
+                <XIcon className="size-3.5 text-ink-2" />
+                {t('panels.activityClosePanel')}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {onConnect && (
+            <Button size="sm" className="ml-auto h-7 min-w-0 shrink gap-1 px-2" onClick={onConnect}>
+              <PlugIcon className="size-3.5 text-ink-2" />
+              {t('canvas.connectAi')}
+            </Button>
+          )}
         </PanelHeader>
         {/* the Agents tab is a column: what the agents are doing scrolls above,
             the prompt composer is docked underneath */}
