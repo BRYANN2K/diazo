@@ -91,17 +91,21 @@
   bound; Refresh asks again) and its `PATH` is given to every CLI process, since a GUI app's
   `/usr/bin:/bin` PATH lacks the `node` an npm install needs. Shells advertise this with
   `__DOOP_CLAUDE_CHOOSE__`.
-- Model menus (`server/modelCatalog.ts`, `GET /api/model-account/models`): the connected
-  account's picker asks the provider's catalog with the user's own key when it opens (the
-  composer's `ModelPicker`) or mounts (Settings, `useAgentModels`), merging the curated entries of
-  `shared/modelMenu.ts` / `shared/localAgent.ts` on top as `recommended`; a provider without a
-  loader, or one that cannot be reached, gets the curated menu with `live: false`. Anthropic and
-  OpenAI (`/v1/models`), Gemini (`/v1beta/models`) and ChatGPT subscriptions (the Codex backend's
-  catalog, `CHATGPT_MODELS_URL`, asked with the account's token as Codex CLI
-  `CHATGPT_CODEX_CLIENT_VERSION`; the route refreshes the token first) have loaders, each with a
-  family filter for reasoning chat models with tools, images and a 16k output window; a picked id
-  only has to be shaped like the provider's, and the run is the final check. OpenRouter, DeepSeek,
-  Kimi and Kimi Code stay on their curated rosters (the run-time vision check knows only the roster's flags).
+- Model menus (`server/modelCatalog.ts`, `catalogForAccount` in `server/agentRunners.ts`,
+  `GET /api/model-account/models`): a connected account's menus list what the account can
+  actually run — the provider's catalog asked with the user's own key, the curated entries of
+  `shared/modelMenu.ts` / `shared/localAgent.ts` merged on top as `recommended`; a provider
+  without a loader, or one that cannot be reached, gets the curated menu with `live: false`.
+  `GET /api/agent-runners` serves the same merged list per enabled account (`listRunners`), so
+  the composer's `ModelPicker`, the model duel's choices and Settings' dropdowns agree; the
+  picker and Settings still fetch `?kind=` per account on open/mount for a fresh list and its
+  error caption. Anthropic and OpenAI (`/v1/models`), Gemini (`/v1beta/models`) and ChatGPT
+  subscriptions (the Codex backend's catalog, `CHATGPT_MODELS_URL`, asked with the account's
+  token as Codex CLI `CHATGPT_CODEX_CLIENT_VERSION`; the call refreshes the token first) have
+  loaders, each with a family filter for reasoning chat models with tools, images and a 16k
+  output window; a picked id only has to be shaped like the provider's, and the run is the
+  final check. OpenRouter, DeepSeek, Kimi and Kimi Code stay on their curated rosters (the
+  run-time vision check knows only the roster's flags).
 - DeepSeek and Kimi keys (`deepseek-key`, `kimi-key`) and the Kimi Code plan (`kimi-code`, a
   Kimi membership's key, sent with a `Doop/<version>` User-Agent as Kimi Code's terms require)
   run on the Chat Completions transport (`server/chatCompletionsAgent.ts`) against fixed URLs
@@ -132,6 +136,10 @@
   `server/openaiAgent.ts` for every turn, with `DOOP_AGENT_OPENAI_EFFORT` as the default until a
   user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
+  A `RunnerPick` may carry its own `effort` for one run — the composer's picker and each duel
+  contestant's `StepSlider` — and `pickModel` honours it (`accountWithPick` for the OpenAI
+  kinds, `isClaudeEffort` → `claude --effort` on the Plan); the localized names and blurbs for
+  the dials live in `src/lib/effortLabels.ts`.
 - Image descriptions (`.context/specs/image-descriptions.md`, `server/imageDescriptions.ts`,
   `shared/imageDescriptions.ts`): raster uploads emit `asset.stored` and get an asynchronous
   description. Billing resolves uploader → eligible canvas owner → server; Off on either
@@ -168,11 +176,16 @@
   someone who connected none (switching every account off does not count). Tests: `anthropicAccount.test.ts` (end to end), `defaultRouting.test.ts`,
   `agentRunners.test.ts`, `chatgptProviderSwitch.test.tsx`, `localClaudeConnection.test.tsx`.
 - Which connection runs a task (`shared/agentRunner.ts`, `server/agentRunners.ts`):
-  `GET /api/agent-runners` lists every connection that is on, with its menus, plus `default`.
-  The composer's `ModelPicker` offers each one and its models; the pick is this browser's
-  (`src/lib/runnerPick.ts`, `doop:agent-runner`), rides on the card as `runner` (a `RunnerPick`:
-  provider, model, effort; `tasks.runner` JSON, migration 0045) and the send button's meter names
-  it. `pickModel(payerId, pick)` honours it for that run when the named connection is on, a
+  `GET /api/agent-runners` lists every connection that is on, each with its merged model
+  catalog (above), plus `default`. The composer's `ModelPicker` offers each one and its models;
+  the pick is this browser's (`src/lib/runnerPick.ts`, `doop:agent-runner`), rides on the card
+  as `runner` (a `RunnerPick`: provider, model, effort; `tasks.runner` JSON, migration 0045)
+  and the send button's meter names it. The model duel (`server/duels.ts`,
+  `DuelDialog.tsx`/`DuelCards.tsx`, `shared/duel.ts`) builds one `RunnerPick` per contestant —
+  provider, model, effort from the row's own `StepSlider` where the connection has a dial —
+  into one scoped card each; `duelChoices` drops the Plan's `default` meta-alias (not a model
+  to compare) and offers the pinned `claude-*` id the Plan is set to, and the comparison card
+  names each entry's effort. `pickModel(payerId, pick)` honours it for that run when the named connection is on, a
   model the provider does not know runs on the connection's configured one, and anything else
   runs on the default. One resident run claims work that agrees on the pick (`actions.nextWork`,
   the `runner` filter on the take functions): comments and automations carry none and run on

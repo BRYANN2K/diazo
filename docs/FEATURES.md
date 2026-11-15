@@ -140,9 +140,11 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   canvas with `.doop.json`, `open` it, `find` frames, `pull` / `push` a frame as an HTML file
   (a push is refused when the frame changed on the canvas since the pull), and `doop mcp install`
   for Claude Code, Codex and Devin. It authenticates with an agent key.
-- **Model duel** — Duel in the agents composer sends one brief to 2-3 models, each into its own
-  sibling frame; a comparison card shows each render with its cost, time and lint score, and the
-  one you keep is saved as a canvas decision while the others are archived (hidden, not deleted).
+- **Model duel** — Duel in the agents composer sends one brief to 2-3 models, each picked from
+  what the connection can actually run (its live provider catalog) with its own reasoning-effort
+  dial where the provider has one; each designs into its own sibling frame. A comparison card
+  shows each render with its cost, time, effort and lint score, and the one you keep is saved as
+  a canvas decision while the others are archived (hidden, not deleted).
 - **Self-hosting** — Docker image `ghcr.io/bryann2k/redoop:main` (also `:latest` and
   `:sha-<commit>`; amd64 + arm64) built on every push to `main`, k3s manifests in `deploy/k3s/`
   with a persistent volume for uploads, exposed through Tailscale Serve only (no ingress, no
