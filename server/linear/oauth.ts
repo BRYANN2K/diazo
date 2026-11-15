@@ -116,7 +116,7 @@ export async function finishInstall(userId: string, state: string, code: string)
     })
     .returning()
   if (!rows.length)
-    throw new LinearError('This Linear workspace already has a Doop installer. Ask them to disconnect it first.', 409)
+    throw new LinearError('This Linear workspace already has a Diazo installer. Ask them to disconnect it first.', 409)
 }
 
 export async function getInstallation(userId: string) {

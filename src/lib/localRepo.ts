@@ -18,7 +18,7 @@ export const hasLocalRepo = () => bridge.__DOOP_LOCAL_REPO__ === true && !!bridg
 
 function invokeRepo<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!hasLocalRepo() || !bridge.__TAURI__) {
-    return Promise.reject(new Error('Link a local project from the Doop desktop app.'))
+    return Promise.reject(new Error('Link a local project from the Diazo desktop app.'))
   }
   return bridge.__TAURI__.core.invoke<T>(command, args)
 }

@@ -153,7 +153,7 @@ export async function collectClosure(
   return files
 }
 
-const SYSTEM_PROMPT = `You are Doop's senior product designer, reconstructing ONE screen of a product from its repository. You receive the screen's source file with some of its imports, plus a listing of the repository's file tree — and a request_files tool to read any other files.
+const SYSTEM_PROMPT = `You are Diazo's senior product designer, reconstructing ONE screen of a product from its repository. You receive the screen's source file with some of its imports, plus a listing of the repository's file tree — and a request_files tool to read any other files.
 
 INVESTIGATE BEFORE YOU DESIGN. Fidelity to the real product is the whole job, and the two ways reconstructions go wrong are inventing the brand and inventing the copy. Before writing any HTML, make sure you have seen:
 - HOW STYLING IS DONE in this repo: the theme/design-token modules, global stylesheets, tailwind/chakra/styled-components config — whatever defines the real colors, fonts, radii and spacing. If the provided files don't show the brand's actual palette and type, request the files that do.
@@ -238,7 +238,7 @@ export function extractHtml(blocks: { type: string; text?: string }[]): { html: 
   return { html, height }
 }
 
-const DESIGN_SYSTEM_PROMPT = `You are Doop's design-system archaeologist. From the given repository files (theme/token modules, tailwind/framework config, global styles, app shell, package.json), distill the product's ACTUAL design system into a style guide for design agents.
+const DESIGN_SYSTEM_PROMPT = `You are Diazo's design-system archaeologist. From the given repository files (theme/token modules, tailwind/framework config, global styles, app shell, package.json), distill the product's ACTUAL design system into a style guide for design agents.
 
 Output ONLY markdown with these sections:
 - **Palette** — every meaningful color as hex with its role (ground, ink, accent, success…), taken from the code, not invented.
@@ -358,7 +358,7 @@ export async function resolveRepoAssets(conn: GithubConnection, html: string, pa
     try {
       const asset = await createAsset(await fetchRepoBinary(conn, p), {
         canvasId: conn.canvasId,
-        uploadedBy: 'Doop',
+        uploadedBy: 'Diazo',
       })
       urls.set(p, `${ORIGIN}/a/${asset.id}.${asset.ext}`)
     } catch (err) {
@@ -430,7 +430,7 @@ function failureReason(err: unknown): string {
   if (err instanceof ModelUnavailableError)
     return 'The chosen model is not available on the connected account yet. Pick another model in Settings, then retry.'
   const message = err instanceof Error ? err.message : 'unknown error'
-  return `Doop could not finish this: ${message.slice(0, 200)}. Retry when you are ready.`
+  return `Diazo could not finish this: ${message.slice(0, 200)}. Retry when you are ready.`
 }
 
 /** A billing/auth failure is account-wide — one card proving it is enough;

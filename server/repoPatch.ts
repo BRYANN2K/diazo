@@ -41,7 +41,7 @@ export async function applyRepoPatch(
   if (!link) throw new RepoPatchError('no linked project — link this canvas to a folder first', 409)
   const device = localRepo.deviceFor(userId)
   if (!device || !device.grants.has(link.id))
-    throw new RepoPatchError("the linked project is unavailable — the doop desktop app holding it isn't online", 409)
+    throw new RepoPatchError("the linked project is unavailable — the Diazo desktop app holding it isn't online", 409)
   const result = await repoToolCall(
     userId,
     link,

@@ -604,7 +604,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     </>
   ) : waiting ? (
     <>
-      {/* Doop holds the loopback port itself, so approving is the whole job —
+      {/* Diazo holds the loopback port itself, so approving is the whole job —
           this row flips on its own. */}
       <p className={cn(maWaiting, 'mt-0')}>
         <Dot className="animate-[arrival-pulse_1.6s_ease-in-out_infinite] bg-brand" /> {t('models.waitingOtherTab')}

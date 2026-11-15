@@ -21,6 +21,6 @@ export const handoff = {
   writeFailed: 'The write did not go through',
   cancelled: 'Write cancelled in the desktop app.',
   notWritable: 'The linked project is not reachable from this device',
-  notWritableHint: 'Open the doop desktop app on the machine that holds the linked project, then try again.',
+  notWritableHint: 'Open the Diazo desktop app on the machine that holds the linked project, then try again.',
   done: 'Written to {dir} in {repo}. The change is ready for Stip validation.',
 } as const

@@ -70,7 +70,7 @@ describe('settings', () => {
   })
 })
 
-describe('.doop.json resolution', () => {
+describe('project file resolution', () => {
   it('finds the nearest file walking up', () => {
     box = sandbox()
     writeFileSync(path.join(box.cwd, '.doop.json'), JSON.stringify({ canvas: 'outer' }))
@@ -79,6 +79,16 @@ describe('.doop.json resolution', () => {
     expect(findProject(nested)?.data.canvas).toBe('outer')
     writeFileSync(path.join(box.cwd, 'apps', '.doop.json'), JSON.stringify({ canvas: 'inner' }))
     expect(findProject(nested)?.data.canvas).toBe('inner')
+  })
+
+  it('reads .diazo.json, and prefers it over a .doop.json in the same folder', () => {
+    box = sandbox()
+    writeFileSync(path.join(box.cwd, '.doop.json'), JSON.stringify({ canvas: 'legacy' }))
+    expect(findProject(box.cwd)?.data.canvas).toBe('legacy')
+    writeFileSync(path.join(box.cwd, '.diazo.json'), JSON.stringify({ canvas: 'current' }))
+    const project = findProject(box.cwd)!
+    expect(project.data.canvas).toBe('current')
+    expect(path.basename(project.file)).toBe('.diazo.json')
   })
 
   it('returns null when no folder is linked', () => {

@@ -7,7 +7,7 @@ export const CAPTURE_PREFIX = 'DOOP_CAPTURE_V1\n'
 
 /** Clipboard content is untrusted, including content bearing our marker. */
 export function parseWebCapture(text: string) {
-  if (!text.startsWith(CAPTURE_PREFIX)) throw new Error('Not a Doop capture')
+  if (!text.startsWith(CAPTURE_PREFIX)) throw new Error('Not a Diazo capture')
   if (text.length > 4_000_000) throw new Error('Capture is too large')
   const value = JSON.parse(text.slice(CAPTURE_PREFIX.length))
   if (

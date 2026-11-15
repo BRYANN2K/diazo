@@ -178,7 +178,7 @@ it('an empty chat welcomes an editor with suggestions tied to the canvas', () =>
     selectedId: null,
   })
   act(() => root.render(<ChatPanel canvasId="c" />))
-  expect(container.textContent).toContain('Plan the next design with Doop')
+  expect(container.textContent).toContain('Plan the next design with Diazo')
   expect(chip('Design a pricing page')).toBeTruthy()
   expect(chip('Review “Checkout” for accessibility')).toBeTruthy()
   expect(chip('Use the /brand skill')).toBeTruthy()
@@ -207,14 +207,14 @@ it('a skill suggestion puts /name in the composer instead of sending', () => {
 it('a viewer sees the welcome without suggestions', () => {
   useStore.setState({ canvas: canvasWith('view'), chat: [] })
   act(() => root.render(<ChatPanel canvasId="c" />))
-  expect(container.textContent).toContain('Plan the next design with Doop')
+  expect(container.textContent).toContain('Plan the next design with Diazo')
   expect(container.querySelector('[data-slot="chip"]')).toBeNull()
 })
 
 it('the welcome gives way once the agent has answered', () => {
   useStore.setState({ canvas: canvasWith('edit'), chat: [planMessage(), ask] })
   act(() => root.render(<ChatPanel canvasId="c" />))
-  expect(container.textContent).not.toContain('Plan the next design with Doop')
+  expect(container.textContent).not.toContain('Plan the next design with Diazo')
 })
 
 it('scrolled up, Jump to latest appears, says when lines arrived, and brings the list down', () => {

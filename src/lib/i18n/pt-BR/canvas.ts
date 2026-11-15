@@ -52,10 +52,10 @@ export const canvas: Catalog['canvas'] = {
   itemsImported: { one: '{count} item importado', other: '{count} itens importados' },
   importedWithFailures: '{imported} · {failed} com falha',
   cardsQueued: {
-    one: '{count} card na fila — o Doop está cuidando disso',
-    other: '{count} cards na fila — o Doop está cuidando disso',
+    one: '{count} card na fila — o Diazo está cuidando disso',
+    other: '{count} cards na fila — o Diazo está cuidando disso',
   },
-  appUpdated: 'O doop foi atualizado',
+  appUpdated: 'O Diazo foi atualizado',
   reload: 'Recarregar',
 
   notFoundTitle: 'Canvas não encontrado',
@@ -83,8 +83,8 @@ export const canvas: Catalog['canvas'] = {
   contactSupport: 'Falar com o suporte',
   youAre: 'Você é “{name}” — clique para mudar seu nome',
   changeDisplayName: 'Mudar seu nome de exibição',
-  agents: 'Agentes · ⌘/ para pedir ao Doop Agent',
-  agentsWorking: 'Agentes · {working} trabalhando · ⌘/ para pedir ao Doop Agent',
+  agents: 'Agentes · ⌘/ para pedir ao Diazo Agent',
+  agentsWorking: 'Agentes · {working} trabalhando · ⌘/ para pedir ao Diazo Agent',
   comments: 'Comentários',
   commentsOpen: 'Comentários · {open} abertos',
   activity: 'Atividade',
@@ -152,7 +152,7 @@ export const canvas: Catalog['canvas'] = {
   repoTitle: 'Importar o design system',
   repoFramework: 'Um app {framework}.',
   repoLede:
-    'O Doop destila o design system do repositório em um guia de estilo fixado neste canvas — todo agente o segue a partir daí. Cada componente ou página que você escolher vira um card no quadro: o Doop o esboça a partir do código-fonte e o entrega como frame. Páginas inteiras são opcionais.',
+    'O Diazo destila o design system do repositório em um guia de estilo fixado neste canvas — todo agente o segue a partir daí. Cada componente ou página que você escolher vira um card no quadro: o Diazo o esboça a partir do código-fonte e o entrega como frame. Páginas inteiras são opcionais.',
   extractTitle: 'Extrair o design system para um guia de estilo',
   extractDescription:
     'Paleta, tipografia e espaçamento do tema do repositório — fixados no canvas e seguidos por todo agente.',
@@ -164,7 +164,7 @@ export const canvas: Catalog['canvas'] = {
   hidePages: 'ocultar páginas',
   showPages: { one: 'mostrar {count} página (opcional)', other: 'mostrar {count} páginas (opcionais)' },
   repoTruncated: 'A listagem do repositório foi cortada — repositórios muito grandes mostram só uma parte.',
-  repoImporting: 'O Doop está importando — o guia de estilo e os esboços aparecem no canvas…',
+  repoImporting: 'O Diazo está importando — o guia de estilo e os esboços aparecem no canvas…',
   repoImport: 'Importar {items}',
   repoPieceSystem: 'design system',
   repoPieceComponents: { one: '{count} componente', other: '{count} componentes' },
@@ -208,7 +208,7 @@ export const canvas: Catalog['canvas'] = {
   liveFrameWidth: 'Largura',
   liveFrameHeight: 'Altura',
   liveFrameNote:
-    'A página renderiza ao vivo somente no app de desktop do Doop; em todo o resto o frame mostra um placeholder.',
+    'A página renderiza ao vivo somente no app de desktop do Diazo; em todo o resto o frame mostra um placeholder.',
   liveFrameCreate: 'Criar frame ao vivo',
   liveFrameCreating: 'Adicionando frame ao vivo…',
   liveFrameFailed: 'Não foi possível adicionar o frame ao vivo',
@@ -232,12 +232,12 @@ export const canvas: Catalog['canvas'] = {
   syncStep3Title: 'Navegue pelo app',
   syncStep3Detail: 'Cada nova tela que alguém visita chega como frame. Exclua um frame para reimportá-lo do zero.',
   syncNote:
-    'O conteúdo visível da página é enviado ao Doop como HTML estático. Valores de campos são descartados; marque qualquer coisa sensível com data-doop-mask.',
+    'O conteúdo visível da página é enviado ao Diazo como HTML estático. Valores de campos são descartados; marque qualquer coisa sensível com data-doop-mask.',
 
   githubTitle: 'Conectar um repositório do GitHub',
   githubForbidden: 'Conexões de repositório são para membros do canvas — peça acesso permanente ao dono.',
   githubLede:
-    'O Doop lê as convenções de rotas do repositório e lista as telas para revisão. Nada é adicionado até você escolher.',
+    'O Diazo lê as convenções de rotas do repositório e lista as telas para revisão. Nada é adicionado até você escolher.',
   nothingImported: 'nada importado ainda',
   analyzing: 'Analisando…',
   analyze: 'Analisar',

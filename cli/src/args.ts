@@ -63,7 +63,7 @@ export function parseInvocation(argv: string[]): Invocation {
   if (!first) return { command: 'help', args: [], flags }
   if (first === 'mcp') {
     const [sub, ...args] = rest
-    if (sub !== 'install') throw new UsageError('unknown mcp command; did you mean `doop mcp install`?')
+    if (sub !== 'install') throw new UsageError('unknown mcp command; did you mean `diazo mcp install`?')
     return checkArity({ command: 'mcp install', args, flags })
   }
   if (!(first in COMMANDS)) throw new UsageError(`unknown command "${first}"`)
@@ -102,8 +102,8 @@ function checkArity(invocation: Invocation): Invocation {
   if (invocation.flags.help) return invocation
   const [min, max] = COMMANDS[invocation.command] ?? [0, 0]
   const n = invocation.args.length
-  if (n < min) throw new UsageError(`doop ${invocation.command}: missing argument`)
-  if (n > max) throw new UsageError(`doop ${invocation.command}: too many arguments`)
+  if (n < min) throw new UsageError(`diazo ${invocation.command}: missing argument`)
+  if (n > max) throw new UsageError(`diazo ${invocation.command}: too many arguments`)
   return invocation
 }
 
@@ -115,26 +115,26 @@ export function parseDoopRef(input: string): { canvas?: string; frame?: string }
     const frame = /[?&]frame=([\w-]+)/.exec(trimmed)?.[1]
     return { canvas: pathMatch[1], ...(frame ? { frame } : {}) }
   }
-  if (!/^[\w-]+$/.test(trimmed)) throw new UsageError(`"${input}" is not a doop id or link`)
+  if (!/^[\w-]+$/.test(trimmed)) throw new UsageError(`"${input}" is not a Diazo id or link`)
   return { canvas: trimmed, frame: trimmed }
 }
 
-export const HELP = `doop - work with a doop canvas from a project folder
+export const HELP = `diazo - work with a Diazo canvas from a project folder ("doop" is the same command)
 
 Usage
-  doop link <canvas>          Link this folder to a canvas (writes .doop.json)
-  doop open [frame]           Open the linked canvas (or one frame) in the browser
-  doop find <query>           Search the linked canvas (--all: every canvas)
-  doop pull <frame>           Write a frame's HTML to a file (-o file)
-  doop push <file>            Replace the frame's HTML with the file, after a check
-  doop mcp install [client…]  Add doop's MCP server to claude, codex and devin
-  doop config                 Show the server URL and where the agent key comes from
+  diazo link <canvas>         Link this folder to a canvas (writes .diazo.json)
+  diazo open [frame]          Open the linked canvas (or one frame) in the browser
+  diazo find <query>          Search the linked canvas (--all: every canvas)
+  diazo pull <frame>          Write a frame's HTML to a file (-o file)
+  diazo push <file>           Replace the frame's HTML with the file, after a check
+  diazo mcp install [client…] Add Diazo's MCP server to claude, codex and devin
+  diazo config                Show the server URL and where the agent key comes from
 
 Options
-  --url <url>      Server URL (else DOOP_URL, .doop.json, ~/.config/doop/config.json)
-  -c, --canvas     Canvas id for find/open instead of .doop.json
+  --url <url>      Server URL (else DOOP_URL, .diazo.json, ~/.config/doop/config.json)
+  -c, --canvas     Canvas id for find/open instead of .diazo.json
   -o, --output     File for pull
-  -f, --frame      Frame id for push when the file is not in .doop.json
+  -f, --frame      Frame id for push when the file is not in .diazo.json
   -n, --limit      Max search hits (1-500)
   -a, --all        find across every canvas you can open
   -y, --yes        Do not ask for confirmation

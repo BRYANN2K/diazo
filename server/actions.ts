@@ -1056,7 +1056,7 @@ export function takeAgentCommentsFor(
     c.claimedBy = agentName
     c.claimedAt = Date.now()
     persist.saveComment(c)
-    broadcast(canvasId, { type: 'comment', comment: c }) // pins flip to "Doop is on it"
+    broadcast(canvasId, { type: 'comment', comment: c }) // pins flip to "Diazo is on it"
   }
   return pending
 }

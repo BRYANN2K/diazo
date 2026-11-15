@@ -175,7 +175,7 @@ ${reloadMeta}
     <div class="badge"><span class="dot"></span>LIVE · ${escapeText(live.host)}</div>
     <h1>Live dev-server frame</h1>
     <p class="url">${escapeText(live.url)}</p>
-    <p class="hint">Open in the Doop desktop app</p>
+    <p class="hint">Open in the Diazo desktop app</p>
   </div>
 </body>
 </html>`

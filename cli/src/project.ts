@@ -1,7 +1,11 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
-export const PROJECT_FILE = '.doop.json'
+/** The file `diazo link` writes in a folder that has none. */
+export const PROJECT_FILE = '.diazo.json'
+/** Every name a project file goes by, the preferred first: `.doop.json`, from
+ *  before the rename, is still read and kept under its own name. */
+export const PROJECT_FILES = [PROJECT_FILE, '.doop.json'] as const
 
 /** One pulled file: the frame it mirrors and the hash of the frame HTML it was pulled from. */
 export interface PulledFile {
@@ -9,7 +13,7 @@ export interface PulledFile {
   base?: string
 }
 
-/** `.doop.json`: links a project folder to one canvas. File paths are relative to its folder. */
+/** `.diazo.json` (or `.doop.json`): links a project folder to one canvas. File paths are relative to its folder. */
 export interface ProjectFile {
   canvas: string
   url?: string
@@ -24,12 +28,21 @@ export interface Project {
 
 export class ProjectError extends Error {}
 
-/** Finds the nearest `.doop.json` from `start` upwards; null when none is found. */
+/** The project file a folder holds itself, `.diazo.json` before `.doop.json`; null when it has neither. */
+export function projectFileIn(dir: string): string | null {
+  for (const name of PROJECT_FILES) {
+    const file = path.join(dir, name)
+    if (existsSync(file)) return file
+  }
+  return null
+}
+
+/** Finds the nearest `.diazo.json` or `.doop.json` from `start` upwards; null when none is found. */
 export function findProject(start: string): Project | null {
   let dir = path.resolve(start)
   for (;;) {
-    const file = path.join(dir, PROJECT_FILE)
-    if (existsSync(file)) return { file, dir, data: readProjectFile(file) }
+    const file = projectFileIn(dir)
+    if (file) return { file, dir, data: readProjectFile(file) }
     const parent = path.dirname(dir)
     if (parent === dir) return null
     dir = parent
@@ -74,7 +87,7 @@ export function projectKey(project: Project, file: string): string {
   return relative.split(path.sep).join('/')
 }
 
-/** Canvas to work on: --canvas wins over the linked `.doop.json`. */
+/** Canvas to work on: --canvas wins over the linked project file. */
 export function resolveCanvas(project: Project | null, flagCanvas?: string): string | undefined {
   return flagCanvas || project?.data.canvas
 }

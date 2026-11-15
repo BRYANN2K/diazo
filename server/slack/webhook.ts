@@ -92,7 +92,7 @@ export function slackWebhookRouter() {
           text: parsed.data.text,
           responseUrl: parsed.data.response_url,
         })
-        res.json({ response_type: 'in_channel', text: 'Doop is on it — designing from your brief.' })
+        res.json({ response_type: 'in_channel', text: 'Diazo is on it — designing from your brief.' })
         wakeSlack()
         return
       }

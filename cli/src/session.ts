@@ -56,7 +56,7 @@ export class Session {
 
   canvas(): string {
     const canvas = resolveCanvas(this.project, this.invocation.flags.canvas)
-    if (!canvas) throw new CommandError(`no canvas; run \`doop link <canvas>\` here or pass --canvas`)
+    if (!canvas) throw new CommandError(`no canvas; run \`diazo link <canvas>\` here or pass --canvas`)
     return canvas
   }
 }

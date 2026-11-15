@@ -50,7 +50,7 @@ export const hasAcpAgent = (agent: AcpAgent) => desktopAcpAgents().includes(agen
 
 export function invokeAcp<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!bridge.__TAURI__ || desktopAcpAgents().length === 0)
-    return Promise.reject(new Error('Update the Doop desktop app to run local agents.'))
+    return Promise.reject(new Error('Update the Diazo desktop app to run local agents.'))
   return bridge.__TAURI__.core.invoke<T>(command, args)
 }
 

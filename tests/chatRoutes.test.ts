@@ -99,7 +99,7 @@ describe('who may do what', () => {
     expect(res.status).toBe(200)
     const message = await res.json()
     expect(message.forAgent).toBe(true)
-    expect(message.targetAgent).toBe('Doop')
+    expect(message.targetAgent).toBe('Diazo')
     const after = await allowance(owner)
     expect(after.used).toBe(before.used + 1)
   })

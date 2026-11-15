@@ -27,9 +27,9 @@ export const Cards: Story = {
     <div className="flex max-w-[640px] flex-col gap-4">
       <Card>
         <CardHeader>
-          <CardTitle>Doop Agent</CardTitle>
+          <CardTitle>Diazo Agent</CardTitle>
           <CardDescription>
-            Choose how the Doop Agent runs on your canvases: a connected model account or Claude CLI on your desktop.
+            Choose how the Diazo Agent runs on your canvases: a connected model account or Claude CLI on your desktop.
           </CardDescription>
         </CardHeader>
         <CardBody>

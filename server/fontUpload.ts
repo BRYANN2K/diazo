@@ -67,7 +67,7 @@ export function fontUploaded(font: CustomFont, scope: FontScope): Record<string,
     library: 'workspaceId' in scope ? { workspace_id: scope.workspaceId } : 'personal',
     css,
     note:
-      `Use it by naming the family in frame CSS (${css}) and nothing more: Doop adds the @font-face rule to every ` +
+      `Use it by naming the family in frame CSS (${css}) and nothing more: Diazo adds the @font-face rule to every ` +
       `frame that names it, on the canvases using this library, in a <style data-doop-fonts> block you keep. Do not ` +
       `write the @font-face yourself or load the family from Google Fonts. Upload one file per weight and style; a ` +
       `file for a face the library already has (same family, weight and style) replaces it.`,

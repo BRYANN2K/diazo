@@ -11,7 +11,7 @@ import { isCanvasElement } from '../lib/drawing'
 import { isResidentLimit } from './TeamAllowance'
 import { refreshLocalRepo, useLocalRepo } from '../lib/localRepo'
 import { ModelPicker } from './ModelPicker'
-import { DoopMark } from './Logo'
+import { DiazoAgentMark } from './Logo'
 import { MenuButton } from './ui/menu-button'
 import {
   DropdownMenu,
@@ -309,9 +309,7 @@ function ChatWelcome({
       aria-label={t('panels.chatWelcomeTitle')}
       className={cn(COLUMN, 'flex flex-col items-start gap-3 px-4', centered ? 'my-auto py-6' : 'pt-5 pb-1')}
     >
-      <span className="grid size-8 place-items-center rounded-control bg-paper-deep text-ink">
-        <DoopMark size={16} className="block" />
-      </span>
+      <DiazoAgentMark size={32} className="block" />
       <div className="flex flex-col gap-1">
         <h3 className="text-copy font-medium text-ink">{t('panels.chatWelcomeTitle')}</h3>
         <p className="text-body text-ink-soft">{canAsk ? t('panels.chatWelcomeBody') : t('panels.chatEmpty')}</p>
@@ -453,7 +451,7 @@ function ChatLine({ message, grouped }: { message: ChatMessage; grouped: boolean
  *  doing, so the answer has a place to land before it arrives. */
 function AgentPending({ message }: { message: ChatMessage }) {
   const t = useT()
-  const agent = message.claimedBy ?? message.targetAgent ?? 'Doop'
+  const agent = message.claimedBy ?? message.targetAgent ?? 'Diazo'
   const thinking = !!message.claimedBy
   return (
     <div role="status" className="flex min-w-0 items-center gap-1.5">
@@ -480,7 +478,7 @@ function AskFailed({ message }: { message: ChatMessage }) {
   const t = useT()
   return (
     <div className="flex min-w-0 items-start gap-1.5">
-      <ChatAvatar name={message.claimedBy ?? message.targetAgent ?? 'Doop'} agent />
+      <ChatAvatar name={message.claimedBy ?? message.targetAgent ?? 'Diazo'} agent />
       <div className="flex min-w-0 flex-1 flex-col items-start gap-1.5">
         <Note tone="error" className="line-clamp-3 min-w-0 break-words">
           {message.failureReason ?? t('panels.chatAskFailed')}
@@ -733,7 +731,7 @@ function ReviseField({ canvasId, message }: { canvasId: string; message: ChatMes
     try {
       /* routed like the composer: the @mention turns it into an ask, the
          thread ties the next plan to this one */
-      await api.sendChat(canvasId, { text: `@Doop ${text}`, threadId: message.id, ...runnerArg() })
+      await api.sendChat(canvasId, { text: `@Diazo ${text}`, threadId: message.id, ...runnerArg() })
       setDraft('')
     } catch (err) {
       setFailed(true)

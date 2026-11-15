@@ -5,7 +5,7 @@ import { ConfigError, realEnvironment, userConfigPath } from './config.ts'
 import { find, pull, push } from './frames.ts'
 import { realIo } from './io.ts'
 import { mcpInstall } from './mcpInstall.ts'
-import { PROJECT_FILE, ProjectError, writeProjectFile } from './project.ts'
+import { PROJECT_FILE, ProjectError, projectFileIn, writeProjectFile } from './project.ts'
 import { CommandError, Session, type Context } from './session.ts'
 
 export { CommandError, Session, type Context } from './session.ts'
@@ -28,7 +28,7 @@ export async function main(argv: string[], context?: Partial<Context>): Promise<
     return await run(invocation, ctx)
   } catch (error) {
     if (error instanceof UsageError) {
-      ctx.io.err(`doop: ${error.message}\n\n${HELP}`)
+      ctx.io.err(`diazo: ${error.message}\n\n${HELP}`)
       return 2
     }
     if (
@@ -37,7 +37,7 @@ export async function main(argv: string[], context?: Partial<Context>): Promise<
       error instanceof ProjectError ||
       error instanceof CommandError
     ) {
-      ctx.io.err(`doop: ${error.message}`)
+      ctx.io.err(`diazo: ${error.message}`)
       return 1
     }
     throw error
@@ -70,7 +70,7 @@ async function showConfig(session: Session): Promise<number> {
     `agent key  ${settings.key ? `set (from ${settings.keySource === 'env' ? 'DOOP_AGENT_KEY' : 'file'})` : '(not set)'}`,
   )
   io.out(`config     ${userConfigPath(environment)}`)
-  io.out(`project    ${project ? `${project.file} -> canvas ${project.data.canvas}` : '(no .doop.json)'}`)
+  io.out(`project    ${project ? `${project.file} -> canvas ${project.data.canvas}` : '(no .diazo.json)'}`)
   return 0
 }
 
@@ -83,7 +83,8 @@ async function link(session: Session): Promise<number> {
   const { io, environment } = session.ctx
   const { canvas } = parseDoopRef(session.invocation.args[0] ?? '')
   if (!canvas) throw new CommandError('give a canvas id or link')
-  const file = path.join(environment.cwd, PROJECT_FILE)
+  /* a folder linked before the rename keeps its `.doop.json` */
+  const file = projectFileIn(environment.cwd) ?? path.join(environment.cwd, PROJECT_FILE)
   let name: string | undefined
   if (session.settings.key && session.settings.url) {
     const canvases = await session.call<CanvasListing[]>('list_canvases', {})
@@ -91,15 +92,15 @@ async function link(session: Session): Promise<number> {
     if (!match) throw new CommandError(`canvas ${canvas} is not one this agent key can open`)
     name = match.name
   } else {
-    io.err('doop: no server or agent key configured, so the canvas id was not checked')
+    io.err('diazo: no server or agent key configured, so the canvas id was not checked')
   }
   const existing = session.project?.file === file ? session.project.data : null
   if (existing && existing.canvas !== canvas) {
     const ok =
       session.invocation.flags.yes ||
-      (await io.confirm(`${PROJECT_FILE} links canvas ${existing.canvas}. Relink it to ${canvas}?`))
+      (await io.confirm(`${path.basename(file)} links canvas ${existing.canvas}. Relink it to ${canvas}?`))
     if (!ok) {
-      io.err('doop: left unchanged')
+      io.err('diazo: left unchanged')
       return 1
     }
   }

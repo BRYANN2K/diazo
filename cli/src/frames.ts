@@ -7,7 +7,7 @@ import { CommandError, type Session } from './session.ts'
 import { projectKey, writeProjectFile, type Project } from './project.ts'
 
 /** The name the CLI's edits are attributed to on the canvas. */
-export const AGENT_NAME = 'doop CLI'
+export const AGENT_NAME = 'Diazo CLI'
 
 export interface FrameData {
   id: string
@@ -113,7 +113,7 @@ export async function pull(session: Session): Promise<number> {
     if (local !== frame.html && !unchangedSincePull && !flags.yes && !flags.force) {
       const ok = await io.confirm(`${path.relative(environment.cwd, file)} has other content. Overwrite it?`)
       if (!ok) {
-        io.err('doop: left unchanged')
+        io.err('diazo: left unchanged')
         return 1
       }
     }
@@ -121,7 +121,7 @@ export async function pull(session: Session): Promise<number> {
   writeFileSync(file, frame.html)
   const tracked = recordPull(session, file, frame.id, frame.html)
   io.out(`pulled "${frame.name}" (${frame.id}) -> ${path.relative(environment.cwd, file) || file}`)
-  if (!tracked) io.err('doop: no .doop.json covers this file, so push will need --frame and cannot spot canvas edits')
+  if (!tracked) io.err('diazo: no .diazo.json covers this file, so push will need --frame and cannot spot canvas edits')
   return 0
 }
 
@@ -153,7 +153,7 @@ export async function push(session: Session): Promise<number> {
         'Pull it again to merge, or push --force to replace it (the canvas design is kept as a version).',
     )
   }
-  if (!base) io.err('doop: no pull is recorded for this file, so edits made on the canvas cannot be spotted')
+  if (!base) io.err('diazo: no pull is recorded for this file, so edits made on the canvas cannot be spotted')
 
   const diff = lineDiff(current.html, html, [`frame ${current.name}`, path.basename(file)])
   io.out(`Replace "${current.name}" (${frameId}): +${diff.added} / -${diff.removed} lines`)
@@ -161,7 +161,7 @@ export async function push(session: Session): Promise<number> {
     io.out(`The frame is ${current.approvalStatus}; changing its HTML withdraws that approval.`)
   }
   if (!flags.yes && !(await io.confirm('Push it?'))) {
-    io.err('doop: not pushed (pass --yes when no terminal can answer)')
+    io.err('diazo: not pushed (pass --yes when no terminal can answer)')
     return 1
   }
   await session.call('set_frame_html', { frame_id: frameId, html, agent_name: AGENT_NAME })

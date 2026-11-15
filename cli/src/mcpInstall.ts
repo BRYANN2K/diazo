@@ -181,7 +181,7 @@ export async function mcpInstall(session: Session, now: () => Date = () => new D
       after = client.edit(before, url)
     } catch (error) {
       if (!(error instanceof InstallError)) throw error
-      io.err(`doop: ${client.label}: ${file} ${error.message}`)
+      io.err(`diazo: ${client.label}: ${file} ${error.message}`)
       failures++
       continue
     }

@@ -496,7 +496,7 @@ export async function testWebhook(userId: string, id: string): Promise<WebhookDe
     id: `evt_${nanoid(12)}`,
     type: 'ping',
     at: Date.now(),
-    message: 'Hello from doop — this webhook is wired up.',
+    message: 'Hello from Diazo — this webhook is wired up.',
   })
   if (!result) return undefined
   record(hook, ticket, result)

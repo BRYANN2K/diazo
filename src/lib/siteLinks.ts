@@ -1,7 +1,7 @@
-/* doop.design's own pages: the marketing site and its download page.
-   Absolute on purpose: a self-hosted server has no marketing site, and the
-   desktop installers are the same whichever server they connect to. */
-export const DOWNLOAD_URL = 'https://doop.design/download'
-/* `?site` makes the server answer `/` with the website even for a signed-in
-   visitor, who would otherwise land back on the dashboard (server/marketing.ts) */
-export const WEBSITE_URL = 'https://doop.design/?site'
+/* Diazo's own pages: it has no marketing site, so its repository stands in
+   for one, and the desktop app installs from its README (the curl installer)
+   or the release assets. Absolute on purpose: the desktop installers are the
+   same whichever server they connect to. Never doop.design: that is the
+   upstream doop service, whose app and site are not Diazo's. */
+export const DOWNLOAD_URL = 'https://github.com/BRYANN2K/diazo#desktop-app-mac'
+export const WEBSITE_URL = 'https://github.com/BRYANN2K/diazo'

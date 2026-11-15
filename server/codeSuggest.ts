@@ -40,7 +40,7 @@ export async function suggestCodeLinks(
   if (!link) throw new CodeLinkError('no linked project — link this canvas to a folder in the desktop app first', 409)
   const device = localRepo.deviceFor(userId)
   if (!device || !device.grants.has(link.id))
-    throw new CodeLinkError("the linked project is unavailable — the doop desktop app holding it isn't online", 409)
+    throw new CodeLinkError("the linked project is unavailable — the Diazo desktop app holding it isn't online", 409)
   const candidates = codeNameCandidates(target.name, target.kind)
   if (!candidates.length) return { target, candidates, suggestions: [], repo: link.name, truncated: false }
   /* the device answers one request per poll, so the two reads go in turn */

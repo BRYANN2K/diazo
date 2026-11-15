@@ -248,8 +248,8 @@ function frameLines(input: DocInput): string {
 function templateDraft(input: DocInput): Draft {
   const { title, plan, frames, assets } = input
   const intent = plan
-    ? `Implement the “${title}” plan as designed in Doop — the exported PNGs in assets/ are the visual reference and tokens.json carries the canvas's design tokens.`
-    : `Implement the “${title}” design from the linked Doop frames — the exported PNGs in assets/ are the reference and tokens.json carries the canvas's design tokens.`
+    ? `Implement the “${title}” plan as designed in Diazo — the exported PNGs in assets/ are the visual reference and tokens.json carries the canvas's design tokens.`
+    : `Implement the “${title}” design from the linked Diazo frames — the exported PNGs in assets/ are the reference and tokens.json carries the canvas's design tokens.`
   const criteria: string[] = []
   for (const a of assets)
     criteria.push(
@@ -303,7 +303,7 @@ function docsFromDraft(input: DocInput, draft: Draft): { proposal: string; spec:
     : '- None recorded.'
   const problem = plan?.summary?.trim()
     ? plan.summary.trim()
-    : `The “${title}” design is approved in Doop and ready for development — this change brings it into the repo as a Stip change pack drafted from the design itself.`
+    : `The “${title}” design is approved in Diazo and ready for development — this change brings it into the repo as a Stip change pack drafted from the design itself.`
   const proposal =
     `# ${title}\n\n## Problem\n\n${problem}\n\n## Scope\n\n${scope.join('\n')}\n\n` +
     `## Decisions and open questions\n\n${questions}\n`

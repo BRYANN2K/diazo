@@ -442,8 +442,8 @@ function buildAuth() {
       sendResetPassword: async ({ user, url }) => {
         await sendMail({
           to: user.email,
-          subject: 'Reset your doop password',
-          text: `Hi ${user.name || 'there'},\n\nSomeone asked to reset the password for this doop account. If that was you, open this link (valid for 1 hour):\n\n${url}\n\nIf it wasn't you, ignore this email — nothing changes.`,
+          subject: 'Reset your Diazo password',
+          text: `Hi ${user.name || 'there'},\n\nSomeone asked to reset the password for this Diazo account. If that was you, open this link (valid for 1 hour):\n\n${url}\n\nIf it wasn't you, ignore this email — nothing changes.`,
         })
       },
     },
@@ -462,8 +462,8 @@ function buildAuth() {
       sendVerificationEmail: async ({ user, url }) => {
         await sendMail({
           to: user.email,
-          subject: 'Verify your doop email',
-          text: `Hi ${user.name || 'there'},\n\nConfirm this email address to activate your doop account:\n\n${url}\n\nIf you didn't sign up for doop, ignore this email.`,
+          subject: 'Verify your Diazo email',
+          text: `Hi ${user.name || 'there'},\n\nConfirm this email address to activate your Diazo account:\n\n${url}\n\nIf you didn't sign up for Diazo, ignore this email.`,
         })
       },
     },

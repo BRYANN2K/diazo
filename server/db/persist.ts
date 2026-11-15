@@ -5,7 +5,7 @@ import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm'
 import { db } from './index.ts'
 import * as t from './schema.ts'
 import { extractAssetIds } from '../assets.ts'
-import { roleByAgentName } from '../../shared/agents.ts'
+import { canonicalAgentName, roleByAgentName } from '../../shared/agents.ts'
 import { isCommunityCategory } from '../../shared/types.ts'
 import { storedLinkAccess } from '../../shared/canvasRole.ts'
 import type { ComponentDef } from '../../shared/components.ts'
@@ -1297,7 +1297,7 @@ export async function hydrate(): Promise<Hydrated> {
     }
     list.push({
       id: row.id,
-      agentName: row.agentName,
+      agentName: canonicalAgentName(row.agentName),
       ...(row.owner != null ? { owner: row.owner } : {}),
       color: row.color,
       status: row.status,
@@ -1339,15 +1339,15 @@ export async function hydrate(): Promise<Hydrated> {
       id: row.id,
       taskId: row.taskId,
       canvasId: row.canvasId,
-      agentName: row.agentName,
-      ...(row.targetAgent != null ? { targetAgent: row.targetAgent } : {}),
+      agentName: canonicalAgentName(row.agentName),
+      ...(row.targetAgent != null ? { targetAgent: canonicalAgentName(row.targetAgent) } : {}),
       from: row.fromName,
       ...(row.fromUserId != null ? { fromUserId: row.fromUserId } : {}),
       ...runnerField(row.runner),
       text: row.text,
       at: row.at,
       ...(row.deliveredAt != null ? { deliveredAt: row.deliveredAt } : {}),
-      ...(row.claimedBy != null ? { claimedBy: row.claimedBy } : {}),
+      ...(row.claimedBy != null ? { claimedBy: canonicalAgentName(row.claimedBy) } : {}),
       ...(row.completedAt != null ? { completedAt: row.completedAt } : {}),
       ...(failedAt !== undefined ? { failedAt } : {}),
       ...(failureReason !== undefined ? { failureReason } : {}),
@@ -1382,8 +1382,8 @@ export async function hydrate(): Promise<Hydrated> {
       text: row.text,
       at: row.at,
       ...(row.forAgent ? { forAgent: true } : {}),
-      ...(row.targetAgent != null ? { targetAgent: row.targetAgent } : {}),
-      ...(row.claimedBy != null ? { claimedBy: row.claimedBy } : {}),
+      ...(row.targetAgent != null ? { targetAgent: canonicalAgentName(row.targetAgent) } : {}),
+      ...(row.claimedBy != null ? { claimedBy: canonicalAgentName(row.claimedBy) } : {}),
       ...(row.claimedAt != null ? { claimedAt: row.claimedAt } : {}),
       ...(failedAt !== undefined ? { failedAt } : {}),
       ...(failureReason !== undefined ? { failureReason } : {}),
@@ -1416,8 +1416,8 @@ export async function hydrate(): Promise<Hydrated> {
       ...runnerField(row.runner),
       at: row.at,
       ...(row.forAgent ? { forAgent: true } : {}),
-      ...(row.targetAgent != null ? { targetAgent: row.targetAgent } : {}),
-      ...(row.claimedBy != null ? { claimedBy: row.claimedBy } : {}),
+      ...(row.targetAgent != null ? { targetAgent: canonicalAgentName(row.targetAgent) } : {}),
+      ...(row.claimedBy != null ? { claimedBy: canonicalAgentName(row.claimedBy) } : {}),
       ...(row.claimedAt != null ? { claimedAt: row.claimedAt } : {}),
       ...(row.answeredAt != null ? { answeredAt: row.answeredAt } : {}),
       ...(failedAt !== undefined ? { failedAt } : {}),

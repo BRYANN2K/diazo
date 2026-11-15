@@ -180,7 +180,7 @@ export class LocalRepo {
     if (!device || !this.online(userId) || !device.grants.has(linkId)) {
       return Promise.resolve({
         ok: false,
-        error: "the linked project is unavailable — the doop desktop app holding it isn't online",
+        error: "the linked project is unavailable — the Diazo desktop app holding it isn't online",
       })
     }
     const p: Pending = {

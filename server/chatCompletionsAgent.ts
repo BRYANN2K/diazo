@@ -80,7 +80,7 @@ export function openrouterConfig(apiKey: string, model: string, vision: boolean)
   return {
     url: OPENROUTER_URL,
     /* the attribution headers are how OpenRouter credits the calling app */
-    headers: { Authorization: `Bearer ${apiKey}`, 'HTTP-Referer': APP_ORIGIN, 'X-Title': 'Doop' },
+    headers: { Authorization: `Bearer ${apiKey}`, 'HTTP-Referer': APP_ORIGIN, 'X-Title': 'Diazo' },
     model,
     label: 'OpenRouter',
     vision,
@@ -125,7 +125,7 @@ export function kimiCodeConfig(apiKey: string, model: string, vision: boolean): 
     url: KIMI_CODE_URL,
     /* Kimi Code's terms ask every tool to name itself truthfully; a disguised
        client can cost the member their plan */
-    headers: { Authorization: `Bearer ${apiKey}`, 'User-Agent': `Doop/${packageJson.version}` },
+    headers: { Authorization: `Bearer ${apiKey}`, 'User-Agent': `Diazo/${packageJson.version}` },
     model,
     label: 'Kimi Code',
     vision,
