@@ -267,7 +267,19 @@ frame, token names kept), a HyperFrames project zip.
   approval, an allowlist of tools, never a path chosen by the page.
 - **WebGL in the server renderer** is software-rendered and slow; 3D shots render locally.
 
-## 12. Open questions
+## 12. Decisions (Bryan, 2026-11-15)
+
+- **Storyboard (Q1):** an ordinary page that gains a timeline, not a new page type.
+- **MVP export (Q2):** MP4/WebM rendered in the browser and on the desktop is enough for the MVP;
+  server renders stay in phase 5.
+- **Blender (Q6):** Blender is reached as an MCP server **through the desktop app**: the shell
+  spawns and talks to the Blender MCP locally (user-approved, allowlisted, like the Claude and ACP
+  agents), and redoop's agents and editor use it through the app. Which Blender MCP server (official
+  or the MIT community one) is decided at build time after a licence check; Mac first.
+
+The other questions below stay open.
+
+## 13. Open questions
 
 1. Is the storyboard a new page kind, or an ordinary page that gains a timeline when asked?
    Recommended: an ordinary page.
