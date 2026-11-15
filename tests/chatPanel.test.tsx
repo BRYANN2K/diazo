@@ -160,3 +160,107 @@ it('a new message without Reply starts a thread; ✕ drops the reply', async () 
   await act(async () => (container.querySelector('button[type="submit"]') as HTMLButtonElement).click())
   expect(calls.sendChat).toHaveBeenCalledWith('c', { text: 'Something new' })
 })
+
+function chip(text: string) {
+  return [...container.querySelectorAll('[data-slot="chip"]')].find((el) => el.textContent?.includes(text)) as
+    HTMLButtonElement | undefined
+}
+
+it('an empty chat welcomes an editor with suggestions tied to the canvas', () => {
+  useStore.setState({
+    canvas: {
+      ...canvasWith('edit'),
+      frames: [{ id: 'f1', name: 'Checkout', pageId: 'p', html: '<html><body></body></html>' }],
+      skills: [{ name: 'brand', description: 'Our brand rules', body: '' }],
+    } as unknown as Canvas,
+    chat: [],
+    activePageId: 'p',
+    selectedId: null,
+  })
+  act(() => root.render(<ChatPanel canvasId="c" />))
+  expect(container.textContent).toContain('Plan the next design with Doop')
+  expect(chip('Design a pricing page')).toBeTruthy()
+  expect(chip('Review “Checkout” for accessibility')).toBeTruthy()
+  expect(chip('Use the /brand skill')).toBeTruthy()
+})
+
+it('a suggestion sends its prompt to the agent', async () => {
+  useStore.setState({ canvas: canvasWith('edit'), chat: [] })
+  act(() => root.render(<ChatPanel canvasId="c" />))
+  await act(async () => chip('Design a pricing page')!.click())
+  expect(calls.sendChat).toHaveBeenCalledWith('c', {
+    text: 'Design a pricing page: three tiers, a feature comparison and a short FAQ.',
+  })
+})
+
+it('a skill suggestion puts /name in the composer instead of sending', () => {
+  useStore.setState({
+    canvas: { ...canvasWith('edit'), skills: [{ name: 'brand', description: 'x', body: '' }] } as unknown as Canvas,
+    chat: [],
+  })
+  act(() => root.render(<ChatPanel canvasId="c" />))
+  act(() => chip('Use the /brand skill')!.click())
+  expect(container.querySelector('textarea')!.value).toBe('/brand ')
+  expect(calls.sendChat).not.toHaveBeenCalled()
+})
+
+it('a viewer sees the welcome without suggestions', () => {
+  useStore.setState({ canvas: canvasWith('view'), chat: [] })
+  act(() => root.render(<ChatPanel canvasId="c" />))
+  expect(container.textContent).toContain('Plan the next design with Doop')
+  expect(container.querySelector('[data-slot="chip"]')).toBeNull()
+})
+
+it('the welcome gives way once the agent has answered', () => {
+  useStore.setState({ canvas: canvasWith('edit'), chat: [planMessage(), ask] })
+  act(() => root.render(<ChatPanel canvasId="c" />))
+  expect(container.textContent).not.toContain('Plan the next design with Doop')
+})
+
+it('scrolled up, Jump to latest appears, says when lines arrived, and brings the list down', () => {
+  useStore.setState({ canvas: canvasWith('edit'), chat: [planMessage(), ask] })
+  act(() => root.render(<ChatPanel canvasId="c" />))
+  const list = container.querySelector('[data-slot="panel-body"]') as HTMLDivElement
+  Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => 1000 })
+  Object.defineProperty(list, 'clientHeight', { configurable: true, get: () => 200 })
+  let top = 800
+  Object.defineProperty(list, 'scrollTop', {
+    configurable: true,
+    get: () => top,
+    set: (value: number) => (top = Math.min(value, 800)),
+  })
+  const jump = () => button('Jump to latest') ?? button('New messages')
+  expect(jump()).toBeUndefined()
+
+  act(() => {
+    list.scrollTop = 100
+    list.dispatchEvent(new Event('scroll'))
+  })
+  expect(button('Jump to latest')).toBeTruthy()
+
+  /* a new line while the reader is up the list: the list stays put */
+  const reply: ChatMessage = { id: 'm2', canvasId: 'c', from: 'Doop', agent: true, text: 'Done.', at: 4 }
+  act(() => useStore.setState({ chat: [reply, planMessage(), ask] }))
+  expect(list.scrollTop).toBe(100)
+  expect(button('New messages')).toBeTruthy()
+
+  act(() => button('New messages')!.click())
+  expect(list.scrollTop).toBe(800)
+  expect(jump()).toBeUndefined()
+})
+
+it('a failed ask shows the reason and a Retry that queues it again', async () => {
+  const failed: ChatMessage = { ...ask, forAgent: true, failedAt: 2, failureReason: 'Model refused the key' }
+  useStore.setState({ canvas: canvasWith('edit'), chat: [failed] })
+  act(() => root.render(<ChatPanel canvasId="c" />))
+  expect(container.textContent).toContain('Model refused the key')
+  await act(async () => button('Retry')!.click())
+  expect(calls.retryChatAsk).toHaveBeenCalledWith('q1')
+})
+
+it('an ask in progress shows the agent thinking in its place', () => {
+  const thinking: ChatMessage = { ...ask, forAgent: true, claimedBy: 'Doop', claimedAt: 2 }
+  useStore.setState({ canvas: canvasWith('edit'), chat: [thinking] })
+  act(() => root.render(<ChatPanel canvasId="c" />))
+  expect(container.querySelector('[role="status"]')?.textContent).toContain('Doop is thinking…')
+})

@@ -84,7 +84,12 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
 - **Plan-first Chat tab** — thread list, one composer, plan card and repo chip. An editor's line
   in the Chat tab asks Doop without an `@mention`, with a model picker per ask. A thread's Reply
   action points the composer at that thread. The composer and the message bubbles follow the
-  design library's chat sections.
+  design library's chat sections. Until someone asks Doop, the tab shows a welcome with suggestion
+  chips tied to the canvas (a pricing page, a landing page, an accessibility review of the selected
+  frame, the canvas's first skill as `/name` in the composer). The agent's turn sits in its own
+  place: a thinking row while it works, the reason and a Retry when an ask fails. The list follows
+  new lines while you read at the bottom; scrolled up, a "Jump to latest" pill (or "New messages")
+  brings you back.
 - **Canvas skills** (upstream issue #380) — named know-how per canvas: a saved brief, or "how we
   do a pricing page here". Agents see each skill's "when to use it" line and load the matching
   one on their own (`list_skills`, `get_skill`, `set_skill` over MCP, and the same tools for the
