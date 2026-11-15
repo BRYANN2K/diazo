@@ -15,10 +15,19 @@ interface Choice {
   label: string
 }
 
-/** Every connection × model the person can send to, as duel choices. */
+/** Every connection × model the person can send to, as duel choices. The
+ *  models already come from the connection's own catalog (agent-runners);
+ *  here only the entries that are not a model to compare are weeded out:
+ *  the Plan's "Claude Code default" alias stands for whatever the CLI is
+ *  set to, while a pinned `claude-*` id the Plan is set to is a real model. */
 export function duelChoices(runners: AgentRunners | null): Choice[] {
   return (runners?.runners ?? []).flatMap((runner) => {
-    const models = runner.models.length > 0 ? runner.models : [{ id: runner.model, name: runner.model, blurb: '' }]
+    let models = runner.models.length > 0 ? runner.models : [{ id: runner.model, name: runner.model, blurb: '' }]
+    if (runner.provider === 'claude-local') {
+      models = models.filter((model) => model.id !== 'default')
+      if (runner.model !== 'default' && !models.some((model) => model.id === runner.model))
+        models = [...models, { id: runner.model, name: runner.model, blurb: '' }]
+    }
     return models.map((model) => ({
       pick: { provider: runner.provider, model: model.id, ...(runner.effort ? { effort: runner.effort } : {}) },
       label: `${runner.name} · ${model.name}`,
