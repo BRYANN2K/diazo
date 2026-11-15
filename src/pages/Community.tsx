@@ -318,7 +318,7 @@ function DesignModal({
                 sizing to the frame's real height would squeeze that into a
                 portrait sliver and crop the sides away. */}
             <div
-              className="h-[300px] max-w-[min(520px,80vw)] overflow-hidden rounded-pill border border-line bg-paper-deep"
+              className="h-[300px] max-w-[min(520px,80vw)] overflow-hidden rounded-card border border-line bg-paper-deep"
               style={{ aspectRatio: `${frame.width} / ${Math.min(frame.height, PREVIEW_MAX_HEIGHT)}` }}
             >
               <FramePreview frameId={frame.id} />

@@ -9,19 +9,22 @@ import { Button } from './button'
 import { CollapsibleTrigger } from './collapsible'
 import { Tooltip } from './tooltip'
 import { XIcon } from './icons'
+import { GlideIndicator } from './glide-indicator'
 
-/* The canvas rails (Activity, Inspector). On a wide screen they float over the
-   board; inside a mobile Sheet they fill it. That used to be a `.side-panel`
+const ACTIVE_PANEL_TAB = '[data-slot=panel-tab][data-state=active], [data-slot=panel-icon-tab][data-state=active]'
+
+/* The canvas islands (01 Foundations · Panel: paper, radius 14, elevation 2).
+   On a wide screen they float over the board; inside a mobile Sheet they fill it. That used to be a `.side-panel`
    class the page reached back through with descendant selectors — it is a prop
    now, so the panel's two shapes live in one place. */
-const panelVariants = cva('flex min-w-0 flex-col overflow-hidden bg-surface', {
+const panelVariants = cva('flex min-w-0 flex-col overflow-hidden bg-paper text-body text-ink', {
   variants: {
     surface: {
-      floating: 'pointer-events-auto absolute z-[35] rounded-[14px] shadow-float',
+      floating: 'pointer-events-auto absolute z-[35] rounded-panel shadow-panel',
       /* a column flush with the window's edge and the bar above it, the
          canvas beside it (Settings → Appearance → Canvas panels); the
          caller says which side takes the hairline */
-      docked: 'pointer-events-auto absolute inset-y-0 z-[35] rounded-none border-line-soft shadow-none',
+      docked: 'pointer-events-auto absolute inset-y-0 z-[35] rounded-none border-line shadow-none',
       /* filling a Sheet: no chrome of its own, the sheet provides it */
       inline: 'h-full w-full rounded-none border-0 shadow-none',
     },
@@ -145,7 +148,7 @@ function PanelHeader({ className, ...props }: React.ComponentProps<'header'>) {
     <header
       data-slot="panel-header"
       className={cn(
-        'sticky top-0 z-[2] flex h-[42px] shrink-0 items-center justify-between gap-2 border-b border-line-soft bg-surface pr-2.5 pl-3.5 text-[12.5px] font-medium text-ink',
+        'sticky top-0 z-[2] flex h-[42px] shrink-0 items-center justify-between gap-2 border-b border-line bg-paper pr-1.5 pl-1.5 text-body font-semibold text-ink [&>:first-child:not([data-slot=panel-tabs])]:pl-2',
         className,
       )}
       {...props}
@@ -182,7 +185,16 @@ function PanelTabsRoot({ className, ...props }: React.ComponentProps<typeof Tabs
 function PanelTabs({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.List>) {
   /* min-w-0 so a long tab strip shrinks instead of shoving the close button
      out through the panel's padding */
-  return <TabsPrimitive.List data-slot="panel-tabs" className={cn('flex min-w-0 gap-0.5', className)} {...props} />
+  return (
+    <TabsPrimitive.List
+      data-slot="panel-tabs"
+      className={cn('relative flex min-w-0 gap-0.5 rounded-[9px] bg-well p-0.75', className)}
+      {...props}
+    >
+      <GlideIndicator activeSelector={ACTIVE_PANEL_TAB} className="rounded-[7px] bg-surface shadow-ring" />
+      {props.children}
+    </TabsPrimitive.List>
+  )
 }
 
 /* forwards its ref so a Tooltip can anchor on an icon-only tab */
@@ -195,7 +207,7 @@ const PanelTab = React.forwardRef<
       ref={ref}
       data-slot="panel-tab"
       className={cn(
-        'inline-flex h-[26px] items-center gap-[7px] whitespace-nowrap rounded-[8px] px-2 text-[12px] text-ink-soft transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ink data-[state=active]:bg-paper-deep data-[state=active]:font-medium data-[state=active]:text-ink',
+        'relative z-[1] inline-flex h-[26px] items-center gap-1.25 whitespace-nowrap rounded-[7px] px-2.25 text-label text-ink-2 transition-colors duration-fast hover:text-ink hover:duration-instant focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal data-[state=active]:font-medium data-[state=active]:text-ink',
         className,
       )}
       {...props}
@@ -203,9 +215,8 @@ const PanelTab = React.forwardRef<
   )
 })
 
-/** A tab with an icon, and a label that unfolds beside it while the tab is the
- *  active one (an icon strip). The label stays in the DOM when folded, so
- *  the tab keeps its accessible name; `title` covers the sighted hover. */
+/** A tab with an icon and its label (the redesign retires icon-only strips:
+ *  tabs are icon + label), on the strip's gliding surface. */
 const PanelIconTab = React.forwardRef<
   HTMLButtonElement,
   React.ComponentProps<typeof TabsPrimitive.Trigger> & {
@@ -219,19 +230,13 @@ const PanelIconTab = React.forwardRef<
       ref={ref}
       data-slot="panel-icon-tab"
       className={cn(
-        'group relative inline-flex h-[26px] shrink-0 items-center rounded-[8px] px-2 font-sans text-[12px] font-normal normal-case tracking-normal text-ink-soft transition-[background-color,color] duration-200 hover:bg-paper-deep/60 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ink data-[state=active]:bg-paper-deep data-[state=active]:font-medium data-[state=active]:text-ink motion-reduce:transition-none',
+        'group relative z-[1] inline-flex h-[26px] shrink-0 items-center rounded-[7px] px-2.25 font-sans text-label font-normal normal-case text-ink-2 transition-colors duration-fast hover:text-ink hover:duration-instant focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal data-[state=active]:font-medium data-[state=active]:text-ink',
         className,
       )}
       {...props}
     >
       <span className="grid size-3.5 shrink-0 place-items-center [&>svg]:size-3.5">{icon}</span>
-      {/* a 0fr → 1fr grid track is the one width animation CSS can run without
-          knowing the label's width */}
-      <span className="grid grid-cols-[0fr] opacity-0 transition-[grid-template-columns,opacity] duration-200 ease-out group-data-[state=active]:grid-cols-[1fr] group-data-[state=active]:opacity-100 motion-reduce:transition-none">
-        <span className="min-w-0 overflow-hidden">
-          <span className="block whitespace-nowrap pl-[7px]">{children}</span>
-        </span>
-      </span>
+      <span className="block whitespace-nowrap pl-1.25">{children}</span>
       {badge}
     </TabsPrimitive.Trigger>
   )
@@ -254,7 +259,7 @@ function PanelDisclosure({ className, ...props }: React.ComponentProps<typeof Co
     <CollapsibleTrigger
       data-slot="panel-disclosure"
       className={cn(
-        'flex w-full items-center gap-2 border-t border-line-soft bg-transparent px-3 py-2.5 text-left text-[12px] text-ink-soft hover:text-ink',
+        'flex w-full items-center gap-2 border-t border-line bg-transparent px-3 py-2.5 text-left text-label text-ink-2 transition-colors duration-fast hover:text-ink hover:duration-instant',
         className,
       )}
       {...props}
@@ -278,7 +283,7 @@ function PanelClose({
         variant="bare"
         size="icon-sm"
         aria-label={text}
-        className={cn('size-7 shrink-0 rounded-[7px] text-ink-faint hover:bg-paper-deep hover:text-ink', className)}
+        className={cn('size-7 shrink-0 rounded-control text-ink-2 hover:bg-well hover:text-ink', className)}
         {...props}
       >
         <XIcon className="size-3.5" />

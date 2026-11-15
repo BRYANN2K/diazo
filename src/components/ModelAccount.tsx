@@ -184,7 +184,7 @@ const maActions = 'mt-3 flex items-center gap-[10px] max-md:flex-col max-md:item
 const maToggle = 'mt-4 block px-0 py-0 text-left text-body font-normal text-ink-faint hover:bg-transparent'
 /* the paste-your-redirect field: ink-bordered so it reads as the live step */
 const maInput =
-  'rounded-pill border-ink px-3 py-[10px] font-mono focus:ring-0 aria-invalid:border-accent-ink md:text-xs'
+  'rounded-control border-ink px-3 py-[10px] font-mono focus:ring-0 aria-invalid:border-accent-ink md:text-xs'
 /* buttons in the responsive action rows centre their label once stacked */
 const rowBtn = 'max-md:justify-center'
 

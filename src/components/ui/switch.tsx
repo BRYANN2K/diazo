@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
    surface thumb lifted by the ring shadow rather than a border, so it reads in
    both themes. Radix gives it role="switch", aria-checked and Space/Enter. */
 const switchVariants = cva(
-  'peer group/switch relative inline-flex flex-none cursor-pointer items-center rounded-full transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-brand data-[state=unchecked]:bg-line',
+  'peer group/switch relative inline-flex flex-none cursor-pointer items-center rounded-full transition-colors duration-fast outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-signal data-[state=unchecked]:bg-line',
   {
     variants: {
       size: {
@@ -22,7 +22,7 @@ const switchVariants = cva(
 )
 
 const thumbVariants = cva(
-  'pointer-events-none block rounded-full bg-surface shadow-ring transition-transform data-[state=unchecked]:translate-x-0.5',
+  'pointer-events-none block rounded-full bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.2)] transition-transform duration-[320ms] ease-spring-snap data-[state=unchecked]:translate-x-0.5',
   {
     variants: {
       size: {

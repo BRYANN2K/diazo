@@ -211,7 +211,7 @@ export const Loading: Story = {
         <Skeleton index={1} shape="card" />
       </div>
       <div className="relative h-20">
-        <Toast className="absolute bottom-0 left-0">
+        <Toast tone="agent" className="absolute bottom-0 left-0">
           <ToastSpinner /> Duplicating canvas…
           <ToastAction>Undo</ToastAction>
         </Toast>

@@ -1073,6 +1073,25 @@ body[data-panel-resizing] * {
     transform: translateY(4px) scale(0.98);
   }
 }
+@keyframes number-roll {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-1em);
+  }
+}
+@keyframes agent-pulse {
+  50% {
+    box-shadow: 0 0 0 5px var(--agent-wash);
+  }
+}
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
 @keyframes pop-in {
   from {
     opacity: 0;

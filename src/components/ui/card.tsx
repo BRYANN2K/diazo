@@ -3,22 +3,22 @@ import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/lib/utils'
 
-/* Cards draw at the 10px pill step, a notch inside the 12px tile corner
-   (rounded-card) the home and gallery tiles use. */
+/* Cards draw at the 12px card corner, the same as the home and gallery tiles
+   (01 Foundations: radius-card). */
 const cardVariants = cva('min-w-0 bg-surface', {
   variants: {
     tone: {
       /* a resting surface: squircle corners, no drawn border — the edge is
          the half-pixel ring inside the elevation shadow */
-      default: 'rounded-pill corner-squircle shadow-elevation-1',
+      default: 'rounded-card corner-squircle shadow-elevation-1',
       /* settings/admin sections: a flat panel that groups rows */
-      flat: 'rounded-pill border border-line',
+      flat: 'rounded-card border border-line',
       /* clickable tiles (canvas cards): the shadow deepens on hover — the
          lift is under the card, nothing is redrawn */
       raised:
-        'rounded-pill corner-squircle shadow-elevation-1 transition-[box-shadow] duration-normal ease-out-quad hover:shadow-elevation-1-hover',
+        'rounded-card corner-squircle shadow-elevation-1 transition-[box-shadow] duration-normal ease-out-quad hover:shadow-elevation-1-hover',
       /* an empty state's placeholder: a dashed outline on the paper, no surface */
-      dashed: 'rounded-pill border-[1.5px] border-dashed border-line bg-transparent',
+      dashed: 'rounded-card border-[1.5px] border-dashed border-line bg-transparent',
     },
     /* `hero` is the generous corner of the one card on an otherwise empty page */
     shape: { default: '', hero: 'rounded-[18px]' },
