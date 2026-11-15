@@ -133,8 +133,20 @@ import {
   beginTicketUpload,
   endTicketUpload,
   createAsset,
+  storeAsset,
   MAX_ASSET_BYTES,
 } from './assets.ts'
+import {
+  cancelRenderJob,
+  createRenderJob,
+  finishRenderJob,
+  getRenderJob,
+  initRenderJobs,
+  listRenderJobs,
+  patchRenderJob,
+  wireRenderJobs,
+} from './motionJobs.ts'
+import { MOTION_LIMITS, parseCompositionBody, parseOps } from '../shared/motion.ts'
 import { placeImage, placedImageResult } from './placeImage.ts'
 import * as ingest from './ingest.ts'
 import * as agentKeys from './agentKeys.ts'
@@ -230,6 +242,9 @@ await webhooks.hydrateWebhooks()
 await hydrateFonts() // before the first request: frame writes add the faces they use
 billing.reportBillingConfig()
 actions.hydrateLogs(data)
+/* render jobs the restart orphaned are already marked failed by hydrate;
+   the in-memory pool mirrors the table for the REST routes */
+initRenderJobs(data.renderJobs)
 seed()
 
 /* Never-attempted queued cards get their first pickup after boot. Hydration
@@ -450,6 +465,7 @@ setInterval(() => {
 }, 5000)
 
 actions.wire(broadcast, agentTouch)
+wireRenderJobs(broadcast)
 /* after the room has been told: email for the people who were not in it */
 onCanvasEvent(commentNotifications.onCanvasEvent)
 onCanvasEvent(webhooks.onCanvasEvent)
@@ -2819,6 +2835,166 @@ app.post('/api/canvases/:id/pages/:pageId/duplicate', async (req, res) => {
   }
 })
 
+/* ------------------------------------------------------------------ */
+/* Motion Studio: a page's timeline (shared/motion.ts, docs/motion-api)  */
+/* ------------------------------------------------------------------ */
+
+/* a page's composition: view reads it, edit writes it whole (PUT), as ops
+   (PATCH) or removes it (DELETE). expectedRevision guards concurrent
+   writers: 409 when the timeline moved under them. */
+app.get('/api/canvases/:id/pages/:pageId/composition', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  res.json({ composition: store.getComposition(canvas.id, req.params.pageId) ?? null })
+})
+
+app.put('/api/canvases/:id/pages/:pageId/composition', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const pageId = req.params.pageId
+  if (!canvasPages(canvas).some((p) => p.id === pageId)) return res.status(404).json({ error: 'page not found' })
+  const parsed = parseCompositionBody(req.body)
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error })
+  const existing = store.getComposition(canvas.id, pageId)
+  const expected = req.body?.expectedRevision
+  if (expected !== undefined) {
+    if (typeof expected !== 'number' || !Number.isInteger(expected)) {
+      return res.status(400).json({ error: 'expectedRevision must be an integer' })
+    }
+    if ((existing?.revision ?? 0) !== expected) {
+      return res.status(409).json({ error: 'the composition changed since you read it', composition: existing ?? null })
+    }
+  }
+  res.json({ composition: actions.setComposition(canvas.id, parsed.value, pageId, userActor(req)) })
+})
+
+app.patch('/api/canvases/:id/pages/:pageId/composition', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const pageId = req.params.pageId
+  const existing = store.getComposition(canvas.id, pageId)
+  if (!existing) return res.status(404).json({ error: 'the page has no composition — PUT one first' })
+  const expected = req.body?.expectedRevision
+  if (expected !== undefined) {
+    if (typeof expected !== 'number' || !Number.isInteger(expected)) {
+      return res.status(400).json({ error: 'expectedRevision must be an integer' })
+    }
+    if (existing.revision !== expected) {
+      return res.status(409).json({ error: 'the composition changed since you read it', composition: existing })
+    }
+  }
+  const ops = parseOps(req.body?.ops, existing.duration)
+  if (!ops.ok) return res.status(400).json({ error: ops.error })
+  const applied = actions.patchComposition(canvas.id, pageId, ops.value, userActor(req))
+  if (!applied.ok) return res.status(400).json({ error: applied.error })
+  res.json({ composition: applied.composition })
+})
+
+app.delete('/api/canvases/:id/pages/:pageId/composition', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  actions.deleteComposition(canvas.id, req.params.pageId, userActor(req))
+  res.json({ ok: true })
+})
+
+/* render jobs: records a browser tab or the desktop shell claims, reports
+   on and uploads into an /a/ asset */
+app.get('/api/canvases/:id/pages/:pageId/composition/renders', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  res.json({ jobs: listRenderJobs(canvas.id).filter((j) => j.pageId === req.params.pageId) })
+})
+
+app.post('/api/canvases/:id/pages/:pageId/composition/renders', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const pageId = req.params.pageId
+  const comp = store.getComposition(canvas.id, pageId)
+  if (!comp) return res.status(404).json({ error: 'the page has no composition — make the timeline first' })
+  const created = createRenderJob({
+    composition: comp,
+    format: req.body?.format,
+    target: req.body?.target,
+    width: req.body?.width,
+    height: req.body?.height,
+    fps: req.body?.fps,
+    range: req.body?.range,
+    by: { id: req.user!.id, name: req.user!.name },
+  })
+  if (!created.ok) return res.status(created.status).json({ error: created.error })
+  res.status(201).json({ job: created.job })
+})
+
+app.get('/api/renders/:id', (req, res) => {
+  const job = getRenderJob(req.params.id)
+  if (!job) return res.status(404).json({ error: 'no such render job' })
+  if (!requireCanvas(req, res, job.canvasId, 'view')) return
+  res.json({ job })
+})
+
+app.patch('/api/renders/:id', (req, res) => {
+  const job = getRenderJob(req.params.id)
+  if (!job) return res.status(404).json({ error: 'no such render job' })
+  if (!requireCanvas(req, res, job.canvasId, 'edit')) return
+  const body = req.body ?? {}
+  const claimedBy = typeof body.claimedBy === 'string' && body.claimedBy.length <= 100 ? body.claimedBy : undefined
+  const patched = patchRenderJob(
+    job,
+    {
+      status: body.status,
+      progress: body.progress,
+      error: body.error,
+      claimedBy,
+    },
+    claimedBy ?? `user:${req.user!.id}`,
+  )
+  if (!patched.ok) return res.status(patched.status).json({ error: patched.error })
+  res.json({ job: patched.job })
+})
+
+/* the finished file: raw video bytes sniffed against the job's format,
+   stored as an /a/ asset; marks the job done */
+app.put(
+  '/api/renders/:id/upload',
+  express.raw({ type: () => true, limit: MOTION_LIMITS.RENDER_MAX_BYTES }),
+  async (req, res) => {
+    const job = getRenderJob(req.params.id)
+    if (!job) return res.status(404).json({ error: 'no such render job' })
+    if (!requireCanvas(req, res, job.canvasId, 'edit')) return
+    if (job.status === 'done') return res.status(409).json({ error: 'the job already has its file' })
+    if (job.status === 'failed' || job.status === 'canceled') {
+      return res.status(409).json({ error: `the job is ${job.status}` })
+    }
+    const buf = req.body as Buffer
+    if (!Buffer.isBuffer(buf) || buf.length === 0)
+      return res.status(400).json({ error: 'send the video file as the body' })
+    if (buf.length > MOTION_LIMITS.RENDER_MAX_BYTES) {
+      return res.status(413).json({ error: `over ${Math.round(MOTION_LIMITS.RENDER_MAX_BYTES / 1024 / 1024)} MB` })
+    }
+    const isMp4 = buf.length > 11 && buf.subarray(4, 8).toString('latin1') === 'ftyp'
+    const isWebm = buf.length > 3 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3
+    const mime = isMp4 ? 'video/mp4' : isWebm ? 'video/webm' : null
+    if (!mime) return res.status(400).json({ error: 'not an mp4 or webm file' })
+    if ((job.format === 'mp4') !== isMp4) {
+      return res.status(400).json({ error: `the job wants ${job.format}, the file is ${isMp4 ? 'mp4' : 'webm'}` })
+    }
+    const ext = isMp4 ? 'mp4' : 'webm'
+    const asset = await storeAsset(
+      buf,
+      { mime, ext },
+      { canvasId: job.canvasId, ownerId: req.user!.id, uploadedBy: req.user!.name },
+    )
+    res.json({ job: finishRenderJob(job, asset.id), asset: { id: asset.id, url: `/a/${asset.id}.${ext}` } })
+  },
+)
+
+app.delete('/api/renders/:id', (req, res) => {
+  const job = getRenderJob(req.params.id)
+  if (!job) return res.status(404).json({ error: 'no such render job' })
+  if (!requireCanvas(req, res, job.canvasId, 'edit')) return
+  res.json({ job: cancelRenderJob(job) })
+})
+
 app.post('/api/canvases/:id/frames', (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   const { name, pageId, x, y, width, height, html, hidden, locked, z, rotation } = req.body ?? {}
@@ -4225,6 +4401,19 @@ wss.on('connection', (ws, upgradeReq) => {
         presence.activeFrameId = msg.frameId
         broadcast(canvasId, { type: 'editing', clientId: presence.clientId, frameId: msg.frameId }, presence.clientId)
         break
+      case 'composition:playhead': {
+        /* presence, like cursor: a collaborator's playhead on a timeline.
+           Validate bounds before echoing to the room. */
+        const t = typeof msg.t === 'number' && Number.isFinite(msg.t) ? msg.t : null
+        const pageId = typeof msg.pageId === 'string' && msg.pageId.length <= 100 ? msg.pageId : null
+        if (t === null || pageId === null || t < 0 || t > 86400) break
+        broadcast(
+          canvasId,
+          { type: 'composition:playhead', clientId: presence.clientId, pageId, t, playing: msg.playing === true },
+          presence.clientId,
+        )
+        break
+      }
       case 'frame:drag':
         broadcast(
           canvasId,
