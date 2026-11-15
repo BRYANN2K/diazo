@@ -79,8 +79,11 @@
   menu writes `/name` into the ask. Tests: `canvasSkills.test.ts`, `residentSkills.test.ts`,
   `skillsUi.test.tsx`.
 - Claude Code on the desktop (`shared/localAgent.ts`, `server/localAgent.ts`,
-  `desktop/src-tauri/src/claude.rs`): the model menu is the CLI's aliases (`CLAUDE_MODEL_ALIASES`),
-  which `claude --model` resolves to the newest model the installed CLI knows, plus a pinned
+  `desktop/src-tauri/src/claude.rs`): the model menu (`CLAUDE_PLAN_MODELS`) is the CLI's aliases
+  (`CLAUDE_MODEL_ALIASES`, named "Latest Opus" and so on), which `claude --model` resolves to the
+  newest model the installed CLI knows, then every pinned id Anthropic still serves
+  (`CLAUDE_PINNED_MODELS`: Fable 5.2 to Haiku 4.5, by name and version; a release adds a line),
+  served by `/api/agent-runners` and listed in Settings' dropdown, plus any other
   `claude-*` id accepted by shape (`isClaudeModel`, mirrored by `valid_model` in the shell before the
   value becomes an argument); `effort` (`CLAUDE_EFFORTS`, `local_agent_preferences.effort`) rides the
   job and becomes `--effort`. A pre-alias shell's "Invalid model" is reworded by
@@ -137,7 +140,8 @@
   user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
   A `RunnerPick` may carry its own `effort` for one run — the composer's picker and each duel
-  contestant's `StepSlider` — and `pickModel` honours it (`accountWithPick` for the OpenAI
+  contestant's `EffortMenu` (a compact dropdown driven by the runner's effort list, with a
+  "Default" row sending no effort where the connection has none configured) — and `pickModel` honours it (`accountWithPick` for the OpenAI
   kinds, `isClaudeEffort` → `claude --effort` on the Plan); the localized names and blurbs for
   the dials live in `src/lib/effortLabels.ts`.
 - Image descriptions (`.context/specs/image-descriptions.md`, `server/imageDescriptions.ts`,
@@ -182,10 +186,16 @@
   as `runner` (a `RunnerPick`: provider, model, effort; `tasks.runner` JSON, migration 0045)
   and the send button's meter names it. The model duel (`server/duels.ts`,
   `DuelDialog.tsx`/`DuelCards.tsx`, `shared/duel.ts`) builds one `RunnerPick` per contestant —
-  provider, model, effort from the row's own `StepSlider` where the connection has a dial —
-  into one scoped card each; `duelChoices` drops the Plan's `default` meta-alias (not a model
-  to compare) and offers the pinned `claude-*` id the Plan is set to, and the comparison card
-  names each entry's effort. `pickModel(payerId, pick)` honours it for that run when the named connection is on, a
+  provider, model, effort from the contestant's `EffortMenu` where the connection has a dial —
+  into one scoped card each. `duelGroups` groups the choices by connection (its `AppIcon` from
+  `src/lib/runnerMarks.ts`, initials for a provider with no tile; no provider is named in the
+  UI), drops a `default` meta-entry (not a model to compare) and keeps a configured model the
+  menu does not list; the dialog shows contestant slots A-C, a search over model and connection
+  names from seven models (`filterDuelGroups`), and holds the list at three. Entry labels use
+  `knownModelName` ("Claude Plan · Opus 5.5", "ChatGPT · GPT-6.1 Sol"), and the comparison card
+  names each entry's effort. OpenAI names are written one way by `openaiModelName`
+  (`shared/modelMenu.ts`) in every catalog. Tests: `duelDialog.test.tsx`, `duel.test.ts`,
+  `claudeModels.test.ts`, `modelNames.test.ts`. `pickModel(payerId, pick)` honours it for that run when the named connection is on, a
   model the provider does not know runs on the connection's configured one, and anything else
   runs on the default. One resident run claims work that agrees on the pick (`actions.nextWork`,
   the `runner` filter on the take functions): comments and automations carry none and run on
