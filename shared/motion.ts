@@ -1086,6 +1086,30 @@ function clipAllowed(track: MotionTrack, clip: MotionClip): string | null {
 /** the key element state is indexed under: `frameId/elementId` */
 export const elementKey = (frameId: string, elementId: string): string => `${frameId}/${elementId}`
 
+/**
+ * Point a copied composition at the copied frames: page/canvas duplication
+ * remaps `frameId` targets (element tracks, frame clips) through the copy's
+ * id map and leaves references to frames outside it alone.
+ */
+export function remapCompositionRefs<T extends Pick<Composition, 'tracks'>>(
+  comp: T,
+  frameIds: ReadonlyMap<string, string>,
+): T {
+  const remap = (id: string | undefined) => (id ? (frameIds.get(id) ?? id) : id)
+  return {
+    ...comp,
+    tracks: comp.tracks.map((track) => ({
+      ...track,
+      frameId: remap(track.frameId),
+      clips: track.clips?.map((clip) =>
+        clip.source.type === 'frame'
+          ? { ...clip, source: { ...clip.source, frameId: remap(clip.source.frameId)! } }
+          : clip,
+      ),
+    })),
+  }
+}
+
 export const newComposition = (input: {
   canvasId: string
   pageId: string

@@ -10,6 +10,7 @@ import { isCommunityCategory } from '../../shared/types.ts'
 import { storedLinkAccess } from '../../shared/canvasRole.ts'
 import type { ComponentDef } from '../../shared/components.ts'
 import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
+import type { Composition, RenderJob } from '../../shared/motion.ts'
 import type { CanvasSkill } from '../../shared/skills.ts'
 import type {
   LibraryIndexState,
@@ -128,6 +129,10 @@ export async function saveCanvasCopy(c: Canvas): Promise<void> {
 
     if (c.skills?.length) {
       await tx.insert(t.canvasSkills).values(c.skills.map((skill) => ({ canvasId: c.id, ...skill })))
+    }
+
+    if (c.compositions?.length) {
+      await tx.insert(t.compositions).values(c.compositions.map((comp) => compositionRow(comp)))
     }
 
     if (c.components?.length) {
@@ -258,6 +263,156 @@ export function saveSkill(canvasId: string, skill: CanvasSkill) {
 
 export function deleteSkill(canvasId: string, name: string) {
   swallow(db.delete(t.canvasSkills).where(and(eq(t.canvasSkills.canvasId, canvasId), eq(t.canvasSkills.name, name))))
+}
+
+/* ---- Motion Studio: compositions, versions, render jobs ---- */
+
+function compositionRow(c: Composition) {
+  return {
+    id: c.id,
+    canvasId: c.canvasId,
+    pageId: c.pageId,
+    duration: c.duration,
+    fps: c.fps,
+    width: c.width,
+    height: c.height,
+    posterTime: c.posterTime ?? null,
+    tracks: c.tracks,
+    revision: c.revision,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+    updatedBy: c.updatedBy,
+  }
+}
+
+export function saveComposition(c: Composition) {
+  swallow(
+    db
+      .insert(t.compositions)
+      .values(compositionRow(c))
+      .onConflictDoUpdate({
+        target: [t.compositions.canvasId, t.compositions.pageId],
+        set: {
+          duration: c.duration,
+          fps: c.fps,
+          width: c.width,
+          height: c.height,
+          posterTime: c.posterTime ?? null,
+          tracks: c.tracks,
+          revision: c.revision,
+          updatedAt: c.updatedAt,
+          updatedBy: c.updatedBy,
+        },
+      }),
+  )
+}
+
+export function deleteComposition(canvasId: string, pageId: string) {
+  /* versions and jobs go with the composition they belong to — the version
+     delete reads the composition id, so it runs before the row delete */
+  swallow(
+    db
+      .delete(t.compositionVersions)
+      .where(
+        inArray(
+          t.compositionVersions.compositionId,
+          db
+            .select({ id: t.compositions.id })
+            .from(t.compositions)
+            .where(and(eq(t.compositions.canvasId, canvasId), eq(t.compositions.pageId, pageId))),
+        ),
+      )
+      .then(() =>
+        db.delete(t.compositions).where(and(eq(t.compositions.canvasId, canvasId), eq(t.compositions.pageId, pageId))),
+      ),
+  )
+  swallow(db.delete(t.renderJobs).where(and(eq(t.renderJobs.canvasId, canvasId), eq(t.renderJobs.pageId, pageId))))
+}
+
+export function deleteCompositions(canvasId: string) {
+  swallow(db.delete(t.compositions).where(eq(t.compositions.canvasId, canvasId)))
+  swallow(db.delete(t.compositionVersions).where(eq(t.compositionVersions.canvasId, canvasId)))
+  swallow(db.delete(t.renderJobs).where(eq(t.renderJobs.canvasId, canvasId)))
+}
+
+/** a composition keeps its last 20 states (spec's undo budget) */
+export const MAX_COMPOSITION_VERSIONS = 20
+
+export function saveCompositionVersion(v: {
+  id: string
+  compositionId: string
+  canvasId: string
+  state: Composition
+  savedAt: number
+  savedBy: string
+  savedByKind?: string
+  runId?: string
+}) {
+  swallow(
+    (async () => {
+      await db.insert(t.compositionVersions).values({
+        id: v.id,
+        compositionId: v.compositionId,
+        canvasId: v.canvasId,
+        state: v.state,
+        savedAt: v.savedAt,
+        savedBy: v.savedBy,
+        savedByKind: v.savedByKind ?? null,
+        runId: v.runId ?? null,
+      })
+      const excess = await db
+        .select({ id: t.compositionVersions.id })
+        .from(t.compositionVersions)
+        .where(eq(t.compositionVersions.compositionId, v.compositionId))
+        .orderBy(desc(t.compositionVersions.savedAt))
+        .offset(MAX_COMPOSITION_VERSIONS)
+      if (excess.length) {
+        await db.delete(t.compositionVersions).where(
+          inArray(
+            t.compositionVersions.id,
+            excess.map((e) => e.id),
+          ),
+        )
+      }
+    })(),
+  )
+}
+
+/** the render-job row the public RenderJob maps to and back */
+function jobRow(j: RenderJob) {
+  return {
+    id: j.id,
+    canvasId: j.canvasId,
+    pageId: j.pageId,
+    compositionId: j.compositionId,
+    format: j.format,
+    target: j.target,
+    width: j.width,
+    height: j.height,
+    fps: j.fps,
+    rangeStart: j.range.start,
+    rangeEnd: j.range.end,
+    status: j.status,
+    progress: j.progress,
+    outputAssetId: j.outputAssetId ?? null,
+    error: j.error ?? null,
+    claimedBy: j.claimedBy ?? null,
+    claimedAt: j.claimedAt ?? null,
+    createdBy: j.createdBy,
+    createdByName: j.createdByName,
+    createdAt: j.createdAt,
+    updatedAt: j.updatedAt,
+    finishedAt: j.finishedAt ?? null,
+  }
+}
+
+export function saveRenderJob(j: RenderJob) {
+  const row = jobRow(j)
+  swallow(db.insert(t.renderJobs).values(row).onConflictDoUpdate({ target: t.renderJobs.id, set: row }))
+}
+
+export function deleteRenderJob(id: string) {
+  swallow(db.delete(t.renderJobs).where(eq(t.renderJobs.id, id)))
 }
 
 export function deleteGuideline(canvasId: string, name: string) {
@@ -436,9 +591,12 @@ const FRAME_DEBOUNCE_MS = 400
 /** Persist a duplicated page as one unit: the canvas's new page list and
  * every copied frame land together or not at all, so a copy is never half
  * there after a crash. Like saveCanvasCopy, success means durable. */
-export async function savePageCopy(c: Canvas, frames: Frame[]): Promise<void> {
+export async function savePageCopy(c: Canvas, frames: Frame[], compositions: Composition[] = []): Promise<void> {
   await db.transaction(async (tx) => {
     await tx.update(t.canvases).set(canvasColumns(c)).where(eq(t.canvases.id, c.id))
+    if (compositions.length) {
+      await tx.insert(t.compositions).values(compositions.map((comp) => compositionRow(comp)))
+    }
     if (!frames.length) return
     await tx.insert(t.frames).values(
       frames.map((frame) => ({
@@ -834,6 +992,7 @@ export function deleteCanvas(canvasId: string) {
     ),
   )
   swallow(db.delete(t.memoryReferences).where(eq(t.memoryReferences.canvasId, canvasId)))
+  deleteCompositions(canvasId)
   swallow(db.delete(t.decisions).where(eq(t.decisions.canvasId, canvasId)))
   swallow(db.delete(t.memoryProposals).where(eq(t.memoryProposals.canvasId, canvasId)))
   swallow(db.delete(t.agentRuns).where(eq(t.agentRuns.canvasId, canvasId)))
@@ -1132,6 +1291,9 @@ export async function flush(getFrame: (id: string) => Frame | undefined): Promis
 
 export interface Hydrated {
   canvases: Canvas[]
+  /** canvasId -> render jobs, newest first; a job left 'rendering' across a
+   *  restart is failed on the way in */
+  renderJobs: Map<string, RenderJob[]>
   tasks: Map<string, AgentTask[]> // canvasId -> newest first
   feedback: Map<string, TaskFeedback[]>
   comments: Map<string, ElementComment[]>
@@ -1163,6 +1325,8 @@ export async function hydrate(): Promise<Hydrated> {
     decisionRows,
     proposalRows,
     memberRows,
+    compositionRows,
+    renderJobRows,
   ] = await Promise.all([
     db.select().from(t.canvases),
     /* every column but html: frame HTML is most of the database and loads
@@ -1181,6 +1345,8 @@ export async function hydrate(): Promise<Hydrated> {
     db.select().from(t.decisions).orderBy(desc(t.decisions.at)),
     db.select().from(t.memoryProposals).orderBy(desc(t.memoryProposals.at)),
     db.select().from(t.canvasMembers).orderBy(t.canvasMembers.addedAt),
+    db.select().from(t.compositions),
+    db.select().from(t.renderJobs).orderBy(desc(t.renderJobs.createdAt)),
   ])
 
   const canvases: Canvas[] = canvasRows.map((c) => ({
@@ -1258,6 +1424,25 @@ export async function hydrate(): Promise<Hydrated> {
   for (const { canvasId, ...skill } of skillRows) {
     const c = byId.get(canvasId)
     if (c) (c.skills ??= []).push(skill)
+  }
+  for (const row of compositionRows) {
+    const c = byId.get(row.canvasId)
+    if (!c) continue
+    ;(c.compositions ??= []).push({
+      id: row.id,
+      canvasId: row.canvasId,
+      pageId: row.pageId,
+      duration: row.duration,
+      fps: row.fps,
+      width: row.width,
+      height: row.height,
+      ...(row.posterTime != null ? { posterTime: row.posterTime } : {}),
+      tracks: row.tracks,
+      revision: row.revision,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      updatedBy: row.updatedBy,
+    })
   }
   for (const row of tokenRows) {
     const c = byId.get(row.canvasId)
@@ -1480,7 +1665,60 @@ export async function hydrate(): Promise<Hydrated> {
     proposals.set(row.canvasId, list)
   }
 
-  return { canvases, tasks, feedback, comments, chat, legacyCommentSelectors, activity, decisions, proposals }
+  const renderJobs = new Map<string, RenderJob[]>()
+  for (const row of renderJobRows) {
+    const list = renderJobs.get(row.canvasId) ?? []
+    /* a job still rendering/encoding across a restart lost its renderer —
+       fail it visibly; a queued job waits for a client to pick it up */
+    const interrupted = row.status === 'rendering' || row.status === 'encoding'
+    const job: RenderJob = {
+      id: row.id,
+      canvasId: row.canvasId,
+      pageId: row.pageId,
+      compositionId: row.compositionId,
+      format: row.format,
+      target: row.target,
+      width: row.width,
+      height: row.height,
+      fps: row.fps,
+      range: { start: row.rangeStart, end: row.rangeEnd },
+      status: interrupted ? 'failed' : row.status,
+      progress: row.progress,
+      ...(row.outputAssetId != null ? { outputAssetId: row.outputAssetId } : {}),
+      ...(row.error != null || interrupted ? { error: row.error ?? 'the renderer went away — queue it again' } : {}),
+      ...(row.claimedBy != null ? { claimedBy: row.claimedBy } : {}),
+      ...(row.claimedAt != null ? { claimedAt: row.claimedAt } : {}),
+      createdBy: row.createdBy,
+      createdByName: row.createdByName,
+      createdAt: row.createdAt,
+      updatedAt: interrupted ? now : row.updatedAt,
+      ...(row.finishedAt != null ? { finishedAt: row.finishedAt } : {}),
+      ...(interrupted ? { finishedAt: row.finishedAt ?? now } : {}),
+    }
+    if (interrupted) {
+      swallow(
+        db
+          .update(t.renderJobs)
+          .set({ status: 'failed', error: job.error ?? null, finishedAt: now, updatedAt: now })
+          .where(eq(t.renderJobs.id, row.id)),
+      )
+    }
+    list.push(job)
+    renderJobs.set(row.canvasId, list)
+  }
+
+  return {
+    canvases,
+    tasks,
+    feedback,
+    comments,
+    chat,
+    legacyCommentSelectors,
+    activity,
+    decisions,
+    proposals,
+    renderJobs,
+  }
 }
 
 /** One-time import of the pre-DB data/store.json so existing canvases survive. */

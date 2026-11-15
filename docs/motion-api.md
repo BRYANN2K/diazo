@@ -348,3 +348,12 @@ write/Python/render tools need an approval UX that does not exist yet.
 Contract changes after the first commit land here, dated.
 
 <!-- append new entries below -->
+
+- **2025-02 — additive helpers + render defaults.** `shared/motion.ts` gains
+  `elementKey(frameId, elementId)` (the `frameId/elementId` index key used by
+  `FrameState.elements`) and `remapCompositionRefs(comp, frameIds)` which the
+  server applies when a page or canvas is duplicated: element-track `frameId`s
+  and `frame` clip sources are rewritten through the copy's id map, refs to
+  frames outside the copy are left alone. On `POST …/composition/renders`
+  `target` is now optional and defaults to `'browser'`; `format` stays
+  required.
