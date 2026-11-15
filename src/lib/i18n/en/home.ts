@@ -104,6 +104,8 @@ export const home = {
   /* agent allowance */
   meterGeminiCloud: 'Doop Agent on your Gemini cloud connection',
   meterClaudeLocal: 'Doop Agent on your local Claude CLI',
+  meterDevinLocal: 'Doop Agent on your local Devin CLI',
+  meterGrokLocal: 'Doop Agent on your local Grok CLI',
   meterChatgpt: 'Doop Agent on your ChatGPT',
   meterProviderKey: 'Doop Agent on your {provider} key',
   meterCustomProvider: 'Doop Agent on {provider}',

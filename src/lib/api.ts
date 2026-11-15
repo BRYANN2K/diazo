@@ -17,7 +17,7 @@ import type { TokenDiff } from '../../shared/tokenSync'
 import type { PatchSummary } from '../../shared/patch'
 import type { FrameCodeInput, FrameCodePreview } from '../../shared/frameCode'
 import type { ImageDescriptionMode, ImageDescriptionPreference } from '../../shared/imageDescriptions'
-import type { AgentRunners, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
+import type { AgentRunners, LocalRunnerProvider, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
 import type { CanvasFindResult } from '../../shared/canvasFind'
 import type {
   ImportReport,
@@ -270,7 +270,7 @@ export interface Allowance {
   connected: boolean
   /** connected a model account the Doop Agent itself can run on */
   byoModel: boolean
-  byoKind?: ModelAccountKind | 'claude-local' | 'gemini-cloud'
+  byoKind?: ModelAccountKind | LocalRunnerProvider | 'gemini-cloud'
   byoEmail?: string
   /** a custom provider's name, when that is the default */
   byoName?: string

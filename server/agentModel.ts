@@ -5,6 +5,15 @@ import { geminiCloudRuns, geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { localAgentRuns, type LocalHarnessRequest } from './localAgentRuns.ts'
 import { isClaudeEffort, isClaudeModel, type LocalAgentResult } from '../shared/localAgent.ts'
 import type { RunnerPick } from '../shared/agentRunner.ts'
+import {
+  ACP_AGENT_NAMES,
+  acpAgentOf,
+  acpRunArgs,
+  isAcpEffort,
+  isAcpModel,
+  isAcpRunnerProvider,
+  type AcpRunnerProvider,
+} from '../shared/acpAgent.ts'
 import { fromAnthropicUsage, type TokenUsage } from '../shared/usage.ts'
 import Anthropic from '@anthropic-ai/sdk'
 import { withFreshToken, accountModelFor, accountVisionFor, accountWithPick, customModelFor } from './modelAccounts.ts'
@@ -43,7 +52,7 @@ import {
  */
 
 export type ServerProvider = 'anthropic' | 'azure'
-export type Provider = ServerProvider | AccountKind | 'claude-local' | 'gemini-cloud'
+export type Provider = ServerProvider | AccountKind | 'claude-local' | AcpRunnerProvider | 'gemini-cloud'
 
 export interface AgentTurnRequest {
   /** ordered system blocks; `cache` marks an Anthropic cache breakpoint */
@@ -457,7 +466,12 @@ export async function pickModel(payerId?: string, pick?: RunnerPick): Promise<Ag
     return { plan: { enabled: false, model: 'default' }, accounts: [], default: undefined }
   })
   const picked =
-    pick && (pick.provider === 'claude-local' ? connections.plan.enabled : usableAccount(connections, pick.provider))
+    pick &&
+    (pick.provider === 'claude-local'
+      ? connections.plan.enabled
+      : isAcpRunnerProvider(pick.provider)
+        ? !!connections.acp?.[acpAgentOf(pick.provider)].enabled
+        : usableAccount(connections, pick.provider))
   const provider = picked ? pick.provider : connections.default
   /* the pick's model and effort apply only to the connection it named */
   const own = picked ? pick : undefined
@@ -474,6 +488,25 @@ export async function pickModel(payerId?: string, pick?: RunnerPick): Promise<Ag
       label: `Claude CLI (${run.model}${run.effort ? `, ${run.effort} effort` : ''})`,
       userId: payerId,
       runHarness: (req) => localAgentRuns.start(payerId, run, req),
+      run: () =>
+        Promise.reject(
+          new Error('Repository imports require a server provider. Select your connected account in Settings.'),
+        ),
+    }
+  }
+  if (isAcpRunnerProvider(provider)) {
+    const agent = acpAgentOf(provider)
+    const preference = connections.acp?.[agent]
+    /* like the Plan: the work waits for this desktop rather than moving */
+    if (!preference?.enabled || !localAgentRuns.online(payerId, Date.now(), agent)) return null
+    const model = own && isAcpModel(own.model) ? own.model : preference.model
+    const effort = own && isAcpEffort(agent, own.effort) ? own.effort : preference.effort
+    const run = acpRunArgs(agent, model, effort, localAgentRuns.catalog(payerId, agent))
+    return {
+      provider,
+      label: `${ACP_AGENT_NAMES[agent]} (${run.model}${run.effort ? `, ${run.effort} effort` : ''})`,
+      userId: payerId,
+      runHarness: (req) => localAgentRuns.start(payerId, { agent, ...run }, req),
       run: () =>
         Promise.reject(
           new Error('Repository imports require a server provider. Select your connected account in Settings.'),

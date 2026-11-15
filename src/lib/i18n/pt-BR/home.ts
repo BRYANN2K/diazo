@@ -105,6 +105,8 @@ export const home: Catalog['home'] = {
   /* agent allowance */
   meterGeminiCloud: 'Doop Agent na sua conexão do Gemini na nuvem',
   meterClaudeLocal: 'Doop Agent no seu Claude CLI local',
+  meterDevinLocal: 'Doop Agent no seu Devin CLI local',
+  meterGrokLocal: 'Doop Agent no seu Grok CLI local',
   meterChatgpt: 'Doop Agent no seu ChatGPT',
   meterProviderKey: 'Doop Agent na sua chave da {provider}',
   meterCustomProvider: 'Doop Agent em {provider}',

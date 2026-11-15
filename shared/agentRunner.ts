@@ -10,19 +10,32 @@
  */
 import { ACCOUNT_KIND_LABELS, type AccountKindName } from './modelMenu.ts'
 import { isCustomProviderKind, type CustomProviderKind } from './customProvider.ts'
+import { ACP_AGENT_NAMES, ACP_RUNNER_PROVIDERS, type AcpRunnerProvider } from './acpAgent.ts'
+
+/** The connections that run on the person's own desktop: the Claude Plan,
+ *  and the agents spoken to over ACP (shared/acpAgent.ts). */
+export type LocalRunnerProvider = 'claude-local' | AcpRunnerProvider
 
 /** A connection by name, or a custom provider (`custom:<id>`) a person added. */
-export type RunnerProvider = 'claude-local' | AccountKindName | CustomProviderKind
+export type RunnerProvider = LocalRunnerProvider | AccountKindName | CustomProviderKind
 
 /** The connections Doop knows by name; custom providers are named by their person. */
-export const RUNNER_PROVIDERS: readonly ('claude-local' | AccountKindName)[] = [
+export const RUNNER_PROVIDERS: readonly (LocalRunnerProvider | AccountKindName)[] = [
   'claude-local',
+  ...ACP_RUNNER_PROVIDERS,
   ...(Object.keys(ACCOUNT_KIND_LABELS) as AccountKindName[]),
 ]
 
-export const RUNNER_NAMES: Record<'claude-local' | AccountKindName, string> = {
+export const RUNNER_NAMES: Record<LocalRunnerProvider | AccountKindName, string> = {
   'claude-local': 'Claude Plan',
+  'devin-local': ACP_AGENT_NAMES.devin,
+  'grok-local': ACP_AGENT_NAMES.grok,
   ...ACCOUNT_KIND_LABELS,
+}
+
+/** A connection whose runs go to a desktop rather than a provider's API. */
+export function isLocalRunner(provider: unknown): provider is LocalRunnerProvider {
+  return provider === 'claude-local' || provider === 'devin-local' || provider === 'grok-local'
 }
 
 /** What a card asks to run on. The model and effort are checked against the
@@ -78,7 +91,7 @@ export interface AgentRunner {
   /** 'Claude Plan', 'ChatGPT', 'OpenAI'… */
   name: string
   email?: string
-  /** the Claude Plan: whether the desktop that runs it is polling right now */
+  /** a desktop connection: whether the desktop that runs it is polling right now */
   online?: boolean
   /** what the connection runs on when a pick names no model */
   model: string

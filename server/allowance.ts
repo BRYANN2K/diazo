@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import type { LocalRunnerProvider } from '../shared/agentRunner.ts'
 import { readConnections, usableAccount, type Connections } from './agentDefaults.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { eq, sql } from 'drizzle-orm'
@@ -35,7 +36,7 @@ export interface Allowance {
   /** the user connected a model account the Doop Agent can run on */
   byoModel: boolean
   /** which kind, for the UI copy */
-  byoKind?: AccountKind | 'claude-local' | 'gemini-cloud'
+  byoKind?: AccountKind | LocalRunnerProvider | 'gemini-cloud'
   /** the default account's email, so the UI can name what is connected */
   byoEmail?: string
   /** a custom provider's name, which no label table knows */

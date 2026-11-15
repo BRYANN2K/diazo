@@ -1,6 +1,17 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import type Anthropic from '@anthropic-ai/sdk'
-import type { LocalAgentJob, LocalAgentPreference, LocalAgentResult } from '../shared/localAgent.ts'
+import type { LocalAgentJob, LocalAgentResult } from '../shared/localAgent.ts'
+import type { AcpAgent, AcpCatalogModel } from '../shared/acpAgent.ts'
+
+/** Which desktop agent a run goes to: the Claude Plan, or an ACP agent. */
+export type LocalAgentKind = 'claude' | AcpAgent
+
+/** What one run is started with on the desktop. */
+export interface LocalRunSettings {
+  agent?: LocalAgentKind
+  model: string
+  effort?: LocalAgentJob['effort']
+}
 
 export interface LocalHarnessRequest {
   canvasId: string
@@ -18,6 +29,7 @@ export interface LocalHarnessRequest {
 
 interface Run {
   userId: string
+  agent: LocalAgentKind
   deviceId?: string
   job: LocalAgentJob
   request: LocalHarnessRequest
@@ -28,21 +40,42 @@ interface Run {
   resolve: (result: LocalAgentResult) => void
 }
 
+/** Devices poll per agent, so a desktop running Devin is not the one
+ *  holding the Claude Plan by accident. */
+const deviceKey = (userId: string, agent: LocalAgentKind) => (agent === 'claude' ? userId : `${agent}:${userId}`)
+
 /** A single server process owns each live canvas sweep, as with resident.ts.
- * Tokens expire with the run. No Claude credentials pass through this relay. */
+ * Tokens expire with the run. No CLI credentials pass through this relay. */
 export class LocalAgentRuns {
   private runs = new Map<string, Run>()
   private devices = new Map<string, { id: string; at: number }>()
+  /** the models each desktop's ACP CLI lists, as it last reported them */
+  private catalogs = new Map<string, { models: AcpCatalogModel[]; at: number }>()
 
-  online(userId: string, now = Date.now()) {
-    return now - (this.devices.get(userId)?.at ?? 0) < 30_000
+  online(userId: string, now = Date.now(), agent: LocalAgentKind = 'claude') {
+    return now - (this.devices.get(deviceKey(userId, agent))?.at ?? 0) < 30_000
   }
 
-  poll(userId: string, deviceId: string, now = Date.now()): LocalAgentJob | null {
-    const device = this.devices.get(userId)
-    if (device && device.id !== deviceId && this.online(userId, now)) return null
-    this.devices.set(userId, { id: deviceId, at: now })
-    const run = [...this.runs.values()].find((r) => r.userId === userId && !r.closing && !r.request.isCanceled?.())
+  /** What the desktop's CLI listed, while that desktop is online. */
+  catalog(userId: string, agent: AcpAgent, now = Date.now()): AcpCatalogModel[] {
+    return this.online(userId, now, agent) ? (this.catalogs.get(deviceKey(userId, agent))?.models ?? []) : []
+  }
+
+  poll(
+    userId: string,
+    deviceId: string,
+    now = Date.now(),
+    agent: LocalAgentKind = 'claude',
+    catalog?: AcpCatalogModel[],
+  ): LocalAgentJob | null {
+    const key = deviceKey(userId, agent)
+    const device = this.devices.get(key)
+    if (device && device.id !== deviceId && this.online(userId, now, agent)) return null
+    this.devices.set(key, { id: deviceId, at: now })
+    if (catalog) this.catalogs.set(key, { models: catalog, at: now })
+    const run = [...this.runs.values()].find(
+      (r) => r.userId === userId && r.agent === agent && !r.closing && !r.request.isCanceled?.(),
+    )
     if (!run || (run.deviceId && run.deviceId !== deviceId)) return null
     run.deviceId = deviceId
     run.lastSeen = now
@@ -51,13 +84,14 @@ export class LocalAgentRuns {
 
   start(
     userId: string,
-    { model, effort }: Pick<LocalAgentPreference, 'model' | 'effort'>,
+    { agent = 'claude', model, effort }: LocalRunSettings,
     request: LocalHarnessRequest,
   ): Promise<LocalAgentResult> {
     const id = randomUUID()
     return new Promise((resolve) => {
       const run: Run = {
         userId,
+        agent,
         request,
         resolve,
         lastSeen: Date.now(),
@@ -72,6 +106,8 @@ export class LocalAgentRuns {
           prompt: request.prompt,
           system: request.system,
           maxTurns: request.maxTurns,
+          /* absent for the Plan, so a shell from before ACP reads it unchanged */
+          ...(agent !== 'claude' ? { agent, tools: request.tools.map((tool) => tool.name) } : {}),
         },
       }
       this.runs.set(id, run)
@@ -114,12 +150,14 @@ export class LocalAgentRuns {
     run.resolve(result)
   }
 
-  async cancel(userId: string) {
-    this.devices.delete(userId)
+  async cancel(userId: string, agent: LocalAgentKind = 'claude') {
+    this.devices.delete(deviceKey(userId, agent))
+    this.catalogs.delete(deviceKey(userId, agent))
+    const name = agent === 'claude' ? 'Claude' : agent === 'devin' ? 'Devin' : 'Grok'
     await Promise.all(
       [...this.runs.values()]
-        .filter((r) => r.userId === userId && !r.closing)
-        .map((r) => this.close(r, { success: false, text: 'Local Claude run stopped.' })),
+        .filter((r) => r.userId === userId && r.agent === agent && !r.closing)
+        .map((r) => this.close(r, { success: false, text: `Local ${name} run stopped.` })),
     )
   }
 
@@ -130,7 +168,7 @@ export class LocalAgentRuns {
           (r) =>
             !r.closing &&
             (r.request.isCanceled?.() ||
-              (r.deviceId ? now - r.lastSeen > 45_000 : !this.online(r.userId, now)) ||
+              (r.deviceId ? now - r.lastSeen > 45_000 : !this.online(r.userId, now, r.agent)) ||
               now - r.startedAt > 30 * 60_000),
         )
         .map((r) =>
@@ -142,7 +180,11 @@ export class LocalAgentRuns {
           }),
         ),
     )
-    for (const [userId, device] of this.devices) if (now - device.at > 60_000) this.devices.delete(userId)
+    for (const [key, device] of this.devices)
+      if (now - device.at > 60_000) {
+        this.devices.delete(key)
+        this.catalogs.delete(key)
+      }
   }
 }
 

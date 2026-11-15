@@ -5,7 +5,7 @@ import { Fragment, useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api } from '../lib/api'
 import type { AgentModelCatalog, AgentModelOption, DeviceFlow, ModelAccountKind, ModelAccounts } from '../lib/api'
-import type { RunnerProvider } from '../../shared/agentRunner'
+import { isLocalRunner, type RunnerProvider } from '../../shared/agentRunner'
 import { AvailableRow, ConnectionRow, FieldError, ConnectionSection, ModelSelect } from './ConnectionTable'
 import { CustomProviderForm } from './CustomProviderForm'
 import { isCustomProviderKind, type CustomProviderKind } from '../../shared/customProvider'
@@ -378,7 +378,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     )
   const makeDefault = (provider: RunnerProvider) =>
     act(
-      provider === 'claude-local' ? null : provider,
+      isLocalRunner(provider) ? null : provider,
       () => api.setDefaultRunner(provider),
       () => posthog.capture('agent_default_changed', { provider }),
     )
