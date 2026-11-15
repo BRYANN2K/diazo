@@ -91,6 +91,34 @@ White system (Doop UI v2, canvas guideline `doop-ui-system`): neutral greys, no 
   `text-paper`, never `text-white`, so it flips with the theme. `text-white` is for brand and
   accent fills and for dark overlays, which stay dark in both themes.
 
+## Marks (Diazo)
+
+The product is **Diazo** (a non-commercial fork of doop; doop's name and Disc-D logo are its
+owner's trademarks and are not used). The brand sheet is the canvas page "00 Brand — Diazo"; the
+source SVGs are in `.github/assets/diazo/`. Everything is drawn inline from
+`src/components/Logo.tsx`, never from an image.
+
+- **The mark ("02 Contact")**: an ink-outline D, the original, and offset bottom-right of it a
+  solid signal-blue D, the print, which knocks a gap out of the outline where they overlap. One
+  48-unit box. `Logo` is the colour mark (outline in the text colour, print in `--diazo-signal`:
+  `#1f5fff`, `#5b8cff` in dark); `DiazoMark` is the inline glyph, one colour by default (`tone="color"`
+  for the blue print, `color` for a pill). No tile, no container: the mark sits on the surface.
+- **The wordmark**: "diazo", lowercase, Familjen Grotesk outlined into paths (no font loads), the
+  i's dot a small blue print D. `DiazoWordmark` alone, `Wordmark` the mark + word lockup (headers,
+  the auth card). It reads as "Diazo" to assistive tech; prose writes "Diazo" capitalised.
+- **The reveal** (`DiazoMark animated`, the home greeting): the original draws its outline, then the
+  print lands on it from the top left. Once, never looped; a plain fade under reduced motion.
+- **The Diazo Agent** (the built-in agent; mention `@diazo`, `@doop` still routes): its own face,
+  `DiazoAgentMark`, the two Ds smaller in agent orange (`--diazo-agent`: `#e8650a`, `#ff8f45` in
+  dark) on a ringed surface disc. `working` animates it (an arc chases the ring, the original is
+  redrawn, the print pulses), the presence pill's glaze state; at rest under reduced motion.
+  `solid` is white Ds on a filled disc: `RoleMark` uses it in each role's crew colour. An outside
+  agent never wears it: a known brand gets its `BrandMark`, an unknown MCP client the mono mark.
+- **Colours** are the marks' only: `--brand` (`#0177d3`) stays the UI accent for selection and
+  focus. The app icon (`desktop/app-icon.png`, from `app-icon-1024.svg`) is the colour mark on a
+  pale gridded tile; favicons are `public/favicon.svg` (follows the OS theme) plus PNG/ICO
+  fallbacks in the light colours.
+
 ## Component catalogue (Storybook)
 
 - `bun run storybook` serves the catalogue on :6006; `bun run build-storybook` writes
@@ -98,7 +126,8 @@ White system (Doop UI v2, canvas guideline `doop-ui-system`): neutral greys, no 
   It rides on the app's own `vite.config.ts`, so Tailwind, the `@` alias and the fonts need no second
   setup, and the toolbar's theme switch flips `.dark` the way `src/lib/theme.ts` does.
 - Foundations (colours, the type scale, radii, shadows, every icon) render from the live tokens;
-  Primitives cover `src/components/ui`; Marks is the one page every logo and avatar comes from;
+  Primitives cover `src/components/ui`; Marks is the one page every logo and avatar comes from
+  (Diazo, its reveal, the Diazo Agent at rest and at work, the brands);
   Shell shows the rail and the search palette with sample data. A new primitive is not done until it
   has a story, and a new screen starts from this catalogue rather than from a blank file.
 
@@ -156,7 +185,7 @@ Each has a story.
   brand row itself, a rail toggle plus wordmark, whenever an `AppRail` is mounted, and the rail
   opens as a left drawer that closes on any pick) - surfaces and content. The rail is built from
   the same parts: `DashSidebar variant="rail"` (borderless, `bg-sub`, 236px), `DashSidebarBrand`
-  (the Disc-D home button, with the rail's own controls as children), `DashSectionLabel
+  (the Diazo mark as the home button, with the rail's own controls as children), `DashSectionLabel
 density="rail"` (the group caption with its chevron) and `DashNavItem density="rail"` (the 31px
   row; `as="div"` for a static row such as an agent, `count` for a mono number, `trailing` for
   anything else). `DashHeader variant="bare"` drops the fill and the rule on the rail pages.
@@ -184,7 +213,8 @@ density="rail"` (the group caption with its chevron) and `DashNavItem density="r
   `error`, and the `manual` steps in a `Disclosure`.
 - `Avatar` - the one presence face: a disc on a 2px surface collar, any px `size` (24 in the
   presence pill, 18 on a canvas card, 28-32 in menus and rows); a person is initials on a 22% tint
-  of their colour, an agent its brand mark on the surface, `glaze` for an agent at work, `stacked`
+  of their colour, an agent its brand mark on the surface (the built-in Diazo Agent: its own ringed
+  face filling the disc), `glaze` for an agent at work (the Diazo Agent animates instead), `stacked`
   to overlap, `children` replaces the initials. `PresenceFace` in `PeerAvatars.tsx` is the same
   component under the canvas chrome's name. `AvatarStack` (the first `max` people plus a "+N"
   disc), `tone="ink"` (the account's own face: initials on an ink disc, no collar), `initials()`
@@ -195,9 +225,9 @@ density="rail"` (the group caption with its chevron) and `DashNavItem density="r
   the brand tile (23% corners, inset edge and soft drop) with its glyph at 56% (`claude`, `claude-code`, `openai`,
   `gemini`, `openrouter`, `opencode`, `deepseek`, `kimi`, `seedream`, `codex`, `cursor`, `mcp`, `headless`, `github`, `figma`, `photoshop`, `canva`, `website`, `live-app`, `pdf`, `png`, `svg`,
   `jpg`), 32px in a list row and 40px beside a modal title,
-  `Wordmark`, `Logo` / `DoopMark` (the bare Disc-D; `animated` hops its dot, as the home greeting
-  wears it), `icons.tsx` - identity. Feature tiles (`FigmaTile`, `MetaTile`, the integrations'
-  `Tile`s, `AgentIcon`) compose a `BrandMark`; nothing else inlines a logo path.
+  `Wordmark`, `Logo` / `DiazoMark` / `DiazoWordmark` / `DiazoAgentMark` (`src/components/Logo.tsx`,
+  rules under Marks below), `icons.tsx` - identity. Feature tiles (`FigmaTile`, `MetaTile`, the
+  integrations' `Tile`s, `AgentIcon`) compose a `BrandMark`; nothing else inlines a logo path.
 - Editor chrome (`PropertyField`, `Toolbar`, `Panel`, `Menu`) - the canvas page's own set, still on
   exact pixel sizes until its pass. `Panel` has three surfaces: `floating` (an island over the
   board), `docked` (a flush column with a hairline on its canvas side, the Appearance setting's

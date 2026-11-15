@@ -2,7 +2,7 @@
 
 The detailed guide inherited from upstream doop's README: the editor, agents and MCP tools,
 accounts, deployment, environment variables, the REST API and the architecture. It applies to
-redoop as well. Start with the [README](../README.md); this fork's additions are in [FEATURES.md](FEATURES.md).
+Diazo as well (doop's name and logo below are upstream's, a trademark; Diazo uses its own). Start with the [README](../README.md); this fork's additions are in [FEATURES.md](FEATURES.md).
 
 ## Overview
 
@@ -87,7 +87,7 @@ OpenRouter brings Qwen, GLM, MiniMax and more ([details](#past-the-free-tasks-co
 ## Develop from source
 
 ```bash
-git clone https://github.com/BRYANN2K/redoop && cd redoop
+git clone https://github.com/BRYANN2K/diazo && cd diazo
 bun install
 bun run dev
 ```
