@@ -25,21 +25,119 @@
     U+2325-2326, U+232B, U+238B, U+23CE, U+2423;
 }
 
-/* Tailwind is the utility API for Doop's existing design system. Keep the
-   semantic CSS variables below as the source of truth while the legacy
-   component rules are migrated incrementally. */
+/* Diazo type, direction B "Hyperlegible" (redesign 2026-11): Atkinson
+   Hyperlegible Next for the chrome, its Mono for values, Familjen Grotesk for
+   display (20px and up). Self-hosted variable woff2 (latin + latin-ext), so no
+   page ever asks Google Fonts for the UI's own faces. Licences: OFL, beside the
+   files in src/assets/fonts. */
+@font-face {
+  font-family: 'Atkinson Hyperlegible Next';
+  src: url('./assets/fonts/atkinson-hyperlegible-next-latin.woff2') format('woff2');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Atkinson Hyperlegible Next';
+  src: url('./assets/fonts/atkinson-hyperlegible-next-latin-ext.woff2') format('woff2');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Atkinson Hyperlegible Next';
+  src: url('./assets/fonts/atkinson-hyperlegible-next-latin-italic.woff2') format('woff2');
+  font-weight: 200 800;
+  font-style: italic;
+  font-display: swap;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Atkinson Hyperlegible Mono';
+  src: url('./assets/fonts/atkinson-hyperlegible-mono-latin.woff2') format('woff2');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Atkinson Hyperlegible Mono';
+  src: url('./assets/fonts/atkinson-hyperlegible-mono-latin-ext.woff2') format('woff2');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Familjen Grotesk';
+  src: url('./assets/fonts/familjen-grotesk-latin.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Familjen Grotesk';
+  src: url('./assets/fonts/familjen-grotesk-latin-ext.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range:
+    U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F,
+    U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* Tailwind is the utility API for the design system. The role tokens in
+   :root (ground, paper, surface, well, line, ink, ink-2, ink-3, signal,
+   agent, ok, caution, danger) are the source of truth, taken from the
+   "redoop — Redesign 2026-11" canvas (Cyanotype bench). The older names
+   (paper-deep, sub, ink-soft, ink-faint, brand, accent-ink, success,
+   warning) stay as aliases of those roles, so every screen speaks the new
+   palette without being rewritten. */
 @theme inline {
+  /* roles */
+  --color-ground: var(--ground);
   --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-well: var(--well);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-on-ink: var(--on-ink);
+  --color-signal: var(--signal);
+  --color-signal-wash: var(--signal-wash);
+  --color-agent: var(--agent);
+  --color-agent-ink: var(--agent-ink);
+  --color-agent-wash: var(--agent-wash);
+  --color-danger: var(--danger);
+  --color-danger-wash: var(--danger-wash);
+  --color-ok: var(--ok);
+  --color-ok-wash: var(--ok-wash);
+  --color-caution: var(--caution);
+  --color-caution-ink: var(--caution-ink);
+  /* aliases kept for the screens written before the redesign */
   --color-canvas: var(--canvas);
   --color-paper-deep: var(--paper-deep);
   --color-sub: var(--sub);
-  --color-surface: var(--surface);
-  --color-ink: var(--ink);
   --color-ink-soft: var(--ink-soft);
   --color-ink-faint: var(--ink-faint);
   --color-ink-ghost: var(--ink-ghost);
-  --color-line: var(--line);
-  --color-line-soft: var(--line-soft);
   --color-code: var(--code);
   --color-code-ink: var(--code-ink);
   --color-brand: var(--brand);
@@ -54,25 +152,38 @@
   --font-display: var(--font-display);
   --font-hero: var(--font-hero);
   --font-mono: var(--font-mono);
+  /* elevation: 1 ring (controls), 2 panel (islands), 3 pop (menus, toasts),
+     4 modal (dialogs) */
+  --shadow-ring: var(--shadow-ring);
+  --shadow-ring-hover: var(--shadow-ring-hover);
+  --shadow-panel: var(--shadow-panel);
+  --shadow-float: var(--shadow-float);
   --shadow-card: var(--shadow-card);
   --shadow-pop: var(--shadow-pop);
   --shadow-modal: var(--shadow-modal);
-  --shadow-ring: var(--shadow-ring);
-  --shadow-ring-hover: var(--shadow-ring-hover);
-  --shadow-float: var(--shadow-float);
   --shadow-elevation-1: var(--shadow-elevation-1);
   --shadow-elevation-1-hover: var(--shadow-elevation-1-hover);
   --shadow-elevation-1-focus: var(--shadow-elevation-1-focus);
   --shadow-elevation-2: var(--shadow-elevation-2);
-  /* Named motion: Penner curves as `ease-out-quad` etc. Durations are
-     `duration-instant` … `duration-slow` (defined as utilities below). */
-  --ease-out-quad: var(--ease-out-quad);
-  --ease-out-cubic: var(--ease-out-cubic);
-  --ease-out-quint: var(--ease-out-quint);
-  --ease-in-out-quad: var(--ease-in-out-quad);
-  --ease-in-out-cubic: var(--ease-in-out-cubic);
+  /* Motion (redoop-system "Motion"): `ease-out` enters, `ease-in-out` moves
+     between two states, `ease-exit` leaves, and the three springs are CSS
+     linear() curves, each meant for its own duration (`duration-spring-*`).
+     The Penner names are kept as aliases of the system curves. */
+  --ease-out: var(--ease-out);
+  --ease-in-out: var(--ease-in-out);
+  --ease-exit: var(--ease-exit);
+  --ease-spring-soft: var(--spring-soft);
+  --ease-spring-snap: var(--spring-snap);
+  --ease-spring-pop: var(--spring-pop);
+  --ease-out-quad: var(--ease-out);
+  --ease-out-cubic: var(--ease-out);
+  --ease-out-quint: var(--ease-out);
+  --ease-in-out-quad: var(--ease-in-out);
+  --ease-in-out-cubic: var(--ease-in-out);
+  --animate-enter: enter var(--dur-base) var(--ease-out) both;
+  --animate-shimmer: shimmer 1.6s linear infinite;
   --breakpoint-xs: 30rem;
-  /* Doop's mobile boundary, in one place. `md:` is the switch between the
+  /* Diazo's mobile boundary, in one place. `md:` is the switch between the
      phone layout and the desktop one, and useIsMobile() matches the same
      900px in JS — keep the two in step or the canvas will render its mobile
      sheets while the page is still in its desktop layout. */
@@ -116,151 +227,252 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
-  /* Named corners, by what they sit on: a tag (badge, checkbox square), a row
-     in a list or rail, a control (button, field), a pill or chip, a card or
-     tile, a floating panel. These are the shapes the white system draws;
+  /* Named corners, by what they sit on: a tag (badge, checkbox square), a
+     control (button, field), a row in a list, menu or rail, a pill (chips,
+     fully round), a card or tile, a floating island, a sheet (dialogs).
      `rounded-[Npx]` is for a one-off. */
   --radius-tag: 4px;
-  --radius-row: 7px;
-  --radius-control: 8px;
-  --radius-pill: 10px;
+  --radius-control: 7px;
+  --radius-row: 8px;
+  --radius-pill: 999px;
   --radius-card: 12px;
   --radius-panel: 14px;
-  /* The type scale, by role. The chrome speaks in `text-body`; everything
-     else is a named step away from it. Line heights ride along, so a class
-     sets both. `text-[Npx]` is for a one-off that the scale cannot name. */
-  --text-micro: 10px;
+  --radius-sheet: 20px;
+  /* The type scale, by role. Atkinson runs wide, so the chrome speaks in
+     `text-body` 12.5px with a hair of negative tracking; everything else is
+     a named step away. Line heights and tracking ride along, so one class
+     sets all three. Familjen (font-display) from `text-heading` up only. */
+  --text-micro: 10.5px;
   --text-micro--line-height: 1.4;
   --text-caption: 11px;
   --text-caption--line-height: 1.4;
   --text-label: 12px;
   --text-label--line-height: 1.4;
+  --text-label--letter-spacing: -0.005em;
   --text-body: 12.5px;
-  --text-body--line-height: 1.45;
+  --text-body--line-height: 1.4;
+  --text-body--letter-spacing: -0.005em;
   --text-copy: 13.5px;
   --text-copy--line-height: 1.55;
+  --text-copy--letter-spacing: -0.005em;
   --text-lead: 15px;
   --text-lead--line-height: 1.5;
-  --text-heading: 18px;
-  --text-heading--line-height: 1.25;
-  --text-title: 24px;
+  --text-lead--letter-spacing: -0.005em;
+  --text-heading: 20px;
+  --text-heading--line-height: 1.15;
+  --text-heading--letter-spacing: -0.015em;
+  --text-title: 28px;
   --text-title--line-height: 1.15;
-  --text-display: 46px;
-  --text-display--line-height: 1;
+  --text-title--letter-spacing: -0.03em;
+  --text-display: 44px;
+  --text-display--line-height: 1.05;
+  --text-display--letter-spacing: -0.03em;
 }
 
 :root {
   color-scheme: light;
-  /* Pure white system (Doop UI v2): the canvas is a hair off white, panels
-     are white, and neutral greys carry every other layer — no warm cream.
-     --paper is the canvas, --surface a floating panel, --paper-deep the
-     pressed/selected row fill, --sub the filled well behind a field. */
-  --paper: #fdfdfd;
-  /* the stage behind the frames: a step below white, so a white frame reads
-     on it without a border (Figma's canvas grey) */
-  --canvas: #f5f5f5;
-  --paper-deep: #f0f0f0;
+  /* Cyanotype bench, light: a quiet graphite bench. --ground is the stage
+     and the app backdrop, --paper a page, --surface an island or card,
+     --well a filled field or a hovered row. */
+  --ground: #eef0f2;
+  --paper: #fbfbfc;
   --surface: #ffffff;
-  --sub: #f7f7f7;
-  --ink: #111111;
-  --ink-soft: #5f5e5b;
-  --ink-faint: #9c9b99;
+  --well: #f1f3f5;
+  --line: #e1e4e8;
+  --line-soft: #eceef1;
+  --ink: #15171c;
+  --ink-2: #5b616b;
+  --ink-3: #9298a2;
+  --on-ink: #ffffff;
+  /* Signal blue = people and selection. Agent orange = anything an agent
+     does. Never swap them, and never show an agent by colour alone. */
+  --signal: #1f5fff;
+  --signal-wash: #1f5fff1a;
+  --agent: #e8650a;
+  --agent-ink: #b54a00;
+  --agent-wash: #e8650a1a;
+  /* Danger (red ink) only for failure, always with an icon and text.
+     Caution (yellow pencil) only on hover or a selected frame. */
+  --danger: #c8202f;
+  --danger-wash: #c8202f14;
+  --ok: #1e8e62;
+  --ok-wash: #1e8e6214;
+  --caution: #e3b341;
+  --caution-ink: #8a6400;
+  /* aliases */
+  --canvas: var(--ground);
+  --paper-deep: var(--well);
+  --sub: var(--well);
+  --ink-soft: var(--ink-2);
+  --ink-faint: var(--ink-3);
   /* the quietest text: placeholders, unit letters inside fields */
-  --ink-ghost: #b8b8b8;
-  --line: #dcdcdc;
-  --line-soft: #ececec;
+  --ink-ghost: #b4b9c1;
   /* the code well (CodeBlock, the HTML editors): dark in both themes */
-  --code: #17171b;
-  --code-ink: #e9e9ee;
-  /* Selection blue is the one accent: selection, focus, the live-agent
-     signal. Red only means "something failed", which --accent-ink carries. */
-  --brand: #0177d3;
-  --accent-ink: #d0341f;
-  --dot: #ebebeb;
-  /* Status: the fill (--success, --warning) tints and dots, the ink variant
-     is text that sits on paper. Both flip with the theme. */
-  --success: #1fc16b;
-  --success-ink: #0f7a45;
-  --success-on-ink: #6fd8a0;
-  --warning: #ff8447;
-  --warning-ink: #a8481a;
-  /* the silver hairline an active agent's avatar wears in the presence pill */
-  --glaze-ring: #c9c9cd;
-  /* Diazo's marks only (Logo.tsx), never the UI accent: the print's signal
-     blue and the Diazo Agent's orange */
-  --diazo-signal: #1f5fff;
-  --diazo-agent: #e8650a;
-  --font-ui: 'Inter', 'Doop Keys', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  /* Display is the SAME sans as the UI — the chrome is quiet by design. The
-     home greeting's Hanken Grotesk Light is the one other face (`font-hero`). */
-  --font-display: 'Inter', 'Doop Keys', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  --font-hero: 'Hanken Grotesk', 'Inter', 'Doop Keys', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  --font-mono: 'Geist Mono', 'Doop Keys', ui-monospace, monospace;
-  /* Ring system: no CSS borders on controls and panels — a 1px shadow ring
-     draws the edge, and a soft two-step drop lifts it. --shadow-ring is a
-     resting control (inputs, chips, buttons), --shadow-float a panel that
-     floats over the canvas, --shadow-pop a menu or toast. */
-  --shadow-ring: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 1px 2px -1px rgba(0, 0, 0, 0.06), 0 2px 4px rgba(0, 0, 0, 0.04);
-  --shadow-ring-hover: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 1px 2px -1px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.06);
-  --shadow-float: 0 12px 40px -10px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --code: #15171b;
+  --code-ink: #eceef2;
+  --brand: var(--signal);
+  --accent-ink: var(--danger);
+  --dot: #d7dbe0;
+  --success: var(--ok);
+  --success-ink: var(--ok);
+  --success-on-ink: #6fd8a8;
+  --warning: var(--caution);
+  --warning-ink: var(--caution-ink);
+  /* the ring an agent at work wears in the presence pill */
+  --glaze-ring: var(--agent);
+  /* Diazo's marks (Logo.tsx): the print's signal blue, the agent's orange */
+  --diazo-signal: var(--signal);
+  --diazo-agent: var(--agent);
+  --font-ui: 'Atkinson Hyperlegible Next', 'Doop Keys', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Familjen Grotesk', 'Atkinson Hyperlegible Next', 'Doop Keys', system-ui, sans-serif;
+  /* the home greeting: the display face, nothing else */
+  --font-hero: var(--font-display);
+  --font-mono: 'Atkinson Hyperlegible Mono', 'Doop Keys', ui-monospace, monospace;
+  /* Elevation. No borders on controls: a 1px ring draws the edge. */
+  --shadow-ring: 0 0 0 1px var(--line);
+  --shadow-ring-hover: 0 0 0 1px color-mix(in srgb, var(--ink) 18%, transparent);
+  --shadow-panel: 0 0 0 1px var(--line), 0 8px 24px -12px rgba(21, 23, 28, 0.18);
+  --shadow-pop: 0 0 0 1px var(--line), 0 16px 40px -12px rgba(21, 23, 28, 0.24);
+  --shadow-modal: 0 0 0 1px var(--line), 0 32px 80px -20px rgba(21, 23, 28, 0.32);
+  --scrim: rgba(12, 13, 16, 0.24);
+  --shadow-float: var(--shadow-panel);
   --shadow-card: var(--shadow-ring);
-  --shadow-pop: 0 25px 80px -12px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.06);
-  /* modal card: a half-pixel ring and three short soft shadows */
-  --shadow-modal:
-    0 0 0 0.5px rgba(0, 0, 0, 0.07), 0 2px 3px -2px rgba(0, 0, 0, 0.1), 0 3px 12px -4px rgba(0, 0, 0, 0.1),
-    0 4px 16px -8px rgba(0, 0, 0, 0.1);
   --shadow-elevation-1: var(--shadow-ring);
   --shadow-elevation-1-hover: var(--shadow-ring-hover);
-  --shadow-elevation-1-focus:
-    0 0 0 2px color-mix(in srgb, var(--brand) 18%, transparent), 0 0 0 1px rgba(0, 0, 0, 0.08),
-    0 5px 7px -2px rgba(0, 0, 0, 0.05), 0 7px 20px -4px rgba(0, 0, 0, 0.06);
-  --shadow-elevation-2: var(--shadow-float);
-  /* Motion: Penner easing curves and a named duration scale. */
-  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
-  --ease-out-quint: cubic-bezier(0.23, 1, 0.32, 1);
-  --ease-in-out-quad: cubic-bezier(0.455, 0.03, 0.515, 0.955);
-  --ease-in-out-cubic: cubic-bezier(0.645, 0.045, 0.355, 1);
-  --duration-instant: 0.05s;
-  --duration-micro: 0.1s;
-  --duration-fast: 0.15s;
-  --duration-normal: 0.2s;
-  --duration-slow: 0.3s;
-  --duration-slower: 0.45s;
+  --shadow-elevation-1-focus: inset 0 0 0 1px var(--signal), 0 0 0 3px var(--signal-wash);
+  --shadow-elevation-2: var(--shadow-panel);
+  /* Motion tokens (redoop-build-notes). Durations: instant (hover in), fast
+     (hover out, press), base (most enters), slow (panels), slower (number
+     roll, big moves). Springs are linear() curves sampled from a damped
+     spring, each with its own duration. src/lib/motion.ts mirrors these. */
+  --dur-instant: 80ms;
+  --dur-fast: 140ms;
+  --dur-base: 200ms;
+  --dur-slow: 280ms;
+  --dur-slower: 420ms;
+  --stagger: 30ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 0.6, 1);
+  --spring-soft: linear(
+    0,
+    0.047,
+    0.156,
+    0.29,
+    0.427,
+    0.555,
+    0.666,
+    0.757,
+    0.83,
+    0.887,
+    0.928,
+    0.958,
+    0.979,
+    0.992,
+    1.001,
+    1.005,
+    1.008,
+    1.008,
+    1.007,
+    1.005,
+    1.003,
+    1
+  );
+  --dur-spring-soft: 400ms;
+  --spring-snap: linear(
+    0,
+    0.049,
+    0.157,
+    0.285,
+    0.411,
+    0.525,
+    0.624,
+    0.706,
+    0.772,
+    0.825,
+    0.866,
+    0.899,
+    0.924,
+    0.943,
+    0.957,
+    0.968,
+    0.976,
+    0.982,
+    0.987,
+    0.99,
+    0.993,
+    0.996,
+    1
+  );
+  --dur-spring-snap: 320ms;
+  --spring-pop: linear(
+    0,
+    0.042,
+    0.142,
+    0.274,
+    0.414,
+    0.549,
+    0.67,
+    0.774,
+    0.858,
+    0.922,
+    0.97,
+    1.002,
+    1.023,
+    1.035,
+    1.039,
+    1.039,
+    1.036,
+    1.031,
+    1.026,
+    1.02,
+    1.015,
+    1.011,
+    1.007,
+    1.004,
+    1
+  );
+  --dur-spring-pop: 450ms;
+  /* the older duration names, on the new scale */
+  --duration-instant: var(--dur-instant);
+  --duration-micro: var(--dur-instant);
+  --duration-fast: var(--dur-fast);
+  --duration-normal: var(--dur-base);
+  --duration-slow: var(--dur-slow);
+  --duration-slower: var(--dur-slower);
   --background: var(--paper);
   --foreground: var(--ink);
   --card: var(--surface);
   --card-foreground: var(--ink);
   --popover: var(--surface);
   --popover-foreground: var(--ink);
-  /* one black primary: the strongest action on a screen is an ink fill */
+  /* one ink primary: the strongest action on a screen is an ink fill */
   --primary: var(--ink);
-  --primary-foreground: var(--surface);
-  --secondary: var(--paper-deep);
+  --primary-foreground: var(--on-ink);
+  --secondary: var(--well);
   --secondary-foreground: var(--ink);
-  --muted: var(--paper-deep);
-  --muted-foreground: var(--ink-soft);
-  --accent: var(--paper-deep);
+  --muted: var(--well);
+  --muted-foreground: var(--ink-2);
+  --accent: var(--well);
   --accent-foreground: var(--ink);
-  --destructive: var(--accent-ink);
+  --destructive: var(--danger);
   --border: var(--line);
   --input: var(--line);
-  --ring: var(--ink-faint);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  /* 8px: buttons and chips; rows step down to 6, panels up to 14 */
+  --ring: var(--signal);
+  --chart-1: var(--signal);
+  --chart-2: var(--agent);
+  --chart-3: var(--ok);
+  --chart-4: var(--caution);
+  --chart-5: var(--ink-3);
   --radius: 0.5rem;
-  --sidebar: #fafafa;
+  --sidebar: var(--paper);
   --sidebar-foreground: var(--ink);
   --sidebar-primary: var(--ink);
-  --sidebar-primary-foreground: var(--surface);
-  --sidebar-accent: var(--paper-deep);
+  --sidebar-primary-foreground: var(--on-ink);
+  --sidebar-accent: var(--well);
   --sidebar-accent-foreground: var(--ink);
-  --sidebar-border: var(--line-soft);
-  --sidebar-ring: var(--ink-faint);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--signal);
 }
 
 /* Base layer: the resets and defaults every screen inherits. Everything that
@@ -400,6 +612,8 @@
   body {
     @apply bg-background font-sans text-foreground;
     overflow: hidden;
+    letter-spacing: -0.005em;
+    font-variant-numeric: tabular-nums;
     -webkit-font-smoothing: antialiased;
   }
   html {
@@ -430,48 +644,39 @@
 
 .dark {
   color-scheme: dark;
-  /* Neutral graphite, not OLED black and not warm: the same layers as the
-     white system, one step apart, so floating panels keep their edge. The
-     shadcn tokens above resolve through these, so only the primitives and
-     the shadows are redefined. */
-  --paper: #141414;
-  --canvas: var(--paper);
-  --paper-deep: #2a2a2a;
-  --surface: #1c1c1c;
-  --sub: #242424;
-  --ink: #f2f2f2;
-  --ink-soft: #a9a8a5;
-  --ink-faint: #7a7976;
-  --ink-ghost: #5c5c5c;
-  --line: rgba(255, 255, 255, 0.13);
-  --line-soft: rgba(255, 255, 255, 0.08);
+  /* Cyanotype bench, dark: graphite, not OLED black. The same layers one
+     step apart, so islands keep their edge; signal and agent lifted for a
+     dark ground. The aliases in :root resolve through these. */
+  --ground: #0c0d10;
+  --paper: #15171b;
+  --surface: #1c1f24;
+  --well: #22252b;
+  --line: #2a2e35;
+  --line-soft: #22252b;
+  --ink: #eceef2;
+  --ink-2: #a3a9b3;
+  --ink-3: #6d737d;
+  --on-ink: #15171c;
+  --signal: #5b8cff;
+  --signal-wash: #5b8cff26;
+  --agent: #ff8f45;
+  --agent-ink: #ff8f45;
+  --agent-wash: #ff8f4526;
+  --danger: #ff6b6b;
+  --danger-wash: #ff6b6b1f;
+  --ok: #3cc48a;
+  --ok-wash: #3cc48a1f;
+  --caution: #e3b341;
+  --caution-ink: #e3b341;
+  --ink-ghost: #4f545c;
   --dot: rgba(255, 255, 255, 0.07);
-  /* Selection blue lifted for luminance on a dark ground; the failure red is
-     softened the same way. */
-  --brand: #3a9bef;
-  --accent-ink: #ff6b57;
-  --success: #2fd47c;
-  --success-ink: #6fd8a0;
-  --success-on-ink: #0f7a45;
-  --warning: #ff9a66;
-  --warning-ink: #ffb58c;
-  --glaze-ring: #6b6b70;
-  --diazo-signal: #5b8cff;
-  --diazo-agent: #ff8f45;
-  --sidebar: #181818;
-  /* Dark surfaces cannot lift on shadow alone: each tier keeps a light-catch
-     ring on top of a deeper ambient drop. */
-  --shadow-ring: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.25);
-  --shadow-ring-hover: 0 0 0 1px rgba(255, 255, 255, 0.13), 0 1px 2px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3);
-  --shadow-float: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 12px 40px -10px rgba(0, 0, 0, 0.7);
-  --shadow-pop:
-    0 0 0 1px rgba(255, 255, 255, 0.11), 0 4px 12px rgba(0, 0, 0, 0.45), 0 24px 56px -16px rgba(0, 0, 0, 0.75);
-  --shadow-modal:
-    0 0 0 0.5px rgba(255, 255, 255, 0.14), 0 2px 3px -2px rgba(0, 0, 0, 0.5), 0 3px 12px -4px rgba(0, 0, 0, 0.5),
-    0 4px 16px -8px rgba(0, 0, 0, 0.6);
-  --shadow-elevation-1-focus:
-    0 0 0 2px color-mix(in srgb, var(--brand) 32%, transparent), 0 0 0 1px rgba(255, 255, 255, 0.12),
-    0 4px 14px -3px rgba(0, 0, 0, 0.4);
+  --success-on-ink: #0f6a45;
+  --shadow-ring: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-ring-hover: 0 0 0 1px rgba(255, 255, 255, 0.16);
+  --shadow-panel: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+  --shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 18px 48px -12px rgba(0, 0, 0, 0.7);
+  --shadow-modal: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 36px 90px -20px rgba(0, 0, 0, 0.8);
+  --scrim: rgba(0, 0, 0, 0.5);
 }
 
 /* While a canvas panel's edge is dragged, the chrome positioned off its width
@@ -843,6 +1048,182 @@ body[data-panel-resizing] * {
   .glaze-sweep::after {
     animation: none;
     opacity: 0;
+  }
+}
+
+/* ---- Redesign 2026-11 motion ----
+   Enter: opacity 0→1, 6px up, .98→1. Exit at 70% of the time on ease-exit.
+   Stagger 30ms for the first eight items (`stagger-children`). AI states are
+   agent orange: a 2s shimmer over a status label, streamed words fading in
+   from a 4px blur, a 1px conic beam round a frame being written. */
+@property --beam-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+@keyframes exit {
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@keyframes word-in {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+  }
+}
+@keyframes beam-turn {
+  to {
+    --beam-angle: 360deg;
+  }
+}
+@keyframes field-shake {
+  20% {
+    transform: translateX(-6px);
+  }
+  40% {
+    transform: translateX(6px);
+  }
+  60% {
+    transform: translateX(-4px);
+  }
+  80% {
+    transform: translateX(2px);
+  }
+}
+@keyframes ring-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* children enter one after another, 30ms apart, the first eight only */
+@utility stagger-children {
+  & > * {
+    animation: enter var(--dur-base) var(--ease-out) both;
+  }
+  & > :nth-child(2) {
+    animation-delay: calc(var(--stagger) * 1);
+  }
+  & > :nth-child(3) {
+    animation-delay: calc(var(--stagger) * 2);
+  }
+  & > :nth-child(4) {
+    animation-delay: calc(var(--stagger) * 3);
+  }
+  & > :nth-child(5) {
+    animation-delay: calc(var(--stagger) * 4);
+  }
+  & > :nth-child(6) {
+    animation-delay: calc(var(--stagger) * 5);
+  }
+  & > :nth-child(7) {
+    animation-delay: calc(var(--stagger) * 6);
+  }
+  & > :nth-child(n + 8) {
+    animation-delay: calc(var(--stagger) * 7);
+  }
+}
+/* the agent's status label: a band of light crosses the orange text every 2s */
+@utility shimmer-text {
+  background: linear-gradient(
+      90deg,
+      var(--agent-ink) 0%,
+      var(--agent-ink) 40%,
+      color-mix(in srgb, var(--agent) 35%, var(--surface)) 50%,
+      var(--agent-ink) 60%,
+      var(--agent-ink) 100%
+    )
+    0 0 / 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2s linear infinite;
+}
+/* a 1px conic beam of agent orange travelling round the element's edge:
+   the frame an agent is writing into */
+@utility agent-beam {
+  position: relative;
+  &::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    pointer-events: none;
+    background: conic-gradient(
+      from var(--beam-angle),
+      transparent 0deg,
+      transparent 250deg,
+      var(--agent) 320deg,
+      transparent 360deg
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    animation: beam-turn 2.4s linear infinite;
+  }
+}
+/* streamed words fade in from a 4px blur */
+@utility word-in {
+  animation: word-in 160ms var(--ease-out) both;
+}
+/* press feedback: scale to .97 over 140ms */
+@utility press {
+  transition: transform var(--dur-fast) var(--ease-out);
+  &:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+}
+
+/* Reduced motion: transforms become short opacity fades; the shimmer, the
+   beam and the glaze hold still. Nothing that conveys state is lost. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 120ms !important;
+    transition-property: opacity !important;
+  }
+  .shimmer-text {
+    animation: none !important;
+    color: var(--agent-ink);
+    background: none;
+  }
+  .agent-beam::before {
+    animation: none !important;
+    background: color-mix(in srgb, var(--agent) 70%, transparent);
   }
 }
 
