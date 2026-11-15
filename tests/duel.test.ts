@@ -59,9 +59,9 @@ describe('startDuel', () => {
       userId: 'u1',
     })
     expect(duel.brief).toBe('A pricing page')
-    expect(duel.entries.map((e) => e.label)).toEqual(['OpenAI · gpt-5', 'Claude API · claude-sonnet-4-6'])
+    expect(duel.entries.map((e) => e.label)).toEqual(['OpenAI · GPT-5', 'Claude API · Sonnet 4.6'])
     const frames = duel.entries.map((e) => store.getFrame(e.frameId)!)
-    expect(frames.map((f) => f.name)).toEqual(['Duel A · OpenAI · gpt-5', 'Duel B · Claude API · claude-sonnet-4-6'])
+    expect(frames.map((f) => f.name)).toEqual(['Duel A · OpenAI · GPT-5', 'Duel B · Claude API · Sonnet 4.6'])
     expect(frames.map((f) => [f.x, f.y, f.width])).toEqual([
       [560, 40, DUEL_FRAME.width],
       [560 + DUEL_FRAME.width + 80, 40, DUEL_FRAME.width],
@@ -110,6 +110,11 @@ describe('startDuel', () => {
 
   it('labels a pick by its connection name', () => {
     expect(pickLabel({ provider: 'claude-local' })).toBe('Claude Plan')
+    /* and its model as the menus name it, not by its raw id */
+    expect(pickLabel({ provider: 'claude-local', model: 'opus' })).toBe('Claude Plan · Latest Opus')
+    expect(pickLabel({ provider: 'claude-local', model: 'claude-opus-5-5' })).toBe('Claude Plan · Opus 5.5')
+    expect(pickLabel({ provider: 'chatgpt', model: 'gpt-6.1-sol' })).toBe('ChatGPT · GPT-6.1 Sol')
+    expect(pickLabel({ provider: 'gemini-key', model: 'gemini-3.7-flash' })).toBe('Gemini · gemini-3.7-flash')
   })
 })
 
@@ -159,8 +164,8 @@ describe('pickDuel', () => {
     expect(update).toHaveBeenCalledWith(duel.id, expect.objectContaining({ pickedFrameId: b!.frameId }))
     const [decision] = actions.getDecisions('c1')
     expect(decision).toMatchObject({ source: 'duel', frameId: b!.frameId })
-    expect(decision!.text).toContain('kept Claude API · claude-sonnet-4-6 over OpenAI · gpt-5')
-    expect(store.getFrame(a!.frameId)).toMatchObject({ hidden: true, name: 'Duel A · OpenAI · gpt-5 (archived)' })
+    expect(decision!.text).toContain('kept Claude API · Sonnet 4.6 over OpenAI · GPT-5')
+    expect(store.getFrame(a!.frameId)).toMatchObject({ hidden: true, name: 'Duel A · OpenAI · GPT-5 (archived)' })
     expect(store.getFrame(b!.frameId)?.hidden).toBeFalsy()
     /* decided once */
     row = { ...row, pickedFrameId: b!.frameId }

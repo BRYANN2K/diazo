@@ -2,13 +2,14 @@ import { Fragment, useState } from 'react'
 import { posthog } from '../lib/posthog'
 import { navigate } from '../App'
 import { cn } from '@/lib/utils'
-import { BrandMark, type Brand } from './ui/brand-mark'
+import { BrandMark } from './ui/brand-mark'
+import { RUNNER_BRAND } from '../lib/runnerMarks'
 import { EffortSlider } from './ConnectionTable'
 import { DoopMark } from './Logo'
 import { useAgentModels } from './ModelAccount'
 import { useAgentRunners, useRunnerPick } from '../lib/runnerPick'
 import { effortLabel, effortOptions } from '../lib/effortLabels'
-import { resolveRunnerPick, type AgentRunner, type RunnerOption, type RunnerProvider } from '../../shared/agentRunner'
+import { resolveRunnerPick, type AgentRunner, type RunnerOption } from '../../shared/agentRunner'
 import { useT } from '@/lib/i18n'
 import {
   DropdownMenu,
@@ -21,19 +22,6 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
 import { MenuButton } from './ui/menu-button'
-
-/* the brand mark each connection's models wear in the picker */
-const PROVIDER_MARK: Partial<Record<RunnerProvider, Brand>> = {
-  'claude-local': 'claude',
-  'anthropic-key': 'claude',
-  chatgpt: 'openai',
-  'openai-key': 'openai',
-  'gemini-key': 'gemini',
-  'openrouter-key': 'openrouter',
-  'deepseek-key': 'deepseek',
-  'kimi-key': 'kimi',
-  'kimi-code': 'kimi',
-}
 
 function modelName(models: RunnerOption[], id: string): string {
   return models.find((m) => m.id === id)?.name ?? id
@@ -63,7 +51,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
     runner.provider === liveKind && catalog?.live ? catalog.models : runner.models
 
   const label = resolved ? modelName(modelsOf(resolved.runner), resolved.pick.model ?? '') : 'Doop Agent'
-  const mark = resolved ? PROVIDER_MARK[resolved.runner.provider] : undefined
+  const mark = resolved ? RUNNER_BRAND[resolved.runner.provider] : undefined
   /* the effort reads after the model, lighter, as in Settings */
   const effortId = resolved?.pick.effort
   const effortText = effortId ? effortLabel(effortId, resolved?.runner.efforts, t) : undefined

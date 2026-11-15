@@ -8,7 +8,8 @@
  * Work the resident picks up on its own — @mention comments, automations —
  * carries no pick and runs on the Settings default.
  */
-import { ACCOUNT_KIND_LABELS, type AccountKindName } from './modelMenu.ts'
+import { ACCOUNT_KIND_LABELS, ANTHROPIC_MODELS, openaiModelName, type AccountKindName } from './modelMenu.ts'
+import { CLAUDE_PLAN_MODELS } from './localAgent.ts'
 import { isCustomProviderKind, type CustomProviderKind } from './customProvider.ts'
 
 /** A connection by name, or a custom provider (`custom:<id>`) a person added. */
@@ -64,6 +65,17 @@ export function parseRunnerPick(value: unknown): RunnerPick | undefined {
 export function runnerKey(pick: RunnerPick | undefined): string {
   if (!pick) return ''
   return [pick.provider, pick.model ?? '', pick.effort ?? ''].join('|')
+}
+
+/** A model id as the menus name it, without asking a catalog: the Claude
+ *  rosters for the Claude connections, the one OpenAI spelling for the
+ *  OpenAI ones, the id itself for anything else. For lines written after
+ *  the fact, such as a duel entry's label. */
+export function knownModelName(provider: RunnerProvider, id: string): string {
+  if (provider === 'claude-local' || provider === 'anthropic-key')
+    return (CLAUDE_PLAN_MODELS.find((m) => m.id === id) ?? ANTHROPIC_MODELS.find((m) => m.id === id))?.name ?? id
+  if (provider === 'chatgpt' || provider === 'openai-key') return openaiModelName(id)
+  return id
 }
 
 export interface RunnerOption {

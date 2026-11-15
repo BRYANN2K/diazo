@@ -146,8 +146,10 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   (a push is refused when the frame changed on the canvas since the pull), and `doop mcp install`
   for Claude Code, Codex and Devin. It authenticates with an agent key.
 - **Model duel** — Duel in the agents composer sends one brief to 2-3 models, each picked from
-  what the connection can actually run (its live provider catalog) with its own reasoning-effort
-  dial where the provider has one; each designs into its own sibling frame. A comparison card
+  what the connection can actually run (its live provider catalog; on the Claude Plan the
+  "Latest" aliases and every pinned Claude version), grouped by connection with a search, shown
+  as contestant slots A-C, each with its own reasoning-effort menu that starts at the
+  connection's setting; each designs into its own sibling frame. A comparison card
   shows each render with its cost, time, effort and lint score, and the one you keep is saved as
   a canvas decision while the others are archived (hidden, not deleted).
 - **Self-hosting** — Docker image `ghcr.io/bryann2k/redoop:main` (also `:latest` and

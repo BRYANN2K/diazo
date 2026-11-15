@@ -46,7 +46,8 @@ export function effortOptions(
     return {
       id: option.id,
       name: name ? t(name) : option.name,
-      blurb: blurb ? t(blurb) : t('models.effortServerDefault'),
+      /* a level the table does not know keeps the provider's own words */
+      blurb: blurb ? t(blurb) : option.blurb || t('models.effortServerDefault'),
     }
   })
 }

@@ -247,7 +247,7 @@ it('OpenAI: lists the GPT and o-series chat families, newest first after the cur
   const catalog = await (await alice.get('/api/model-account/models?kind=openai-key')).json()
   expect(catalog.live).toBe(true)
   expect(ids(catalog)).toEqual(['gpt-6-astra', 'gpt-5.6-terra', 'gpt-6.1-sol', 'o4-mini'])
-  expect(catalog.models[2]).toMatchObject({ name: 'GPT-6.1-sol', vision: true })
+  expect(catalog.models[2]).toMatchObject({ name: 'GPT-6.1 Sol', vision: true })
   expect(seen.map((r) => r.auth)).toEqual(['Bearer sk-openai-test'])
   expect((await alice.patch('/api/model-account/openai-key', { model: 'gpt-6.1-sol' })).status).toBe(200)
   expect(accountIn(await (await alice.get('/api/model-account')).json(), 'openai-key')).toMatchObject({

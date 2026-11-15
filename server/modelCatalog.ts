@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import { env } from './env.ts'
 import type { BuiltinAccountKind, ModelAccount } from './modelAccounts.ts'
-import { ACCOUNT_KIND_LABELS, type ModelOption } from '../shared/modelMenu.ts'
+import { ACCOUNT_KIND_LABELS, openaiModelName, type ModelOption } from '../shared/modelMenu.ts'
 
 /**
  * The models a connected account can run right now, asked of the provider
@@ -96,7 +96,7 @@ async function openaiModels(apiKey: string, signal: AbortSignal): Promise<ModelO
   return page.data
     .filter((model) => OPENAI_API_MODEL.test(model.id) && !NOT_AN_AGENT_MODEL.test(model.id))
     .sort((a, b) => b.created - a.created || a.id.localeCompare(b.id))
-    .map((model) => ({ id: model.id, name: model.id.replace(/^gpt-/, 'GPT-'), blurb: '', vision: true }))
+    .map((model) => ({ id: model.id, name: openaiModelName(model.id), blurb: '', vision: true }))
 }
 
 const geminiPage = z.object({
@@ -181,7 +181,7 @@ async function chatgptModels(account: ModelAccount, signal: AbortSignal): Promis
     )
     .map((model) => ({
       id: model.slug,
-      name: model.display_name || model.slug,
+      name: openaiModelName(model.slug, model.display_name),
       blurb: model.description ?? '',
       vision: true,
     }))
