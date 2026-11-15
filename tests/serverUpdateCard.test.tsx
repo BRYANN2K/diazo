@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AboutCardView } from '../src/components/AboutCard'
 import { ServerUpdateCard, ServerUpdateCardView } from '../src/components/ServerUpdateCard'
+import { UpdateCard } from '../src/components/UpdateCard'
 import { UPDATE_DISMISSED_KEY } from '../src/lib/updateStatus'
 import type { InstallType, UpdateStatus } from '../shared/updateCheck'
 
@@ -137,6 +138,29 @@ describe('the update card', () => {
     vi.stubGlobal('fetch', fetch)
     await render(<ServerUpdateCard />)
     expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('in the desktop app', () => {
+  it('stacks above the shell own update card, each with its own offer', async () => {
+    const handlers = new Map<string, (event: { payload: unknown }) => void>()
+    vi.stubGlobal('__DOOP_UPDATE_CARD__', true)
+    vi.stubGlobal('__TAURI__', {
+      core: { invoke: async () => null },
+      event: {
+        listen: async (name: string, handler: (event: { payload: unknown }) => void) => {
+          handlers.set(name, handler)
+          return () => {}
+        },
+      },
+    })
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify(status())))
+    await render(<UpdateCard />)
+    await act(async () => handlers.get('update-ready')?.({ payload: { version: '0.12.0', current: '0.11.0' } }))
+    const cards = [...container.querySelectorAll('section')].map((s) => s.getAttribute('aria-labelledby'))
+    expect(cards).toEqual(['server-update-title', 'update-card-title'])
+    expect(container.textContent).toContain('5 new commits on BRYANN2K/redoop main.')
+    expect(container.textContent).toContain('Doop 0.12.0 is ready')
   })
 })
 
