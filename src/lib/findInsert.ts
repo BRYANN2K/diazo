@@ -159,7 +159,11 @@ export async function insertLibraryItem(opts: {
   mode?: 'snapshot' | 'component'
 }): Promise<InsertedItem | null> {
   if (opts.mode === 'component' && opts.libraryId) return insertComponentItem(opts as Required<typeof opts>)
-  const snap = await snapshotLibraryItem(opts.sourceFrameId, opts.focus)
+  const snap = await snapshotLibraryItem(
+    opts.sourceFrameId,
+    opts.focus,
+    opts.libraryId ? { libraryId: opts.libraryId, itemId: opts.ref } : undefined,
+  )
   if (!snap) return null
   const s = useStore.getState()
   /* the frame as it stands now: it may have changed while the item rendered */
@@ -197,7 +201,10 @@ export async function insertLibraryItem(opts: {
  *  block are lost, which the caller confirmed. */
 export async function replaceLibraryBlock(frameId: string, block: LibraryRef): Promise<boolean> {
   const detail = await api.libraryItem(block.libraryId, block.ref)
-  const snap = await snapshotLibraryItem(detail.item.frameId, focusOfItem(detail.item))
+  const snap = await snapshotLibraryItem(detail.item.frameId, focusOfItem(detail.item), {
+    libraryId: block.libraryId,
+    itemId: block.ref,
+  })
   if (!snap) return false
   const frame = useStore.getState().canvas?.frames.find((f) => f.id === frameId)
   if (!frame || frame.locked || frame.htmlDeferred) return false

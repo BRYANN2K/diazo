@@ -5,6 +5,14 @@
  * this script swaps the outline onto the new element and posts its box back,
  * so hovering the result list never reloads a 300 KB library sheet.
  *
+ * The item runs as it does on the canvas: nothing here pauses an animation,
+ * injects a reduced-motion rule or strips the frame's scripts, so CSS
+ * animations and transitions, Web Animations and the sheet's own scripts
+ * play (the viewer's own `prefers-reduced-motion` still reaches the
+ * document, as on the canvas). The parent only pauses what is running while
+ * the preview is off screen (`{ play: false }`) and plays it again after.
+ * A link inside a hovered demo is not followed: it would replace the sheet.
+ *
  * `findPreviewRuntime` is inlined by source (`toString()`): it must not
  * reference anything outside its own body.
  */
@@ -193,6 +201,43 @@ export function findPreviewRuntime(token: string): void {
     }
   }
 
+  /* ---- playing while on screen ---- */
+
+  /* what this script paused, played again when the preview is back; an
+     animation the sheet paused itself stays paused */
+  let paused: Animation[] = []
+  function setPlaying(on: boolean) {
+    if (typeof document.getAnimations !== 'function') return
+    if (!on) {
+      for (const a of document.getAnimations()) {
+        if (a.playState !== 'running') continue
+        a.pause()
+        paused.push(a)
+      }
+      return
+    }
+    for (const a of paused) {
+      try {
+        a.play()
+      } catch {
+        /* an animation whose element left the document */
+      }
+    }
+    paused = []
+  }
+
+  /* a demo reacts to the pointer, but following one of its links would
+     navigate the preview away from the sheet */
+  document.addEventListener(
+    'click',
+    (e) => {
+      const target = e.target instanceof Element ? e.target.closest('a[href]') : null
+      const href = target?.getAttribute('href') ?? ''
+      if (target && !href.startsWith('#')) e.preventDefault()
+    },
+    true,
+  )
+
   /* ---- the snapshot an insert copies ---- */
 
   /* taken by shared/librarySnapshot.ts, defined beside this script; the
@@ -214,12 +259,17 @@ export function findPreviewRuntime(token: string): void {
       focus?: string
       find?: { text?: string; selector?: string; anchor?: boolean }
       snapshot?: string
+      play?: boolean
       type?: string
     } | null
     /* what this script posts carries a `type`: a document that is its own
        parent (opened top level) must not take its own box for a new focus,
        which looped and reset the retries forever */
     if (!data || data.doopFindPreview !== token || data.type !== undefined) return
+    if (typeof data.play === 'boolean') {
+      setPlaying(data.play)
+      return
+    }
     if (typeof data.snapshot === 'string') {
       post({ type: 'snapshot', request: data.snapshot, snapshot: snapshot() })
       return
