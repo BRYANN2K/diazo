@@ -93,6 +93,7 @@ export function roomMessageNeeds(msg: ClientMessage): CanvasRole {
     case 'cursor':
     case 'viewport':
     case 'frames:load':
+    case 'composition:playhead':
       return 'view'
     case 'editing':
     case 'frame:drag':
