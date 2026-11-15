@@ -33,7 +33,8 @@ agent run did and cost.
 - **Keep tokens and code in sync.** The Tokens panel diffs the canvas's tokens with the repo's CSS
   variables. A frame exports as a React or Astro component, shown as a patch before it is written.
 - **Run it yourself.** One command on a Mac, or your own server. Canvases, uploads and keys stay
-  on your machine.
+  on your machine. When a newer build is out, admins see how many commits it adds and the
+  command that updates their install.
 
 <table>
   <tr>

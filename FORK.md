@@ -145,6 +145,44 @@ sur Mac Apple silicon). Chaque arch est buildée sur un runner natif
 (`ubuntu-latest`, `ubuntu-24.04-arm`), poussée par digest, puis un job
 `merge` assemble le tag multi-arch.
 
+## Détection des mises à jour (notre dépôt)
+
+Chaque image porte son commit et sa date de build (`DOOP_BUILD_SHA` /
+`DOOP_BUILD_DATE`, build-args passés par `docker.yml`), lisibles sur
+`GET /api/version` (public) et dans Settings → General → About. Le serveur
+(`server/updateCheck.ts`) demande à l'API publique GitHub, sans token, le
+dernier commit de `main` dont le run `docker.yml` a réussi (donc une image
+existe), puis le compare au commit en cours : à jour, N commits de retard,
+en avance, divergé ou inconnu. Réponse gardée 1 h (échec 15 min, quota
+épuisé jusqu'au reset), revalidée par ETag : au plus ~2 requêtes/heure sur
+les 60 autorisées. Les admins de l'instance (et l'utilisateur d'une install
+locale) voient la carte « Update available » avec la commande adaptée :
+`doop-local update`, `docker compose pull && docker compose up -d`, ou
+`kubectl -n doop rollout restart deploy/doop`. Réglages : `DOOP_UPDATE_CHECK`,
+`DOOP_UPDATE_REPO`, `DOOP_UPDATE_BRANCH`, `DOOP_INSTALL` (`.env.example`).
+
+### App desktop
+
+La carte vient de la page, donc elle s'affiche aussi dans l'app desktop,
+empilée au-dessus de la carte du shell. Le shell lui-même se met toujours à
+jour depuis le flux d'upstream (`plugins.updater.endpoints` =
+`https://doop.design/desktop/latest.json`, clé publique d'upstream). Pour le
+pointer sur notre dépôt, il faudrait :
+
+1. une paire de clés `tauri signer generate`, la clé privée en secrets
+   `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` de `BRYANN2K/redoop`, la publique
+   dans `plugins.updater.pubkey` (WebKit et Chromium) ;
+2. publier les installeurs signés sur des releases `desktop-v*` de
+   `BRYANN2K/redoop` (`desktop-release.yml` le fait déjà sur tag), avec un
+   `latest.json` attaché ou copié sur une prerelease fixe ;
+3. remplacer l'endpoint par
+   `https://github.com/BRYANN2K/redoop/releases/download/desktop-updates/latest.json`,
+   puis livrer une première version à la main : un shell déjà installé ne
+   fait confiance qu'à la clé d'upstream.
+
+Non fait ici : sans clé ni release, changer l'endpoint couperait les mises à
+jour du shell.
+
 ## Déploiement k3s (Tailscale only)
 
 Manifests dans `deploy/k3s/`. Le Service reste `ClusterIP` ; l'exposition se

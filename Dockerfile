@@ -56,6 +56,14 @@ COPY --from=build /app/dist ./dist
 COPY server ./server
 COPY shared ./shared
 
+# Build identity (server/buildInfo.ts, GET /api/version, the update check):
+# docker.yml passes the commit and the build time. Last, so a new commit only
+# invalidates this layer. An image built without them reports "unknown".
+ARG DOOP_BUILD_SHA=
+ARG DOOP_BUILD_DATE=
+ENV DOOP_BUILD_SHA=$DOOP_BUILD_SHA \
+    DOOP_BUILD_DATE=$DOOP_BUILD_DATE
+
 # Run as an unprivileged user: frame HTML (agent-written, untrusted) is executed
 # by the bundled Chromium for screenshots, thumbnails and PDF export, and the
 # process holds DATABASE_URL and SECRETS_ENCRYPTION_KEYS. Chromium still runs

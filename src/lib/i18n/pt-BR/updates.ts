@@ -1,0 +1,36 @@
+import type { Catalog } from '..'
+
+export const updates: Catalog['updates'] = {
+  aboutTitle: 'Sobre',
+  aboutDescription: 'A versão que esta instância está executando.',
+  versionRow: 'Versão',
+  commitRow: 'Commit',
+  builtRow: 'Compilado em',
+  unknownCommit: 'Desconhecido (compilado sem o commit)',
+  devBuild: 'Cópia de desenvolvimento',
+  updatesRow: 'Atualizações',
+  statusCurrent: 'Em dia com {repo} {branch}',
+  statusBehind: { one: '{count} commit novo em {repo} {branch}', other: '{count} commits novos em {repo} {branch}' },
+  statusAhead: {
+    one: '{count} commit à frente de {repo} {branch}',
+    other: '{count} commits à frente de {repo} {branch}',
+  },
+  statusDiverged: 'Divergiu de {repo} {branch}',
+  statusDisabled: 'Verificação desligada (DOOP_UPDATE_CHECK=false)',
+  statusNoSha: 'Desconhecido: esta versão não conhece o próprio commit',
+  statusNotFound: 'Desconhecido: o GitHub não conhece este commit',
+  statusRateLimited: 'Desconhecido: limite do GitHub atingido, nova verificação mais tarde',
+  statusUnreachable: 'Desconhecido: não foi possível acessar o GitHub',
+  seeChanges: 'Ver mudanças',
+  cardTitle: 'Atualização disponível',
+  cardBody: { one: '{count} commit novo em {repo} {branch}.', other: '{count} commits novos em {repo} {branch}.' },
+  cardDiverged: 'Esta versão e {repo} {branch} divergiram: {count} commits novos lá.',
+  cardMore: { one: 'e mais {count}', other: 'e mais {count}' },
+  cardHowTo: 'Para atualizar',
+  cardDismiss: 'Dispensar até a próxima atualização',
+  hintLocal: 'Execute no Terminal. Seus dados e segredos em ~/.doop são mantidos.',
+  hintDocker:
+    'Na pasta do seu arquivo compose. Compilado a partir deste repositório? git pull && docker compose up -d --build',
+  hintKubernetes: 'O deployment baixa a imagem :main de novo (imagePullPolicy Always).',
+  hintSource: 'Na sua cópia do repositório, depois reinicie o servidor.',
+}

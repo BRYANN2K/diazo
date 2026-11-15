@@ -3,6 +3,8 @@ import type { CanvasMeta, WorkspaceSummary } from '../../shared/types'
 import { AppRail, railLayout } from '@/components/AppRail'
 import { CanvasSearchModal } from '@/components/CanvasSearchModal'
 import { UpdateCardView } from '@/components/UpdateCard'
+import { ServerUpdateCardView } from '@/components/ServerUpdateCard'
+import type { UpdateStatus } from '../../shared/updateCheck'
 import {
   DashContent,
   DashHeader,
@@ -129,6 +131,36 @@ export const UpdateAvailable: Story = {
     <div className="flex gap-6 p-6">
       <UpdateCardView version="0.11.0" onRestart={() => {}} onLater={() => {}} />
       <UpdateCardView version="0.11.0" restarting onRestart={() => {}} onLater={() => {}} />
+    </div>
+  ),
+}
+
+const serverUpdate: UpdateStatus = {
+  state: 'behind',
+  install: 'local',
+  repo: 'BRYANN2K/redoop',
+  branch: 'main',
+  running: '1'.repeat(40),
+  latest: '2'.repeat(40),
+  source: 'image',
+  behindBy: 7,
+  aheadBy: 0,
+  commits: [
+    'feat(duel): let each contestant carry its own reasoning effort',
+    'fix(agent-runners): serve the provider live catalog',
+    'test(library): time the extract budget as the best of five runs',
+  ].map((title, i) => ({ sha: String(i).padStart(40, 'a'), title, url: '#' })),
+  compareUrl: '#',
+  checkedAt: null,
+}
+
+/** The server's offer to admins when the fork has a newer image (server/updateCheck.ts). */
+export const ServerUpdateAvailable: Story = {
+  name: 'Server update available',
+  render: () => (
+    <div className="flex flex-wrap gap-6 p-6">
+      <ServerUpdateCardView status={serverUpdate} onDismiss={() => {}} />
+      <ServerUpdateCardView status={{ ...serverUpdate, install: 'kubernetes' }} onDismiss={() => {}} />
     </div>
   ),
 }

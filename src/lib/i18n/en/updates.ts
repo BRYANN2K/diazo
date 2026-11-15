@@ -1,0 +1,33 @@
+/** Settings → General → About, and the "update available" card the server's
+ *  check (server/updateCheck.ts) shows instance admins. */
+export const updates = {
+  aboutTitle: 'About',
+  aboutDescription: 'The build this instance is running.',
+  versionRow: 'Version',
+  commitRow: 'Commit',
+  builtRow: 'Built',
+  unknownCommit: 'Unknown (built without its commit)',
+  devBuild: 'Development checkout',
+  updatesRow: 'Updates',
+  statusCurrent: 'Up to date with {repo} {branch}',
+  statusBehind: { one: '{count} new commit on {repo} {branch}', other: '{count} new commits on {repo} {branch}' },
+  statusAhead: { one: '{count} commit ahead of {repo} {branch}', other: '{count} commits ahead of {repo} {branch}' },
+  statusDiverged: 'Diverged from {repo} {branch}',
+  statusDisabled: 'Update check off (DOOP_UPDATE_CHECK=false)',
+  statusNoSha: 'Unknown: this build does not know its commit',
+  statusNotFound: 'Unknown: GitHub does not know this commit',
+  statusRateLimited: 'Unknown: GitHub rate limit reached, checking again later',
+  statusUnreachable: 'Unknown: GitHub could not be reached',
+  seeChanges: 'See changes',
+  cardTitle: 'Update available',
+  cardBody: { one: '{count} new commit on {repo} {branch}.', other: '{count} new commits on {repo} {branch}.' },
+  cardDiverged: 'This build and {repo} {branch} have diverged: {count} new commits there.',
+  cardMore: { one: 'and {count} more', other: 'and {count} more' },
+  cardHowTo: 'To update',
+  cardDismiss: 'Dismiss until the next update',
+  hintLocal: 'Run it in Terminal. Your data and secrets in ~/.doop are kept.',
+  hintDocker:
+    'In the folder of your compose file. Built from this repository instead? git pull && docker compose up -d --build',
+  hintKubernetes: 'The deployment pulls the :main image again (imagePullPolicy Always).',
+  hintSource: 'In your checkout, then restart the server.',
+} as const

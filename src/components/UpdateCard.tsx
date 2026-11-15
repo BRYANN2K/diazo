@@ -5,6 +5,7 @@ import { DownloadIcon, XIcon } from '@/components/ui/icons'
 import { type UpdateOffer, listenForUpdates, restartToUpdate } from '@/lib/desktopUpdate'
 import { useT } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
+import { ServerUpdateCard } from './ServerUpdateCard'
 
 /** The desktop shell's "Update available" card (src/lib/desktopUpdate.ts):
  *  mounted once over every screen, empty until the shell offers an update. */
@@ -16,7 +17,10 @@ export function UpdateCard() {
   return (
     /* bottom right, just above the canvas's zoom pill (14px in, 36px tall),
        so it never covers the zoom or the getting-started card on the left */
-    <div aria-live="polite" className="fixed right-3.5 bottom-[58px] z-[80]">
+    <div aria-live="polite" className="fixed right-3.5 bottom-[58px] z-[80] flex flex-col items-end gap-2">
+      {/* the server's own "newer build" card (admins, a local install), in a
+          browser and in the app alike; above the shell's when both show */}
+      <ServerUpdateCard />
       {offer && <UpdateCardControls offer={offer} onLater={() => setOffer(null)} />}
     </div>
   )

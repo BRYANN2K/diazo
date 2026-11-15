@@ -215,7 +215,8 @@ run_args() {
     --volume "$DATA_DIR:/app/data" \
     --env-file "$ENV_FILE" \
     --env "BETTER_AUTH_URL=http://localhost:$DOOP_PORT" \
-    --env PORT=4400
+    --env PORT=4400 \
+    --env DOOP_INSTALL=local
   if [ "$RUN_PLATFORM" = amd64 ]; then
     printf '%s\n' --platform linux/amd64 --rosetta
   fi

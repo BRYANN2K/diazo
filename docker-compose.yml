@@ -3,11 +3,18 @@
 #   BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up -d
 services:
   doop:
-    build: .
+    build:
+      context: .
+      # the commit shown in Settings -> About and compared by the update check:
+      #   DOOP_BUILD_SHA=$(git rev-parse HEAD) docker compose up -d --build
+      args:
+        DOOP_BUILD_SHA: ${DOOP_BUILD_SHA:-}
     ports:
       - '4400:4400'
     environment:
       DATABASE_URL: postgres://doop:doop@db:5432/doop
+      # the update card's instructions (server/updateCheck.ts)
+      DOOP_INSTALL: docker
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-change-me-please-not-for-production}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:4400}
       SIGNUP_EMAIL_DOMAINS: ${SIGNUP_EMAIL_DOMAINS:-}

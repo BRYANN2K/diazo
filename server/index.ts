@@ -108,6 +108,8 @@ import { isLinkAccess, roleAllows, type CanvasRole } from '../shared/canvasRole.
 import { auth, initAuth, syncAdmins, getUserName, isBanned, loginProvidersConfig } from './auth.ts'
 import { getInstanceSettings, hydrateInstanceSettings, loginPolicy } from './instanceSettings.ts'
 import { adminRouter } from './admin.ts'
+import { buildInfo } from './buildInfo.ts'
+import { maySeeUpdates, updateStatus } from './updateCheck.ts'
 import { communityRouter, parseListing, publishableFrames } from './community.ts'
 import { automationsRouter, startScheduler } from './automations.ts'
 import { startMcpTokenPrune } from './mcpTokens.ts'
@@ -815,6 +817,13 @@ app.get('/api/oidc-config', (req, res) => {
   res.json({ ...providers, ...loginPolicy(providers.enabled) })
 })
 
+/* Public: which build is running (version, commit, build date). No secrets;
+   the update check (server/updateCheck.ts) compares this commit with the
+   repository's. */
+app.get('/api/version', (_req, res) => {
+  res.json(buildInfo())
+})
+
 /* Public: the interface language for visitors who have not picked one. The
    client asks before its first render, so sign-in already speaks it. */
 app.get('/api/locale-config', (_req, res) => {
@@ -981,6 +990,17 @@ app.use(
   '/api/comments/:id',
   loadFirst((id) => actions.findComment(id)?.canvasId),
 )
+
+/* Whether a newer build of this fork is out (server/updateCheck.ts). 404 to
+   anyone but an instance admin or a local install's user, like /api/admin. */
+app.get('/api/update-status', async (req, res, next) => {
+  if (!maySeeUpdates(req.user)) return res.status(404).end()
+  try {
+    res.json(await updateStatus())
+  } catch (err) {
+    next(err)
+  }
+})
 
 /* Home's push channel: tells an open dashboard its canvas list changed */
 app.get('/api/me/events', userEvents.subscribe)

@@ -34,6 +34,9 @@ spec:
           image: ghcr.io/bryann2k/redoop:main
           imagePullPolicy: Always
           env:
+            # the update card's instructions (server/updateCheck.ts)
+            - name: DOOP_INSTALL
+              value: kubernetes
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
