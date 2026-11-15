@@ -3,7 +3,8 @@
 //! Up to 0.14 the shell was `design.doop.desktop`; from 0.15 it is
 //! `dev.bryann2k.diazo`, so Tauri's app data folders moved with it. On the
 //! first launch under the new identifier, while its folder is still missing
-//! or empty, everything in the old one is copied over: the chosen server
+//! or empty (or holds only the server.json scripts/install.sh writes, which
+//! is kept), everything in the old one is copied over: the chosen server
 //! (`server.json`), the picked Claude CLI (`cli.json`), the Chromium profile
 //! (`cef/`, with the cookies and localStorage that keep the person signed in,
 //! and the `webkit-migrated` marker, so src/webkit_migration.rs does not run
@@ -73,10 +74,15 @@ pub fn run() {
     }
 }
 
-/// Copies `old` to `new` when `old` is a folder and `new` is missing or
-/// empty; true when it copied. `old` is only read.
+/// What the all-in-one installer (scripts/install.sh) may write before the
+/// app's first launch: the server choice. A folder holding only these has
+/// not been used yet, and they win over the old app's.
+const PRESEEDED: &[&str] = &["server.json"];
+
+/// Copies `old` to `new` when `old` is a folder and `new` is missing, empty
+/// or holds only PRESEEDED files; true when it copied. `old` is only read.
 pub fn migrate(old: &Path, new: &Path) -> io::Result<bool> {
-    if !old.is_dir() || has_entries(new) {
+    if !old.is_dir() || in_use(new) {
         return Ok(false);
     }
     let Some(name) = new.file_name() else {
@@ -89,16 +95,26 @@ pub fn migrate(old: &Path, new: &Path) -> io::Result<bool> {
         fs::remove_dir_all(&staging)?;
     }
     copy_dir(old, &staging)?;
+    for name in PRESEEDED {
+        if new.join(name).is_file() {
+            fs::copy(new.join(name), staging.join(name))?;
+        }
+    }
     if new.exists() {
-        fs::remove_dir(new)?;
+        fs::remove_dir_all(new)?;
     }
     fs::rename(&staging, new)?;
     Ok(true)
 }
 
-fn has_entries(dir: &Path) -> bool {
+fn in_use(dir: &Path) -> bool {
     fs::read_dir(dir)
-        .map(|mut entries| entries.next().is_some())
+        .map(|entries| {
+            entries.flatten().any(|entry| {
+                !PRESEEDED.iter().any(|name| entry.file_name() == *name)
+                    || !entry.file_type().is_ok_and(|kind| kind.is_file())
+            })
+        })
         .unwrap_or(false)
 }
 
@@ -186,9 +202,33 @@ mod tests {
         let old = old_app(base.path());
         let new = base.path().join(IDENTIFIER);
         write(&new.join("server.json"), "mine");
+        write(&new.join("cef/Default/Cookies"), "new cookies");
         assert!(!migrate(&old, &new).unwrap());
         assert_eq!(fs::read_to_string(new.join("server.json")).unwrap(), "mine");
         assert!(!new.join("cli.json").exists());
+    }
+
+    /// scripts/install.sh writes the server choice before the first launch:
+    /// the sign-in still comes over, and the installer's choice wins.
+    #[test]
+    fn keeps_the_installers_server_choice() {
+        let base = tempfile::tempdir().unwrap();
+        let old = old_app(base.path());
+        let new = base.path().join(IDENTIFIER);
+        write(
+            &new.join("server.json"),
+            r#"{"url":"http://127.0.0.1:4400"}"#,
+        );
+        assert!(migrate(&old, &new).unwrap());
+        assert_eq!(
+            fs::read_to_string(new.join("server.json")).unwrap(),
+            r#"{"url":"http://127.0.0.1:4400"}"#
+        );
+        assert_eq!(
+            fs::read_to_string(new.join("cef/Default/Cookies")).unwrap(),
+            "cookies"
+        );
+        assert!(new.join("cli.json").is_file());
     }
 
     #[test]
