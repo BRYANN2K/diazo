@@ -28,7 +28,7 @@ fn mcp_url(mut page: Url) -> Result<String, String> {
         || !page.username().is_empty()
         || page.password().is_some()
     {
-        return Err("Open your Doop server before connecting Codex.".into());
+        return Err("Open your Diazo server before connecting Codex.".into());
     }
     page.set_path("/mcp");
     page.set_query(None);
@@ -145,7 +145,7 @@ pub async fn codex_add_mcp(window: WebviewWindow) -> Result<(), String> {
     let url = mcp_url(
         window
             .url()
-            .map_err(|_| "Could not read the current Doop server.")?,
+            .map_err(|_| "Could not read the current Diazo server.")?,
     )?;
     let home = window
         .path()

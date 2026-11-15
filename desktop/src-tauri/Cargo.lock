@@ -934,9 +934,10 @@ dependencies = [
 
 [[package]]
 name = "doop-desktop"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "base64 0.22.1",
+ "dirs",
  "objc2",
  "objc2-app-kit",
  "regex",

@@ -1,4 +1,4 @@
-//! Which Doop server the shell opens. Official builds open doop.design (or
+//! Which Diazo (or doop) server the shell opens. Official builds open doop.design (or
 //! the `DOOP_APP_URL` they were built with); the sign-in screen's server
 //! settings (src/components/ServerSettings.tsx) let a person point the same
 //! build at a self-hosted instance instead, through `server_choose`.
@@ -21,7 +21,9 @@
 //! the shell checks a chosen server answers and, when it does not, asks in a
 //! native dialog whether to try again or go back to doop.design (every
 //! platform: Windows and Linux have no menu bar), and on macOS the app menu
-//! also has "Use doop.design…" while another server is chosen.
+//! also has "Use doop.design (original doop)…" while another server is
+//! chosen. A Diazo shell has no public server of its own, so doop.design
+//! (upstream's hosted service) stays the default and the way back.
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -141,7 +143,7 @@ fn secure(url: &Url) -> Result<(), String> {
 fn parse_origin(input: &str) -> Result<Url, String> {
     let input = input.trim();
     if input.is_empty() {
-        return Err("Enter the address of a Doop server.".into());
+        return Err("Enter the address of a Diazo server.".into());
     }
     let with_scheme = if input.contains("://") {
         input.to_string()
@@ -217,7 +219,7 @@ async fn probe(server: &str) -> Result<String, String> {
         let _ = rustls::crypto::ring::default_provider().install_default();
     }
     let unreachable =
-        || format!("No Doop server answered at {server}. Check the address and try again.");
+        || format!("No Diazo server answered at {server}. Check the address and try again.");
     let client = reqwest::Client::builder()
         .timeout(PROBE_TIMEOUT)
         .build()
@@ -259,6 +261,22 @@ fn dialog(app: &AppHandle, title: &str, description: &str) -> AsyncMessageDialog
     }
 }
 
+/// How the dialogs and the menu name the default server. doop.design is the
+/// upstream doop service this Diazo shell opens with nothing chosen, so the
+/// label says whose it is; a self-hoster's own default is named by its host.
+fn default_name() -> String {
+    server_name(&default_url())
+}
+
+fn server_name(server: &str) -> String {
+    let host = display(server);
+    if same_server(server, "https://doop.design") {
+        format!("{host} (original doop)")
+    } else {
+        host
+    }
+}
+
 fn display(server: &str) -> String {
     Url::parse(server)
         .ok()
@@ -274,7 +292,7 @@ async fn switch(app: &AppHandle, server: String) -> Result<bool, String> {
         dialog(
             app,
             &format!("Switch back to {}?", display(&server)),
-            "doop will restart and open it.",
+            "Diazo will restart and open it.",
         )
         .set_buttons(MessageButtons::OkCancelCustom(SWITCH.into(), CANCEL.into()))
         .show()
@@ -282,9 +300,9 @@ async fn switch(app: &AppHandle, server: String) -> Result<bool, String> {
     } else {
         dialog(
             app,
-            &format!("Connect doop to {}?", display(&server)),
+            &format!("Connect Diazo to {}?", display(&server)),
             &format!(
-                "doop will restart and open {server}.\n\nThe server you connect to can use this app's access to your computer: it can run Claude Code here, read fonts you pick and add itself to your Codex and Claude settings. Only connect to a server you trust."
+                "Diazo will restart and open {server}.\n\nThe server you connect to can use this app's access to your computer: it can run Claude Code here, read fonts you pick and add itself to your Codex and Claude settings. Only connect to a server you trust."
             ),
         )
         .set_level(MessageLevel::Warning)
@@ -315,7 +333,7 @@ pub fn check_on_launch(app: &AppHandle, entry: Url) {
         let mut failed = false;
         while let Err(error) = probe(server).await {
             failed = true;
-            let back = format!("Use {}", display(&default_url()));
+            let back = format!("Use {}", default_name());
             let choice = dialog(&app, &format!("Can’t reach {}", display(server)), &error)
                 .set_level(MessageLevel::Warning)
                 .set_buttons(MessageButtons::OkCancelCustom(RETRY.into(), back.clone()))
@@ -403,7 +421,7 @@ pub mod menu {
         if !is_custom(app) {
             return Ok(None);
         }
-        let label = format!("Use {}…", display(&default_url()));
+        let label = format!("Use {}…", default_name());
         MenuItem::with_id(app, MENU_ID, label, true, None::<&str>).map(Some)
     }
 
@@ -423,6 +441,13 @@ pub mod menu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_doop_design_as_the_original_doop() {
+        assert_eq!(server_name("https://doop.design"), "doop.design (original doop)");
+        assert_eq!(server_name("https://www.doop.design/"), "www.doop.design (original doop)");
+        assert_eq!(server_name("https://diazo.example.com"), "diazo.example.com");
+    }
 
     #[test]
     fn normalizes_typed_addresses_to_origins() {
@@ -510,7 +535,7 @@ mod tests {
     fn refuses_a_server_that_is_not_doop() {
         let other = serve(json_response(r#"{"hello":"world"}"#));
         let answered = tauri::async_runtime::block_on(probe(&format!("http://127.0.0.1:{other}")));
-        assert!(answered.unwrap_err().contains("No Doop server answered"));
+        assert!(answered.unwrap_err().contains("No Diazo server answered"));
     }
 
     #[test]

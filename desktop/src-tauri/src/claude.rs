@@ -598,8 +598,8 @@ pub async fn claude_connect(app: AppHandle, user_id: String, enabled: bool) -> R
         if user_id.is_empty() || user_id.len() > 256 { return Err("Invalid account".into()); }
         let mut users = enabled_users(&app)?;
         if enabled && !users.contains(&user_id) {
-            let accepted = rfd::MessageDialog::new().set_title("Use local Claude for Doop?")
-                .set_description("Doop will run your installed Claude CLI on this computer for this Doop account's canvas tasks, using your Claude login and usage limits. Only Doop canvas tools are enabled. Tasks run while this desktop app is open.")
+            let accepted = rfd::MessageDialog::new().set_title("Use local Claude for Diazo?")
+                .set_description("Diazo will run your installed Claude CLI on this computer for this Doop account's canvas tasks, using your Claude login and usage limits. Only Doop canvas tools are enabled. Tasks run while this desktop app is open.")
                 .set_buttons(rfd::MessageButtons::OkCancel).show();
             if accepted != rfd::MessageDialogResult::Ok { return Err("Connection cancelled".into()); }
             users.insert(user_id);

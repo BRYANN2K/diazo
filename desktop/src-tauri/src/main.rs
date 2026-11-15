@@ -54,6 +54,7 @@ mod claude_extension;
 mod codex;
 mod drift;
 mod fonts;
+mod identity_migration;
 mod live;
 mod repo;
 mod server;
@@ -293,7 +294,6 @@ fn chromium_runtime() -> tauri_runtime_cef::Cef {
 /// identifier in step with both tauri.conf.json files.
 #[cfg(chromium)]
 fn chromium_profile_dir() -> Option<PathBuf> {
-    const IDENTIFIER: &str = "design.doop.desktop";
     let home = std::env::var_os("HOME")?;
     let profile = if cfg!(debug_assertions) {
         "cef-dev"
@@ -303,7 +303,7 @@ fn chromium_profile_dir() -> Option<PathBuf> {
     Some(
         PathBuf::from(home)
             .join("Library/Application Support")
-            .join(IDENTIFIER)
+            .join(identity_migration::IDENTIFIER)
             .join(profile),
     )
 }
@@ -312,6 +312,9 @@ fn chromium_profile_dir() -> Option<PathBuf> {
 // the entry point hands those to Chromium before any of main() runs.
 #[cfg_attr(chromium, tauri_runtime_cef::cef_entry_point)]
 fn main() {
+    // before anything opens the app data folder (the CEF runtime opens its
+    // profile as soon as it is configured): bring the doop-era data over
+    identity_migration::run();
     let builder = tauri::Builder::default();
     #[cfg(chromium)]
     let builder = builder.runtime(chromium_runtime());
@@ -527,7 +530,7 @@ fn main() {
                             }
                         }
                     })
-                    .title("doop")
+                    .title("Diazo")
                     .visible(!migrating)
                     .inner_size(1440.0, 900.0)
                     .min_inner_size(900.0, 600.0)
@@ -555,7 +558,7 @@ fn main() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("failed to start doop")
+        .expect("failed to start Diazo")
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
                 claude::shutdown(&app.state::<claude::ClaudeState>());

@@ -774,7 +774,7 @@ pub async fn repo_write_change(
         let accepted = rfd::MessageDialog::new()
             .set_title(&format!("Write a Stip change to \"{}\"?", grant.name))
             .set_description(&format!(
-                "The doop handoff creates {} new file{} under {}/ — nothing existing is changed or overwritten:\n\n{}",
+                "The Diazo handoff creates {} new file{} under {}/ — nothing existing is changed or overwritten:\n\n{}",
                 prepared.len(),
                 if prepared.len() == 1 { "" } else { "s" },
                 dir,
@@ -1103,7 +1103,7 @@ pub async fn repo_apply_patch(
         let reason: String = reason.unwrap_or_default().chars().take(300).collect();
         let accepted = rfd::MessageDialog::new()
             .set_title(&format!(
-                "Apply doop's changes to {} file{} in \"{}\"?",
+                "Apply Diazo's changes to {} file{} in \"{}\"?",
                 ready.len(),
                 if ready.len() == 1 { "" } else { "s" },
                 grant.name
