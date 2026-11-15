@@ -1,14 +1,14 @@
 {
   "manifest_version": "0.3",
   "name": "doop",
-  "display_name": "Doop",
+  "display_name": "Diazo",
   "version": "0.1.0",
   "description": "Design with Claude on a shared canvas. Create, edit and review designs together in real time.",
-  "author": { "name": "Doop", "url": "https://doop.design" },
-  "homepage": "https://doop.design",
-  "documentation": "https://github.com/kgoedecke/doop/tree/main/claude-extension",
-  "support": "https://github.com/kgoedecke/doop/issues",
-  "repository": { "type": "git", "url": "https://github.com/kgoedecke/doop" },
+  "author": { "name": "Diazo", "url": "https://github.com/BRYANN2K/diazo" },
+  "homepage": "https://github.com/BRYANN2K/diazo",
+  "documentation": "https://github.com/BRYANN2K/diazo/tree/main/claude-extension",
+  "support": "https://github.com/BRYANN2K/diazo/issues",
+  "repository": { "type": "git", "url": "https://github.com/BRYANN2K/diazo" },
   "license": "AGPL-3.0-only",
   "icon": "icon.png",
   "server": {
@@ -24,16 +24,16 @@
         "--auth-timeout",
         "300",
         "--static-oauth-client-metadata",
-        "{\"client_name\":\"Doop for Claude Desktop\",\"client_uri\":\"https://doop.design\"}"
+        "{\"client_name\":\"Diazo for Claude Desktop\",\"client_uri\":\"https://github.com/BRYANN2K/diazo\"}"
       ]
     }
   },
   "user_config": {
     "server_url": {
       "type": "string",
-      "title": "Doop server URL",
-      "description": "Keep this for Doop Cloud. For self-hosting, use your Doop server's URL followed by /mcp. HTTPS is required except on localhost.",
-      "default": "https://doop.design/mcp",
+      "title": "Diazo server URL",
+      "description": "Your Diazo server's URL followed by /mcp. Keep this for a local install. HTTPS is required except on localhost.",
+      "default": "http://localhost:4400/mcp",
       "required": true
     }
   },

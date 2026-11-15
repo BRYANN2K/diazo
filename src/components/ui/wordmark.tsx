@@ -1,27 +1,26 @@
 import * as React from 'react'
 
 import { cn } from '@/lib/utils'
-import { Logo } from '../Logo'
+import { DiazoWordmark, Logo } from '../Logo'
 
-/** Logo + "Doop", the lockup used in headers, the auth card and the footer. */
+/** The mark + "diazo" lockup used in headers, the auth card and the footer.
+ *  The word is the outlined Familjen Grotesk wordmark, in the text colour
+ *  with its blue dot, and reads as "Diazo" to assistive tech. */
 function Wordmark({
   size = 'md',
   className,
-  children = 'Doop',
   ...props
-}: React.ComponentProps<'span'> & { size?: 'sm' | 'md' }) {
+}: Omit<React.ComponentProps<'span'>, 'children'> & {
+  size?: 'sm' | 'md'
+}) {
   return (
     <span
       data-slot="wordmark"
-      className={cn(
-        'flex items-center gap-3 font-display font-extrabold tracking-[-0.01em]',
-        size === 'sm' ? 'gap-2 text-lead/4.5' : 'text-heading/5.5',
-        className,
-      )}
+      className={cn('flex items-center', size === 'sm' ? 'gap-1.5' : 'gap-2', className)}
       {...props}
     >
-      <Logo className={size === 'sm' ? 'size-[26px]' : 'size-[30px]'} />
-      {children}
+      <Logo className={size === 'sm' ? 'size-[24px]' : 'size-[28px]'} />
+      <DiazoWordmark height={size === 'sm' ? 18 : 22} className="translate-y-[1px]" />
     </span>
   )
 }
