@@ -206,6 +206,21 @@ export const panels = {
   chatThinking: '{agent} is thinking…',
   chatAskFailed: 'The agent could not take that ask.',
   chatRetry: 'Retry',
+  chatWelcomeTitle: 'Plan the next design with Doop',
+  chatWelcomeBody:
+    'Ask for a screen, a flow or a review. Doop answers with a plan you can edit, and only Go design touches the canvas.',
+  chatSuggestPricing: 'Design a pricing page',
+  chatSuggestPricingPrompt: 'Design a pricing page: three tiers, a feature comparison and a short FAQ.',
+  chatSuggestLanding: 'Plan a landing page',
+  chatSuggestLandingPrompt:
+    'Plan a landing page for this product: a hero, three feature sections, social proof and a call to action.',
+  chatSuggestReview: 'Review “{name}” for accessibility',
+  chatSuggestReviewPrompt:
+    'Review the frame “{name}” for accessibility: contrast, hierarchy, tap targets and labels. List the fixes before changing anything.',
+  chatSuggestSkill: 'Use the /{name} skill',
+  chatJumpLatest: 'Jump to latest',
+  chatNewMessages: 'New messages',
+  chatSendTitle: 'Send (↩) · new line (⇧↩)',
   chatRepoReading: 'the agent reads this while it plans',
   chatPlanTitle: 'Design plan',
   chatPlanStatus_proposed: 'proposed',

@@ -208,6 +208,21 @@ export const panels: Catalog['panels'] = {
   chatThinking: '{agent} está pensando…',
   chatAskFailed: 'O agente não conseguiu atender a esse pedido.',
   chatRetry: 'Tentar de novo',
+  chatWelcomeTitle: 'Planeje o próximo design com o Doop',
+  chatWelcomeBody:
+    'Peça uma tela, um fluxo ou uma revisão. O Doop responde com um plano editável, e só o Go design toca o canvas.',
+  chatSuggestPricing: 'Criar uma página de preços',
+  chatSuggestPricingPrompt: 'Crie uma página de preços: três planos, uma comparação de recursos e um FAQ curto.',
+  chatSuggestLanding: 'Planejar uma landing page',
+  chatSuggestLandingPrompt:
+    'Planeje uma landing page para este produto: um hero, três seções de recursos, prova social e uma chamada para ação.',
+  chatSuggestReview: 'Revisar a acessibilidade de “{name}”',
+  chatSuggestReviewPrompt:
+    'Revise a acessibilidade do frame “{name}”: contraste, hierarquia, áreas de toque e rótulos. Liste as correções antes de mudar qualquer coisa.',
+  chatSuggestSkill: 'Usar a skill /{name}',
+  chatJumpLatest: 'Ir para o fim',
+  chatNewMessages: 'Novas mensagens',
+  chatSendTitle: 'Enviar (↩) · nova linha (⇧↩)',
   chatRepoReading: 'o agente lê este projeto enquanto planeja',
   chatPlanTitle: 'Plano de design',
   chatPlanStatus_proposed: 'proposto',

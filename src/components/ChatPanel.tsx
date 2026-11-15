@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { ChatMessage, ChatPlan, ChatPlanReference, ChatPlanScreen } from '../../shared/types'
 import { colorFor } from '../../shared/types'
 import { MAX_CHAT_TEXT_CHARS, chatThreadId, isOpenPlan } from '../../shared/chat'
@@ -7,9 +7,11 @@ import { api, errorMessage } from '../lib/api'
 import { posthog } from '../lib/posthog'
 import { timeAgo } from '../lib/time'
 import { isComposingEnter } from '../lib/keys'
+import { isCanvasElement } from '../lib/drawing'
 import { isResidentLimit } from './TeamAllowance'
 import { refreshLocalRepo, useLocalRepo } from '../lib/localRepo'
 import { ModelPicker } from './ModelPicker'
+import { DoopMark } from './Logo'
 import { MenuButton } from './ui/menu-button'
 import {
   DropdownMenu,
@@ -27,16 +29,36 @@ import { PanelBody } from './ui/panel'
 import { Card } from './ui/card'
 import { Badge } from './ui/badge'
 import { Avatar } from './ui/avatar'
+import { Chip } from './ui/chip'
+import { Kbd } from './ui/kbd'
+import { DotMatrix } from './ui/dot-matrix'
 import { StatusLabel } from './ui/status-label'
 import { HandoffModal } from './HandoffModal'
 import { Note } from './ui/note'
-import { ArrowUpIcon, CheckIcon, FolderIcon, ReplyIcon, XIcon } from './ui/icons'
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  CheckIcon,
+  ClockIcon,
+  EyeIcon,
+  FolderIcon,
+  LayoutTemplateIcon,
+  ReplyIcon,
+  SparkIcon,
+  SyncIcon,
+  XIcon,
+} from './ui/icons'
 import { useT } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
 
-const emptyNote = 'px-4 py-6 text-center text-body text-ink-faint'
 /** the field grows with the draft up to this many lines, then scrolls */
-const MAX_COMPOSER_LINES = 6
+const MAX_COMPOSER_LINES = 8
+/** within this many px of the end, the list counts as read to the bottom */
+const BOTTOM_SLACK_PX = 48
+/** a second line by the same author within this window drops its header */
+const GROUP_WINDOW_MS = 5 * 60_000
+/** the conversation's reading width when the panel is docked wide */
+const COLUMN = 'mx-auto w-full max-w-[640px]'
 
 /* feedback and plan launches are metered like any other resident task — a
    403 means the free tier ran out, so raise the connect wall */
@@ -60,6 +82,17 @@ function autosize(ta: HTMLTextAreaElement) {
   ta.style.height = `${Math.min(ta.scrollHeight, Math.round(line * MAX_COMPOSER_LINES))}px`
 }
 
+function atEnd(el: HTMLElement) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK_PX
+}
+
+/** A draft the panel hands the composer (a skill suggestion): `n` makes a
+ *  second pick of the same text land again. */
+interface ComposerSeed {
+  text: string
+  n: number
+}
+
 /**
  * The canvas chat: where the room talks the next design over with the
  * resident agent before anything touches the canvas. A design ask comes back
@@ -68,10 +101,18 @@ function autosize(ta: HTMLTextAreaElement) {
 export function ChatPanel({ canvasId }: { canvasId: string }) {
   const chat = useStore((s) => s.chat)
   const canComment = useStore(canCommentOpenCanvas)
+  const canEdit = useStore(canEditOpenCanvas)
   const t = useT()
   /* the thread the composer answers in, set from a thread's Reply action */
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const [seed, setSeed] = useState<ComposerSeed | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  /* whether new lines keep the list pinned to its end: true until the reader
+     scrolls up, and again once they come back down or send */
+  const stick = useRef(true)
+  const [away, setAway] = useState(false)
+  /* the newest line the reader has seen at the bottom of the list */
+  const [seenId, setSeenId] = useState<string | undefined>(undefined)
   /* thread views: a root and its replies, oldest thread first so the newest
      conversation is the one the scroll lands on */
   const threads = useMemo(() => {
@@ -82,36 +123,92 @@ export function ChatPanel({ canvasId }: { canvasId: string }) {
       replies: byAt.filter((m) => m.threadId === chatThreadId(root)),
     }))
   }, [chat])
-
-  /* follow the conversation while it grows at the bottom */
   const latestId = chat[0]?.id
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end' })
-  }, [threads.length, latestId])
+  /* until someone has asked the agent something, the welcome stays above
+     the lines */
+  const welcome = !chat.some((m) => m.agent || m.forAgent)
+
+  /* follow the conversation while it grows at the bottom, plans and status
+     changes included — unless the reader scrolled up to read something */
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (el && stick.current) el.scrollTop = el.scrollHeight
+  }, [chat])
+
+  function onScroll() {
+    const el = scrollRef.current
+    if (!el) return
+    const end = atEnd(el)
+    /* pinned until this scroll, the reader had read down to the newest line */
+    if (end || stick.current) setSeenId(latestId)
+    stick.current = end
+    setAway(!end)
+  }
+
+  function jumpToLatest() {
+    const el = scrollRef.current
+    stick.current = true
+    setAway(false)
+    setSeenId(latestId)
+    if (el) el.scrollTop = el.scrollHeight
+  }
+
+  /* a send of one's own always brings the list back down to it */
+  function onSent() {
+    stick.current = true
+    setAway(false)
+  }
+
+  async function ask(text: string) {
+    onSent()
+    await api.sendChat(canvasId, { text, ...runnerArg() })
+    posthog.capture('chat_suggestion_sent')
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <LocalProjectChip canvasId={canvasId} />
-      <PanelBody className="py-2">
-        {threads.length === 0 ? (
-          <div className={emptyNote}>{t('panels.chatEmpty')}</div>
-        ) : (
-          threads.map((thread) => (
-            <ChatThread
-              key={thread.root.id}
-              root={thread.root}
-              replies={thread.replies}
-              onReply={canComment ? () => setReplyTo(thread.root) : undefined}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <PanelBody ref={scrollRef} onScroll={onScroll} className="flex flex-col">
+          {welcome && (
+            <ChatWelcome
+              centered={threads.length === 0}
+              canAsk={canEdit}
+              onAsk={(text) => ask(text).catch(reportLimit)}
+              onSeed={(text) => setSeed((cur) => ({ text, n: (cur?.n ?? 0) + 1 }))}
             />
-          ))
+          )}
+          {threads.length > 0 && (
+            <div className={cn(COLUMN, 'mt-auto flex flex-col gap-5 px-3 pt-4 pb-3')}>
+              {threads.map((thread) => (
+                <ChatThread
+                  key={thread.root.id}
+                  root={thread.root}
+                  replies={thread.replies}
+                  onReply={canComment ? () => setReplyTo(thread.root) : undefined}
+                />
+              ))}
+            </div>
+          )}
+        </PanelBody>
+        {away && (
+          <Button
+            size="pill"
+            className="absolute bottom-2 left-1/2 -translate-x-1/2 gap-1 py-1 pr-2.5 pl-2 shadow-float hover:shadow-float"
+            onClick={jumpToLatest}
+          >
+            <ArrowDownIcon size={12} />
+            {latestId !== seenId ? t('panels.chatNewMessages') : t('panels.chatJumpLatest')}
+          </Button>
         )}
-        <div ref={bottomRef} />
-      </PanelBody>
+      </div>
       {canComment && (
         <ChatComposer
           canvasId={canvasId}
+          seed={seed}
           replyTo={replyTo && threads.some((th) => th.root.id === replyTo.id) ? replyTo : null}
           onClearReply={() => setReplyTo(null)}
+          onSent={onSent}
         />
       )}
     </div>
@@ -138,35 +235,149 @@ function LocalProjectChip({ canvasId }: { canvasId: string }) {
   )
 }
 
+interface Suggestion {
+  key: string
+  icon: ReactNode
+  label: string
+  /** sent as the ask; a skill instead puts `/name` in the composer */
+  prompt?: string
+  skill?: string
+}
+
+/** The suggestions under the welcome, tied to this canvas: the frame in
+ *  hand (selected, else the page's first), and the canvas's first skill. */
+function useSuggestions(): Suggestion[] {
+  const t = useT()
+  const frames = useStore((s) => s.canvas?.frames)
+  const firstPage = useStore((s) => s.canvas?.pages?.[0]?.id)
+  const pageId = useStore((s) => s.activePageId) ?? firstPage
+  const selectedId = useStore((s) => s.selectedId)
+  const skill = useStore((s) => s.canvas?.skills?.[0]?.name)
+  return useMemo(() => {
+    const onPage = (frames ?? []).filter((f) => (f.pageId ?? firstPage) === pageId && !isCanvasElement(f.html ?? ''))
+    const frame = onPage.find((f) => f.id === selectedId) ?? onPage[0]
+    const list: Suggestion[] = [
+      {
+        key: 'pricing',
+        icon: <LayoutTemplateIcon size={12} />,
+        label: t('panels.chatSuggestPricing'),
+        prompt: t('panels.chatSuggestPricingPrompt'),
+      },
+      {
+        key: 'landing',
+        icon: <SparkIcon size={12} />,
+        label: t('panels.chatSuggestLanding'),
+        prompt: t('panels.chatSuggestLandingPrompt'),
+      },
+    ]
+    if (frame)
+      list.push({
+        key: 'review',
+        icon: <EyeIcon size={12} />,
+        label: t('panels.chatSuggestReview', { name: frame.name }),
+        prompt: t('panels.chatSuggestReviewPrompt', { name: frame.name }),
+      })
+    if (skill)
+      list.push({
+        key: 'skill',
+        icon: <span className="font-mono text-micro">/</span>,
+        label: t('panels.chatSuggestSkill', { name: skill }),
+        skill,
+      })
+    return list
+  }, [frames, firstPage, pageId, selectedId, skill, t])
+}
+
+/** What the column shows before the agent has answered: what it does, and
+ *  a few asks to start from. Centred when the chat is empty, at the top of
+ *  the list when the room has only talked among itself so far. */
+function ChatWelcome({
+  centered,
+  canAsk,
+  onAsk,
+  onSeed,
+}: {
+  centered: boolean
+  canAsk: boolean
+  onAsk: (prompt: string) => void
+  onSeed: (text: string) => void
+}) {
+  const t = useT()
+  const suggestions = useSuggestions()
+  return (
+    <section
+      aria-label={t('panels.chatWelcomeTitle')}
+      className={cn(COLUMN, 'flex flex-col items-start gap-3 px-4', centered ? 'my-auto py-6' : 'pt-5 pb-1')}
+    >
+      <span className="grid size-8 place-items-center rounded-control bg-paper-deep text-ink">
+        <DoopMark size={16} className="block" />
+      </span>
+      <div className="flex flex-col gap-1">
+        <h3 className="text-copy font-medium text-ink">{t('panels.chatWelcomeTitle')}</h3>
+        <p className="text-body text-ink-soft">{canAsk ? t('panels.chatWelcomeBody') : t('panels.chatEmpty')}</p>
+      </div>
+      {canAsk && (
+        <div className="flex max-w-full flex-col items-start gap-1.5 pt-1">
+          {suggestions.map((s) => (
+            <Chip
+              key={s.key}
+              icon={s.icon}
+              /* a chat suggestion is the panel's content, not a passing
+                 hint: barely faded, so it reads in the dark theme too */
+              className="max-w-full opacity-90"
+              onClick={() => (s.skill ? onSeed(`/${s.skill} `) : s.prompt && onAsk(s.prompt))}
+            >
+              <span className="min-w-0 truncate">{s.label}</span>
+            </Chip>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
 /** One face: a person's initials on their colour, or the agent's mark. */
-function ChatAvatar({ message }: { message: ChatMessage }) {
+function ChatAvatar({ name, agent, glaze }: { name: string; agent?: boolean; glaze?: boolean }) {
   return (
     <Avatar
-      name={message.from}
-      kind={message.agent ? 'agent' : 'user'}
-      color={colorFor(message.from)}
+      name={name}
+      kind={agent ? 'agent' : 'user'}
+      color={colorFor(name)}
       size={18}
+      glaze={glaze}
       className="flex-none shadow-none dark:shadow-none"
     />
   )
 }
 
-/** A thread: its root line and the replies under it. A follow-up is
- *  written in the panel's one composer: Reply points it at this thread. */
+/** A thread: its root line and the replies under it, one turn of the
+ *  conversation. A follow-up is written in the panel's one composer: Reply
+ *  points it at this thread. */
 function ChatThread({ root, replies, onReply }: { root: ChatMessage; replies: ChatMessage[]; onReply?: () => void }) {
   const t = useT()
+  const lines = [root, ...replies]
   return (
-    <div className="group/thread relative flex flex-col gap-1.5 border-b border-line-soft px-3 py-3 last:border-b-0">
-      <ChatLine message={root} />
-      {replies.map((reply) => (
-        <ChatLine key={reply.id} message={reply} />
-      ))}
+    <div className="group/thread relative flex flex-col gap-2">
+      {lines.map((message, i) => {
+        const prev = lines[i - 1]
+        const grouped =
+          !!prev &&
+          prev.from === message.from &&
+          !!prev.agent === !!message.agent &&
+          message.at - prev.at < GROUP_WINDOW_MS
+        return <ChatLine key={message.id} message={message} grouped={grouped} />
+      })}
       {onReply && (
         <IconButton
           size="sm"
           aria-label={t('panels.chatReplyTo', { name: root.from })}
           title={t('panels.chatReplyTo', { name: root.from })}
-          className="absolute top-2 right-2 opacity-0 transition-opacity group-hover/thread:opacity-100 focus-visible:opacity-100"
+          /* the corner the root's header leaves free: a person's line is
+             on the right, the agent's on the left */
+          className={cn(
+            'absolute -top-1 opacity-0 transition-opacity group-hover/thread:opacity-100 focus-visible:opacity-100',
+            root.agent ? 'right-0' : 'left-0',
+          )}
           onClick={onReply}
         >
           <ReplyIcon size="rail" />
@@ -176,92 +387,111 @@ function ChatThread({ root, replies, onReply }: { root: ChatMessage; replies: Ch
   )
 }
 
+/** When a line was written: quiet, with the full date on hover. */
+function Stamp({ at }: { at: number }) {
+  return (
+    <time
+      dateTime={new Date(at).toISOString()}
+      title={new Date(at).toLocaleString()}
+      className="text-caption text-ink-faint tabular-nums"
+    >
+      {timeAgo(at)}
+    </time>
+  )
+}
+
 /** One line of the conversation: who and when, then the text — or the plan
- *  card the line carries. An ask shows where it stands: queued, thinking,
- *  or failed with its reason and a Retry. */
-function ChatLine({ message }: { message: ChatMessage }) {
-  const canvasId = useStore((s) => s.canvas?.id)
-  const canEdit = useStore(canEditOpenCanvas)
-  const t = useT()
+ *  card the line carries. An ask shows where it stands under it, in the
+ *  agent's place: queued, thinking, or failed with its reason and a Retry. */
+function ChatLine({ message, grouped }: { message: ChatMessage; grouped: boolean }) {
   const asking = message.forAgent && !message.answeredAt && !message.failedAt
   /* a person's line is a bubble on the right; the agent's turn is plain
      text beside its mark, with its plan card under it */
   if (!message.agent) {
     return (
-      <div className="flex flex-col items-end gap-1">
-        <span className="flex items-center gap-1.5 pr-0.5 text-caption text-ink-faint">
-          <span className="truncate font-medium text-ink-soft">{message.from}</span>
-          <span className="tabular-nums">{timeAgo(message.at)}</span>
-        </span>
-        <div className="max-w-[85%] rounded-card rounded-br-tag bg-paper-deep px-3 py-2 text-body break-words whitespace-pre-wrap text-ink">
-          {message.text}
+      <>
+        <div className="flex flex-col items-end gap-1">
+          {!grouped && (
+            <span className="flex items-center gap-1.5 pr-0.5 text-caption">
+              <span className="truncate font-medium text-ink-soft">{message.from}</span>
+              <Stamp at={message.at} />
+            </span>
+          )}
+          <div className="max-w-[85%] rounded-card rounded-br-tag bg-paper-deep px-3 py-2 text-body break-words whitespace-pre-wrap text-ink">
+            {message.text}
+          </div>
         </div>
-        {asking && (
-          <span className="pr-0.5 text-caption text-ink-faint">
-            {message.claimedBy
-              ? t('panels.chatThinking', { agent: message.claimedBy })
-              : t('panels.chatQueued', { agent: message.targetAgent ?? '' })}
-          </span>
-        )}
-        {message.failedAt && (
-          <span className="flex w-full min-w-0 items-start gap-2">
-            <Note tone="error" className="line-clamp-3 min-w-0 break-words">
-              {message.failureReason ?? t('panels.chatAskFailed')}
-            </Note>
-            {canEdit && canvasId && (
-              <Button
-                variant="danger-solid"
-                size="pill"
-                className="ml-auto flex-none"
-                onClick={() => api.retryChatAsk(message.id).catch(reportLimit)}
-              >
-                {t('panels.chatRetry')}
-              </Button>
-            )}
-          </span>
-        )}
-      </div>
+        {asking && <AgentPending message={message} />}
+        {message.failedAt && <AskFailed message={message} />}
+      </>
     )
   }
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1">
-      <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
-        <ChatAvatar message={message} />
-        <b className="truncate text-body font-medium text-ink">{message.from}</b>
-      </span>
-      <span className="text-caption text-ink-faint tabular-nums">{timeAgo(message.at)}</span>
-      <span className="col-span-2 min-w-0 break-words pl-[24px] whitespace-pre-wrap text-body text-ink">
-        {message.text}
-      </span>
+    <div className="flex flex-col gap-1">
+      {!grouped && (
+        <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
+          <ChatAvatar name={message.from} agent />
+          <b className="truncate text-body font-medium text-ink">{message.from}</b>
+          <Stamp at={message.at} />
+        </span>
+      )}
+      {message.text && (
+        <span className="min-w-0 pl-6 text-body break-words whitespace-pre-wrap text-ink">{message.text}</span>
+      )}
       {message.plan && (
-        <div className="col-span-2 pl-[24px]">
+        <div className="pl-6">
           <PlanCard message={message} plan={message.plan} />
         </div>
       )}
-      {asking && (
-        <span className="col-span-2 pl-[24px] text-caption text-ink-faint">
-          {message.claimedBy
-            ? t('panels.chatThinking', { agent: message.claimedBy })
-            : t('panels.chatQueued', { agent: message.targetAgent ?? '' })}
-        </span>
+      {asking && <AgentPending message={message} />}
+      {message.failedAt && <AskFailed message={message} />}
+    </div>
+  )
+}
+
+/** The agent's turn while it is still coming: its glazed face and what it is
+ *  doing, so the answer has a place to land before it arrives. */
+function AgentPending({ message }: { message: ChatMessage }) {
+  const t = useT()
+  const agent = message.claimedBy ?? message.targetAgent ?? 'Doop'
+  const thinking = !!message.claimedBy
+  return (
+    <div role="status" className="flex min-w-0 items-center gap-1.5">
+      <ChatAvatar name={agent} agent glaze={thinking} />
+      {thinking ? (
+        <DotMatrix className="mx-0.5" />
+      ) : (
+        <ClockIcon size={12} className="mx-0.5 flex-none text-ink-faint" />
       )}
-      {message.failedAt && (
-        <span className="col-span-2 flex min-w-0 items-start gap-2 pl-[24px]">
-          <Note tone="error" className="line-clamp-3 min-w-0 break-words">
-            {message.failureReason ?? t('panels.chatAskFailed')}
-          </Note>
-          {canEdit && canvasId && (
-            <Button
-              variant="danger-solid"
-              size="pill"
-              className="ml-auto flex-none"
-              onClick={() => api.retryChatAsk(message.id).catch(reportLimit)}
-            >
-              {t('panels.chatRetry')}
-            </Button>
-          )}
-        </span>
-      )}
+      <span className="min-w-0 truncate text-caption text-ink-faint">
+        {thinking
+          ? t('panels.chatThinking', { agent: message.claimedBy ?? '' })
+          : t('panels.chatQueued', { agent: message.targetAgent ?? '' })}
+      </span>
+    </div>
+  )
+}
+
+/** An ask the agent could not take: the reason, in the agent's place, and
+ *  the Retry an editor can press to queue it again. */
+function AskFailed({ message }: { message: ChatMessage }) {
+  const canvasId = useStore((s) => s.canvas?.id)
+  const canEdit = useStore(canEditOpenCanvas)
+  const t = useT()
+  return (
+    <div className="flex min-w-0 items-start gap-1.5">
+      <ChatAvatar name={message.claimedBy ?? message.targetAgent ?? 'Doop'} agent />
+      <div className="flex min-w-0 flex-1 flex-col items-start gap-1.5">
+        <Note tone="error" className="line-clamp-3 min-w-0 break-words">
+          {message.failureReason ?? t('panels.chatAskFailed')}
+        </Note>
+        {canEdit && canvasId && (
+          <Button size="pill" className="gap-1" onClick={() => api.retryChatAsk(message.id).catch(reportLimit)}>
+            <SyncIcon size={12} />
+            {t('panels.chatRetry')}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }
@@ -299,9 +529,12 @@ function PlanCard({ message, plan }: { message: ChatMessage; plan: ChatPlan }) {
   }
 
   return (
-    <Card tone="flat" className="mt-1 mb-1.5 p-2 text-body">
+    <Card tone="flat" className="mt-1 p-3 text-body">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-caption font-medium text-ink-soft">{t('panels.chatPlanTitle')}</span>
+        <span className="flex min-w-0 items-center gap-1.5 text-caption font-medium text-ink-soft">
+          <LayoutTemplateIcon size={12} className="flex-none text-ink-faint" />
+          {t('panels.chatPlanTitle')}
+        </span>
         <Badge tone={STATUS_TONES[plan.status]}>{t(`panels.chatPlanStatus_${plan.status}`)}</Badge>
       </div>
       {editing ? (
@@ -375,7 +608,7 @@ function PlanCard({ message, plan }: { message: ChatMessage; plan: ChatPlan }) {
             </div>
           )}
           {open && canEdit && (
-            <div className="mt-2 flex items-center gap-1 border-t border-line-soft pt-1.5">
+            <div className="mt-2.5 flex items-center gap-1 border-t border-line-soft pt-2">
               <Button
                 variant="primary"
                 size="pill"
@@ -613,13 +846,18 @@ function PlanEditor({
  *  @mention to the agent — same field, the server tells them apart. */
 function ChatComposer({
   canvasId,
+  seed,
   replyTo,
   onClearReply,
+  onSent,
 }: {
   canvasId: string
+  /** a draft handed down by the welcome (a skill to start from) */
+  seed: ComposerSeed | null
   /** the thread a send answers in; null starts a new thread */
   replyTo: ChatMessage | null
   onClearReply: () => void
+  onSent: () => void
 }) {
   const canEdit = useStore(canEditOpenCanvas)
   const t = useT()
@@ -628,14 +866,21 @@ function ChatComposer({
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
+  /* a seed replaces the draft once per pick */
+  const [seenSeed, setSeenSeed] = useState(seed)
+  if (seed !== seenSeed) {
+    setSeenSeed(seed)
+    if (seed) setText(seed.text)
+  }
+
   useLayoutEffect(() => {
     if (inputRef.current) autosize(inputRef.current)
   }, [text])
 
-  /* Reply on a thread puts the keyboard here */
+  /* Reply on a thread, or a picked suggestion, puts the keyboard here */
   useEffect(() => {
-    if (replyTo) inputRef.current?.focus()
-  }, [replyTo])
+    if (replyTo || seed) inputRef.current?.focus()
+  }, [replyTo, seed])
 
   async function submit() {
     const clean = text.trim()
@@ -643,6 +888,7 @@ function ChatComposer({
     setSending(true)
     setError(null)
     try {
+      onSent()
       await api.sendChat(canvasId, { text: clean, ...(replyTo ? { threadId: replyTo.id } : {}), ...runnerArg() })
       posthog.capture('chat_message_sent')
       setText('')
@@ -656,6 +902,7 @@ function ChatComposer({
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    /* ↩ and ⌘↩ send, ⇧↩ breaks the line */
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       void submit()
@@ -665,9 +912,14 @@ function ChatComposer({
     }
   }
 
-  /* a picked skill goes in front of the ask as /name, once */
+  /* a picked skill goes in front of the ask as /name, once; a lone "/" the
+     person typed to look for one is the slot it takes */
   function pickSkill(name: string) {
-    setText((current) => (current.includes(`/${name}`) ? current : `/${name} ${current}`.trimEnd() + ' '))
+    setText((current) => {
+      if (current.includes(`/${name}`)) return current
+      const rest = current.trim() === '/' ? '' : current
+      return `/${name} ${rest}`.trimEnd() + ' '
+    })
     inputRef.current?.focus()
   }
 
@@ -680,7 +932,17 @@ function ChatComposer({
         void submit()
       }}
     >
-      <div className="flex flex-col gap-1.5 rounded-panel bg-surface px-3 pt-2.5 pb-2 shadow-ring transition-shadow focus-within:shadow-float">
+      <div
+        className={cn(
+          COLUMN,
+          'flex cursor-text flex-col gap-1.5 rounded-panel bg-surface px-3 pt-2.5 pb-2 shadow-ring',
+          'transition-shadow duration-normal ease-out-quad focus-within:shadow-elevation-1-focus',
+        )}
+        onClick={(e) => {
+          /* the whole box is the field's target, not only its text lines */
+          if (e.target === e.currentTarget) inputRef.current?.focus()
+        }}
+      >
         {replyTo && (
           <span className="flex min-w-0 items-center gap-1 self-start rounded-pill bg-sub py-0.5 pr-0.5 pl-2 text-caption text-ink-soft">
             <ReplyIcon size={12} className="flex-none text-ink-faint" />
@@ -703,7 +965,7 @@ function ChatComposer({
           rows={2}
           maxLength={MAX_CHAT_TEXT_CHARS}
           aria-label={t('panels.chatAria')}
-          className="block min-h-10 overflow-y-auto px-0.5 text-copy"
+          className="block min-h-10 overflow-y-auto px-0.5 text-copy placeholder:text-ink-faint"
           value={text}
           disabled={sending}
           placeholder={
@@ -716,25 +978,33 @@ function ChatComposer({
           onKeyDown={onKeyDown}
           onChange={(e) => setText(e.target.value)}
         />
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-0 items-center gap-1">
           {canEdit && <SkillMenu disabled={sending} onPick={pickSkill} />}
           {canEdit && <ModelPicker disabled={sending} />}
           <span className="flex-1" />
+          {ready && (
+            <span aria-hidden className="flex flex-none items-center gap-1 pr-1 text-caption text-ink-faint">
+              <Kbd>↩</Kbd>
+            </span>
+          )}
           <IconButton
             variant="primary"
             size="md"
             shape="round"
             type="submit"
             aria-label={sending ? t('panels.chatSending') : t('panels.chatSend')}
+            title={t('panels.chatSendTitle')}
             disabled={!ready}
-            className={cn('transition-transform', ready && 'scale-105')}
+            /* at rest the button is a quiet well, not a dimmed ink disc that
+               reads as muddy grey on the dark surface */
+            className="disabled:bg-paper-deep disabled:text-ink-faint disabled:opacity-100"
           >
             <ArrowUpIcon className={cn(sending && 'animate-pulse')} />
           </IconButton>
         </div>
       </div>
       {error && (
-        <Note tone="error" size="sm" className="mt-1.5">
+        <Note tone="error" size="sm" className={cn(COLUMN, 'mt-1.5')}>
           {error}
         </Note>
       )}
@@ -751,7 +1021,12 @@ function SkillMenu({ disabled, onPick }: { disabled: boolean; onPick: (name: str
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <MenuButton variant="quiet" disabled={disabled} aria-label={t('panels.skillMenu')}>
+        <MenuButton
+          variant="quiet"
+          disabled={disabled}
+          aria-label={t('panels.skillMenu')}
+          title={t('panels.skillMenu')}
+        >
           <span className="font-mono">/</span>
         </MenuButton>
       </DropdownMenuTrigger>
