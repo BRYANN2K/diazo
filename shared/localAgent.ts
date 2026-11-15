@@ -26,13 +26,57 @@ export function isClaudeModel(value: unknown): value is ClaudeModel {
   )
 }
 
+/** The aliases as the menus name them: "Latest Opus" follows every Opus
+ *  release, where a pinned id below stays on one version. */
 export const CLAUDE_MODELS: { id: ClaudeModelAlias; name: string; blurb: string }[] = [
-  { id: 'fable', name: 'Fable', blurb: 'The newest Fable your Claude Code knows — for the hardest, longest tasks.' },
-  { id: 'opus', name: 'Opus', blurb: 'The newest Opus — for complex layouts and demanding design or coding work.' },
-  { id: 'sonnet', name: 'Sonnet', blurb: 'The newest Sonnet — a balanced default for everyday design work.' },
-  { id: 'haiku', name: 'Haiku', blurb: 'The newest Haiku — for quick edits and straightforward tasks.' },
+  {
+    id: 'fable',
+    name: 'Latest Fable',
+    blurb: 'The newest Fable your Claude Code knows — for the hardest, longest tasks.',
+  },
+  {
+    id: 'opus',
+    name: 'Latest Opus',
+    blurb: 'The newest Opus — for complex layouts and demanding design or coding work.',
+  },
+  { id: 'sonnet', name: 'Latest Sonnet', blurb: 'The newest Sonnet — a balanced default for everyday design work.' },
+  { id: 'haiku', name: 'Latest Haiku', blurb: 'The newest Haiku — for quick edits and straightforward tasks.' },
   { id: 'default', name: 'Claude Code default', blurb: 'Whatever model your Claude Code is set to.' },
 ]
+
+/**
+ * The pinned models `claude --model` accepts, newest first in each family:
+ * the current generation and the earlier ones Anthropic still serves.
+ * Checked against the Claude model list (2026-11); the verified-only Mythos
+ * models are left out. A release adds a line here; the aliases above reach
+ * it on their own meanwhile.
+ */
+export const CLAUDE_PINNED_MODELS: { id: string; name: string; blurb: string }[] = [
+  { id: 'claude-fable-5-2', name: 'Fable 5.2', blurb: 'Anthropic’s most capable model, pinned.' },
+  { id: 'claude-fable-5-1', name: 'Fable 5.1', blurb: 'The previous Fable, pinned.' },
+  { id: 'claude-fable-5', name: 'Fable 5', blurb: 'The first Fable, pinned.' },
+  { id: 'claude-opus-5-5', name: 'Opus 5.5', blurb: 'The current Opus, pinned.' },
+  { id: 'claude-opus-5', name: 'Opus 5', blurb: 'The previous Opus, pinned.' },
+  { id: 'claude-opus-4-8', name: 'Opus 4.8', blurb: 'An earlier Opus, pinned.' },
+  { id: 'claude-opus-4-7', name: 'Opus 4.7', blurb: 'An earlier Opus, pinned.' },
+  { id: 'claude-opus-4-6', name: 'Opus 4.6', blurb: 'An earlier Opus, pinned.' },
+  { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', blurb: 'The current Sonnet, pinned.' },
+  { id: 'claude-sonnet-5', name: 'Sonnet 5', blurb: 'The previous Sonnet, pinned.' },
+  { id: 'claude-sonnet-4-6', name: 'Sonnet 4.6', blurb: 'An earlier Sonnet, pinned.' },
+  { id: 'claude-haiku-5-5', name: 'Haiku 5.5', blurb: 'The current Haiku, pinned.' },
+  { id: 'claude-haiku-4-5', name: 'Haiku 4.5', blurb: 'The previous Haiku, pinned.' },
+]
+
+/** Everything the Plan's menus offer, the aliases first: what the composer,
+ *  the duel and Settings list alike. */
+export const CLAUDE_PLAN_MODELS: { id: ClaudeModel; name: string; blurb: string }[] = [
+  ...CLAUDE_MODELS,
+  ...CLAUDE_PINNED_MODELS,
+]
+
+export function isClaudeAlias(value: unknown): value is ClaudeModelAlias {
+  return CLAUDE_MODEL_ALIASES.some((alias) => alias === value)
+}
 
 /** A stored preference as it will run: an alias or pinned id as is, anything
  *  older or unknown on the default. Ids saved before the aliases keep working. */

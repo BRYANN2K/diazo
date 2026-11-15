@@ -15,6 +15,8 @@ import {
 import {
   CLAUDE_EFFORT_OPTIONS,
   CLAUDE_MODELS,
+  CLAUDE_PLAN_MODELS,
+  CLAUDE_PINNED_MODELS,
   isClaudeModel,
   normalizeClaudeModel,
   type ClaudeEffort,
@@ -137,8 +139,9 @@ export function LocalClaudeRow({ isDefault = false, onMakeDefault, onChange }: P
   const supported = hasLocalClaude()
   const selectedModel = normalizeClaudeModel(preference?.model)
   const selectedEffort = preference?.effort
-  /* an alias is on the chip row; a pinned id wears its own chip beside them */
-  const pinnedModel = CLAUDE_MODELS.some((model) => model.id === selectedModel) ? undefined : selectedModel
+  /* the menu holds the aliases and the known pinned ids; an id typed in the
+     Claude Code settings that neither knows gets an entry of its own */
+  const pinnedModel = CLAUDE_PLAN_MODELS.some((model) => model.id === selectedModel) ? undefined : selectedModel
   const [pin, setPin] = useState('')
   /* Connecting turns the Plan on; once connected, a model or effort change
      keeps the switch where it is, and the switch alone turns it on or off. */
@@ -176,6 +179,7 @@ export function LocalClaudeRow({ isDefault = false, onMakeDefault, onChange }: P
 
   const models = [
     ...CLAUDE_MODELS.map((model) => ({ id: model.id, name: modelName(model), blurb: t(MODEL_BLURBS[model.id]) })),
+    ...CLAUDE_PINNED_MODELS.map((model) => ({ id: model.id, name: model.name, blurb: t('models.pinnedBlurb') })),
     /* a pinned id is a model of its own until an alias is picked again */
     ...(pinnedModel ? [{ id: pinnedModel, name: pinnedModel, blurb: t('models.pinnedBlurb') }] : []),
   ]

@@ -161,7 +161,7 @@ describe('a connected Plan', () => {
     await act(async () => toggle().click())
     expect(mocks.select).toHaveBeenCalledExactlyOnceWith('alice', { enabled: true, model: 'claude-opus-5' })
     mocks.select.mockClear()
-    await pick(openMenu('Model for Claude Plan')('Sonnet')!)
+    await pick(openMenu('Model for Claude Plan')('Latest Sonnet')!)
     expect(mocks.select).toHaveBeenCalledExactlyOnceWith('alice', { enabled: false, model: 'sonnet' })
   })
 })

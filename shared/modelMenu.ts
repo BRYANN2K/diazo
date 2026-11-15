@@ -273,6 +273,26 @@ export function reasoningEffortOptions(active: string): { id: string; name: stri
   return [...REASONING_EFFORT_OPTIONS, { id: active, name: active, blurb: 'The server’s default' }]
 }
 
+/**
+ * One way to write an OpenAI model's name, whatever the catalog said: the
+ * family and version joined by a hyphen, the tier words after a space, each
+ * capitalised (`gpt-6.1-sol` and "GPT-6.1-Sol" both read "GPT-6.1 Sol").
+ * Anything not shaped like a GPT or o-series name is kept as it is.
+ */
+export function openaiModelName(id: string, displayName?: string): string {
+  const source = displayName?.trim() || id
+  const match = /^(gpt|o)(-?[\d.]+)(?:[- ](.*))?$/i.exec(source)
+  if (!match) return source
+  const [, family = '', version = '', rest] = match
+  const head = family.toLowerCase() === 'gpt' ? `GPT-${version.replace(/^-/, '')}` : `o${version}`
+  if (!rest) return head
+  const words = rest
+    .split(/[- ]+/)
+    .filter(Boolean)
+    .map((word) => (/^[a-z]/.test(word) ? word.charAt(0).toUpperCase() + word.slice(1) : word))
+  return [head, ...words].join(' ')
+}
+
 export const ACCOUNT_KIND_LABELS = {
   chatgpt: 'ChatGPT',
   'openai-key': 'OpenAI',

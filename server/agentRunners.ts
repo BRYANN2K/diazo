@@ -22,7 +22,7 @@ import {
 } from './modelAccounts.ts'
 import { customMenu } from './customProviders.ts'
 import { customProvidersEnabled } from './customProviderFetch.ts'
-import { CLAUDE_EFFORT_OPTIONS, CLAUDE_MODELS } from '../shared/localAgent.ts'
+import { CLAUDE_EFFORT_OPTIONS, CLAUDE_PLAN_MODELS } from '../shared/localAgent.ts'
 import {
   ANTHROPIC_MODELS,
   DEEPSEEK_MODELS,
@@ -85,7 +85,7 @@ export async function listRunners(userId: string): Promise<AgentRunners> {
       online: localAgentRuns.online(userId),
       model: plan.model,
       ...(plan.effort ? { effort: plan.effort } : {}),
-      models: CLAUDE_MODELS,
+      models: CLAUDE_PLAN_MODELS,
       efforts: CLAUDE_EFFORT_OPTIONS,
     })
   }
