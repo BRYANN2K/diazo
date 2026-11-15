@@ -76,6 +76,30 @@ describe('startDuel', () => {
     expect(insert).toHaveBeenCalledTimes(1)
   })
 
+  it('carries each pick’s effort onto its entry and card, so its run can honour it', async () => {
+    store.init([structuredClone(CANVAS)])
+    vi.spyOn(duelDeps, 'insert').mockResolvedValue()
+    const duel = await startDuel({
+      canvasId: 'c1',
+      brief: 'Hero',
+      picks: [
+        { provider: 'openai-key', model: 'gpt-5', effort: 'xhigh' },
+        { provider: 'claude-local', model: 'opus', effort: 'max' },
+      ],
+      actor: human,
+      userId: 'u1',
+    })
+    /* the whole pick — effort included — is what the claiming run resolves:
+       the Plan's becomes `claude --effort`, the OpenAI one's `reasoning.effort`
+       (localAgentRouting.test.ts, accountWithPick in agentRunners.test.ts) */
+    expect(duel.entries.map((e) => e.runner)).toEqual([
+      { provider: 'openai-key', model: 'gpt-5', effort: 'xhigh' },
+      { provider: 'claude-local', model: 'opus', effort: 'max' },
+    ])
+    const cards = actions.getTasks('c1')
+    for (const entry of duel.entries) expect(cards.find((c) => c.id === entry.cardId)?.runner).toEqual(entry.runner)
+  })
+
   it('refuses a request that is no duel before touching the canvas', async () => {
     store.init([structuredClone(CANVAS)])
     await expect(

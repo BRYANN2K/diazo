@@ -7,6 +7,7 @@ export const duel = {
   lede: 'Pick {min} to {max} models. Each designs the same brief in its own frame, side by side.',
   briefPlaceholder: 'What should each model design?',
   noModels: 'Connect a model account in Settings to run a duel.',
+  effortFor: 'Reasoning effort for {label}',
   start: { one: 'Start with {count} model', other: 'Start with {count} models' },
   starting: 'Starting…',
   started: { one: 'Duel started with {count} model', other: 'Duel started with {count} models' },

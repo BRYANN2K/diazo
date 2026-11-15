@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
 const mocks = vi.hoisted(() => ({
   preference: vi.fn(),
@@ -20,8 +20,14 @@ import { accountsView, listRunners } from '../server/agentRunners.ts'
 import { accountWithPick, type ModelAccount } from '../server/modelAccounts.ts'
 import { resolveDefault } from '../server/agentDefaults.ts'
 
+/* catalog loaders must never reach a real provider from a unit test: a stub
+   key would otherwise be sent to api.openai.com / api.anthropic.com */
+beforeEach(() => {
+  vi.stubGlobal('fetch', () => Promise.reject(new Error('no provider catalog in this test')))
+})
 afterEach(() => {
   vi.clearAllMocks()
+  vi.unstubAllGlobals()
   mocks.stored.mockReturnValue([])
   unstubAllEnvs()
 })
@@ -79,6 +85,50 @@ describe('listRunners', () => {
     mocks.accounts.mockResolvedValue([chatgpt, claudeKey])
     mocks.stored.mockReturnValue([{ provider: 'anthropic-key' }])
     expect((await listRunners('alice')).default).toBe('anthropic-key')
+  })
+  it('lists the models the provider says the account can run, not the stale curated roster', async () => {
+    mocks.preference.mockResolvedValue({ enabled: false, model: 'default' })
+    /* a ChatGPT subscription with a live token: the Codex backend's own
+       catalog decides the menu, so a tier the plan no longer unlocks
+       (Sol → 6.1 Sol, Luna hidden) and a brand-new one come out right */
+    mocks.accounts.mockResolvedValue([
+      { ...chatgpt, accessToken: 'tok-live', refreshToken: 'ref', expiresAt: Date.now() + 3_600_000 },
+    ])
+    vi.stubGlobal('fetch', async () =>
+      Response.json({
+        models: [
+          { slug: 'gpt-6-astra', display_name: 'GPT-6 Astra', visibility: 'list', input_modalities: ['text', 'image'] },
+          {
+            slug: 'gpt-5.6-terra',
+            display_name: 'GPT-5.6 Terra',
+            visibility: 'list',
+            input_modalities: ['text', 'image'],
+          },
+          { slug: 'gpt-6.1-sol', display_name: 'GPT-6.1 Sol', visibility: 'list', input_modalities: ['text', 'image'] },
+          /* hidden from pickers, and one that cannot see a screenshot: out */
+          {
+            slug: 'gpt-5.6-luna',
+            display_name: 'GPT-5.6 Luna',
+            visibility: 'hidden',
+            input_modalities: ['text', 'image'],
+          },
+          { slug: 'gpt-6-ink', display_name: 'GPT-6 Ink', visibility: 'list', input_modalities: ['text'] },
+        ],
+      }),
+    )
+    const [gpt] = (await listRunners('alice')).runners
+    expect(gpt?.models.map((m) => m.id)).toEqual(['gpt-6-astra', 'gpt-5.6-terra', 'gpt-6.1-sol'])
+    expect(gpt?.models.map((m) => m.id)).not.toContain('gpt-5.6-luna')
+    expect(gpt?.models.map((m) => m.id)).not.toContain('gpt-5.6-sol')
+    expect(gpt?.models[2]).toMatchObject({ name: 'GPT-6.1 Sol' })
+  })
+  it('keeps the curated menu for a kind without a catalog and when the provider is down', async () => {
+    mocks.preference.mockResolvedValue({ enabled: false, model: 'default' })
+    mocks.accounts.mockResolvedValue([chatgpt, claudeKey])
+    const [gpt, claude] = (await listRunners('alice')).runners
+    /* fetch rejects (beforeEach): the menu degrades to the built-in roster */
+    expect(gpt?.models.map((m) => m.id)).toEqual(['gpt-6-astra', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'])
+    expect(claude?.models.map((m) => m.id)).toContain('claude-sonnet-5')
   })
   it('has nothing to offer with no connection, and names the operator pilot as the default', async () => {
     mocks.preference.mockResolvedValue({ enabled: false, model: 'default' })

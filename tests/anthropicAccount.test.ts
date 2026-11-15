@@ -5,7 +5,16 @@ let server: Server
 let alice: Client
 let bob: Client
 beforeAll(async () => {
-  server = await startServer({ ANTHROPIC_API_KEY: '', OPENAI_API_KEY: '', DATABASE_URL: '', SMTP_HOST: '' })
+  server = await startServer({
+    ANTHROPIC_API_KEY: '',
+    /* /api/agent-runners now asks each connection's provider for its catalog;
+       a dead port keeps this suite off the real providers (curated fallback) */
+    ANTHROPIC_BASE_URL: 'http://127.0.0.1:9',
+    OPENAI_API_KEY: '',
+    OPENAI_MODELS_URL: 'http://127.0.0.1:9/models',
+    DATABASE_URL: '',
+    SMTP_HOST: '',
+  })
   alice = await new Client(server).signUp('claude-alice@example.test', 'Alice')
   bob = await new Client(server).signUp('claude-bob@example.test', 'Bob')
 }, 60000)

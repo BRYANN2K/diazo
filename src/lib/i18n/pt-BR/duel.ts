@@ -7,6 +7,7 @@ export const duel = {
   lede: 'Escolha de {min} a {max} modelos. Cada um desenha o mesmo briefing no seu próprio frame, lado a lado.',
   briefPlaceholder: 'O que cada modelo deve desenhar?',
   noModels: 'Conecte uma conta de modelo nas Configurações para fazer um duelo.',
+  effortFor: 'Esforço de raciocínio para {label}',
   start: { one: 'Começar com {count} modelo', other: 'Começar com {count} modelos' },
   starting: 'Começando…',
   started: { one: 'Duelo iniciado com {count} modelo', other: 'Duelo iniciado com {count} modelos' },

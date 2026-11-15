@@ -3,6 +3,7 @@ import { formatCost } from '../../shared/agentRuns'
 import type { DuelEntryResult, DuelView } from '../../shared/duel'
 import { api, errorMessage } from '../lib/api'
 import { useStore } from '../lib/store'
+import { effortLabel } from '../lib/effortLabels'
 import { useT } from '../lib/i18n'
 import { FramePreview } from './FramePreview'
 import { Badge } from './ui/badge'
@@ -91,6 +92,7 @@ function DuelCard({
               {[
                 formatCost(entry.costUsd),
                 elapsed(entry.durationMs),
+                entry.runner.effort ? effortLabel(entry.runner.effort, undefined, t) : '',
                 entry.lintScore !== undefined ? t('duel.lint', { score: entry.lintScore }) : '',
               ]
                 .filter(Boolean)

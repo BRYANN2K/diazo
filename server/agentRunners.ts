@@ -9,11 +9,13 @@ import { AGENT_MODELS, effortFor } from './openaiAgent.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import { localAgentRuns } from './localAgentRuns.ts'
 import { readConnections } from './agentDefaults.ts'
+import { modelCatalogFor, type ModelCatalog } from './modelCatalog.ts'
 import {
   accountModelFor,
   chatgptConnectEnabled,
   statusOf,
   takesReasoningEffort,
+  withFreshToken,
   type AccountStatus,
   type BuiltinAccountKind,
   type ModelAccount,
@@ -57,6 +59,21 @@ function nameOf(account: ModelAccount): string {
   return account.custom?.name ?? RUNNER_NAMES[account.kind as BuiltinAccountKind]
 }
 
+/** The models one connected account can really run, for every menu that
+ *  lists them: the provider's own catalog merged over the curated roster
+ *  (modelCatalog.ts). A ChatGPT token may have lapsed since the last run; a
+ *  refresh that fails leaves the stale token to be refused, which the
+ *  catalog reports as "reconnect" rather than this call failing outright. */
+export async function catalogForAccount(account: ModelAccount): Promise<ModelCatalog> {
+  const live = await Promise.race([
+    withFreshToken(account).catch(() => account),
+    /* the refresh has no timeout of its own; a stalled token endpoint must
+       not hold the picker past the catalog's own budget */
+    new Promise<ModelAccount>((resolve) => setTimeout(resolve, 8_000, account).unref()),
+  ])
+  return modelCatalogFor(live, menuFor(account))
+}
+
 export async function listRunners(userId: string): Promise<AgentRunners> {
   const connections = await readConnections(userId)
   const runners: AgentRunner[] = []
@@ -72,8 +89,12 @@ export async function listRunners(userId: string): Promise<AgentRunners> {
       efforts: CLAUDE_EFFORT_OPTIONS,
     })
   }
-  for (const account of connections.accounts) {
-    if (!account.enabled) continue
+  /* the menu must list what the connection can actually run, so it comes
+     from the provider's own catalog — every account's asked at once, bounded
+     by the slowest rather than their sum (each loader bounds itself at 8s) */
+  const enabled = connections.accounts.filter((account) => account.enabled)
+  const catalogs = await Promise.all(enabled.map((account) => catalogForAccount(account)))
+  for (const [i, account] of enabled.entries()) {
     const effort = takesReasoningEffort(account.kind) ? effortFor(account) : undefined
     runners.push({
       provider: account.kind,
@@ -81,7 +102,7 @@ export async function listRunners(userId: string): Promise<AgentRunners> {
       ...(account.email ? { email: account.email } : {}),
       model: accountModelFor(account),
       ...(effort ? { effort } : {}),
-      models: menuFor(account).map(({ id, name, blurb }) => ({ id, name, blurb })),
+      models: (catalogs[i]?.models ?? menuFor(account)).map(({ id, name, blurb }) => ({ id, name, blurb })),
       ...(effort ? { efforts: reasoningEffortOptions(effort) } : {}),
     })
   }
