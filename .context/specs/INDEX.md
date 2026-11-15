@@ -42,6 +42,10 @@ lists every file in this folder.
   editor's read-only mode.
 - [workspaces-billing.md](workspaces-billing.md) - Shared workspaces (org-level canvas access with
   roles) and the per-seat Team plan on Stripe: data model, entitlement rules, API, webhook flow.
+- [orca-integration.md](orca-integration.md) - Proposal: "Ready for dev" → an Orca worktree and
+  coding agent launched by the desktop shell (typed `orca` CLI calls, native confirmation), live
+  dev-task status on the frame (`orca worktree ps` pull + `update_dev_task` MCP push), previews,
+  drift review, code duels, automations bridge, `frame_dev_tasks`. Not built.
 - [design-libraries.md](design-libraries.md) - Design libraries: a canvas kind whose frames are indexed as
   items with variants, categories and tags; per-library import rules; a real search index behind ⌘F and the
   agent tools; the gallery; sharing; the path from today's name-based "Design Library" canvases. Built.
