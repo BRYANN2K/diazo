@@ -118,6 +118,8 @@ describe('install-local.sh', () => {
     expect(line).toContain('--publish 127.0.0.1:4400:4400')
     expect(line).toContain(`--volume ${home}/.doop/data:/app/data`)
     expect(line).toContain('--env BETTER_AUTH_URL=http://localhost:4400')
+    /* the update card tells this install to run `doop-local update` */
+    expect(line).toContain('--env DOOP_INSTALL=local')
     expect(line).not.toContain('--rosetta')
     expect(line.endsWith('ghcr.io/bryann2k/redoop:main')).toBe(true)
   })

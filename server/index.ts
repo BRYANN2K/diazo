@@ -109,6 +109,7 @@ import { auth, initAuth, syncAdmins, getUserName, isBanned, loginProvidersConfig
 import { getInstanceSettings, hydrateInstanceSettings, loginPolicy } from './instanceSettings.ts'
 import { adminRouter } from './admin.ts'
 import { buildInfo } from './buildInfo.ts'
+import { maySeeUpdates, updateStatus } from './updateCheck.ts'
 import { communityRouter, parseListing, publishableFrames } from './community.ts'
 import { automationsRouter, startScheduler } from './automations.ts'
 import { startMcpTokenPrune } from './mcpTokens.ts'
@@ -989,6 +990,17 @@ app.use(
   '/api/comments/:id',
   loadFirst((id) => actions.findComment(id)?.canvasId),
 )
+
+/* Whether a newer build of this fork is out (server/updateCheck.ts). 404 to
+   anyone but an instance admin or a local install's user, like /api/admin. */
+app.get('/api/update-status', async (req, res, next) => {
+  if (!maySeeUpdates(req.user)) return res.status(404).end()
+  try {
+    res.json(await updateStatus())
+  } catch (err) {
+    next(err)
+  }
+})
 
 /* Home's push channel: tells an open dashboard its canvas list changed */
 app.get('/api/me/events', userEvents.subscribe)

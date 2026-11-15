@@ -9,6 +9,7 @@ import {
   DEFAULT_OPENROUTER_MODEL,
 } from '../shared/modelMenu.ts'
 import { FALLBACK_LOCALE, LOCALES } from '../shared/locales.ts'
+import { INSTALL_TYPES } from '../shared/updateCheck.ts'
 
 /**
  * Every environment variable the server reads, declared once with its type
@@ -46,6 +47,13 @@ const origin = makeExactValidator<string>((input) => {
     throw new TypeError(`Invalid URL (expected http or https): "${input}"`)
   }
   return input.replace(/\/+$/, '')
+})
+
+/** A GitHub repository as `owner/name`. */
+const githubRepo = makeExactValidator<string>((input) => {
+  const repo = input.trim()
+  if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(repo)) throw new TypeError(`Invalid repository (owner/name): "${input}"`)
+  return repo
 })
 
 /** Comma-separated values, trimmed, empties dropped. */
@@ -319,6 +327,20 @@ const schema = {
      unset in a dev checkout, where server/buildInfo.ts asks git instead */
   DOOP_BUILD_SHA: str({ default: undefined }),
   DOOP_BUILD_DATE: str({ default: undefined }),
+
+  /* -------------------------------------------------- update check */
+  /* server/updateCheck.ts asks GitHub whether a newer build of REPO's BRANCH
+     exists; admins (and a local install's user) see the answer */
+  DOOP_UPDATE_CHECK: bool({ default: true }),
+  DOOP_UPDATE_REPO: githubRepo({ default: 'BRYANN2K/redoop' }),
+  DOOP_UPDATE_BRANCH: str({ default: 'main' }),
+  /* GitHub's REST API; another origin for GitHub Enterprise or a test stub */
+  DOOP_UPDATE_API: origin({ default: 'https://api.github.com' }),
+  /* how this instance was installed (the card's update instructions); unset
+     = guessed from the environment (Kubernetes, a container, a checkout) */
+  DOOP_INSTALL: str({ choices: INSTALL_TYPES, default: undefined }),
+  /* set by Kubernetes in every pod; read only to recognise one */
+  KUBERNETES_SERVICE_HOST: str({ default: undefined }),
 
   /* ------------------------------------------------------- iOS push */
   DOOP_APNS_TEAM_ID: str({ default: undefined }),
