@@ -4,12 +4,13 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRunners } from '../shared/agentRunner.ts'
 import { CLAUDE_EFFORT_OPTIONS, CLAUDE_PLAN_MODELS } from '../shared/localAgent.ts'
-const mocks = vi.hoisted(() => ({ runners: vi.fn(), startDuel: vi.fn() }))
+const mocks = vi.hoisted(() => ({ runners: vi.fn(), startDuel: vi.fn(), models: vi.fn() }))
 vi.mock('../src/lib/api', () => ({
-  api: { agentRunners: mocks.runners, startDuel: mocks.startDuel },
+  api: { agentRunners: mocks.runners, startDuel: mocks.startDuel, agentModels: mocks.models },
   errorMessage: (_err: unknown, fallback: string) => fallback,
 }))
-import { DuelDialog, duelChoices, duelGroups, filterDuelGroups } from '../src/components/DuelDialog'
+vi.mock('../src/App', () => ({ navigate: vi.fn() }))
+import { DuelDialog, duelChoices, duelGroups, duelRepeats } from '../src/components/DuelDialog'
 import { useRunnerPick } from '../src/lib/runnerPick'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -70,6 +71,7 @@ beforeEach(() => {
   useRunnerPick.setState({ stored: null, runners: null })
   mocks.runners.mockResolvedValue(runners)
   mocks.startDuel.mockResolvedValue({})
+  mocks.models.mockResolvedValue({ models: [], live: false })
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -80,34 +82,72 @@ afterEach(() => {
 })
 
 const dialog = () => document.querySelector('[role="dialog"]')!
-const box = (label: string) => dialog().querySelector<HTMLInputElement>(`input[type="checkbox"][aria-label="${label}"]`)
-const check = (label: string) => act(() => box(label)!.click())
-const effortTrigger = (label: string) =>
-  dialog().querySelector<HTMLButtonElement>(`button[aria-label="Reasoning effort for ${label}"]`)
-const chooseEffort = async (label: string, level: string) => {
+const slot = (n: number) => dialog().querySelector<HTMLButtonElement>(`button[data-slot-index="${n}"]`)!
+const menu = () => document.querySelector<HTMLElement>('[role="menu"]')
+const captions = () =>
+  [...menu()!.querySelectorAll('[data-slot="dropdown-menu-caption"]')]
+    .map((el) => el.textContent)
+    .filter((text) => text !== 'Reasoning effort')
+const openSlot = (n: number) =>
   act(() => {
-    effortTrigger(label)!.dispatchEvent(
-      new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }),
-    )
+    /* Radix opens a menu on pointerdown, not click */
+    slot(n).dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
   })
-  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((el) =>
-    el.textContent?.startsWith(level),
-  )!
+const select = async (item: HTMLElement) => {
   await act(async () => {
     item.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
     item.click()
   })
 }
-const button = (text: string) => [...dialog().querySelectorAll('button')].find((el) => el.textContent === text)!
-const slots = () => [...dialog().querySelectorAll<HTMLElement>('[data-contestant]')]
-const search = (text: string) =>
+/* the menu's model rows in order, each tagged with the connection caption above it */
+const radios = () => {
+  let caption = ''
+  const rows: { connection: string; model: string; el: HTMLElement }[] = []
+  for (const el of menu()!.querySelectorAll<HTMLElement>(
+    '[data-slot="dropdown-menu-caption"], [role="menuitemradio"]',
+  )) {
+    if (el.getAttribute('role') === 'menuitemradio') rows.push({ connection: caption, model: el.textContent ?? '', el })
+    else caption = el.textContent ?? ''
+  }
+  return rows
+}
+const pick = async (n: number, connection: string, model: string) => {
+  await openSlot(n)
+  const row = radios().find((r) => r.connection.startsWith(connection) && r.model === model)
+  if (!row) throw new Error(`no ${connection} · ${model} in the menu`)
+  await select(row.el)
+}
+const slider = () => document.querySelector<HTMLInputElement>('input[type="range"][aria-label="Reasoning effort"]')
+const closeMenu = () =>
   act(() => {
-    const input = dialog().querySelector<HTMLInputElement>('input[aria-label="Search models"]')!
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text)
+    menu()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  })
+/* the slider's step by position; it commits on release */
+const setEffort = async (n: number, step: number) => {
+  await openSlot(n)
+  const input = slider()!
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, String(step))
     input.dispatchEvent(new Event('input', { bubbles: true }))
   })
-const render = async (brief = 'A pricing hero') => {
-  await act(async () => root.render(<DuelDialog canvasId="c1" brief={brief} onClose={() => {}} onStarted={() => {}} />))
+  await act(async () => {
+    input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }))
+  })
+  await closeMenu()
+}
+const startButton = () =>
+  [...dialog().querySelectorAll<HTMLButtonElement>('button')].find((el) => el.textContent?.startsWith('Start'))!
+const render = async (brief = 'A pricing hero', handlers: { onClose?: () => void; onStarted?: () => void } = {}) => {
+  await act(async () =>
+    root.render(
+      <DuelDialog
+        canvasId="c1"
+        brief={brief}
+        onClose={handlers.onClose ?? (() => {})}
+        onStarted={handlers.onStarted ?? (() => {})}
+      />,
+    ),
+  )
   await settle()
 }
 
@@ -134,87 +174,124 @@ describe('duelGroups', () => {
     expect(duelChoices({ runners: [] })).toEqual([])
   })
 
-  it('narrows by model name or id, and keeps a whole connection named in the query', () => {
-    const groups = duelGroups(runners)
-    expect(filterDuelGroups(groups, 'sol').map((g) => g.choices.map((c) => c.model.id))).toEqual([['gpt-6.1-sol']])
-    expect(filterDuelGroups(groups, 'opus 5.5').flatMap((g) => g.choices.map((c) => c.key))).toEqual([
-      'claude-local|claude-opus-5-5',
-      'anthropic-key|claude-opus-5-5',
-    ])
-    expect(filterDuelGroups(groups, 'claude plan')[0]!.choices).toHaveLength(groups[0]!.choices.length)
-    expect(filterDuelGroups(groups, '   ')).toBe(groups)
+  it('finds the slots that repeat an earlier one, model and effort alike', () => {
+    const opus = { provider: 'claude-local' as const, model: 'opus' }
+    expect(duelRepeats([opus, undefined, { ...opus }])).toEqual(new Map([[2, 0]]))
+    /* the same model at another effort is a fair duel */
+    expect(duelRepeats([opus, { ...opus, effort: 'max' }, undefined]).size).toBe(0)
   })
 })
 
 describe('the duel dialog', () => {
-  it('lists each connection under its own heading, searchable', async () => {
+  it('is the brief with three model slots in its foot, and nothing else', async () => {
     await render()
-    const headings = [...dialog().querySelectorAll('[role="group"] [role="group"]')].map((g) =>
-      g.getAttribute('aria-label'),
-    )
-    expect(headings).toEqual(['Claude Plan', 'ChatGPT', 'Claude API', 'My Gateway'])
-    expect(dialog().textContent).not.toContain('Claude Code default')
-    await search('terra')
-    expect(box('ChatGPT · GPT-5.6 Terra')).toBeTruthy()
-    expect(box('ChatGPT · GPT-6 Astra')).toBeNull()
-    expect(box('Claude Plan · Latest Opus')).toBeNull()
-    await search('nothing like this')
-    expect(dialog().textContent).toContain('No model matches “nothing like this”.')
+    expect([1, 2, 3].map((n) => slot(n).textContent)).toEqual(['Model 1', 'Model 2', 'Model 3'])
+    expect(slot(3).getAttribute('aria-label')).toBe('Model 3 (optional): pick a model')
+    /* the slots live inside the brief's field */
+    expect(dialog().querySelector('textarea')!.parentElement!.contains(slot(1))).toBe(true)
+    expect(dialog().querySelector('input[type="checkbox"]')).toBeNull()
+    expect(dialog().querySelector('input[aria-label="Search models"]')).toBeNull()
+    expect(startButton().textContent).toBe('Start duel · 0 models')
+    expect(startButton().disabled).toBe(true)
   })
 
-  it('fills contestant slots A to C, and holds the list once three are picked', async () => {
+  it('opens the composer’s model menu in each slot: connections, their models, the effort', async () => {
     await render()
-    expect(slots()).toHaveLength(0)
-    check('Claude Plan · Opus 5.5')
-    check('ChatGPT · GPT-6.1 Sol')
-    check('My Gateway · GW Large')
-    expect(slots().map((s) => [s.dataset.contestant, s.textContent?.includes('Opus 5.5')])).toEqual([
-      ['A', true],
-      ['B', false],
-      ['C', false],
-    ])
-    expect(dialog().textContent).toContain('3 of 3 picked')
-    expect(box('Claude API · Sonnet 5')!.disabled).toBe(true)
-    expect(dialog().textContent).toContain('Three models picked. Remove one to pick another.')
-    /* removing a contestant frees a slot */
+    await openSlot(1)
+    expect(captions()).toEqual(['Claude Plan', 'ChatGPT', 'Claude API', 'My Gateway'])
+    expect(menu()!.textContent).not.toContain('Claude Code default')
+    expect(menu()!.textContent).toContain('Model settings…')
+    /* nothing picked yet: no effort to set */
+    expect(slider()).toBeNull()
+    await select(radios().find((r) => r.connection === 'ChatGPT' && r.model === 'GPT-6.1 Sol')!.el)
+    expect(slot(1).textContent).toBe('GPT-6.1 SolMedium')
+    expect(slot(1).getAttribute('aria-label')).toBe('Model 1: GPT-6.1 Sol · Medium')
+    await openSlot(1)
+    expect(
+      radios()
+        .find((r) => r.model === 'GPT-6.1 Sol')!
+        .el.getAttribute('aria-checked'),
+    ).toBe('true')
+    expect(slider()!.getAttribute('aria-valuetext')).toBe('Medium')
+  })
+
+  it('says inside the menu when a desktop connection is not running', async () => {
+    mocks.runners.mockResolvedValue({ ...runners, runners: [{ ...plan, online: false }, chatgpt] })
+    await render()
+    await openSlot(2)
+    expect(captions()).toEqual(['Claude Plan · Desktop app not running', 'ChatGPT'])
+  })
+
+  it('starts with two slots filled or more, and a slot clears from its menu or the keyboard', async () => {
+    await render()
+    await pick(1, 'Claude Plan', 'Opus 5.5')
+    expect(startButton().disabled).toBe(true)
+    await pick(2, 'ChatGPT', 'GPT-6.1 Sol')
+    expect(startButton().textContent).toBe('Start duel · 2 models')
+    expect(startButton().disabled).toBe(false)
+    await pick(3, 'My Gateway', 'GW Large')
+    expect(startButton().textContent).toBe('Start duel · 3 models')
+    await openSlot(2)
+    const clear = [...menu()!.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (el) => el.textContent === 'Clear Model 2',
+    )!
+    await select(clear)
+    expect(slot(2).textContent).toBe('Model 2')
     act(() => {
-      dialog().querySelector<HTMLButtonElement>('button[aria-label="Remove ChatGPT · GPT-6.1 Sol"]')!.click()
+      slot(3).dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true }))
     })
-    expect(slots()).toHaveLength(2)
-    expect(box('Claude API · Sonnet 5')!.disabled).toBe(false)
+    expect(slot(3).textContent).toBe('Model 3')
+    expect(startButton().disabled).toBe(true)
   })
 
-  it('shows each contestant’s effort at its connection’s setting, and none where there is no dial', async () => {
+  it('gives each slot its connection’s effort: the Plan’s Default, none where there is no dial', async () => {
     await render()
-    check('Claude Plan · Latest Opus')
-    check('ChatGPT · GPT-5.6 Terra')
-    check('Claude API · Sonnet 5')
-    expect(effortTrigger('ChatGPT · GPT-5.6 Terra')!.textContent).toBe('Medium')
+    await pick(1, 'Claude Plan', 'Latest Opus')
+    await pick(2, 'ChatGPT', 'GPT-5.6 Terra')
+    await pick(3, 'Claude API', 'Sonnet 5')
     /* a Plan with no configured effort runs the CLI's own setting: Default, not Low */
-    expect(effortTrigger('Claude Plan · Latest Opus')!.textContent).toBe('Default')
-    expect(effortTrigger('Claude API · Sonnet 5')).toBeNull()
+    expect(slot(1).textContent).toBe('Latest OpusDefault')
+    expect(slot(2).textContent).toBe('GPT-5.6 TerraMedium')
+    expect(slot(3).textContent).toBe('Sonnet 5')
+    await openSlot(1)
+    expect(slider()!.getAttribute('aria-valuetext')).toBe('Default')
   })
 
-  it('sends each contestant’s pick with the effort chosen for it, or the connection’s own', async () => {
+  it('lets the same model duel itself at another effort, and holds two equal slots back', async () => {
+    await render()
+    await pick(1, 'ChatGPT', 'GPT-6.1 Sol')
+    await pick(2, 'ChatGPT', 'GPT-6.1 Sol')
+    expect(dialog().textContent).toContain('Model 2 is the same model and effort as Model 1.')
+    expect(startButton().disabled).toBe(true)
+    /* efforts: low, medium, high, xhigh */
+    await setEffort(2, 2)
+    expect(slot(2).textContent).toBe('GPT-6.1 SolHigh')
+    expect(dialog().textContent).not.toContain('same model and effort')
+    expect(startButton().disabled).toBe(false)
+  })
+
+  it('sends each slot’s pick with the effort chosen for it, or the connection’s own', async () => {
     const onClose = vi.fn()
     const onStarted = vi.fn()
-    await act(async () =>
-      root.render(<DuelDialog canvasId="c1" brief="A pricing hero" onClose={onClose} onStarted={onStarted} />),
-    )
-    await settle()
-    check('Claude Plan · Latest Opus')
-    check('ChatGPT · GPT-5.6 Terra')
-    check('ChatGPT · GPT-6 Astra')
-    await chooseEffort('Claude Plan · Latest Opus', 'Max')
-    await chooseEffort('ChatGPT · GPT-5.6 Terra', 'Extra high')
-    expect(effortTrigger('ChatGPT · GPT-5.6 Terra')!.textContent).toBe('Extra high')
-    await act(async () => button('Start with 3 models').click())
+    await render('A pricing hero', { onClose, onStarted })
+    await pick(1, 'Claude Plan', 'Latest Opus')
+    await pick(2, 'ChatGPT', 'GPT-5.6 Terra')
+    await pick(3, 'ChatGPT', 'GPT-6 Astra')
+    /* the Plan's steps: Default, then low … max */
+    await setEffort(1, 5)
+    await setEffort(2, 3)
+    expect(slot(1).textContent).toBe('Latest OpusMax')
+    expect(slot(2).textContent).toBe('GPT-5.6 TerraExtra high')
+    /* a model change within a connection keeps the slot's effort */
+    await pick(2, 'ChatGPT', 'GPT-6.1 Sol')
+    expect(slot(2).textContent).toBe('GPT-6.1 SolExtra high')
+    await act(async () => startButton().click())
     expect(mocks.startDuel).toHaveBeenCalledWith(
       'c1',
       'A pricing hero',
       [
         { provider: 'claude-local', model: 'opus', effort: 'max' },
-        { provider: 'chatgpt', model: 'gpt-5.6-terra', effort: 'xhigh' },
+        { provider: 'chatgpt', model: 'gpt-6.1-sol', effort: 'xhigh' },
         /* untouched: the account's configured medium */
         { provider: 'chatgpt', model: 'gpt-6-astra', effort: 'medium' },
       ],
@@ -224,11 +301,11 @@ describe('the duel dialog', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
-  it('sends no effort for a Plan contestant left on Default', async () => {
+  it('sends no effort for a Plan slot left on Default, and only the filled slots', async () => {
     await render('A hero')
-    check('Claude Plan · Fable 5.2')
-    check('ChatGPT · GPT-6.1 Sol')
-    await act(async () => button('Start with 2 models').click())
+    await pick(1, 'Claude Plan', 'Fable 5.2')
+    await pick(3, 'ChatGPT', 'GPT-6.1 Sol')
+    await act(async () => startButton().click())
     expect(mocks.startDuel).toHaveBeenCalledWith(
       'c1',
       'A hero',

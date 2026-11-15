@@ -170,8 +170,8 @@
   user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
   shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
   A `RunnerPick` may carry its own `effort` for one run — the composer's picker and each duel
-  contestant's `EffortMenu` (a compact dropdown driven by the runner's effort list, with a
-  "Default" row sending no effort where the connection has none configured) — and `pickModel` honours it (`accountWithPick` for the OpenAI
+  slot set it with the effort slider of the shared `ModelMenu` (in a duel slot, a "Default"
+  first step sends no effort where the connection has none configured) — and `pickModel` honours it (`accountWithPick` for the OpenAI
   kinds, `isClaudeEffort` → `claude --effort` on the Plan); the localized names and blurbs for
   the dials live in `src/lib/effortLabels.ts`.
 - Image descriptions (`.context/specs/image-descriptions.md`, `server/imageDescriptions.ts`,
@@ -215,13 +215,19 @@
   the pick is this browser's (`src/lib/runnerPick.ts`, `doop:agent-runner`), rides on the card
   as `runner` (a `RunnerPick`: provider, model, effort; `tasks.runner` JSON, migration 0045)
   and the send button's meter names it. The model duel (`server/duels.ts`,
-  `DuelDialog.tsx`/`DuelCards.tsx`, `shared/duel.ts`) builds one `RunnerPick` per contestant —
-  provider, model, effort from the contestant's `EffortMenu` where the connection has a dial —
-  into one scoped card each. `duelGroups` groups the choices by connection (its `AppIcon` from
-  `src/lib/runnerMarks.ts`, initials for a provider with no tile; no provider is named in the
-  UI), drops a `default` meta-entry (not a model to compare) and keeps a configured model the
-  menu does not list; the dialog shows contestant slots A-C, a search over model and connection
-  names from seven models (`filterDuelGroups`), and holds the list at three. Entry labels use
+  `DuelDialog.tsx`/`DuelCards.tsx`, `shared/duel.ts`) builds one `RunnerPick` per filled slot
+  into one scoped card each. The dialog is the brief alone with three slot buttons in its foot
+  ("Model 1", "Model 2", "Model 3 (optional)"; filled: brand mark, model, effort). Each opens
+  `ModelMenu` (`src/components/ModelMenu.tsx`), the composer's `ModelPicker` menu extracted:
+  connections under their names ("· Desktop app not running" when `online` is false), the pick
+  highlighted, the picked connection's live catalog, the effort slider, Model settings; a slot
+  adds Clear (or Delete/Backspace on its button). A slot's effort starts at its connection's
+  own (`runner.effort`, else Default) and stays with the slot across that connection's models.
+  The same model may fill two slots (at different efforts it is a fair duel), but two slots
+  with the same model and effort (`duelRepeats`, by `runnerKey`) get a warning and hold Start
+  back, since the server refuses equal picks. Start needs two filled slots ("Start duel · 2
+  models"). `duelGroups` groups the choices by connection, drops a `default` meta-entry (not a
+  model to compare) and keeps a configured model the menu does not list. Entry labels use
   `knownModelName` ("Claude Plan · Opus 5.5", "ChatGPT · GPT-6.1 Sol"), and the comparison card
   names each entry's effort. OpenAI names are written one way by `openaiModelName`
   (`shared/modelMenu.ts`) in every catalog. Tests: `duelDialog.test.tsx`, `duel.test.ts`,
