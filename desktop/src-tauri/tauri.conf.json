@@ -16,9 +16,9 @@
       }
     },
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJDMTFCREY0MzhGNkM1NjkKUldScHhmWTQ5TDBSdkJBV0Zaa3MvY01HWWRIaHhTd1NQazRlMERpUFBSLy95eU5EdEFCRmRPOE8K",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEIxMzc1RjdFODhCOEZDNzIKUldSeS9MaUlmbDgzc2ZjNVZYMkxjYmMvaDB5SlNTTXhZMXQrSjJ0YVB3emRRQjBrY3ZYZ1BhNEwK",
       "endpoints": [
-        "https://doop.design/desktop/latest.json"
+        "https://github.com/BRYANN2K/redoop/releases/download/desktop-updates/latest.json"
       ],
       "windows": {
         "installMode": "passive"
