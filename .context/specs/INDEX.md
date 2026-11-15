@@ -49,3 +49,7 @@ lists every file in this folder.
 - [design-libraries.md](design-libraries.md) - Design libraries: a canvas kind whose frames are indexed as
   items with variants, categories and tags; per-library import rules; a real search index behind ⌘F and the
   agent tools; the gallery; sharing; the path from today's name-based "Design Library" canvases. Built.
+- [motion-studio.md](motion-studio.md) - Proposal: motion design inside redoop. A page with a seekable
+  timeline (camera across frames, layer keyframes, captions, media and three.js layers), the storyboard
+  to agent-animated HTML flow, the survey of AI video and motion tools, the Blender link, rendering
+  targets, the HyperFrames contract and its export, phases and open questions. Not built.
