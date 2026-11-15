@@ -42,6 +42,28 @@ export function groupByFrame(hits: CanvasFindHit[], query: string): FrameGroup[]
   const groups: FrameGroup[] = []
   const byId = new Map<string, FrameGroup>()
   for (const hit of hits) {
+    /* a library answered from its index (the everywhere scope): one group
+       per item, which inserts like a Library-scope row */
+    if (hit.item && hit.canvasId) {
+      const key = `${hit.canvasId}:${hit.item.id}`
+      if (byId.has(key)) continue
+      const g: FrameGroup = {
+        key,
+        frameId: hit.item.frameId,
+        pageId: hit.item.pageId,
+        pageName: hit.item.category,
+        ...(hit.canvasName ? { canvasName: hit.canvasName } : {}),
+        id: hit.item.id,
+        label: hit.item.label,
+        hits: [hit],
+        inside: [],
+        item: hit.item,
+        libraryId: hit.canvasId,
+      }
+      byId.set(key, g)
+      groups.push(g)
+      continue
+    }
     let g = byId.get(hit.frameId)
     if (!g) {
       g = {
@@ -76,6 +98,18 @@ export function relevance(g: FrameGroup, q: string): number {
   score += Math.min(g.hits.length, 20)
   if (g.label.startsWith('§') || id.startsWith('§')) score -= 2000
   return score
+}
+
+/** Where a group is listed: with the canvases' text matches, or with the
+ *  library items. */
+export type FindSection = 'canvas' | 'library'
+
+export const sectionOf = (g: FrameGroup): FindSection => (g.item ? 'library' : 'canvas')
+
+/** The groups in the order the list shows them: the canvases' matches,
+ *  then the library items, each section keeping its own ranking. */
+export function bySection(groups: FrameGroup[]): FrameGroup[] {
+  return [...groups.filter((g) => sectionOf(g) === 'canvas'), ...groups.filter((g) => sectionOf(g) === 'library')]
 }
 
 /** Groups listed in the remote results. */

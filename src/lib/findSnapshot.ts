@@ -22,13 +22,26 @@ interface Loaded {
 
 const htmlCache = new Map<string, Promise<Loaded>>()
 
-/** A frame's HTML and size: from the open canvas, else fetched once. */
-export function frameHtml(frameId: string): Promise<Loaded> {
+/** The library item a frame is read for, when the frame itself may not be:
+ *  a workspace or public library is read through its item routes. */
+export interface ItemRef {
+  libraryId: string
+  itemId: string
+}
+
+/** A frame's HTML and size: from the open canvas, else fetched once; a
+ *  library item's frame the person cannot open as a canvas is read through
+ *  the library (`/api/libraries/:id/items/:itemId/html`), so the preview
+ *  still runs live instead of settling on the frame's still image. */
+export function frameHtml(frameId: string, via?: ItemRef): Promise<Loaded> {
   const local = useStore.getState().canvas?.frames.find((f) => f.id === frameId)
   if (local?.html) return Promise.resolve({ html: local.html, width: local.width, height: local.height })
   let p = htmlCache.get(frameId)
   if (!p) {
-    p = api.frame(frameId).then((f) => ({ html: f.html ?? '', width: f.width, height: f.height }))
+    const asFrame = () => api.frame(frameId).then((f) => ({ html: f.html ?? '', width: f.width, height: f.height }))
+    const asItem = (ref: ItemRef) =>
+      api.libraryItemHtml(ref.libraryId, ref.itemId).then((f) => ({ html: f.html, width: f.width, height: f.height }))
+    p = via ? asFrame().catch(() => asItem(via)) : asFrame()
     p.catch(() => htmlCache.delete(frameId))
     htmlCache.set(frameId, p)
   }
@@ -86,8 +99,8 @@ async function ask(win: Window, token: string): Promise<LibrarySnapshot | null> 
   return (await reply)?.snapshot ?? null
 }
 
-async function offscreen(frameId: string, focus: ItemFocus): Promise<LibrarySnapshot | null> {
-  const { html, width, height } = await frameHtml(frameId)
+async function offscreen(frameId: string, focus: ItemFocus, via?: ItemRef): Promise<LibrarySnapshot | null> {
+  const { html, width, height } = await frameHtml(frameId, via)
   const token = `snap-${Math.random().toString(36).slice(2)}`
   const iframe = document.createElement('iframe')
   iframe.setAttribute('sandbox', 'allow-scripts')
@@ -117,8 +130,10 @@ async function offscreen(frameId: string, focus: ItemFocus): Promise<LibrarySnap
   }
 }
 
-/** The item `focus` names in the frame, as rendered. */
-export function snapshotLibraryItem(frameId: string, focus: ItemFocus): Promise<LibrarySnapshot | null> {
+/** The item `focus` names in the frame, as rendered. The preview on
+ *  screen answers only while nobody has played with it: a hovered demo may
+ *  have changed its own markup, and the copy is taken from a fresh render. */
+export function snapshotLibraryItem(frameId: string, focus: ItemFocus, via?: ItemRef): Promise<LibrarySnapshot | null> {
   if (live && live.frameId === frameId && live.focus === focus.key && live.found) return ask(live.win, live.token)
-  return offscreen(frameId, focus)
+  return offscreen(frameId, focus, via)
 }

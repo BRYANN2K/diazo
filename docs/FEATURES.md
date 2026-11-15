@@ -6,8 +6,12 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
 
 ## Features added in this fork
 
-- **⌘F across every page** — results grouped by frame, with thumbnails and a large preview.
-  Agents get the same search with the `find_in_canvas` MCP tool.
+- **⌘F across every page** — a palette: This canvas (this page or all pages), Library or All as
+  one segmented control, results in sections (canvas matches, then library items with their
+  thumbnail, kind, category and variants), a large side preview with variant chips and Insert /
+  Go to, and the keys in the footer (↩, ⇧↩, ⌥↩ variants, ⌘C). The preview runs the item live:
+  its animations, transitions and scripts play and hover demos react under the pointer, paused
+  while off screen. Agents get the same search with the `find_in_canvas` MCP tool.
 - **Insert from ⌘F** — hovering a result moves the live preview onto that variant without
   reloading it. Clicking a library item (a row the library index answered) while a frame is selected inserts a
   copy: its HTML plus only the CSS that matches it, scoped with `@scope`, with fresh

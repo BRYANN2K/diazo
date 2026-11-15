@@ -105,4 +105,40 @@ describe.skipIf(!findBrowserPath())('⌘F preview runtime', () => {
       expect(box).toMatchObject({ w: Math.round(d.w), h: Math.round(d.h) })
     })
   })
+
+  describe('motion', () => {
+    const MOVING = `<!doctype html><html><head><style>
+      @keyframes slide{to{transform:translateX(100px)}}
+      .m{width:40px;height:40px;animation:slide 2s linear infinite}
+      .h{width:40px;height:40px;background:rgb(0,0,0);transition:background-color 1ms}
+      .h:hover{background:rgb(255,0,0)}
+    </style></head><body><div class="m" id="m"></div><div class="h" id="h"></div>
+    <script>document.getElementById('h').addEventListener('pointerenter', function () { document.body.dataset.hovered = '1' })</script>
+    </body></html>`
+
+    const time = () => page.evaluate(() => Number(document.getAnimations()[0]?.currentTime ?? 0))
+
+    it('lets CSS animations run, pauses them on { play: false } and plays them on { play: true }', async () => {
+      await page.setContent(withFindPreviewScript(MOVING, 't3'), { waitUntil: 'load' })
+      const first = await time()
+      await new Promise((r) => setTimeout(r, 150))
+      expect(await time()).toBeGreaterThan(first)
+      await page.evaluate(() => window.postMessage({ doopFindPreview: 't3', play: false }, '*'))
+      await page.waitForFunction(() => document.getAnimations()[0]?.playState === 'paused')
+      const held = await time()
+      await new Promise((r) => setTimeout(r, 150))
+      expect(await time()).toBe(held)
+      await page.evaluate(() => window.postMessage({ doopFindPreview: 't3', play: true }, '*'))
+      await page.waitForFunction(() => document.getAnimations()[0]?.playState === 'running')
+    })
+
+    it('lets a hover demo react to the pointer, its own script included', async () => {
+      await page.setContent(withFindPreviewScript(MOVING, 't3'), { waitUntil: 'load' })
+      await page.hover('#h')
+      await page.waitForFunction(() => document.body.dataset.hovered === '1')
+      await page.waitForFunction(
+        () => getComputedStyle(document.getElementById('h')!).backgroundColor === 'rgb(255, 0, 0)',
+      )
+    })
+  })
 })

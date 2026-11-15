@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CanvasFindHit } from '../shared/canvasFind'
-import { defaultFocus, focusOf, groupByFrame, resultRows, rowDomId, rowKey } from '../src/lib/findRows'
+import { bySection, defaultFocus, focusOf, groupByFrame, resultRows, rowDomId, rowKey } from '../src/lib/findRows'
+import { summary } from './libraryFindFixtures'
 
 const hit = (over: Partial<CanvasFindHit>): CanvasFindHit => ({
   frameId: 'f',
@@ -124,5 +125,24 @@ describe('rows and focus', () => {
         ' otp ',
       ),
     ).toBe('otp')
+  })
+})
+
+describe('library items in the everywhere scope', () => {
+  const lib = (id: string) =>
+    hit({ canvasId: 'lib1', canvasName: 'Library', frameId: 'sheet', where: 'name', n: -1, item: summary(id) })
+  const groups = groupByFrame(
+    [lib('cp.a'), hit({ frameId: 'page', frameName: 'Page' }), lib('cp.b'), lib('cp.a')],
+    'otp',
+  )
+
+  it('makes one insertable group per item, even when items share a sheet', () => {
+    const items = groups.filter((g) => g.item)
+    expect(items.map((g) => g.id)).toEqual(['cp.a', 'cp.b'])
+    expect(items[0]).toMatchObject({ key: 'lib1:cp.a', libraryId: 'lib1', pageName: 'Inputs & forms' })
+  })
+
+  it('lists the canvases first, then the library items', () => {
+    expect(bySection(groups).map((g) => g.id ?? g.label)).toEqual(['Page', 'cp.a', 'cp.b'])
   })
 })
