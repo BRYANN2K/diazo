@@ -69,16 +69,16 @@ export const useAcpAgents = create<Record<AcpAgent, AcpAgentState>>(
 )
 
 function patch(agent: AcpAgent, next: Partial<AcpAgentState> | ((s: AcpAgentState) => Partial<AcpAgentState>)) {
-  useAcpAgents.setState((all) => ({ [agent]: { ...all[agent], ...(typeof next === 'function' ? next(all[agent]) : next) } }))
+  useAcpAgents.setState((all) => ({
+    [agent]: { ...all[agent], ...(typeof next === 'function' ? next(all[agent]) : next) },
+  }))
 }
 
 /** `fresh` asks the login shell and the CLI again (the Refresh button). */
 export async function refreshAcpAgent(userId: string, agent: AcpAgent, fresh = false) {
   const [preference, native] = await Promise.all([
     api.acpAgent(agent),
-    hasAcpAgent(agent)
-      ? invokeAcp<AcpNativeStatus>('acp_status', { userId, agent, fresh })
-      : Promise.resolve(null),
+    hasAcpAgent(agent) ? invokeAcp<AcpNativeStatus>('acp_status', { userId, agent, fresh }) : Promise.resolve(null),
   ])
   patch(agent, { preference, native })
   return { preference, native }

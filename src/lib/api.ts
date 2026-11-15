@@ -510,8 +510,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ deviceId, ...(catalog ? { catalog } : {}) }),
     }),
-  stopAcpAgent: (agent: AcpAgent) =>
-    req<{ ok: boolean }>(`/api/local-agent/acp/${agent}/stop`, { method: 'POST' }),
+  stopAcpAgent: (agent: AcpAgent) => req<{ ok: boolean }>(`/api/local-agent/acp/${agent}/stop`, { method: 'POST' }),
   /* the caller's own link between this canvas and a folder on their computer */
   canvasRepo: (canvasId: string) => req<RepoLinkStatus>(`/api/canvases/${canvasId}/repo`),
   linkCanvasRepo: (canvasId: string, link: { linkId: string; name: string; deviceId: string }) =>
