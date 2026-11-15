@@ -91,6 +91,21 @@ generated on your Mac. Run it again to update. `~/.doop/bin/doop-local` starts, 
 uninstalls it. The script, step by step:
 [.context/RELEASE.md](.context/RELEASE.md#local-install-on-a-mac-apple-container-this-fork).
 
+### Desktop app (Mac)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BRYANN2K/redoop/main/scripts/install-desktop.sh | sh
+```
+
+Installs `doop.app` (Apple silicon and Intel) into `/Applications`, or `~/Applications` when
+`/Applications` is not writable. The app is not signed by Apple, and does not need to be: a file
+`curl` downloads carries no quarantine flag, so Gatekeeper lets it open. The script checks the
+release's SHA-256 (and its signature when `minisign` is installed) and keeps your data. The app then
+updates itself from this repository's releases. To use your own server, click the cog on the
+sign-in screen. `--version X.Y.Z` installs a given release, `--uninstall` removes the app. An app
+installed from doop.design does not switch by itself: run the command once. Windows and Linux
+installers are attached to each `desktop-v*` release.
+
 ### Hosted
 
 The image is built from `main` for amd64 and arm64: `ghcr.io/bryann2k/redoop:main` (also

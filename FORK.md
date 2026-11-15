@@ -131,9 +131,10 @@ Gardés par `if: github.repository == 'kgoedecke/doop'`, donc inactifs ici :
 - **CLA** : le CLA est celui d'upstream ; il aurait réclamé une signature sur
   nos propres PR.
 
-`desktop-release.yml` et `ios-release.yml` ne partent que sur un tag
-(`desktop-v*`, `ios-v*`) ou à la main, et demandent les secrets de signature
-d'upstream : ne pas pousser ces tags dans le fork.
+`desktop-release.yml` part sur un tag `desktop-v*` (ou une PR qui le
+modifie) et publie l'app desktop du fork : voir « App desktop » plus bas.
+`ios-release.yml` part sur un tag `ios-v*` et demande les secrets de
+signature d'upstream : ne pas pousser ces tags dans le fork.
 
 ## Image Docker
 
@@ -164,24 +165,59 @@ locale) voient la carte « Update available » avec la commande adaptée :
 ### App desktop
 
 La carte vient de la page, donc elle s'affiche aussi dans l'app desktop,
-empilée au-dessus de la carte du shell. Le shell lui-même se met toujours à
-jour depuis le flux d'upstream (`plugins.updater.endpoints` =
-`https://doop.design/desktop/latest.json`, clé publique d'upstream). Pour le
-pointer sur notre dépôt, il faudrait :
+empilée au-dessus de la carte du shell. Le shell, lui, se met à jour depuis
+**notre** dépôt (depuis la 0.14.0) :
 
-1. une paire de clés `tauri signer generate`, la clé privée en secrets
-   `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` de `BRYANN2K/redoop`, la publique
-   dans `plugins.updater.pubkey` (WebKit et Chromium) ;
-2. publier les installeurs signés sur des releases `desktop-v*` de
-   `BRYANN2K/redoop` (`desktop-release.yml` le fait déjà sur tag), avec un
-   `latest.json` attaché ou copié sur une prerelease fixe ;
-3. remplacer l'endpoint par
-   `https://github.com/BRYANN2K/redoop/releases/download/desktop-updates/latest.json`,
-   puis livrer une première version à la main : un shell déjà installé ne
-   fait confiance qu'à la clé d'upstream.
+- **Flux** : `plugins.updater.endpoints` (WebKit et Chromium) =
+  `https://github.com/BRYANN2K/redoop/releases/download/desktop-updates/latest.json`,
+  une prerelease fixe `desktop-updates` que `desktop-release.yml` crée puis
+  réécrit à chaque tag. Choisie plutôt que `releases/latest/download/…` :
+  « latest » désigne la dernière release non-prerelease du dépôt, quelle
+  qu'elle soit (une release web ou iOS la détournerait), alors que la
+  prerelease fixe ne bouge que pour le desktop, et le job refuse d'y remettre
+  une version plus ancienne (relance d'un vieux tag).
+- **Clé** : une paire minisign propre à redoop (id `B1375F7E88B8FC72`),
+  générée en mémoire le 2026-11-15 et jamais écrite sur disque : la privée et
+  son mot de passe sont seulement dans les secrets `TAURI_SIGNING_PRIVATE_KEY`
+  et `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` de `BRYANN2K/redoop` (illisibles une
+  fois posés). La publique est `plugins.updater.pubkey`, et aussi `PUBKEY`
+  dans `scripts/install-desktop.sh`. Perdre la clé = générer une nouvelle
+  paire et réinstaller une fois par le script curl ; aucune perte de données.
+- **Install** : `curl -fsSL https://raw.githubusercontent.com/BRYANN2K/redoop/main/scripts/install-desktop.sh | sh`
+  (macOS, universel). Pas de signature Apple : un fichier téléchargé par curl
+  n'a pas l'attribut de quarantaine, Gatekeeper ne bloque donc pas l'app
+  (signée ad hoc). Le script vérifie `SHA256SUMS` (et la signature minisign si
+  `minisign` est installé), quitte l'app, remplace `doop.app` dans
+  `/Applications` (sinon `~/Applications`), ne touche jamais
+  `~/Library/Application Support/design.doop.desktop`. Testé sans réseau par
+  `tests/installDesktop.test.ts`.
+- **Shells installés depuis doop.design** : ils gardent la clé et le flux
+  d'upstream et ne passeront jamais seuls sur les nôtres. Une réinstallation
+  par le script curl suffit (connexion et serveur choisi conservés).
+- **Serveur** : l'app ouvre toujours doop.design par défaut (`DOOP_APP_URL`
+  inchangé, sinon `updates.rs` couperait les mises à jour) ; la roue dentée de
+  l'écran de connexion la pointe sur l'instance du fork.
 
-Non fait ici : sans clé ni release, changer l'endpoint couperait les mises à
-jour du shell.
+#### Couper une release desktop
+
+1. Monter la version dans `desktop/package.json`, les deux `tauri.conf.json`,
+   les deux `Cargo.toml` (+ la ligne du paquet dans chaque `Cargo.lock`) et
+   `.release-please-manifest.json` ; noter le changement dans
+   `desktop/CHANGELOG.md`. `updater-config.sh` refuse un tag dont la version
+   diffère des `tauri.conf.json`.
+2. Merger dans `main`, puis :
+
+   ```bash
+   git tag desktop-vX.Y.Z origin/main && git push origin desktop-vX.Y.Z
+   ```
+
+3. `desktop-release.yml` construit le DMG universel (Chromium/CEF, ~1 h), le
+   setup Windows et les paquets Linux, non signés pour Apple et Windows (pas
+   de secrets `APPLE_*` ni de variables `AZURE_*` ici), signe les paquets de
+   mise à jour avec la clé, attache tout plus `SHA256SUMS` et `latest.json` à
+   la release `desktop-vX.Y.Z`, puis copie `latest.json` sur
+   `desktop-updates`. Les apps installées le voient sous 24 h (ou doop →
+   Check for Updates…).
 
 ## Déploiement k3s (Tailscale only)
 

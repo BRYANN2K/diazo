@@ -126,6 +126,10 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
 - **Local install on a Mac** — one `curl … | sh` runs doop in a single Apple `container` on
   `127.0.0.1:4400`, with PGlite and uploads in `~/.doop/data` and secrets generated on the Mac
   ([Run doop](../README.md#install)).
+- **Desktop app from this repo** — `scripts/install-desktop.sh` (`curl … | sh`) installs the Mac
+  app from a `desktop-v*` release of this repo, checked against its SHA-256, with no Apple
+  signing needed; the app then updates itself from the same releases, signed with redoop's own
+  updater key ([Desktop app](../README.md#desktop-app-mac)).
 - **Usage meter** — every model transport reports its tokens, each resident run lands in an
   `agent_runs` ledger with its time and cost (the provider's figure, else a per-model price
   table), and a Usage tab shows the totals per run and per model. Agents call `get_usage`.
