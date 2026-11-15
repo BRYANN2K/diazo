@@ -15,9 +15,9 @@ const build = vi.hoisted(() => ({ sha: '1'.repeat(40) as string | null }))
 vi.mock('../server/buildInfo.ts', () => ({ buildInfo: () => ({ version: '0.0.0', sha: build.sha, date: null }) }))
 const LATEST = '2'.repeat(40)
 const API = 'https://api.github.com'
-const RUNS = `${API}/repos/BRYANN2K/redoop/actions/workflows/docker.yml/runs?branch=main&status=success&per_page=1`
-const HEAD = `${API}/repos/BRYANN2K/redoop/commits/main`
-const COMPARE = `${API}/repos/BRYANN2K/redoop/compare/${RUNNING}...${LATEST}`
+const RUNS = `${API}/repos/BRYANN2K/diazo/actions/workflows/docker.yml/runs?branch=main&status=success&per_page=1`
+const HEAD = `${API}/repos/BRYANN2K/diazo/commits/main`
+const COMPARE = `${API}/repos/BRYANN2K/diazo/compare/${RUNNING}...${LATEST}`
 
 type Route = (init: RequestInit | undefined) => Response | Promise<Response>
 let routes: Map<string, Route>
@@ -38,7 +38,7 @@ function compareBody(status: string, aheadBy: number, behindBy = 0) {
     behind_by: behindBy,
     commits: Array.from({ length: aheadBy }, (_, i) => ({
       sha: String(i).padStart(40, 'a'),
-      html_url: `https://github.com/BRYANN2K/redoop/commit/${i}`,
+      html_url: `https://github.com/BRYANN2K/diazo/commit/${i}`,
       commit: { message: `feat: change ${i}\n\nbody ${i}` },
     })),
   }
@@ -78,12 +78,12 @@ describe('update check', () => {
       source: 'image',
       behindBy: 3,
       aheadBy: 0,
-      compareUrl: `https://github.com/BRYANN2K/redoop/compare/${RUNNING}...${LATEST}`,
+      compareUrl: `https://github.com/BRYANN2K/diazo/compare/${RUNNING}...${LATEST}`,
     })
     /* newest first, titles only */
     expect(status.commits.map((c) => c.title)).toEqual(['feat: change 2', 'feat: change 1', 'feat: change 0'])
     expect(updateKey(status)).toBe(LATEST)
-    expect(calls[0]?.headers['user-agent']).toBe('redoop-update-check')
+    expect(calls[0]?.headers['user-agent']).toBe('diazo-update-check')
   })
 
   it('is up to date without a compare when the image is the running commit', async () => {
@@ -218,7 +218,7 @@ describe('install type and visibility', () => {
   })
 
   it('names the update command for each install type', () => {
-    expect(updateCommand('local')).toBe('doop-local update')
+    expect(updateCommand('local')).toBe('diazo-local update')
     expect(updateCommand('docker')).toBe('docker compose pull && docker compose up -d')
     expect(updateCommand('kubernetes')).toBe('kubectl -n doop rollout restart deploy/doop')
     expect(updateCommand('source')).toContain('git pull')

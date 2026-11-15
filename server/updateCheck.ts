@@ -168,7 +168,7 @@ async function github<T>(path: string, valid: (body: unknown) => body is T): Pro
       headers: {
         accept: 'application/vnd.github+json',
         'x-github-api-version': '2022-11-28',
-        'user-agent': 'redoop-update-check',
+        'user-agent': 'diazo-update-check',
         ...(known ? { 'if-none-match': known.etag } : {}),
       },
       signal: AbortSignal.timeout(TIMEOUT_MS),
