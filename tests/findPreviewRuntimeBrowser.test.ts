@@ -124,7 +124,11 @@ describe.skipIf(!findBrowserPath())('⌘F preview runtime', () => {
       await new Promise((r) => setTimeout(r, 150))
       expect(await time()).toBeGreaterThan(first)
       await page.evaluate(() => window.postMessage({ doopFindPreview: 't3', play: false }, '*'))
-      await page.waitForFunction(() => document.getAnimations()[0]?.playState === 'paused')
+      // a pause is pending until the next frame, and the clock still moves while it is
+      await page.waitForFunction(() => {
+        const animation = document.getAnimations()[0]
+        return animation?.playState === 'paused' && !animation.pending
+      })
       const held = await time()
       await new Promise((r) => setTimeout(r, 150))
       expect(await time()).toBe(held)
