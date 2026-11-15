@@ -7,8 +7,9 @@ import { EffortSlider } from './ConnectionTable'
 import { DoopMark } from './Logo'
 import { useAgentModels } from './ModelAccount'
 import { useAgentRunners, useRunnerPick } from '../lib/runnerPick'
+import { effortLabel, effortOptions } from '../lib/effortLabels'
 import { resolveRunnerPick, type AgentRunner, type RunnerOption, type RunnerProvider } from '../../shared/agentRunner'
-import { useT, type PlainMessageKey } from '@/lib/i18n'
+import { useT } from '@/lib/i18n'
 import {
   DropdownMenu,
   DropdownMenuCaption,
@@ -32,29 +33,6 @@ const PROVIDER_MARK: Partial<Record<RunnerProvider, Brand>> = {
   'deepseek-key': 'deepseek',
   'kimi-key': 'kimi',
   'kimi-code': 'kimi',
-}
-
-/* the effort ids stay as sent to the server; only their names are translated */
-const EFFORT_NAMES: Record<string, PlainMessageKey> = {
-  low: 'models.effortLow',
-  medium: 'models.effortMedium',
-  high: 'models.effortHigh',
-  xhigh: 'models.effortXhigh',
-  max: 'models.effortMax',
-}
-const EFFORT_BLURBS: Record<string, PlainMessageKey> = {
-  low: 'models.effortLowBlurb',
-  medium: 'models.effortMediumBlurb',
-  high: 'models.effortHighBlurb',
-  xhigh: 'models.effortXhighBlurb',
-}
-/* the Claude Plan's dial reads differently: it is the CLI's own levels */
-const CLAUDE_EFFORT_BLURBS: Record<string, PlainMessageKey> = {
-  low: 'models.claudeEffortLowBlurb',
-  medium: 'models.claudeEffortMediumBlurb',
-  high: 'models.claudeEffortHighBlurb',
-  xhigh: 'models.claudeEffortXhighBlurb',
-  max: 'models.claudeEffortMaxBlurb',
 }
 
 function modelName(models: RunnerOption[], id: string): string {
@@ -88,12 +66,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
   const mark = resolved ? PROVIDER_MARK[resolved.runner.provider] : undefined
   /* the effort reads after the model, lighter, as in Settings */
   const effortId = resolved?.pick.effort
-  const effortKey = effortId ? EFFORT_NAMES[effortId] : undefined
-  const effortLabel = effortId
-    ? effortKey
-      ? t(effortKey)
-      : resolved?.runner.efforts?.find((e) => e.id === effortId)?.name
-    : undefined
+  const effortText = effortId ? effortLabel(effortId, resolved?.runner.efforts, t) : undefined
 
   function choose(runner: AgentRunner, model: string) {
     const effort = resolved?.runner.provider === runner.provider ? resolved.pick.effort : runner.effort
@@ -106,8 +79,6 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
     setPick({ ...resolved.pick, effort })
     posthog.capture('agent_effort_changed', { effort, provider: resolved.runner.provider, via: 'composer' })
   }
-
-  const effortBlurbs = resolved?.runner.provider === 'claude-local' ? CLAUDE_EFFORT_BLURBS : EFFORT_BLURBS
 
   return (
     <DropdownMenu onOpenChange={setOpen}>
@@ -129,7 +100,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
           }
         >
           <span className="truncate">{label}</span>
-          {effortLabel && <span className="flex-none text-ink-faint">{effortLabel}</span>}
+          {effortText && <span className="flex-none text-ink-faint">{effortText}</span>}
         </MenuButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="end" width="auto">
@@ -160,15 +131,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
               <>
                 <DropdownMenuSeparator />
                 <EffortSlider
-                  efforts={resolved.runner.efforts.map((e) => {
-                    const name = EFFORT_NAMES[e.id]
-                    const blurb = effortBlurbs[e.id]
-                    return {
-                      id: e.id,
-                      name: name ? t(name) : e.name,
-                      blurb: blurb ? t(blurb) : t('models.effortServerDefault'),
-                    }
-                  })}
+                  efforts={effortOptions(resolved.runner.provider, resolved.runner.efforts, t)}
                   effort={resolved.pick.effort}
                   onEffort={chooseEffort}
                 />

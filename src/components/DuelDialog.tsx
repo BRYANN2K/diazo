@@ -1,18 +1,25 @@
 import { useState } from 'react'
-import { runnerKey, type AgentRunners, type RunnerPick } from '../../shared/agentRunner'
+import { type AgentRunners, type RunnerOption, type RunnerPick } from '../../shared/agentRunner'
 import { DUEL_MAX, DUEL_MIN, duelProblem } from '../../shared/duel'
 import { api, errorMessage } from '../lib/api'
 import { useStore } from '../lib/store'
 import { useAgentRunners } from '../lib/runnerPick'
+import { effortOptions } from '../lib/effortLabels'
 import { useT } from '../lib/i18n'
 import { Button } from './ui/button'
 import { Checkbox } from './ui/checkbox'
+import { StepSlider } from './ui/step-slider'
 import { Textarea } from './ui/textarea'
 import { Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/modal'
 
 interface Choice {
+  /** the row's stable id: the connection and the model; the effort is a pick detail */
+  key: string
   pick: RunnerPick
   label: string
+  /** the effort dial, where the connection has one */
+  efforts?: RunnerOption[]
+  provider: RunnerPick['provider']
 }
 
 /** Every connection × model the person can send to, as duel choices. The
@@ -29,8 +36,11 @@ export function duelChoices(runners: AgentRunners | null): Choice[] {
         models = [...models, { id: runner.model, name: runner.model, blurb: '' }]
     }
     return models.map((model) => ({
+      key: `${runner.provider}|${model.id}`,
+      provider: runner.provider,
       pick: { provider: runner.provider, model: model.id, ...(runner.effort ? { effort: runner.effort } : {}) },
       label: `${runner.name} · ${model.name}`,
+      efforts: runner.efforts,
     }))
   })
 }
@@ -53,10 +63,15 @@ export function DuelDialog({
   const pageId = useStore((s) => s.activePageId) ?? undefined
   const [brief, setBrief] = useState(initialBrief)
   const [chosen, setChosen] = useState<string[]>([])
+  /* a row's effort once the dial was touched; untouched rows run their
+     connection's configured effort (choice.pick carries it) */
+  const [effortOf, setEffortOf] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const choices = duelChoices(runners)
-  const picks = choices.filter((c) => chosen.includes(runnerKey(c.pick))).map((c) => c.pick)
+  const picks = choices
+    .filter((c) => chosen.includes(c.key))
+    .map((c) => ({ ...c.pick, ...(effortOf[c.key] !== undefined ? { effort: effortOf[c.key] } : {}) }))
   const problem = duelProblem(brief, picks)
 
   function toggle(key: string) {
@@ -95,13 +110,30 @@ export function DuelDialog({
       <div className="mt-4 flex max-h-64 flex-col gap-2 overflow-y-auto">
         {choices.length === 0 && <p className="text-body text-muted-foreground">{t('duel.noModels')}</p>}
         {choices.map((choice) => {
-          const key = runnerKey(choice.pick)
-          const on = chosen.includes(key)
+          const on = chosen.includes(choice.key)
           return (
-            <label key={key} className="flex items-center gap-2 text-body">
-              <Checkbox checked={on} disabled={!on && chosen.length >= DUEL_MAX} onChange={() => toggle(key)} />
-              {choice.label}
-            </label>
+            <div key={choice.key}>
+              <label className="flex items-center gap-2 text-body">
+                <Checkbox
+                  checked={on}
+                  disabled={!on && chosen.length >= DUEL_MAX}
+                  onChange={() => toggle(choice.key)}
+                />
+                {choice.label}
+              </label>
+              {on && choice.efforts && choice.efforts.length > 0 && (
+                <StepSlider
+                  className="ml-6 mt-1"
+                  label={t('duel.effortFor', { label: choice.label })}
+                  steps={effortOptions(choice.provider, choice.efforts, t).map((step) => ({
+                    ...step,
+                    title: step.blurb,
+                  }))}
+                  value={effortOf[choice.key] ?? choice.pick.effort}
+                  onValueChange={(effort) => setEffortOf((map) => ({ ...map, [choice.key]: effort }))}
+                />
+              )}
+            </div>
           )
         })}
       </div>
