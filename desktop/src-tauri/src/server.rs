@@ -33,6 +33,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, Url};
 
 const CAPABILITY: &str = include_str!("../capabilities/default.json");
+const MOTION_CAPABILITY: &str = include_str!("../capabilities/motion-render.json");
 const CONNECT: &str = "Connect";
 const SWITCH: &str = "Switch";
 const CANCEL: &str = "Cancel";
@@ -194,6 +195,17 @@ fn capability_for(server: &str) -> Result<String, String> {
     Ok(capability.to_string())
 }
 
+/// The render webview's two invoke-backs, granted to `server` the same way.
+fn motion_capability_for(server: &str) -> Result<String, String> {
+    let mut capability: Value =
+        serde_json::from_str(MOTION_CAPABILITY).map_err(|error| error.to_string())?;
+    capability["identifier"] = json!("motion-render-chosen-server");
+    capability["description"] =
+        json!("capabilities/motion-render.json, for the server picked in the app");
+    capability["remote"] = json!({ "urls": [server] });
+    Ok(capability.to_string())
+}
+
 /// Lets a chosen server's pages use the shell's IPC. The bundled capability
 /// already covers the default server (and dev builds' local pages).
 pub fn grant(app: &AppHandle) -> Result<(), String> {
@@ -206,6 +218,9 @@ pub fn grant(app: &AppHandle) -> Result<(), String> {
     }
     let capability = capability_for(active(app))?;
     app.add_capability(capability)
+        .map_err(|error| error.to_string())?;
+    let motion = motion_capability_for(active(app))?;
+    app.add_capability(motion)
         .map_err(|error| error.to_string())
 }
 

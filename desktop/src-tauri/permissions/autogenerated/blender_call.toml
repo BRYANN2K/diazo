@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-blender-call"
+description = "Enables the blender_call command without any pre-configured scope."
+commands.allow = ["blender_call"]
+
+[[permission]]
+identifier = "deny-blender-call"
+description = "Denies the blender_call command without any pre-configured scope."
+commands.deny = ["blender_call"]

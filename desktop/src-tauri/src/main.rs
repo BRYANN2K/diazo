@@ -49,6 +49,7 @@ mod acp;
 mod app_menu;
 #[cfg(target_os = "linux")]
 mod appimage;
+mod blender;
 mod claude;
 mod claude_extension;
 mod codex;
@@ -56,6 +57,7 @@ mod drift;
 mod fonts;
 mod identity_migration;
 mod live;
+mod motion;
 mod repo;
 mod server;
 mod updates;
@@ -326,6 +328,8 @@ fn main() {
         .manage(acp::AcpState::default())
         .manage(fonts::LocalFonts::default())
         .manage(live::LiveState::default())
+        .manage(motion::MotionState::default())
+        .manage(blender::BlenderState::default())
         .manage(app_menu::AppMenu::default())
         .invoke_handler(tauri::generate_handler![
             claude::claude_status,
@@ -356,6 +360,13 @@ fn main() {
             repo::repo_apply_patch,
             live::live_snapshot,
             live::live_snapshot_done,
+            motion::motion_render,
+            motion::motion_render_frame,
+            motion::motion_render_done,
+            motion::motion_read_render,
+            blender::blender_status,
+            blender::blender_start,
+            blender::blender_call,
             server::server_status,
             server::server_choose,
             view_menu::view_menu_state,
@@ -446,12 +457,14 @@ fn main() {
             // (traffic-light inset arrived with the overlay title bar, 0.1.2)
             // and the platform tells it which window framing it lives under.
             let desktop_marker = format!(
-                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_CHOOSE__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true; window.__DOOP_APP_MENU__ = {}; window.__DOOP_LOCAL_FONTS__ = true; window.__DOOP_LOCAL_REPO__ = true; window.__DOOP_REPO_PATCH__ = true; window.__DOOP_LOCAL_DRIFT__ = true; window.__DOOP_LIVE_SNAPSHOT__ = true; window.__DOOP_UPDATE_CARD__ = true; window.__DOOP_SERVER_CHOOSE__ = true; window.__DOOP_ACP_AGENTS__ = ['devin', 'grok'];",
+                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_CHOOSE__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true; window.__DOOP_APP_MENU__ = {}; window.__DOOP_LOCAL_FONTS__ = true; window.__DOOP_LOCAL_REPO__ = true; window.__DOOP_REPO_PATCH__ = true; window.__DOOP_LOCAL_DRIFT__ = true; window.__DOOP_LIVE_SNAPSHOT__ = true; window.__DOOP_UPDATE_CARD__ = true; window.__DOOP_SERVER_CHOOSE__ = true; window.__DOOP_MOTION_RENDER__ = true; window.__DOOP_BLENDER__ = {}; window.__DOOP_ACP_AGENTS__ = ['devin', 'grok'];",
                 app.package_info().version,
                 std::env::consts::OS,
                 cfg!(any(target_os = "macos", target_os = "windows")),
                 // only macOS has a menu bar for the page to build (app_menu.rs)
-                cfg!(target_os = "macos")
+                cfg!(target_os = "macos"),
+                // the Blender bridge advertises itself only when its env gate is on (blender.rs)
+                std::env::var_os("DOOP_BLENDER_BRIDGE").is_some_and(|v| !v.is_empty() && v != "0")
             );
             // macOS never reports the saved path on `Finished`, so remember
             // the destinations chosen on `Requested`, keyed by URL. The same
@@ -563,6 +576,7 @@ fn main() {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
                 claude::shutdown(&app.state::<claude::ClaudeState>());
                 acp::shutdown(&app.state::<acp::AcpState>());
+                blender::shutdown(&app.state::<blender::BlenderState>());
                 updates::install_on_quit(app);
             }
         });
