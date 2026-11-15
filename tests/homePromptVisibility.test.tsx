@@ -7,6 +7,8 @@ import { GeneralSettings } from '../src/components/GeneralSettings'
 import { PROMPT_BOX_STORAGE_KEY, setPromptBoxHidden } from '../src/lib/homePreferences'
 
 vi.mock('../src/components/ModelPicker', () => ({ ModelPicker: () => null }))
+/* General settings' About card asks the server for the build; none runs here */
+vi.mock('../src/components/AboutCard', () => ({ AboutCard: () => null }))
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
