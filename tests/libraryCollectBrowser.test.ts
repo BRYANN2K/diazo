@@ -63,5 +63,6 @@ describe.skipIf(!findBrowserPath())('library collector', () => {
     const out = await collect('cp.big')
     expect(Date.now() - started).toBeLessThan(8000)
     expect(out.items.length).toBeGreaterThan(0)
-  })
+    // building the 60,000-element page alone can take seconds on a shared CI runner
+  }, 20_000)
 })
