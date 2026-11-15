@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { type AgentRunners, type RunnerOption, type RunnerPick } from '../../shared/agentRunner'
+import { isLocalRunner, type AgentRunners, type RunnerOption, type RunnerPick } from '../../shared/agentRunner'
 import { DUEL_MAX, DUEL_MIN, duelProblem } from '../../shared/duel'
 import { api, errorMessage } from '../lib/api'
 import { useStore } from '../lib/store'
@@ -30,7 +30,8 @@ interface Choice {
 export function duelChoices(runners: AgentRunners | null): Choice[] {
   return (runners?.runners ?? []).flatMap((runner) => {
     let models = runner.models.length > 0 ? runner.models : [{ id: runner.model, name: runner.model, blurb: '' }]
-    if (runner.provider === 'claude-local') {
+    /* a desktop CLI's `default` is whatever it is set to, not a model to compare */
+    if (isLocalRunner(runner.provider)) {
       models = models.filter((model) => model.id !== 'default')
       if (runner.model !== 'default' && !models.some((model) => model.id === runner.model))
         models = [...models, { id: runner.model, name: runner.model, blurb: '' }]

@@ -31,6 +31,8 @@ import { MenuButton } from './ui/menu-button'
 /* the brand mark each connection's models wear in the picker */
 const PROVIDER_MARK: Partial<Record<RunnerProvider, Brand>> = {
   'claude-local': 'claude',
+  'devin-local': 'devin',
+  'grok-local': 'grok',
   'anthropic-key': 'claude',
   chatgpt: 'openai',
   'openai-key': 'openai',
