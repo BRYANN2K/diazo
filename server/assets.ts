@@ -8,6 +8,7 @@ import type { FrameImage } from '../shared/imageDescriptions.ts'
 import type { Actor } from '../shared/types.ts'
 import { emitCanvasEvent } from './events.ts'
 import type { ImagePlacement } from './placeImage.ts'
+import type { FontScope } from '../shared/fonts.ts'
 
 /**
  * Uploaded assets (images, and the files of font libraries): bytes in object storage (server/storage.ts), one
@@ -59,11 +60,14 @@ export function sniffMime(buf: Buffer): AssetMime | undefined {
 const TICKET_TTL_MS = 15 * 60 * 1000
 
 interface UploadTicket {
-  canvasId: string
+  /** absent for a font bound for a workspace's library rather than a canvas's */
+  canvasId?: string
   ownerId?: string
   uploadedBy: string
   /** set when the upload should also land on the canvas (server/placeImage.ts) */
   place?: { placement: ImagePlacement; actor: Actor }
+  /** set by upload_font: the bytes are a font for this library (server/fonts.ts) */
+  font?: { scope: FontScope; user: { id: string; name: string }; fileName: string }
   expiresAt: number
   inFlight: boolean
 }

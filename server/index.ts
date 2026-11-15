@@ -93,7 +93,9 @@ import { webhooksRouter } from './webhookRoutes.ts'
 import { fontsRouter } from './fontRoutes.ts'
 import { AvatarInputError, clearAvatar, setAvatar } from './avatars.ts'
 import { MAX_AVATAR_BYTES, avatarUrl } from '../shared/avatar.ts'
-import { fontsForCanvas, hydrateFonts } from './fonts.ts'
+import { FontInputError, addFont, fontsForCanvas, hydrateFonts } from './fonts.ts'
+import { fontUploaded } from './fontUpload.ts'
+import { MAX_FONT_BYTES } from '../shared/fonts.ts'
 import { MAX_TOKEN_VALUE, TOKEN_TYPES, tokensCss, tokensMarkdown, tokensTailwind } from '../shared/designTokens.ts'
 import {
   canEditCanvas,
@@ -655,15 +657,19 @@ app.put('/u/:token', async (req, res) => {
   const { token } = req.params
   const ticket = beginTicketUpload(token)
   if (!ticket)
-    return res
-      .status(410)
-      .json({ error: 'invalid, expired or already-used upload ticket — request a new one via the upload_asset tool' })
+    return res.status(410).json({
+      error:
+        'invalid, expired or already-used upload ticket — request a new one via the upload_asset or upload_font tool',
+    })
   let success = false
   try {
     /* on any early rejection, destroy the request stream — otherwise curl
        keeps sending a body nobody reads and the connection deadlocks */
-    if (Number(req.headers['content-length'] || 0) > MAX_ASSET_BYTES) {
-      res.status(413).json({ error: 'file exceeds the 5 MB limit' })
+    const { font } = ticket
+    const limit = font ? MAX_FONT_BYTES : MAX_ASSET_BYTES
+    const tooBig = { error: `file exceeds the ${limit / 1024 / 1024} MB limit` }
+    if (Number(req.headers['content-length'] || 0) > limit) {
+      res.status(413).json(tooBig)
       req.destroy()
       return
     }
@@ -671,14 +677,26 @@ app.put('/u/:token', async (req, res) => {
     let total = 0
     for await (const chunk of req) {
       total += (chunk as Buffer).length
-      if (total > MAX_ASSET_BYTES) {
-        res.status(413).json({ error: 'file exceeds the 5 MB limit' })
+      if (total > limit) {
+        res.status(413).json(tooBig)
         req.destroy()
         return
       }
       chunks.push(chunk as Buffer)
     }
     const buf = Buffer.concat(chunks)
+    if (font) {
+      /* addFont asks again whether the uploader may still change the library */
+      try {
+        const added = await addFont(font.scope, font.user, buf, font.fileName)
+        success = true
+        return res.json(fontUploaded(added, font.scope))
+      } catch (e) {
+        if (e instanceof FontInputError) return res.status(400).json({ error: e.message })
+        console.error('[fonts] ticket upload failed', e)
+        return res.status(500).json({ error: 'the font could not be saved — try again' })
+      }
+    }
     const asset = await createAsset(buf, {
       canvasId: ticket.canvasId,
       ownerId: ticket.ownerId,
@@ -687,13 +705,14 @@ app.put('/u/:token', async (req, res) => {
     success = true
     const url = `${env.BETTER_AUTH_URL}/a/${asset.id}.${asset.ext}`
     const uploaded = { ok: true, url, mime: asset.mime, size_bytes: asset.size, usage: `<img src="${url}" alt="">` }
-    const { place } = ticket
-    if (!place) return res.json({ ...uploaded, note: 'Permanent public URL — reference it in frame HTML.' })
+    const { place, canvasId } = ticket
+    if (!place || !canvasId)
+      return res.json({ ...uploaded, note: 'Permanent public URL — reference it in frame HTML.' })
     /* the ticket was minted with edit access, up to 15 minutes ago: placing
        changes the canvas, so access is asked again now that the bytes are here */
-    const frame = await store.withCanvas(ticket.canvasId, async (canvas) =>
+    const frame = await store.withCanvas(canvasId, async (canvas) =>
       canvas && canEditCanvas(ticket.ownerId, canvas)
-        ? placeImage(ticket.canvasId, { url, buf, mime: asset.mime }, place.placement, place.actor)
+        ? placeImage(canvasId, { url, buf, mime: asset.mime }, place.placement, place.actor)
         : undefined,
     )
     res.json({ ...uploaded, ...placedImageResult(frame) })

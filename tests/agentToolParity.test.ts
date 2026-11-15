@@ -43,6 +43,7 @@ const MISSING = [
   'set_page_background',
   'export_frame',
   'upload_asset',
+  'upload_font', // a resident run has no file to send: people add fonts in Settings → Fonts
   'create_live_frame',
   'list_linear_issues', // integration tools, registered by their connections
   'get_linear_issue',

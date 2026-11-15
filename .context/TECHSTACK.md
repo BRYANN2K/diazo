@@ -286,7 +286,13 @@
   fonts" group renders at once. Every renderer that reads frame HTML (screenshots, PDF
   export, iOS) gets the font that way. Agents see the library as `fonts` plus a note in
   `get_canvas` and as a system block in the resident agent (`libraryBrief`): name the family,
-  never load it from Google Fonts. Tests: `fonts.test.ts` (a real WOFF2 in `tests/fixtures/fonts`), `fontLibrary.test.ts`,
+  never load it from Google Fonts. MCP `upload_font` (`server/fontUpload.ts`, MCP only: a resident run has no
+  file to send) adds a face through `addFont`: the library is `canvas_id`'s (its workspace's for members,
+  else its owner's for the owner alone, the rule of `GET /api/canvases/:id/fonts`) or `workspace_id`'s
+  (members); bytes by `source_url` (`fetchRemote`, the SSRF-pinned fetch, capped at 10 MB), base64, or
+  `local_file` (an upload ticket carrying `font`, so `PUT /u/<token>` takes 10 MB and calls `addFont`,
+  which checks the library again); the answer names family, weight, style and the CSS to write.
+  Tests: `uploadFontHttp.test.ts`, `fonts.test.ts` (a real WOFF2 in `tests/fixtures/fonts`), `fontLibrary.test.ts`,
   `fontLibraryRace.test.ts`, `fontFrameWrites.test.ts` (faces on create, stream end and idle; an idle close sends viewers the
   healed document, so a cut-off script never runs).
 - Design tokens (`shared/designTokens.ts`, spec `.context/specs/design-tokens.md`): a canvas's

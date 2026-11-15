@@ -20,6 +20,7 @@ import { z } from 'zod'
 import { store, MAX_LIBRARY_PAGES } from './store.ts'
 import { addPage, savePages, updateFrameMeta } from './pageTools.ts'
 import { fontsForCanvas } from './fonts.ts'
+import { runUploadFont } from './fontUpload.ts'
 import { describeLibrary, libraryBrief } from '../shared/fonts.ts'
 import {
   MAX_TOKEN_DESCRIPTION,
@@ -1992,6 +1993,52 @@ export function buildMcpServer(
       } catch (e) {
         return err(e instanceof Error ? e.message : 'upload failed')
       }
+    },
+  )
+
+  server.registerTool(
+    'upload_font',
+    {
+      title: 'Add a font to a font library',
+      description:
+        "Add a font file (TTF, OTF, WOFF or WOFF2, max 10 MB, one face per file: one weight and style, or a variable font's weight range) to a font library, as a person does in Settings → Fonts. The family, weight and style are read from the file. Pick the library: canvas_id (the one that canvas designs with — its workspace's, else its owner's personal library) or workspace_id. Pick ONE input by where the file lives: (1) remote — source_url, fetched by the server; (2) LOCAL FILE — local_file=true returns a one-time upload URL and a curl command to run; (3) data — base64, last resort for small files. Then name the family in frame CSS: Doop adds the @font-face rules itself. A file for a face the library already has replaces it.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      inputSchema: {
+        source_url: z.string().optional().describe('Public http(s) URL of the font file (remote files)'),
+        local_file: z
+          .boolean()
+          .optional()
+          .describe('true = the file is on YOUR machine: returns a one-time upload URL + curl command to run'),
+        data: z
+          .string()
+          .optional()
+          .describe('The file as base64 (raw base64 or a data: URL). Last resort, small files only.'),
+        file_name: z
+          .string()
+          .optional()
+          .describe('File name shown in the library (defaults to the URL’s last segment)'),
+        canvas_id: z
+          .string()
+          .optional()
+          .describe("Add to the library this canvas designs with (its workspace's, else its owner's personal one)"),
+        workspace_id: z.string().optional().describe("Add to this workspace's library (members only)"),
+        agent_name: agentName,
+      },
+    },
+    async ({ agent_name, ...input }) => {
+      const now = Date.now()
+      const limitKey = ownerId ?? agent_name
+      const hits = (uploadHits.get(limitKey) ?? []).filter((t) => now - t < 60_000)
+      if (hits.length >= UPLOADS_PER_MIN) return err('upload rate limit — wait a minute')
+      hits.push(now)
+      uploadHits.set(limitKey, hits)
+      const outcome = await runUploadFont(input, {
+        user: ownerId ? { id: ownerId, name: owner ?? agent_name } : undefined,
+        canvasFor: (id) => canvasFor(id, 'edit'),
+      })
+      if (!outcome.ok) return err(outcome.error)
+      const result = text(outcome.data)
+      return input.canvas_id ? withFeedback(result, input.canvas_id, actorFrom(agent_name)) : result
     },
   )
 
