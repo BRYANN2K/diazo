@@ -1,4 +1,5 @@
 import type { LibraryInfo } from './library.ts'
+import type { Composition, RenderJob } from './motion.ts'
 import type { CanvasSkill } from './skills'
 import type { BillingInterval, WorkspaceStatus } from './billing.ts'
 import type { CanvasRole, LinkAccess } from './canvasRole.ts'
@@ -216,6 +217,9 @@ export interface Canvas {
   guidelines?: GuidelineDoc[]
   /** named know-how agents load when the work matches (shared/skills.ts) */
   skills?: CanvasSkill[]
+  /** page timelines (shared/motion.ts): a film is a page with a clock —
+   *  one Composition per page that has one */
+  compositions?: Composition[]
   /** design tokens (shared/designTokens.ts): the CSS custom properties frames use as var(--name) */
   tokens?: DesignToken[]
   /** the token themes (light, dark, …) in display order; a token may carry a value per theme */
@@ -713,6 +717,8 @@ export type ClientMessage =
   /** Ask for the HTML of frames that arrived deferred: every frame on `pageId`,
    *  and/or the named frames (any page). Answered by `frames:html` messages. */
   | { type: 'frames:load'; pageId?: string; frameIds?: string[] }
+  /** a client's playhead on a page's composition — presence, like cursor */
+  | { type: 'composition:playhead'; pageId: string; t: number; playing?: boolean }
 
 export type ServerMessage =
   | {
@@ -787,6 +793,13 @@ export type ServerMessage =
   | { type: 'asset:described'; assetId: string; description: string }
   | { type: 'canvas:deleted' }
   | { type: 'activity'; item: ActivityItem }
+  /** a page's timeline was written or removed (composition null) —
+   *  multiplayer timeline editing lands over the room */
+  | { type: 'composition'; pageId: string; composition: Composition | null; actor: Actor }
+  /** a collaborator's playhead on a page's composition */
+  | { type: 'composition:playhead'; clientId: string; pageId: string; t: number; playing: boolean }
+  /** a render job's status/progress changed */
+  | { type: 'render:progress'; job: RenderJob }
 
 export const CURSOR_PALETTE = [
   '#2743EE', // cursor blue — the brand accent leads
