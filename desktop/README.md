@@ -49,7 +49,8 @@ in the `init` message).
 
 Official release builds update themselves through `tauri-plugin-updater`
 (`src-tauri/src/updates.rs`). Fifteen seconds after launch and then once a day
-the shell reads `https://doop.design/desktop/latest.json`, downloads a newer
+the shell reads
+`https://github.com/BRYANN2K/redoop/releases/download/desktop-updates/latest.json`, downloads a newer
 version in the background and asks to restart into it. **Later** keeps the
 download: macOS installs it when the app quits, Windows and Linux ask again at
 the next check. On macOS, **doop → Check for Updates…** runs the same check on demand
@@ -71,17 +72,38 @@ The feed and its packages are produced by `desktop-release.yml`:
 - The release job renames the macOS package to `doop_X.Y.Z_universal.app.tar.gz`,
   writes `latest.json` (the platform entries point at the tag's assets),
   attaches everything to the release and then copies `latest.json` onto the
-  fixed `desktop-updates` prerelease (never mark it latest, never delete it).
-- `doop.design/desktop/latest.json` redirects there (the hosted deployment serves it),
-  so the feed can move without shipping a new shell.
+  fixed `desktop-updates` prerelease (never mark it latest, never delete it), which
+  `plugins.updater.endpoints` names. It also attaches `SHA256SUMS`, which the Mac installer checks.
 
 The key's public half is `plugins.updater.pubkey` in `tauri.conf.json`; the
-plugin refuses any package that does not verify against it. Losing the private
-key means no installed app can be updated again without a manual reinstall, so
-it is backed up with the Apple signing material. Shells released before the
-updater (0.9.x and older) have none: their Check for Updates… reads the DMG
-redirect at `https://doop.design/download/mac`, so keep that route current
-too.
+plugin refuses any package that does not verify against it. redoop's key
+(minisign id `B1375F7E88B8FC72`) lives only in the repo's
+`TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` secrets. Losing it means no installed app
+can be updated again without a reinstall through the curl script below. Shells
+installed from doop.design trust upstream's key and feed, and need that
+reinstall once.
+
+### Install on a Mac
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BRYANN2K/redoop/main/scripts/install-desktop.sh | sh
+```
+
+`scripts/install-desktop.sh` installs the universal app of the latest
+`desktop-v*` release (or `--version X.Y.Z`) into `/Applications`, or
+`~/Applications` when `/Applications` is not writable, after checking the
+release's `SHA256SUMS` (and the updater signature when `minisign` is
+installed). The app has no Apple signature (ad hoc only): a file curl downloads
+carries no quarantine flag, so Gatekeeper does not block it, and the script
+clears the flag anyway. It quits a running doop first and reopens it after.
+`--uninstall` removes the app; `~/Library/Application Support/design.doop.desktop`
+(sign-in, `server.json`, the Chromium profile) is kept by both.
+
+### Cut a release
+
+Bump the version in `package.json`, both `tauri.conf.json`, both `Cargo.toml`
+(and the shell's line in each `Cargo.lock`), merge into `main`, then push the
+tag: `git tag desktop-vX.Y.Z origin/main && git push origin desktop-vX.Y.Z`.
 
 ## Develop
 

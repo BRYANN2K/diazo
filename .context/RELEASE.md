@@ -57,8 +57,8 @@ running instance announces a newer image to its admins once the `docker.yml` run
 declares how it updates through `DOOP_INSTALL`: `local` (`install-local.sh` →
 `doop-local update`), `docker` (compose → `docker compose pull && docker compose up -d`),
 `kubernetes` (`deploy/k3s/doop.yaml` → `kubectl -n doop rollout restart deploy/doop`, which
-re-pulls `:main` under `imagePullPolicy: Always`). The desktop shell's own updates still come
-from upstream's doop.design feed (FORK.md says what a switch would take).
+re-pulls `:main` under `imagePullPolicy: Always`). The desktop shell's own updates come from
+this fork's releases (next section).
 
 ## Desktop app (Tauri: macOS DMG + Windows NSIS installer + Linux AppImage/.deb/.rpm)
 
@@ -78,17 +78,34 @@ in `.github/actions/setup-desktop`:
   updater `.sig` when the key is set.
 - Self-update (`tauri-plugin-updater`, `desktop/src-tauri/src/updates.rs`): with the
   `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets set, every build also
-  emits signed updater packages, and the `release` job writes `latest.json`, attaches it and copies
-  it onto the fixed `desktop-updates` prerelease, which `doop.design/desktop/latest.json`
-  redirects to (served by the hosted deployment). A tag fails without the key. Installed official
+  emits signed updater packages, and the `release` job writes `latest.json` and `SHA256SUMS`,
+  attaches them and copies `latest.json` onto the fixed `desktop-updates` prerelease of the repo it
+  runs in, which `plugins.updater.endpoints` names directly (this fork:
+  `https://github.com/BRYANN2K/redoop/releases/download/desktop-updates/latest.json`; a fixed
+  prerelease rather than `releases/latest`, which any other release would take over). A tag fails
+  without the key, or when its version is not the one in both `tauri.conf.json`
+  (`desktop/scripts/updater-config.sh`). Installed official
   shells check at launch and daily, download in the background and offer a restart: in the
   page's "Update available" card (`src/components/UpdateCard.tsx`, `src/lib/desktopUpdate.ts`;
   bottom right above the zoom pill, shaped like the canvas's getting-started card),
   which claims the offer through `update_card_ready` once it listens for `update-ready` and answers
   with `update_restart`, or in a native dialog while no page has claimed it (each page load resets
   the claim, so an older web build still gets the dialog). Its ✕ (Not now) keeps the download for the
-  next check and, on macOS, installs it on quit. The key
-  pair lives in the signing backup; its public half is `plugins.updater.pubkey`.
+  next check and, on macOS, installs it on quit. This fork's key pair (minisign id
+  `B1375F7E88B8FC72`) exists only in the `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)` secrets of
+  `BRYANN2K/redoop`; its public half is `plugins.updater.pubkey` (and `PUBKEY` in
+  `scripts/install-desktop.sh`). Shells installed from doop.design trust upstream's key and feed:
+  they move over with one run of the curl installer below.
+- Mac install (`scripts/install-desktop.sh`, POSIX sh, piped from `raw.githubusercontent.com` on
+  `main` into `sh`, the README's Desktop app line): reads the version from the feed (or `--version`), downloads `doop_<v>_universal.app.tar.gz` from
+  `desktop-v<v>`, checks it against `SHA256SUMS` (and its `.sig` with `minisign` when installed),
+  quits a running app (`osascript`, by bundle id), swaps `doop.app` in `/Applications` or
+  `~/Applications` through a staging folder on the same volume, clears `com.apple.quarantine` and
+  relaunches the app if it was running. A file curl downloads has no quarantine flag, so the
+  ad-hoc-signed app opens without Apple signing. Same version and our key in the binary: nothing
+  to do (`--force` reinstalls); `--uninstall` removes the app and keeps Application Support.
+  Tests: `installDesktop.test.ts` (stub `curl`, `uname`, `pgrep`, `osascript`, `xattr`, `open`,
+  `minisign`).
 - `workflow_dispatch` or a PR touching the workflow file itself -> same builds, uploaded as
   workflow artifacts instead (keeps the pipeline validated without cutting a release).
 - macOS signing/notarization: automatic once the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.0 (redoop)
+
+### Features
+
+* **desktop:** update from the BRYANN2K/redoop feed (`desktop-updates` prerelease) with redoop's own updater key; shells installed from doop.design need one reinstall through `scripts/install-desktop.sh`
+
 ## [0.13.0](https://github.com/kgoedecke/doop/compare/desktop-v0.12.0...desktop-v0.13.0) (2026-11-08)
 
 
