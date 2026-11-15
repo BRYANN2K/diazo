@@ -31,7 +31,6 @@ import { Badge } from './ui/badge'
 import { Avatar } from './ui/avatar'
 import { Chip } from './ui/chip'
 import { Kbd } from './ui/kbd'
-import { DotMatrix } from './ui/dot-matrix'
 import { StatusLabel } from './ui/status-label'
 import { HandoffModal } from './HandoffModal'
 import { Note } from './ui/note'
@@ -49,6 +48,7 @@ import {
   XIcon,
 } from './ui/icons'
 import { useT } from '@/lib/i18n'
+import { ThinkingStatus } from './ui/thinking-status'
 import { cn } from '@/lib/utils'
 
 /** the field grows with the draft up to this many lines, then scrolls */
@@ -415,7 +415,7 @@ function ChatLine({ message, grouped }: { message: ChatMessage; grouped: boolean
               <Stamp at={message.at} />
             </span>
           )}
-          <div className="max-w-[85%] rounded-card rounded-br-tag bg-paper-deep px-3 py-2 text-body break-words whitespace-pre-wrap text-ink">
+          <div className="max-w-[85%] animate-enter rounded-card rounded-br-tag bg-well px-3 py-2 text-copy break-words whitespace-pre-wrap text-ink">
             {message.text}
           </div>
         </div>
@@ -434,7 +434,9 @@ function ChatLine({ message, grouped }: { message: ChatMessage; grouped: boolean
         </span>
       )}
       {message.text && (
-        <span className="min-w-0 pl-6 text-body break-words whitespace-pre-wrap text-ink">{message.text}</span>
+        <span className="min-w-0 animate-enter pl-6 text-copy break-words whitespace-pre-wrap text-ink">
+          {message.text}
+        </span>
       )}
       {message.plan && (
         <div className="pl-6">
@@ -457,15 +459,16 @@ function AgentPending({ message }: { message: ChatMessage }) {
     <div role="status" className="flex min-w-0 items-center gap-1.5">
       <ChatAvatar name={agent} agent glaze={thinking} />
       {thinking ? (
-        <DotMatrix className="mx-0.5" />
+        /* the agent's live line, in agent orange under the shimmer */
+        <ThinkingStatus steps={[t('panels.chatThinking', { agent: message.claimedBy ?? '' })]} className="ml-0.5" />
       ) : (
-        <ClockIcon size={12} className="mx-0.5 flex-none text-ink-faint" />
+        <>
+          <ClockIcon size={12} className="mx-0.5 flex-none text-ink-3" />
+          <span className="min-w-0 truncate text-caption text-ink-3">
+            {t('panels.chatQueued', { agent: message.targetAgent ?? '' })}
+          </span>
+        </>
       )}
-      <span className="min-w-0 truncate text-caption text-ink-faint">
-        {thinking
-          ? t('panels.chatThinking', { agent: message.claimedBy ?? '' })
-          : t('panels.chatQueued', { agent: message.targetAgent ?? '' })}
-      </span>
     </div>
   )
 }

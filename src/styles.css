@@ -1073,6 +1073,12 @@ body[data-panel-resizing] * {
     transform: translateY(4px) scale(0.98);
   }
 }
+@keyframes stop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.4) rotate(-45deg);
+  }
+}
 @keyframes number-roll {
   from {
     transform: translateY(0);
