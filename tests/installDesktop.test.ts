@@ -53,7 +53,7 @@ function run(args: string[], env: Record<string, string> = {}): Promise<{ code: 
 
 const calls = () => (existsSync(path.join(root, 'calls.log')) ? readFileSync(path.join(root, 'calls.log'), 'utf8') : '')
 
-const DIAZO = { app: 'Diazo.app', id: 'dev.diazo.desktop' }
+const DIAZO = { app: 'Diazo.app', id: 'dev.bryann2k.diazo' }
 /* the pre-rename redoop shell, and the official doop app: same name and id */
 const DOOP = { app: 'doop.app', id: 'design.doop.desktop' }
 
@@ -218,14 +218,14 @@ describe('install-desktop.sh', () => {
   it('quits a running app, keeps its data, and opens it again', async () => {
     publish('0.15.0')
     writeApp(apps, '0.14.9', 'other-key')
-    const data = path.join(home, 'Library', 'Application Support', 'dev.diazo.desktop')
+    const data = path.join(home, 'Library', 'Application Support', 'dev.bryann2k.diazo')
     mkdirSync(data, { recursive: true })
     writeFileSync(path.join(data, 'server.json'), '{"origin":"https://diazo.example"}')
     writeFileSync(path.join(root, 'running'), '')
 
     const { code, out } = await run([])
     expect(code, out).toBe(0)
-    expect(calls()).toMatch(/^osascript -e quit app id "dev\.diazo\.desktop"$/m)
+    expect(calls()).toMatch(/^osascript -e quit app id "dev\.bryann2k\.diazo"$/m)
     expect(calls()).toMatch(/^open .*Diazo\.app$/m)
     expect(installed()).toBe('0.15.0')
     expect(readFileSync(path.join(data, 'server.json'), 'utf8')).toContain('diazo.example')
@@ -258,7 +258,7 @@ describe('install-desktop.sh', () => {
   it('uninstalls the app and keeps the data', async () => {
     writeApp(apps, '0.15.0')
     writeApp(path.join(home, 'Applications'), '0.15.0')
-    const data = path.join(home, 'Library', 'Application Support', 'dev.diazo.desktop')
+    const data = path.join(home, 'Library', 'Application Support', 'dev.bryann2k.diazo')
     mkdirSync(data, { recursive: true })
     const { code, out } = await run(['--uninstall'])
     expect(code, out).toBe(0)

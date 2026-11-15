@@ -3,7 +3,7 @@
   "productName": "Diazo",
   "mainBinaryName": "doop-desktop",
   "version": "0.15.0",
-  "identifier": "dev.diazo.desktop",
+  "identifier": "dev.bryann2k.diazo",
   "build": {
     "devUrl": "http://localhost:4300",
     "frontendDist": "https://doop.design"

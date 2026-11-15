@@ -97,7 +97,7 @@ release's `SHA256SUMS` (and the updater signature when `minisign` is
 installed). The app has no Apple signature (ad hoc only): a file curl downloads
 carries no quarantine flag, so Gatekeeper does not block it, and the script
 clears the flag anyway. It quits a running Diazo first and reopens it after.
-`--uninstall` removes the app; `~/Library/Application Support/dev.diazo.desktop`
+`--uninstall` removes the app; `~/Library/Application Support/dev.bryann2k.diazo`
 (sign-in, `server.json`, the Chromium profile) is kept by both.
 
 ### Cut a release
@@ -360,7 +360,7 @@ notarized and packed (`brew install create-dmg` to run it locally).
 ### From doop to Diazo (0.15)
 
 Up to 0.14 this shell was `doop` (`design.doop.desktop`); from 0.15 it is
-`Diazo` (`dev.diazo.desktop`), so its data folders moved. First thing in
+`Diazo` (`dev.bryann2k.diazo`), so its data folders moved. First thing in
 `main()`, before the CEF runtime opens its profile,
 `src/identity_migration.rs` copies the old app data and local data folders
 (`dirs::data_dir()` / `dirs::data_local_dir()` joined with the identifier,
@@ -375,11 +375,11 @@ existing links and the updater's relaunch keep working.
 
 ### Replacing the WebKit app
 
-The Chromium app is `Diazo` (`dev.diazo.desktop`) with the executable
+The Chromium app is `Diazo` (`dev.bryann2k.diazo`) with the executable
 `doop-desktop`, exactly as the WebKit app is: the updater swaps the bundle in
 place and relaunches it by the old executable's path, and macOS keeps the
 app's permissions and keychain items. Chromium keeps its profile in
-`~/Library/Application Support/dev.diazo.desktop/cef` (debug builds use
+`~/Library/Application Support/dev.bryann2k.diazo/cef` (debug builds use
 `cef-dev`, since they encrypt cookies with a mock keychain).
 
 On its first launch the app opens hidden on the app origin's `/favicon.ico`
@@ -399,7 +399,7 @@ without migrating and leaves the next launch to try again.
 To test it on a machine with the WebKit app installed: quit the WebKit app
 (both share the bundle id, so a running one takes the launch over), build
 the Chromium app against the same server, and launch it. Delete
-`~/Library/Application Support/dev.diazo.desktop/cef` (`cef-dev` for a
+`~/Library/Application Support/dev.bryann2k.diazo/cef` (`cef-dev` for a
 debug build) to run the migration again.
 
 `DOOP_CEF_DEBUG_PORT=9333 bun run dev:chromium` opens Chrome's remote

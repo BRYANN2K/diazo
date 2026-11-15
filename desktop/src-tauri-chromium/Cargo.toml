@@ -5,7 +5,7 @@
 # and sets `cfg(chromium)` (see the cfg(chromium) blocks in main.rs).
 #
 # On macOS this is the app that ships: the release workflow builds it as
-# `Diazo` (dev.diazo.desktop), the same bundle the WebKit build is, so the
+# `Diazo` (dev.bryann2k.diazo), the same bundle the WebKit build is, so the
 # WebKit app updates into it in place. Up to 0.14 both were `doop`
 # (design.doop.desktop); src/identity_migration.rs carries that data over. Windows and Linux stay on the WebKit
 # build. Tauri 3 and its CEF runtime are alphas, pinned exactly. Keep the

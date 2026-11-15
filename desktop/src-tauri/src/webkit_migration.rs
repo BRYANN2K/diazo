@@ -3,7 +3,7 @@
 //! signed in and keeps what the page remembered (theme, panel layout, the
 //! agent pick, onboarding).
 //!
-//! Both shells are the same bundle (dev.diazo.desktop), so this process's
+//! Both shells are the same bundle (dev.bryann2k.diazo), so this process's
 //! default WKWebsiteDataStore is the WebKit shell's store. Its cookies come
 //! from WKHTTPCookieStore; its localStorage has no API, so a hidden WKWebView
 //! loads a blank document at the app's origin and reads it there. Nothing is

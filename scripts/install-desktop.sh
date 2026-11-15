@@ -13,7 +13,7 @@
 # not signed by Apple: a file curl downloads carries no quarantine flag, so
 # Gatekeeper does not stop it, and the quarantine flag is cleared anyway. The
 # app then updates itself from the same releases. ~/Library/Application
-# Support/dev.diazo.desktop (sign-in, chosen server, Chromium profile) is never
+# Support/dev.bryann2k.diazo (sign-in, chosen server, Chromium profile) is never
 # touched.
 #
 # Before the rename the app was doop.app (bundle design.doop.desktop), the name
@@ -34,7 +34,7 @@ DOOP_DESKTOP_QUIT_TIMEOUT=${DOOP_DESKTOP_QUIT_TIMEOUT:-20}
 SYSTEM_APPS=${DOOP_DESKTOP_SYSTEM_APPS:-/Applications}
 USER_APPS="$HOME/Applications"
 APP_NAME=Diazo.app
-BUNDLE_ID=dev.diazo.desktop
+BUNDLE_ID=dev.bryann2k.diazo
 DATA_DIR="$HOME/Library/Application Support/$BUNDLE_ID"
 # the pre-rename redoop shell, replaced only when it trusts our key
 LEGACY_APP=doop.app

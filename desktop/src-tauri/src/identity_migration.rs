@@ -1,7 +1,7 @@
 //! The one-time move from the doop bundle identifier to Diazo's.
 //!
 //! Up to 0.14 the shell was `design.doop.desktop`; from 0.15 it is
-//! `dev.diazo.desktop`, so Tauri's app data folders moved with it. On the
+//! `dev.bryann2k.diazo`, so Tauri's app data folders moved with it. On the
 //! first launch under the new identifier, while its folder is still missing
 //! or empty, everything in the old one is copied over: the chosen server
 //! (`server.json`), the picked Claude CLI (`cli.json`), the Chromium profile
@@ -23,7 +23,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// Keep in step with both tauri.conf.json files (checked by a test).
-pub const IDENTIFIER: &str = "dev.diazo.desktop";
+pub const IDENTIFIER: &str = "dev.bryann2k.diazo";
 /// The identifier the shell had up to 0.14.
 pub const OLD_IDENTIFIER: &str = "design.doop.desktop";
 
