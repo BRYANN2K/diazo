@@ -23,7 +23,7 @@ const dropdownMenuContentVariants = cva(
   /* never taller than the room Radix measured beside the trigger: a long menu
      (the model list, with its wrapping blurbs) scrolls instead of running off a
      short window */
-  'z-[70] max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto rounded-[12px] bg-surface p-1.5 shadow-pop animate-[chip-in_0.18s_ease] data-[state=closed]:animate-none',
+  'z-[70] max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto rounded-[12px] bg-surface p-1.5 shadow-pop animate-[chip-in_0.18s_ease] data-[state=closed]:animate-none motion-reduce:animate-none',
   {
     variants: {
       width: {
