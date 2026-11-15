@@ -15,6 +15,7 @@ let owner: Client
 let outsider: Client
 let canvasId: string
 let pageId: string
+let ownerKey: string
 
 const MP4 = Buffer.concat([Buffer.alloc(4), Buffer.from('ftypisom'), Buffer.alloc(64)])
 const WEBM = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(64)])
@@ -44,11 +45,35 @@ beforeAll(async () => {
   const canvas = await (await owner.post('/api/canvases', { name: 'Motion' })).json()
   canvasId = canvas.id
   pageId = canvas.pages[0].id
+  ownerKey = (await (await owner.post('/api/agent-keys', { name: 'motion-agent' })).json()).secret
 }, 70_000)
 
 afterAll(() => server?.stop())
 
 const compUrl = () => `/api/canvases/${canvasId}/pages/${pageId}/composition`
+
+async function mcpCall(secret: string, name: string, args: Record<string, unknown>) {
+  const res = await fetch(`${server.base}/mcp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      Authorization: `Bearer ${secret}`,
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+  })
+  expect(res.status).toBe(200)
+  const body = (await res.json()) as { result: { isError?: boolean; content: { type: string; text?: string }[] } }
+  /* text = the payload block; nudge text blocks the server appends ride in rest */
+  return {
+    isError: !!body.result.isError,
+    text: body.result.content[0]?.text ?? '',
+    rest: body.result.content
+      .slice(1)
+      .map((b) => b.text ?? '')
+      .join('\n'),
+  }
+}
 
 describe('composition REST + access gates', () => {
   it('starts empty, rejects bad bodies and non-editors, then round-trips', async () => {
@@ -236,5 +261,105 @@ describe('render jobs', () => {
     const cancelable = (await fresh.json()).job
     const canceled = await back.delete(`/api/renders/${cancelable.id}`)
     expect(((await canceled.json()).job as { status: string }).status).toBe('canceled')
+  }, 30_000)
+})
+
+describe('the MCP tools', () => {
+  it('storyboards a page, reads and patches its timeline, lints and queues a render', async () => {
+    /* two frames in reading order on a fresh canvas */
+    const film = await (await owner.post('/api/canvases', { name: 'Film' })).json()
+    const filmPage = film.pages[0].id
+    await owner.post(`/api/canvases/${film.id}/frames`, {
+      name: 'Shot 1',
+      x: 0,
+      y: 0,
+      width: 1000,
+      height: 600,
+      html: '<body><h1>one</h1></body>',
+    })
+    await owner.post(`/api/canvases/${film.id}/frames`, {
+      name: 'Shot 2',
+      x: 1200,
+      y: 0,
+      width: 1000,
+      height: 600,
+      html: '<body><h1>two</h1><script>setInterval(() => Date.now(), 100)</script></body>',
+    })
+
+    const noComp = await mcpCall(ownerKey, 'get_composition', {
+      canvas_id: film.id,
+      page_id: filmPage,
+      agent_name: 'Rostrum',
+    })
+    expect(noComp.isError).toBe(true)
+    expect(noComp.text).toContain('no composition')
+
+    const story = await mcpCall(ownerKey, 'animate_storyboard', {
+      canvas_id: film.id,
+      page_id: filmPage,
+      shot_seconds: 4,
+      agent_name: 'Rostrum',
+    })
+    expect(story.isError).toBe(false)
+    const storyData = JSON.parse(story.text) as { composition: Composition; shots: { frameId: string }[] }
+    expect(storyData.shots).toHaveLength(2)
+    expect(storyData.composition.tracks[0]?.kind).toBe('camera')
+
+    const got = await mcpCall(ownerKey, 'get_composition', {
+      canvas_id: film.id,
+      page_id: filmPage,
+      agent_name: 'Rostrum',
+    })
+    const comp = (JSON.parse(got.text) as { composition: Composition }).composition
+    expect(comp.duration).toBe(8)
+    expect(comp.tracks[0]?.keyframes?.every((k) => (k.easing as { type: string }).type === 'hold')).toBe(true)
+
+    const patched = await mcpCall(ownerKey, 'set_composition', {
+      canvas_id: film.id,
+      page_id: filmPage,
+      expected_revision: comp.revision,
+      ops: [{ op: 'set_meta', duration: 10 }],
+      agent_name: 'Rostrum',
+    })
+    expect(patched.isError).toBe(false)
+    const stale = await mcpCall(ownerKey, 'set_composition', {
+      canvas_id: film.id,
+      page_id: filmPage,
+      expected_revision: comp.revision,
+      ops: [{ op: 'set_meta', duration: 11 }],
+      agent_name: 'Rostrum',
+    })
+    expect(stale.isError).toBe(true)
+
+    /* lint flags the setInterval + Date.now in shot 2's html */
+    const lint = await mcpCall(ownerKey, 'lint_motion', {
+      canvas_id: film.id,
+      page_id: filmPage,
+      agent_name: 'Rostrum',
+    })
+    expect(lint.isError).toBe(false)
+    const lintData = JSON.parse(lint.text) as { errors: number; issues: { rule: string }[] }
+    expect(lintData.errors).toBeGreaterThan(0)
+    expect(lintData.issues.map((i) => i.rule)).toContain('MO-02')
+
+    const render = await mcpCall(ownerKey, 'render_composition', {
+      canvas_id: film.id,
+      page_id: filmPage,
+      format: 'webm',
+      agent_name: 'Rostrum',
+    })
+    expect(render.isError).toBe(false)
+    const job = (JSON.parse(render.text) as { job: { id: string; status: string } }).job
+    expect(job.status).toBe('queued')
+
+    /* a key without edit rights is refused on the write tools */
+    const visitorKey = (await (await outsider.post('/api/agent-keys', { name: 'v' })).json()).secret
+    const denied = await mcpCall(visitorKey, 'set_composition', {
+      canvas_id: film.id,
+      page_id: filmPage,
+      ops: [{ op: 'set_meta', duration: 5 }],
+      agent_name: 'Rostrum',
+    })
+    expect(denied.isError).toBe(true)
   }, 30_000)
 })
