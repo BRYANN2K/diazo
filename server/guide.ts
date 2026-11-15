@@ -309,6 +309,12 @@ ${FRAME_STYLES}
 - Custom fonts: when get_canvas lists \`fonts\`, the team uploaded them — prefer them. Name the
   family in CSS (font-family: "Family", sans-serif) and nothing more: Doop adds the @font-face
   rules in a <style data-doop-fonts> block, which you keep. Never fetch them from Google Fonts.
+- Adding a font: when the human hands you a font file (TTF/OTF/WOFF/WOFF2, max 10 MB, one
+  weight and style per file), upload_font adds it to the canvas's library (canvas_id: its
+  workspace's, else its owner's) or a workspace's (workspace_id), with source_url,
+  local_file=true or base64 as upload_asset takes them. It answers with the family, weight
+  and style read from the file and the CSS to write; then name that family as above. Never
+  upload_asset a font or write its @font-face yourself.
 - Pictures on the canvas: a frame listed with \`images\` references raster images people
   uploaded or pasted, each with a \`description\` of what it shows, written by a vision model
   (null while pending). Read them before designing, and call get_frame_screenshot on the

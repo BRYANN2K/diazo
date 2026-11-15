@@ -182,6 +182,11 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   page and the command for their install (`doop-local update`, `docker compose pull && docker
 compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per build;
   `DOOP_UPDATE_CHECK=false` turns it off.
+- **Agents add fonts** — the `upload_font` MCP tool adds a TTF/OTF/WOFF/WOFF2 file (10 MB, one
+  face) to a font library, as Settings → Fonts does: the canvas's (its workspace's, else its
+  owner's) or a named workspace's, for whoever may change that library. The file comes by URL,
+  as a one-time `curl` upload or as base64; the answer names the family, weight and style read
+  from the file and the CSS to write, and Doop adds the `@font-face` to the frames.
 - **Demo and README screenshots** — `scripts/seed-demo.ts` boots a local instance seeded with an
   invented product (Fieldnote), with a scripted stand-in for the model API and a fake desktop
   device serving a demo repo, so the agent, usage, duel, curation and repo features run without a
