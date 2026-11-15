@@ -21,10 +21,15 @@
 # Self-update: with the TAURI_SIGNING_PRIVATE_KEY (+ _PASSWORD) secrets set,
 # every build also produces updater packages signed with the key whose public
 # half is in tauri.conf.json, and a tag release writes latest.json and copies
-# it onto the fixed `desktop-updates` release, which doop.design/desktop/
-# latest.json redirects to (see desktop/README.md). Tags fail without the key
-# so a release never leaves installed apps behind; other builds skip the
-# updater packages.
+# it onto the fixed `desktop-updates` prerelease of the repository it runs in,
+# which plugins.updater.endpoints names (see desktop/README.md). Tags fail
+# without the key so a release never leaves installed apps behind; other
+# builds skip the updater packages. Every tag also gets SHA256SUMS, which
+# scripts/install-desktop.sh checks before installing the macOS app.
+#
+# Nothing here needs upstream's accounts: Apple signing and Azure signing
+# switch themselves off when their secrets or variables are absent (forks),
+# and every URL is built from github.repository.
 name: Desktop Release
 
 on:
@@ -274,6 +279,9 @@ jobs:
               "linux-x86_64-rpm": {url: $rpm_url, signature: $rpm_sig}
             }}' > latest.json
           cat latest.json
+          # what scripts/install-desktop.sh checks the macOS package against
+          sha256sum -- *.dmg *.exe *.AppImage *.deb *.rpm *.app.tar.gz > SHA256SUMS
+          cat SHA256SUMS
       - name: Attach installers to release
         uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
         with:
@@ -286,6 +294,7 @@ jobs:
             installers/*.app.tar.gz
             installers/*.sig
             installers/latest.json
+            installers/SHA256SUMS
           fail_on_unmatched_files: true
       # last, once the packages it names are public: installed apps read this copy
       - name: Publish the update feed
