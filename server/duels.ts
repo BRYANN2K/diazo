@@ -5,7 +5,13 @@ import { modelDuels } from './db/schema.ts'
 import { store } from './store.ts'
 import * as actions from './actions.ts'
 import type { Actor } from '../shared/types.ts'
-import { RUNNER_NAMES, isRunnerProvider, parseRunnerPick, type RunnerPick } from '../shared/agentRunner.ts'
+import {
+  RUNNER_NAMES,
+  isRunnerProvider,
+  knownModelName,
+  parseRunnerPick,
+  type RunnerPick,
+} from '../shared/agentRunner.ts'
 import {
   duelLetter,
   duelProblem,
@@ -52,7 +58,7 @@ export function pickLabel(pick: RunnerPick): string {
   const name = isCustomProviderKind(pick.provider)
     ? 'Custom'
     : (RUNNER_NAMES[pick.provider as keyof typeof RUNNER_NAMES] ?? pick.provider)
-  return pick.model ? `${name} · ${pick.model}` : name
+  return pick.model ? `${name} · ${knownModelName(pick.provider, pick.model)}` : name
 }
 
 /** Where a row of `count` new frames goes on `pageId`: right of everything
