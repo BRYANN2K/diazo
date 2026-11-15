@@ -521,7 +521,22 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   before its original is back; tests in `replaceFrames.test.ts`); ⇧⌘U links (`setElementLink`: an
   image or SVG is wrapped in the link, other layers' content is); ⌃C is the EyeDropper. ⌘F / ⌥⌘F is
   the find bar (`FindBar.tsx`, `findText.ts`: text nodes only, locked layers found but never
-  replaced, replace-all is one undo step across frames). View toggles: ⇧' / ⇧C / ⌥⌘\ switch the view
+  replaced, replace-all is one undo step across frames). It is laid out as a palette: one
+  `Segmented` for This canvas / Library / All (This page or All pages under This canvas; the
+  replace line moves it to the page), results in sections (`bySection` in `findRows.ts`: the
+  canvases' matches, then library items, one row per item with its `ItemThumb`, kind, category and
+  variant count, `find/FindResultList.tsx`; the page's matches under their frame's name with a
+  lock mark, `find/FindTextList.tsx`), and a side pane (`find/FindPreviewPane.tsx`, above the list
+  on a phone) with the pointed result large and live, variant chips and Insert / Go to. Keys:
+  ↑/↓ walk, ↩ inserts or goes, ⇧↩ goes, ⌥↩ opens the variants, ⌘C copies the id; start, loading
+  (skeleton rows) and empty states. The preview (`FindPreview.tsx`, `shared/findPreviewRuntime.ts`)
+  plays the item as the canvas does: scripts, CSS animations, transitions and Web Animations run,
+  the pane's preview takes the pointer so hover demos react, a clicked link inside is not
+  followed, and the runtime pauses what runs while the preview is off screen or the tab hidden
+  (`{ play }` message). A library frame the person cannot open is read through
+  `/api/libraries/:id/items/:itemId/html`; an insert from a preview the pointer touched snapshots a
+  fresh render. Tests: `findBarUi.test.tsx`, `findPreview.test.tsx`, `findPreviewRuntime.test.ts`,
+  the motion cases in `findPreviewRuntimeBrowser.test.ts`. View toggles: ⇧' / ⇧C / ⌥⌘\ switch the view
   options (pixel grid, comment pins, cursors), ⌘Y outline mode (an adopted sheet in each frame's
   runtime, never saved or exported), ⌥L collapses the Layers tree. N / ⇧N zoom to the next frame in
   reading order, Home / End bring it into view, PgUp / PgDn change page. Tests:
