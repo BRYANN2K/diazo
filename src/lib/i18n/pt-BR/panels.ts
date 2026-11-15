@@ -271,6 +271,9 @@ export const panels: Catalog['panels'] = {
   modelNoAccount: 'Nada conectado ainda — o Doop Agent usa o modelo do servidor quando houver um configurado.',
   modelSettings: 'Configurações do modelo…',
   modelConnect: 'Conectar um modelo…',
+  modelOffline: 'App de desktop fechado',
+  modelEffortDefault: 'Padrão',
+  modelEffortDefaultBlurb: 'O que estiver configurado na conexão',
 
   shareAccessNone: 'Sem acesso',
   shareAccessView: 'Ver',

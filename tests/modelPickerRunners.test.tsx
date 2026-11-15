@@ -144,3 +144,13 @@ it('says so with nothing connected, and carries no pick', async () => {
   expect(document.body.textContent).toContain('Nothing connected yet')
   expect(document.body.textContent).toContain('Connect a model…')
 })
+
+it('says beside its name when a desktop connection is not running', async () => {
+  mocks.runners.mockResolvedValue({ ...both, runners: [{ ...both.runners[0]!, online: false }, both.runners[1]!] })
+  await act(async () => root.render(<ModelPicker />))
+  await settle()
+  await open()
+  const captions = [...document.querySelectorAll('[data-slot="dropdown-menu-caption"]')].map((el) => el.textContent)
+  expect(captions).toContain('Claude Plan · Desktop app not running')
+  expect(captions).toContain('ChatGPT')
+})

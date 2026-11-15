@@ -269,6 +269,9 @@ export const panels = {
   modelNoAccount: 'Nothing connected yet — the Doop Agent runs on the server’s model when one is set up.',
   modelSettings: 'Model settings…',
   modelConnect: 'Connect a model…',
+  modelOffline: 'Desktop app not running',
+  modelEffortDefault: 'Default',
+  modelEffortDefaultBlurb: 'Whatever the connection is set to',
 
   shareAccessNone: 'No access',
   shareAccessView: 'View',
