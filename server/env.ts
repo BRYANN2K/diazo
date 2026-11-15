@@ -314,6 +314,12 @@ const schema = {
   SYNC_PAGE_INTERVAL_MS: nonNegativeInt({ default: 30_000 }),
   SYNC_FREEZE_MS: nonNegativeInt({ default: 15 * 60_000 }),
 
+  /* --------------------------------------------------------- build */
+  /* baked into the image by the Dockerfile (docker.yml passes github.sha);
+     unset in a dev checkout, where server/buildInfo.ts asks git instead */
+  DOOP_BUILD_SHA: str({ default: undefined }),
+  DOOP_BUILD_DATE: str({ default: undefined }),
+
   /* ------------------------------------------------------- iOS push */
   DOOP_APNS_TEAM_ID: str({ default: undefined }),
   DOOP_APNS_KEY_ID: str({ default: undefined }),

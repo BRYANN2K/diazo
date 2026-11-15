@@ -108,6 +108,7 @@ import { isLinkAccess, roleAllows, type CanvasRole } from '../shared/canvasRole.
 import { auth, initAuth, syncAdmins, getUserName, isBanned, loginProvidersConfig } from './auth.ts'
 import { getInstanceSettings, hydrateInstanceSettings, loginPolicy } from './instanceSettings.ts'
 import { adminRouter } from './admin.ts'
+import { buildInfo } from './buildInfo.ts'
 import { communityRouter, parseListing, publishableFrames } from './community.ts'
 import { automationsRouter, startScheduler } from './automations.ts'
 import { startMcpTokenPrune } from './mcpTokens.ts'
@@ -813,6 +814,13 @@ app.post('/api/account-exists', async (req, res) => {
 app.get('/api/oidc-config', (req, res) => {
   const providers = loginProvidersConfig()
   res.json({ ...providers, ...loginPolicy(providers.enabled) })
+})
+
+/* Public: which build is running (version, commit, build date). No secrets;
+   the update check (server/updateCheck.ts) compares this commit with the
+   repository's. */
+app.get('/api/version', (_req, res) => {
+  res.json(buildInfo())
 })
 
 /* Public: the interface language for visitors who have not picked one. The

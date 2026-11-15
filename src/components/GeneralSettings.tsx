@@ -1,5 +1,6 @@
 import { useLocale, useT } from '../lib/i18n'
 import { setPromptBoxHidden, usePromptBoxHidden } from '../lib/homePreferences'
+import { AboutCard } from './AboutCard'
 import { LanguagePicker } from './LanguagePicker'
 import { Note } from './ui/note'
 import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from './ui/card'
@@ -39,6 +40,7 @@ export function GeneralSettings() {
           <span className="text-body text-ink-soft">{t('settings.showPromptBoxHint')}</span>
         </CardRow>
       </SettingsCard>
+      <AboutCard />
     </>
   )
 }
