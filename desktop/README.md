@@ -227,6 +227,33 @@ shells display an update hint; browser sessions display a desktop-only hint.
 Subscription availability is governed by Anthropic's current terms and account
 policy; an existing CLI login is not a promise of unlimited usage.
 
+## Local ACP agents (Devin, Grok)
+
+Settings → Doop Agent lists **Devin (desktop)** and **Grok (desktop)** in shells that advertise
+`__DOOP_ACP_AGENTS__`. Install the CLI and sign it in from a terminal (`devin auth login`,
+`grok login`; the row's **Sign in** runs the same), then **Connect**. The first connection
+shows a native consent dialog per agent; the accounts allowed on this device are kept in
+`acp/connections.json` in the app's data directory.
+
+- `acp.rs` starts `devin acp [--model <id>]` or `grok agent [-m <id>] [--reasoning-effort <e>]
+stdio` and speaks the Agent Client Protocol over its stdio. Only those two programs run: the
+  agent name is allowlisted, the binary is looked up in `~/.local/bin` (and `~/.grok/bin`), the
+  login shell's PATH, the app's PATH and Homebrew, and the model id and effort are checked by
+  shape before they become arguments.
+- Each session opens in an empty private directory under `acp/<run id>` with the run's Doop MCP
+  server (`/local-agent/mcp/<id>`, Bearer token) and nothing else Doop adds. Permission requests
+  are granted only for the run's Doop tools; edits, shell commands and other servers' tools are
+  rejected, and the client advertises no file system or terminal. The CLI keeps its own login,
+  usage limits and session history; Doop never reads its credentials.
+- **Stop task** sends `session/cancel` and kills the process group 10 seconds later; quitting the
+  app does the same. One run per agent at a time; the Claude Plan runs alongside.
+- Known limits: Devin also loads the person's own MCP config (`~/.config/devin/mcp_config.json`),
+  and its sessions start in its `accept-edits` mode, so edits it makes without asking land in the
+  empty run directory, which is removed after the run.
+
+Needs a desktop release: older shells do not advertise the agents, and the rows stay hidden
+there.
+
 ## Local project
 
 A canvas can be linked to a folder on this machine so the resident agent reads real code while it

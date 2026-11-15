@@ -91,6 +91,36 @@
   bound; Refresh asks again) and its `PATH` is given to every CLI process, since a GUI app's
   `/usr/bin:/bin` PATH lacks the `node` an npm install needs. Shells advertise this with
   `__DOOP_CLAUDE_CHOOSE__`.
+- Local ACP agents (`shared/acpAgent.ts`, `server/acpAgentPreferences.ts`,
+  `desktop/src-tauri/src/acp.rs`, `src/lib/acpAgent.ts`, `src/components/LocalAcpAgent.tsx`): the
+  Devin CLI (`devin acp`) and the Grok CLI (`grok agent stdio`) run on the person's desktop as the
+  connections `devin-local` and `grok-local`, next to the Claude Plan (`isLocalRunner`). The
+  shell is a minimal ACP client (JSON-RPC 2.0 over stdio, no ACP crate: the official one is async
+  and `!Send`, the shell's runners are blocking threads): `initialize` (the agent must report
+  `mcpCapabilities.http`), `session/new` in an empty private directory with the run's
+  `/local-agent/mcp/:id` server and Bearer token, one `session/prompt` (the system brief leads the
+  text, ACP having no system prompt), `agent_message_chunk` updates streamed to the page as
+  `acp-progress`, `session/cancel` on a stop with 10s to wind down, then the process group is
+  killed. `session/request_permission` is granted once for one of the job's Doop tool names
+  (`mcp__doop__x`, `doop/x` or bare, never an edit, delete, move or execute call), rejected
+  otherwise; `fs/*` and `terminal/*` are refused (the client advertises neither). The binary is
+  the allowlisted agent's name found in its installer's dirs, the login shell's PATH
+  (`claude::login_shell_path`), the app's PATH and Homebrew; the page passes a model id
+  (`valid_model`, the shape of `ACP_MODEL_ID`) and a Grok effort, nothing else. `acp_status` runs
+  `--version`, `devin auth status` + `devin models` or `grok models` (cached 10 min, Refresh asks
+  again) and the page sends the model list along with a poll every minute; the server keeps it in
+  memory per desktop (`localAgentRuns.catalog`) to widen the curated menus (`acpMenu`). Devin's
+  menu is model families, its effort the variant suffix (`devinModelId`: nearest step, the
+  higher on a tie); Grok's effort is `--reasoning-effort` (low / medium / high / xhigh). The relay
+  is `localAgentRuns`, keyed by agent: jobs carry `agent` and `tools` (absent for the Plan, so old
+  shells read Claude jobs unchanged), devices and the online check are per agent,
+  `/api/local-agent/acp/:agent` (GET, PUT, `/poll`, `/stop`) beside the Plan's routes, results
+  through the shared `/finish/:id`. Preferences in `acp_agent_preferences` (migration 0070, one
+  row per person and agent). Usage comes from the prompt response's `usage` and a USD
+  `usage_update` cost (`fromAcpUsage`); without them the run record keeps its time only. Known
+  limits: Devin also loads the person's own MCP config, and its sessions open in its
+  `accept-edits` mode (edits land in the empty run directory). Tests: the Rust tests in `acp.rs`
+  (a fake agent in sh), `acpAgents.test.ts`, `acpAgentRow.test.tsx`, `acpAgentRunners.test.tsx`.
 - Model menus (`server/modelCatalog.ts`, `catalogForAccount` in `server/agentRunners.ts`,
   `GET /api/model-account/models`): a connected account's menus list what the account can
   actually run — the provider's catalog asked with the user's own key, the curated entries of

@@ -145,6 +145,14 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   dial where the provider has one; each designs into its own sibling frame. A comparison card
   shows each render with its cost, time, effort and lint score, and the one you keep is saved as
   a canvas decision while the others are archived (hidden, not deleted).
+- **Devin and Grok on the desktop (ACP)** — Settings → Doop Agent lists **Devin (desktop)** and
+  **Grok (desktop)** when the desktop app can run them: the shell starts the CLI already installed
+  and signed in on the computer (`devin acp`, `grok agent stdio`) and drives it over the Agent
+  Client Protocol, with the run's Doop MCP server, the way the Claude Plan runs Claude Code. Each
+  is a connection of its own, in the composer's model picker and the model duel, with its model
+  menu (curated plus what `devin models` / `grok models` list) and effort (Grok's
+  `--reasoning-effort`; Devin's effort picks the model variant, `swe-2` + Max → `swe-2-max`).
+  Permission requests are granted for Doop's canvas tools only. Needs a desktop release.
 - **Self-hosting** — Docker image `ghcr.io/bryann2k/redoop:main` (also `:latest` and
   `:sha-<commit>`; amd64 + arm64) built on every push to `main`, k3s manifests in `deploy/k3s/`
   with a persistent volume for uploads, exposed through Tailscale Serve only (no ingress, no
