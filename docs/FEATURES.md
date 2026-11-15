@@ -151,9 +151,11 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   for Claude Code, Codex and Devin. It authenticates with an agent key.
 - **Model duel** — Duel in the agents composer sends one brief to 2-3 models, each picked from
   what the connection can actually run (its live provider catalog; on the Claude Plan the
-  "Latest" aliases and every pinned Claude version), grouped by connection with a search, shown
-  as contestant slots A-C, each with its own reasoning-effort menu that starts at the
-  connection's setting; each designs into its own sibling frame. A comparison card
+  "Latest" aliases and every pinned Claude version). The dialog is just the brief, with three
+  compact slots in its foot (Model 1, Model 2, an optional Model 3); each opens the composer's own
+  model menu (connections, models, reasoning effort starting at the connection's setting) and
+  can be cleared. The same model can run twice at different efforts; two identical slots are
+  flagged and hold Start back. Each designs into its own sibling frame. A comparison card
   shows each render with its cost, time, effort and lint score, and the one you keep is saved as
   a canvas decision while the others are archived (hidden, not deleted).
 - **Devin and Grok on the desktop (ACP)** — Settings → Doop Agent lists **Devin (desktop)** and
