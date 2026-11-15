@@ -1026,6 +1026,26 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 
 ## 9. Infrastructure and Deployment
 
+- Build identity and update check (`server/buildInfo.ts`, `server/updateCheck.ts`,
+  `shared/updateCheck.ts`): the image carries `DOOP_BUILD_SHA` / `DOOP_BUILD_DATE` (Dockerfile
+  build args from `docker.yml`; a checkout reads `git rev-parse HEAD`), served publicly at
+  `GET /api/version` and shown in Settings → General → About (`AboutCard.tsx`). The server asks
+  GitHub's REST API, unauthenticated (`user-agent: redoop-update-check`), for the newest
+  `DOOP_UPDATE_BRANCH` commit of `DOOP_UPDATE_REPO` whose `docker.yml` run succeeded (`GET
+.../actions/workflows/docker.yml/runs?status=success`: a finished image build is the one
+  signal that `:main` exists for it without a GHCR token; a repository without the workflow
+  falls back to the branch head), then `compare/<running>...<latest>` for the count and titles.
+  States: `current`, `behind`, `ahead`, `diverged`, `unknown` (`no-build-sha`, `not-found`,
+  `rate-limited`, `unreachable`), `disabled` (`DOOP_UPDATE_CHECK=false`). Kept an hour, a
+  failure 15 minutes, a spent limit until `x-ratelimit-reset`; ETags make a revalidation free;
+  concurrent asks share one check; 8s timeout. `GET /api/update-status` answers instance admins
+  and, on `DOOP_INSTALL=local`, everyone (404 otherwise). `ServerUpdateCard.tsx` sits in
+  `UpdateCard`'s stack (browser and desktop alike), lists three titles, links the compare page
+  and gives `updateCommand(install)`; dismissed per latest commit under `doop:update-dismissed`.
+  `DOOP_INSTALL` is set by `install-local.sh`, compose and the k3s manifest, else guessed
+  (`KUBERNETES_SERVICE_HOST`, `/.dockerenv`, a checkout). Tests: `buildInfo.test.ts`,
+  `updateCheck.test.ts` (stubbed fetch), `updateStatusHttp.test.ts`, `serverUpdateCard.test.tsx`.
+
 - Experimental Gemini cloud pilot: `server/geminiCloudRuns.ts` dispatches resident harness tasks
   to per-user workers; `server/geminiCloudMcp.ts` exposes run-scoped canvas tools. The standalone
   worker runs official Gemini CLI headlessly, with Google credentials retained in its own volume.

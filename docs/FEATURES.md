@@ -149,6 +149,14 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   `:sha-<commit>`; amd64 + arm64) built on every push to `main`, k3s manifests in `deploy/k3s/`
   with a persistent volume for uploads, exposed through Tailscale Serve only (no ingress, no
   Funnel).
+- **Update check against this fork** — every image knows its commit and build date
+  (`GET /api/version`, Settings → General → About). The server asks GitHub, at most hourly and
+  without a token, for the newest `main` commit whose image build succeeded and compares it with
+  the running one; instance admins (and a local install's user) get an "Update available · N new
+  commits" card, in the browser and the desktop app, with the commit titles, a link to the compare
+  page and the command for their install (`doop-local update`, `docker compose pull && docker
+compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per build;
+  `DOOP_UPDATE_CHECK=false` turns it off.
 - **Demo and README screenshots** — `scripts/seed-demo.ts` boots a local instance seeded with an
   invented product (Fieldnote), with a scripted stand-in for the model API and a fake desktop
   device serving a demo repo, so the agent, usage, duel, curation and repo features run without a

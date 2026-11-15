@@ -46,6 +46,20 @@ update, uninstall). `.github/workflows/docker.yml` builds the image for `linux/a
 runs the amd64 image under Rosetta, and `--build` builds it locally. Tests:
 `installLocal.test.ts` (stub `container`, `uname`, `curl`; no container is started).
 
+## Build identity and the update check (this fork)
+
+`docker.yml` passes `DOOP_BUILD_SHA=${{ github.sha }}` and `DOOP_BUILD_DATE` as build args;
+the Dockerfile turns them into env in its last layer, so `GET /api/version` and Settings →
+About name the commit. A compose build gets the commit only with
+`DOOP_BUILD_SHA=$(git rev-parse HEAD) docker compose up -d --build`; a checkout asks git. A
+running instance announces a newer image to its admins once the `docker.yml` run of a newer
+`main` commit has succeeded (`server/updateCheck.ts`), never from a push alone. Each install
+declares how it updates through `DOOP_INSTALL`: `local` (`install-local.sh` →
+`doop-local update`), `docker` (compose → `docker compose pull && docker compose up -d`),
+`kubernetes` (`deploy/k3s/doop.yaml` → `kubectl -n doop rollout restart deploy/doop`, which
+re-pulls `:main` under `imagePullPolicy: Always`). The desktop shell's own updates still come
+from upstream's doop.design feed (FORK.md says what a switch would take).
+
 ## Desktop app (Tauri: macOS DMG + Windows NSIS installer + Linux AppImage/.deb/.rpm)
 
 Driven by `.github/workflows/desktop-release.yml`; every desktop job shares the toolchain setup
