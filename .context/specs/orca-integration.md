@@ -460,7 +460,18 @@ automation action), `list_dev_tasks` / `request_dev_task` for agents.
 
 Docs at each phase: `docs/FEATURES.md`, `.context/TECHSTACK.md`, a plan in `.context/plans/`.
 
-## 12. Open questions for Bryan
+## 12. Decisions (Bryan, 2026-11-15)
+
+- **Pack delivery (Q1):** MCP only (`get_handoff`). Nothing is written into the worktree.
+- **Surface (Q2):** respect Bryan's Orca Chat | CLI setting; doop never forces `--surface`.
+- **Targets (Q5):** this Mac **and** the VPS (`--environment vps`) in the MVP. Remote hosts move
+  from phase 2 into phase 1: the launch picks the environment, status comes from
+  `orca worktree ps --json` on that host, and the preview on the VPS uses Orca screenshots until a
+  live frame can reach the remote dev server.
+
+The questions below stay open.
+
+## 13. Open questions for Bryan
 
 1. Pack delivery: MCP only (`get_handoff`, recommended), or also files in the worktree so `stip`
    runs there?
@@ -479,7 +490,7 @@ Docs at each phase: `docs/FEATURES.md`, `.context/TECHSTACK.md`, a plan in `.con
 9. Server-to-Orca headless launches (§10.3): never, or worth a separate spec?
 10. Is Devin a real target (needs `orca account add --agent devin`), or Claude + Codex only?
 
-## 13. Risks
+## 14. Risks
 
 - **CLI drift**: Orca ships often (1.4.259 today; several notes say "older hosts…"). Mitigation:
   schema check at startup, `--json` everywhere, tolerant parsing, feature hidden when flags vanish.
