@@ -54,6 +54,13 @@ import { indexFor, libraryItems } from './libraryIndex.ts'
 import { itemUrl, thumbUrl } from './libraryQueries.ts'
 import { searchIndex } from '../shared/librarySearch.ts'
 import { CodeLinkError, SET_CODE_LINK_DESCRIPTION, componentCodeLink, setCodeLinkTool } from './codeLinks.ts'
+import {
+  animateStoryboard,
+  getCompositionData,
+  lintMotion,
+  renderComposition,
+  setCompositionData,
+} from './motionTools.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
 import { canvasesFor } from './workspaces.ts'
@@ -2486,6 +2493,83 @@ const TOOLS: Anthropic.Tool[] = [
       required: ['frame_id'],
     },
   },
+  {
+    name: 'get_composition',
+    description:
+      "Read a page's Motion Studio timeline: duration, fps, output size, and every track's keyframes, easings, clips, audio and captions. Returns the composition's revision — quote it as expected_revision in set_composition so a collaborator's edit is never silently overwritten.",
+    input_schema: {
+      type: 'object',
+      properties: { page_id: { type: 'string', description: 'The page whose timeline to read' } },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'set_composition',
+    description:
+      "Write a page's Motion Studio timeline — composition for a whole timeline ({duration, fps, width, height, tracks}) or ops for a surgical patch (set_meta, add_track, remove_track, update_track, move_track, set_camera, add_keyframe, update_keyframe, remove_keyframe, add_clip, update_clip, remove_clip). The room sees the change live.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        composition: { type: 'object', description: 'Full timeline body; mutually exclusive with ops' },
+        ops: { type: 'array', items: { type: 'object' }, description: 'Patch ops applied atomically' },
+        expected_revision: { type: 'number', description: 'Fail when the live revision differs' },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'animate_storyboard',
+    description:
+      'Turn the frames laid out on a page into a Motion Studio composition: one shot per frame in reading order, a camera track cutting between shots at shot_seconds each. Plan the story from the brief first, call this once, then refine with set_composition ops — turn cuts into camera moves, add captions and clips — and lint_motion before render_composition.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        shot_seconds: { type: 'number', description: 'Seconds per shot, default 3' },
+        margin: { type: 'number', description: 'Breathing room around each shot, default 1.08' },
+        fps: { type: 'number', description: 'Output rate, default 30' },
+        width: { type: 'number', description: 'Output width px, default 1920' },
+        height: { type: 'number', description: 'Output height px, default 1080' },
+        frame_ids: { type: 'array', items: { type: 'string' }, description: 'Only these frames become shots' },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'lint_motion',
+    description:
+      "Check a page is seek-safe before rendering: wall clocks, free-running loops, unseeded Math.random, CSS animations not bound to the timeline, GSAP, network calls at seek time, autoplaying media, malformed motion blocks and bad track references (MO-* rules), over the composition and every frame's HTML.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string', description: 'The page to lint (or give frame_id to lint its page)' },
+        frame_id: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'render_composition',
+    description:
+      "Queue a video render of a page's timeline — mp4 or webm, the whole composition or a range. A browser tab or the desktop app claims the job and the file lands as an /a/ asset; progress shows in the room as render:progress.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        format: { type: 'string', enum: ['mp4', 'webm'], description: 'Container, default mp4' },
+        target: { type: 'string', enum: ['browser', 'desktop'], description: 'Who renders it, default browser' },
+        width: { type: 'number' },
+        height: { type: 'number' },
+        fps: { type: 'number' },
+        range: {
+          type: 'object',
+          properties: { start: { type: 'number' }, end: { type: 'number' } },
+          description: 'Seconds window to render, default the whole composition',
+        },
+      },
+      required: ['page_id'],
+    },
+  },
 ]
 
 /* the same tools as MCP, minus the arguments a resident run already has */
@@ -3517,6 +3601,80 @@ export async function execTool(
             })),
           }),
         )
+      }
+      case 'get_composition': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const out = getCompositionData(canvas, String(input.page_id ?? ''))
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'set_composition': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as Record<string, unknown>
+        const out = setCompositionData(
+          canvas,
+          String(raw.page_id ?? ''),
+          { composition: raw.composition, ops: raw.ops, expected_revision: raw.expected_revision },
+          actor,
+        )
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'animate_storyboard': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as Record<string, unknown>
+        const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+        const out = animateStoryboard(
+          canvas,
+          String(raw.page_id ?? ''),
+          {
+            shot_seconds: num(raw.shot_seconds),
+            margin: num(raw.margin),
+            fps: num(raw.fps),
+            width: num(raw.width),
+            height: num(raw.height),
+            frame_ids: Array.isArray(raw.frame_ids) ? raw.frame_ids.map(String) : undefined,
+          },
+          actor,
+        )
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'lint_motion': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as Record<string, unknown>
+        const out = await lintMotion(canvas, {
+          page_id: typeof raw.page_id === 'string' ? raw.page_id : undefined,
+          frame_id: typeof raw.frame_id === 'string' ? raw.frame_id : undefined,
+        })
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'render_composition': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as Record<string, unknown>
+        const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+        const out = renderComposition(
+          canvas,
+          String(raw.page_id ?? ''),
+          {
+            format: typeof raw.format === 'string' ? raw.format : undefined,
+            target: typeof raw.target === 'string' ? raw.target : undefined,
+            width: num(raw.width),
+            height: num(raw.height),
+            fps: num(raw.fps),
+            range:
+              raw.range && typeof raw.range === 'object' ? (raw.range as { start?: number; end?: number }) : undefined,
+          },
+          { id: runState.payerId ?? `resident:${actor.name}`, name: actor.name },
+        )
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
       }
       case 'screenshot_component': {
         const def = findComponent(canvasId, String(input.component ?? ''))
