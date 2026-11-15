@@ -123,6 +123,23 @@ export const FRAME_STYLES = `- Style an element on the element itself: style="�
 - This is how to write new markup. A frame that already styles itself with classes keeps them: edit
   it in its own idiom, and do not convert it.`
 
+export const MOTION = `A page can be a film: its composition is a seekable timeline where every pixel is a
+function of time t, nothing else.
+
+- get_composition reads a page's timeline; set_composition writes one whole or patches it with
+  ops (set_meta, add_track, set_camera, add_keyframe, add_clip…). Quote the revision you read as
+  expected_revision so a collaborator's edit is never silently overwritten.
+- animate_storyboard turns the frames already on a page into the first timeline: one shot per
+  frame in reading order, a camera track of hard cuts. Plan the story from the brief FIRST, call
+  it once, then refine with ops — turn cuts into moves by changing hold easings, add captions,
+  clips and element animation.
+- Everything on screen at time t comes from the timeline and the frames' markup only. Never
+  animate with Date.now, setInterval, requestAnimationFrame, unseeded Math.random, CSS animations
+  or GSAP — a seek must redraw the same pixels. Bind motion to keyframes on tracks, or to the
+  page's data-doop-time attributes. lint_motion flags every violation; run it before rendering.
+- render_composition queues a video job (mp4/webm): a browser tab or the desktop app claims it,
+  renders deterministically and the file lands as an /a/ asset. Progress shows in the room.`
+
 export const COMPONENTS = `A component is one design used in many places: change its main and every instance follows.
 get_canvas and list_components show a canvas's components with their props.
 
@@ -531,6 +548,10 @@ ${DESIGN_QUALITY}
 
 ${PROTOTYPES}
 - Frame ids come from get_canvas.
+
+## Motion — a page can be a film
+
+${MOTION}
 
 ## Components — design once, use everywhere
 
