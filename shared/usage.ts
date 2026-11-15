@@ -118,6 +118,28 @@ export function fromClaudeCliResult(raw: unknown, fallbackModel: string): TokenU
   return [cost !== undefined ? { ...single, costUsd: cost } : single]
 }
 
+/**
+ * An ACP agent's run (the Devin and Grok CLIs): the prompt response's
+ * `usage` (inputTokens includes the cached reads, thoughts are billed as
+ * output) and the last `usage_update` cost when it is in USD. An agent that
+ * reports neither gives nothing; the run's record still keeps its time.
+ */
+export function fromAcpUsage(raw: unknown, model: string): TokenUsage[] {
+  const event = record(raw)
+  const u = record(event.usage)
+  const cost = record(event.cost)
+  const costUsd = cost.currency === 'USD' ? money(cost.amount) : undefined
+  const cacheRead = tokens(u.cachedReadTokens)
+  const parts = {
+    inputTokens: Math.max(0, tokens(u.inputTokens) - cacheRead),
+    outputTokens: tokens(u.outputTokens) + tokens(u.thoughtTokens),
+    cacheReadTokens: cacheRead,
+    cacheWriteTokens: tokens(u.cachedWriteTokens),
+  }
+  if (Object.values(parts).every((n) => n === 0) && costUsd === undefined) return []
+  return [usage(model, parts, costUsd)]
+}
+
 /** The Gemini CLI's `--output-format json` stats: per model, prompt counts
  *  the cached tokens and thoughts are billed as output. */
 export function fromGeminiCliStats(raw: unknown): TokenUsage[] {

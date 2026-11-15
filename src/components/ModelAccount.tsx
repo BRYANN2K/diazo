@@ -1,11 +1,14 @@
 import { AppIcon } from './ui/brand-mark'
 import { LocalClaudeRow } from './LocalClaude'
+import { AcpAgentRow, acpAgentConnected } from './LocalAcpAgent'
+import { useAcpAgents } from '../lib/acpAgent'
+import { ACP_AGENTS, ACP_RUNNER } from '../../shared/acpAgent'
 import { isDesktopShell } from '../lib/shell'
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api } from '../lib/api'
 import type { AgentModelCatalog, AgentModelOption, DeviceFlow, ModelAccountKind, ModelAccounts } from '../lib/api'
-import type { RunnerProvider } from '../../shared/agentRunner'
+import { isLocalRunner, type RunnerProvider } from '../../shared/agentRunner'
 import { AvailableRow, ConnectionRow, FieldError, ConnectionSection, ModelSelect } from './ConnectionTable'
 import { CustomProviderForm } from './CustomProviderForm'
 import { isCustomProviderKind, type CustomProviderKind } from '../../shared/customProvider'
@@ -196,6 +199,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   const desktop = isDesktopShell()
   const { view, refresh, set } = useModelAccounts()
   const localState = useLocalAgent()
+  const acpState = useAcpAgents()
   const [showKey, setShowKey] = useState<false | Exclude<ModelAccountKind, 'chatgpt'>>(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -378,7 +382,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     )
   const makeDefault = (provider: RunnerProvider) =>
     act(
-      provider === 'claude-local' ? null : provider,
+      isLocalRunner(provider) ? null : provider,
       () => api.setDefaultRunner(provider),
       () => posthog.capture('agent_default_changed', { provider }),
     )
@@ -800,6 +804,19 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
     /* the Plan's row decides for itself whether it is a row or a card; the
        pane only needs to know which part it belongs in */
     { connected: planConnected, node: <LocalClaudeRow key="claude-local" {...planRowProps} /> },
+    /* the desktop agents over ACP: each row decides whether it shows at all */
+    ...ACP_AGENTS.map((agent) => ({
+      connected: acpAgentConnected(agent, acpState[agent]),
+      node: (
+        <AcpAgentRow
+          key={ACP_RUNNER[agent]}
+          agent={agent}
+          isDefault={view.default === ACP_RUNNER[agent]}
+          onMakeDefault={() => void makeDefault(ACP_RUNNER[agent])}
+          onChange={refresh}
+        />
+      ),
+    })),
     keyRow({
       kind: 'anthropic-key',
       title: t('models.claudeKeyTitle'),

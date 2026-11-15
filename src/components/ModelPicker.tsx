@@ -9,7 +9,7 @@ import { DoopMark } from './Logo'
 import { useAgentModels } from './ModelAccount'
 import { useAgentRunners, useRunnerPick } from '../lib/runnerPick'
 import { effortLabel, effortOptions } from '../lib/effortLabels'
-import { resolveRunnerPick, type AgentRunner, type RunnerOption } from '../../shared/agentRunner'
+import { isLocalRunner, resolveRunnerPick, type AgentRunner, type RunnerOption } from '../../shared/agentRunner'
 import { useT } from '@/lib/i18n'
 import {
   DropdownMenu,
@@ -45,7 +45,8 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
   const resolved = resolveRunnerPick(runners, stored)
   /* the picked account's live catalog, asked for once the menu opens; the
      other connections show their curated menus */
-  const liveKind = resolved && resolved.runner.provider !== 'claude-local' ? resolved.runner.provider : undefined
+  /* a desktop connection's menu already carries what its CLI lists */
+  const liveKind = resolved && !isLocalRunner(resolved.runner.provider) ? resolved.runner.provider : undefined
   const catalog = useAgentModels(liveKind, open)
   const modelsOf = (runner: AgentRunner): RunnerOption[] =>
     runner.provider === liveKind && catalog?.live ? catalog.models : runner.models

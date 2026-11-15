@@ -45,6 +45,7 @@
 use tauri::menu::{AboutMetadata, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
+mod acp;
 mod app_menu;
 #[cfg(target_os = "linux")]
 mod appimage;
@@ -319,6 +320,7 @@ fn main() {
     // the deep-link plugin through the `deep-link` feature.
     let builder = builder
         .manage(claude::ClaudeState::default())
+        .manage(acp::AcpState::default())
         .manage(fonts::LocalFonts::default())
         .manage(live::LiveState::default())
         .manage(app_menu::AppMenu::default())
@@ -331,6 +333,11 @@ fn main() {
             claude::claude_reset_cli,
             claude::claude_run,
             claude::claude_stop,
+            acp::acp_status,
+            acp::acp_connect,
+            acp::acp_login,
+            acp::acp_run,
+            acp::acp_stop,
             claude_extension::claude_add_extension,
             codex::codex_add_mcp,
             drift::drift_fetch,
@@ -436,7 +443,7 @@ fn main() {
             // (traffic-light inset arrived with the overlay title bar, 0.1.2)
             // and the platform tells it which window framing it lives under.
             let desktop_marker = format!(
-                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_CHOOSE__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true; window.__DOOP_APP_MENU__ = {}; window.__DOOP_LOCAL_FONTS__ = true; window.__DOOP_LOCAL_REPO__ = true; window.__DOOP_REPO_PATCH__ = true; window.__DOOP_LOCAL_DRIFT__ = true; window.__DOOP_LIVE_SNAPSHOT__ = true; window.__DOOP_UPDATE_CARD__ = true; window.__DOOP_SERVER_CHOOSE__ = true;",
+                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_CHOOSE__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true; window.__DOOP_APP_MENU__ = {}; window.__DOOP_LOCAL_FONTS__ = true; window.__DOOP_LOCAL_REPO__ = true; window.__DOOP_REPO_PATCH__ = true; window.__DOOP_LOCAL_DRIFT__ = true; window.__DOOP_LIVE_SNAPSHOT__ = true; window.__DOOP_UPDATE_CARD__ = true; window.__DOOP_SERVER_CHOOSE__ = true; window.__DOOP_ACP_AGENTS__ = ['devin', 'grok'];",
                 app.package_info().version,
                 std::env::consts::OS,
                 cfg!(any(target_os = "macos", target_os = "windows")),
@@ -552,6 +559,7 @@ fn main() {
         .run(|app, event| {
             if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
                 claude::shutdown(&app.state::<claude::ClaudeState>());
+                acp::shutdown(&app.state::<acp::AcpState>());
                 updates::install_on_quit(app);
             }
         });

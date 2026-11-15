@@ -157,6 +157,12 @@ fn shell_view(fresh: bool) -> ShellView {
     cached.clone().unwrap_or_default()
 }
 
+/// The PATH the person's login shell runs under, for the other local agents
+/// (acp.rs): the same one probe, so a Refresh there asks the shell again too.
+pub(crate) fn login_shell_path(fresh: bool) -> Option<OsString> {
+    shell_view(fresh).path
+}
+
 #[cfg(unix)]
 fn login_shell() -> Option<PathBuf> {
     std::env::var_os("SHELL").map(PathBuf::from).filter(|p| p.is_absolute() && p.is_file())

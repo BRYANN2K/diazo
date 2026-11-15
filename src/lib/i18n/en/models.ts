@@ -91,6 +91,19 @@ export const models = {
   claudeKeyTitle: 'Claude API key',
 
   /* LocalClaude */
+  /* the desktop agents over ACP (LocalAcpAgent) */
+  acpDevinShort: 'Your Devin login, on this computer',
+  acpGrokShort: 'Your Grok login, on this computer',
+  acpNotFound: '{name} is not installed where Doop looks. Install its CLI, then Refresh.',
+  acpInstallToConnect: 'Install the {name} CLI to connect.',
+  acpSignInToConnect: 'Sign in to the {name} CLI to connect.',
+  acpSignInBefore: 'Sign in first: run ',
+  acpSignInAfter: ' in a terminal, then Refresh.',
+  acpVersion: '{name} CLI {version}',
+  acpUpdateDoop: 'Update the Doop desktop app to run {name}.',
+  acpPermissions: 'Doop answers its permission requests: only Doop canvas tools are allowed.',
+  acpEffortDefaultBlurb: 'Whatever {name} is set to',
+
   cliSourceChosen: 'chosen by you',
   cliSourceShell: 'the one your terminal runs',
   cliSourceFound: 'the newest install found',

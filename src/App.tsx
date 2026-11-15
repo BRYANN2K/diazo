@@ -1,6 +1,7 @@
 import { Libraries } from './pages/Libraries'
 import { LibraryPage } from './pages/LibraryPage'
 import { startLocalAgent } from './lib/localAgent'
+import { startAcpAgents } from './lib/acpAgent'
 import { startLocalRepo } from './lib/localRepo'
 import { startLocalDrift } from './lib/localDrift'
 import { navigate } from './lib/navigate'
@@ -132,6 +133,10 @@ export function App() {
   const localAgentUser = !isPending && me && !me.impersonating ? session?.user.id : undefined
   useEffect(() => {
     if (localAgentUser) return startLocalAgent(localAgentUser)
+  }, [localAgentUser])
+  /* the desktop agents over ACP (Devin, Grok), one poller each */
+  useEffect(() => {
+    if (localAgentUser) return startAcpAgents(localAgentUser)
   }, [localAgentUser])
   /* the local-project poll answers repo_* reads for whoever is signed in;
      it starts with the app and stands down on sign-out */

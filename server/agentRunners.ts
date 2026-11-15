@@ -1,7 +1,8 @@
 /**
  * The connections a person's composer may send a task to, as
- * `GET /api/agent-runners` lists them: the Claude Plan while it is on, and
- * every model account that is on. `default` is what work carrying no pick
+ * `GET /api/agent-runners` lists them: the Claude Plan while it is on, the
+ * desktop agents over ACP (Devin, Grok) that are on, and every model
+ * account that is on. `default` is what work carrying no pick
  * runs on (agentDefaults.ts). The Settings pane gets every account, on or
  * off, through `accountsView`.
  */
@@ -23,6 +24,7 @@ import {
 import { customMenu } from './customProviders.ts'
 import { customProvidersEnabled } from './customProviderFetch.ts'
 import { CLAUDE_EFFORT_OPTIONS, CLAUDE_PLAN_MODELS } from '../shared/localAgent.ts'
+import { ACP_AGENTS, ACP_RUNNER, acpMenu } from '../shared/acpAgent.ts'
 import {
   ANTHROPIC_MODELS,
   DEEPSEEK_MODELS,
@@ -87,6 +89,23 @@ export async function listRunners(userId: string): Promise<AgentRunners> {
       ...(plan.effort ? { effort: plan.effort } : {}),
       models: CLAUDE_PLAN_MODELS,
       efforts: CLAUDE_EFFORT_OPTIONS,
+    })
+  }
+  /* a desktop agent's menu: the curated one widened by what its CLI listed
+     on the desktop, while that desktop polls */
+  for (const agent of ACP_AGENTS) {
+    const preference = connections.acp?.[agent]
+    if (!preference?.enabled) continue
+    const provider = ACP_RUNNER[agent]
+    const menu = acpMenu(agent, localAgentRuns.catalog(userId, agent))
+    runners.push({
+      provider,
+      name: RUNNER_NAMES[provider],
+      online: localAgentRuns.online(userId, Date.now(), agent),
+      model: preference.model,
+      ...(preference.effort ? { effort: preference.effort } : {}),
+      models: menu.models,
+      efforts: menu.efforts,
     })
   }
   /* the menu must list what the connection can actually run, so it comes

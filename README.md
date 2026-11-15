@@ -30,6 +30,8 @@ agent run did and cost.
   each frame before and after, and roll the whole run back in one step.
 - **Compare models.** A duel sends one brief to two or three models, each into its own frame, and
   shows cost, time and lint score side by side. You keep one.
+- **Use the agent CLIs you already pay for.** In the desktop app, Devin and Grok run on your own
+  login, next to the Claude Plan, through the Agent Client Protocol.
 - **Keep tokens and code in sync.** The Tokens panel diffs the canvas's tokens with the repo's CSS
   variables. A frame exports as a React or Astro component, shown as a patch before it is written.
 - **Run it yourself.** One command on a Mac, or your own server. Canvases, uploads and keys stay

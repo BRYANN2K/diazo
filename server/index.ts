@@ -159,6 +159,8 @@ import {
   CUSTOM_API_TYPES,
 } from '../shared/customProvider.ts'
 import { setStoredDefault } from './agentDefaults.ts'
+import { getAcpPreference } from './acpAgentPreferences.ts'
+import { acpAgentOf, isAcpRunnerProvider } from '../shared/acpAgent.ts'
 import { isRunnerProvider, parseRunnerPick } from '../shared/agentRunner.ts'
 import { findInCanvas } from './canvasFind.ts'
 import { findInLibrary } from './libraryQueries.ts'
@@ -1550,7 +1552,9 @@ app.put('/api/agent-runners/default', async (req, res) => {
     const usable =
       provider === 'claude-local'
         ? (await getLocalAgentPreference(userId)).enabled
-        : (await modelAccounts.getAccount(userId, provider))?.enabled
+        : isAcpRunnerProvider(provider)
+          ? (await getAcpPreference(userId, acpAgentOf(provider))).enabled
+          : (await modelAccounts.getAccount(userId, provider))?.enabled
     if (!usable) return res.status(400).json({ error: 'connect and switch that on first' })
     await setStoredDefault(userId, provider)
     res.json(await accountsView(userId))

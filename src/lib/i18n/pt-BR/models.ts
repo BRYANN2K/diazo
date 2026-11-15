@@ -93,6 +93,19 @@ export const models: Catalog['models'] = {
   claudeKeyTitle: 'Chave de API do Claude',
 
   /* LocalClaude */
+  /* os agentes do desktop via ACP (LocalAcpAgent) */
+  acpDevinShort: 'Seu login do Devin, neste computador',
+  acpGrokShort: 'Seu login do Grok, neste computador',
+  acpNotFound: '{name} não está instalado onde o Doop procura. Instale a CLI e clique em Atualizar.',
+  acpInstallToConnect: 'Instale a CLI do {name} para conectar.',
+  acpSignInToConnect: 'Entre na CLI do {name} para conectar.',
+  acpSignInBefore: 'Entre primeiro: rode ',
+  acpSignInAfter: ' em um terminal e clique em Atualizar.',
+  acpVersion: 'CLI do {name} {version}',
+  acpUpdateDoop: 'Atualize o app desktop do Doop para rodar o {name}.',
+  acpPermissions: 'O Doop responde aos pedidos de permissão: só as ferramentas de canvas do Doop são permitidas.',
+  acpEffortDefaultBlurb: 'O que estiver configurado no {name}',
+
   cliSourceChosen: 'escolhido por você',
   cliSourceShell: 'o que o seu terminal executa',
   cliSourceFound: 'a instalação mais recente encontrada',

@@ -7,6 +7,7 @@ import type { UsageReport } from '../../shared/agentRuns'
 import type { RollbackResult, RunTimeline } from '../../shared/runReplay'
 import type { DuelView, ModelDuel } from '../../shared/duel'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
+import type { AcpAgent, AcpAgentPreference, AcpCatalogModel } from '../../shared/acpAgent'
 import type { RepoLink, RepoLinkStatus, RepoRequest, RepoResult } from '../../shared/localRepo'
 import type { HandoffFile, HandoffPack, HandoffWriteResult } from '../../shared/handoff'
 import type { DriftComparison, DriftFetchRequest, DriftFetchResult } from '../../shared/drift'
@@ -17,7 +18,7 @@ import type { TokenDiff } from '../../shared/tokenSync'
 import type { PatchSummary } from '../../shared/patch'
 import type { FrameCodeInput, FrameCodePreview } from '../../shared/frameCode'
 import type { ImageDescriptionMode, ImageDescriptionPreference } from '../../shared/imageDescriptions'
-import type { AgentRunners, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
+import type { AgentRunners, LocalRunnerProvider, RunnerPick, RunnerProvider } from '../../shared/agentRunner'
 import type { CanvasFindResult } from '../../shared/canvasFind'
 import type {
   ImportReport,
@@ -270,7 +271,7 @@ export interface Allowance {
   connected: boolean
   /** connected a model account the Doop Agent itself can run on */
   byoModel: boolean
-  byoKind?: ModelAccountKind | 'claude-local' | 'gemini-cloud'
+  byoKind?: ModelAccountKind | LocalRunnerProvider | 'gemini-cloud'
   byoEmail?: string
   /** a custom provider's name, when that is the default */
   byoName?: string
@@ -500,6 +501,17 @@ export const api = {
       body: JSON.stringify({ deviceId, ...result }),
     }),
   stopLocalAgent: () => req<{ ok: boolean }>('/api/local-agent/stop', { method: 'POST' }),
+  /* the desktop agents over ACP (Devin, Grok): the same relay, per agent */
+  acpAgent: (agent: AcpAgent) => req<AcpAgentPreference>(`/api/local-agent/acp/${agent}`),
+  setAcpAgent: (agent: AcpAgent, preference: AcpAgentPreference) =>
+    req<AcpAgentPreference>(`/api/local-agent/acp/${agent}`, { method: 'PUT', body: JSON.stringify(preference) }),
+  pollAcpAgent: (agent: AcpAgent, deviceId: string, catalog?: AcpCatalogModel[]) =>
+    req<{ job: LocalAgentJob | null; enabled: boolean }>(`/api/local-agent/acp/${agent}/poll`, {
+      method: 'POST',
+      body: JSON.stringify({ deviceId, ...(catalog ? { catalog } : {}) }),
+    }),
+  stopAcpAgent: (agent: AcpAgent) =>
+    req<{ ok: boolean }>(`/api/local-agent/acp/${agent}/stop`, { method: 'POST' }),
   /* the caller's own link between this canvas and a folder on their computer */
   canvasRepo: (canvasId: string) => req<RepoLinkStatus>(`/api/canvases/${canvasId}/repo`),
   linkCanvasRepo: (canvasId: string, link: { linkId: string; name: string; deviceId: string }) =>

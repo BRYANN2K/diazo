@@ -778,7 +778,7 @@ export const modelAccounts = pgTable(
 )
 
 /** Which connection work without a pick (comments, @mentions, automations)
- *  runs on: an account kind or 'claude-local'. A provider that is no longer
+ *  runs on: an account kind, 'claude-local', 'devin-local' or 'grok-local'. A provider that is no longer
  *  connected or switched on is skipped, and the fallback order applies. */
 export const agentDefaults = pgTable('agent_defaults', {
   userId: text('user_id').primaryKey(),
@@ -918,6 +918,23 @@ export const localAgentPreferences = pgTable('local_agent_preferences', {
   /** `claude --effort`; null = the CLI's own setting */
   effort: text('effort'),
 })
+
+/** The desktop agents spoken to over ACP (shared/acpAgent.ts), one row per
+ *  person and agent: on/off, the model (a menu id or a pinned CLI id) and
+ *  the effort. */
+export const acpAgentPreferences = pgTable(
+  'acp_agent_preferences',
+  {
+    userId: text('user_id').notNull(),
+    /** `devin` | `grok` */
+    agent: text('agent').notNull(),
+    enabled: boolean('enabled').notNull().default(false),
+    model: text('model').notNull().default('default'),
+    /** null = the CLI's own setting */
+    effort: text('effort'),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.agent] })],
+)
 
 /** Per-user notification switches. No row means everything is on: comment
  *  email is opt-out, so the person who shared a review link hears about the

@@ -1,4 +1,4 @@
-import type { RunnerOption, RunnerProvider } from '../../shared/agentRunner'
+import { isLocalRunner, type RunnerOption, type RunnerProvider } from '../../shared/agentRunner'
 import type { PlainMessageKey, Translate } from './i18n'
 
 /* the effort ids stay as sent to the server; only their names are translated */
@@ -15,7 +15,7 @@ const EFFORT_BLURBS: Record<string, PlainMessageKey> = {
   high: 'models.effortHighBlurb',
   xhigh: 'models.effortXhighBlurb',
 }
-/* the Claude Plan's dial reads differently: it is the CLI's own levels */
+/* a desktop agent's dial reads differently: it is the CLI's own levels */
 const CLAUDE_EFFORT_BLURBS: Record<string, PlainMessageKey> = {
   low: 'models.claudeEffortLowBlurb',
   medium: 'models.claudeEffortMediumBlurb',
@@ -39,7 +39,7 @@ export function effortOptions(
   options: readonly RunnerOption[],
   t: Translate,
 ): { id: string; name: string; blurb: string }[] {
-  const blurbs = provider === 'claude-local' ? CLAUDE_EFFORT_BLURBS : EFFORT_BLURBS
+  const blurbs = isLocalRunner(provider) ? CLAUDE_EFFORT_BLURBS : EFFORT_BLURBS
   return options.map((option) => {
     const name = EFFORT_NAMES[option.id]
     const blurb = blurbs[option.id]

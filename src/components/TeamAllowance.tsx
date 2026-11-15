@@ -43,6 +43,8 @@ function byoText(allowance: Allowance, t: Translate, provider: RunnerProvider | 
   const kind = provider ?? allowance.byoKind
   if (kind === 'gemini-cloud') return t('home.meterGeminiCloud')
   if (kind === 'claude-local') return t('home.meterClaudeLocal')
+  if (kind === 'devin-local') return t('home.meterDevinLocal')
+  if (kind === 'grok-local') return t('home.meterGrokLocal')
   if (kind === 'chatgpt' || !kind) return t('home.meterChatgpt')
   if (isCustomProviderKind(kind)) {
     const custom = (provider ? name : undefined) ?? allowance.byoName

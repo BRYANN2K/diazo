@@ -1,4 +1,5 @@
 import type { TokenUsage } from './usage.ts'
+import type { AcpAgent, AcpEffort } from './acpAgent.ts'
 
 /**
  * The Claude Code run on the user's own desktop. Claude Code has no model
@@ -108,14 +109,20 @@ export interface LocalAgentPreference {
   effort?: ClaudeEffort
 }
 
+/** One run handed to the desktop. Absent `agent` is the Claude Plan (what
+ *  every shell before the ACP agents knows); `devin` / `grok` go to acp.rs. */
 export interface LocalAgentJob {
   id: string
   token: string
   prompt: string
   system: string
   model: ClaudeModel
-  effort?: ClaudeEffort
+  effort?: ClaudeEffort | AcpEffort
   maxTurns: number
+  agent?: AcpAgent
+  /** the run's Doop tool names: an ACP agent's permission requests are
+   *  granted for these alone */
+  tools?: string[]
 }
 
 export interface LocalAgentResult {
@@ -129,4 +136,12 @@ export interface LocalAgentResult {
  *  raw usage figures from its final event (absent from older shells). */
 export interface ClaudeRunOutput extends LocalAgentResult {
   cliUsage?: unknown
+}
+
+/** What the desktop shell's `acp_run` returns: the result, plus the
+ *  prompt's ACP `usage` and the last `usage_update` cost, when the agent
+ *  reported them. */
+export interface AcpRunOutput extends LocalAgentResult {
+  stopReason?: string
+  acpUsage?: { usage?: unknown; cost?: unknown }
 }
