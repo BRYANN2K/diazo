@@ -5,7 +5,7 @@ import { useT } from '../lib/i18n'
 import { usePageCanvas } from '../lib/pages'
 import { canEditOpenCanvas, useStore } from '../lib/store'
 import { saveFrameHtml } from '../lib/layerEdits'
-import { findInHtml, replaceInHtml, type TextMatch } from '../lib/actions/findText'
+import { findInHtml, replaceInHtml } from '../lib/actions/findText'
 import { saveFramesHtml } from '../lib/actions/edits'
 import { api } from '../lib/api'
 import { navigate } from '../lib/navigate'
@@ -19,7 +19,17 @@ import {
 } from '../lib/findInsert'
 import type { CanvasFindHit } from '../../shared/canvasFind'
 import type { LibraryItemSummary, LibrarySearchResult } from '../../shared/library'
-import { focusOf, groupByFrame, resultRows, rowDomId, rowItem, rowKey, type ResultRow } from '../lib/findRows'
+import {
+  bySection,
+  focusOf,
+  groupByFrame,
+  groupKey,
+  resultRows,
+  rowDomId,
+  rowItem,
+  rowKey,
+  type ResultRow,
+} from '../lib/findRows'
 import {
   itemCanvasUrl,
   libraryFocus,
@@ -33,27 +43,17 @@ import { Button } from './ui/button'
 import { IconButton } from './ui/icon-button'
 import { ArrowDownIcon, ArrowUpIcon, ChevronRightIcon, XIcon } from './ui/icons'
 import { Input } from './ui/input'
-import { Pressable } from './ui/pressable'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from './ui/dropdown-menu'
+import { Kbd } from './ui/kbd'
+import { Segmented, SegmentedItem } from './ui/segmented'
+import { Skeleton } from './ui/skeleton'
 import { ToggleChipGroup, ToggleChipItem } from './ui/toggle-chip'
 import { SearchField } from './ui/search-field'
-import { FindPreview } from './FindPreview'
 import { FindResultList } from './find/FindResultList'
+import { FindPreviewPane } from './find/FindPreviewPane'
+import { FindTextList, type TextHit as Hit } from './find/FindTextList'
 import { useFindDrag } from './FindDrag'
 import { useInsertedBox } from '../lib/insertedBox'
-
-interface Hit {
-  frame: Frame
-  /** the match's place among its frame's matches, which a single replace names */
-  n: number
-  match: TextMatch
-}
+import { useIsMobile } from '../hooks/use-mobile'
 
 /** Where ⌘F looks: the open page (find and replace, on the HTML the client
  *  holds), every page of the canvas or every canvas (find only, answered by
@@ -63,14 +63,22 @@ type Scope = 'page' | 'canvas' | 'all' | 'library'
 /** remote scopes are answered by the server, grouped by frame */
 const isRemote = (scope: Scope) => scope !== 'page'
 
-const SCOPE_LABEL = {
-  page: { short: 'actions.findScopePageShort', long: 'actions.findScopePage' },
-  canvas: { short: 'actions.findAllPagesShort', long: 'actions.findAllPages' },
-  all: { short: 'actions.findEverywhereShort', long: 'actions.findEverywhere' },
-  library: { short: 'library.scopeShort', long: 'library.scope' },
-} as const
+/** The three places the segmented control offers; "This canvas" is the page
+ *  or every page, picked under it when the canvas has several. */
+type Place = 'canvas' | 'library' | 'all'
 
-const SCOPES: Scope[] = ['page', 'canvas', 'all', 'library']
+const placeOf = (scope: Scope): Place => (scope === 'library' ? 'library' : scope === 'all' ? 'all' : 'canvas')
+
+const PLACES = [
+  {
+    place: 'canvas',
+    label: 'actions.findScopeCanvas',
+    title: 'actions.findAllPages',
+    start: 'actions.findStartCanvas',
+  },
+  { place: 'library', label: 'actions.findScopeLibrary', title: 'library.scope', start: 'actions.findStartLibrary' },
+  { place: 'all', label: 'actions.findScopeAll', title: 'actions.findEverywhere', start: 'actions.findStartAll' },
+] as const
 
 /** How long typing settles before the library index is asked. */
 const LIBRARY_FIND_DEBOUNCE_MS = 120
@@ -118,6 +126,7 @@ export function FindBar({
   onClose: () => void
 }) {
   const t = useT()
+  const mobile = useIsMobile()
   const page = usePageCanvas()
   const canEdit = useStore((s) => canEditOpenCanvas(s))
   const [query, setQuery] = useState('')
@@ -132,18 +141,34 @@ export function FindBar({
   /* a library canvas, or a person with a library, searches the libraries;
      else a canvas of several pages is searched whole, a one-page project
      everywhere */
-  const [scope, setScope] = useState<Scope>(isLibraryCanvas ? 'library' : pageCount > 1 ? 'canvas' : 'all')
-  const scopeTouched = useRef(false)
+  const [scope, setScope] = useState<Scope>(
+    mode === 'replace' ? 'page' : isLibraryCanvas ? 'library' : pageCount > 1 ? 'canvas' : 'all',
+  )
+  /* a scope picked by hand (or the replace line, which needs the page) is kept */
+  const scopeTouched = useRef(mode === 'replace')
+  /* what "This canvas" goes back to: the page, or every page */
+  const canvasScope = useRef<'page' | 'canvas'>(pageCount > 1 ? 'canvas' : 'page')
+  const [hasLibrary, setHasLibrary] = useState(false)
   useEffect(() => {
     if (isLibraryCanvas) return
     let stale = false
     void personHasLibraries().then((has) => {
-      if (has && !stale && !scopeTouched.current) setScope('library')
+      if (stale) return
+      setHasLibrary(has)
+      if (has && !scopeTouched.current) setScope('library')
     })
     return () => {
       stale = true
     }
   }, [isLibraryCanvas])
+
+  function pickScope(next: Scope) {
+    scopeTouched.current = true
+    if (next === 'page' || next === 'canvas') canvasScope.current = next
+    setScope(next)
+    setCursor(0)
+    setPointed(null)
+  }
   const [remote, setRemote] = useState<{ q: string; hits: CanvasFindHit[]; total: number; frames: number } | null>(null)
   const [searching, setSearching] = useState(false)
   const [kind, setKind] = useState('')
@@ -204,9 +229,13 @@ export function FindBar({
   const [seenMode, setSeenMode] = useState(mode)
   if (seenMode !== mode) {
     setSeenMode(mode)
-    if (mode === 'replace') setShowReplace(true)
+    if (mode === 'replace') {
+      setShowReplace(true)
+      setScope('page')
+    }
   }
   useEffect(() => {
+    if (mode === 'replace') scopeTouched.current = true
     inputRef.current?.focus()
     inputRef.current?.select()
   }, [mode])
@@ -228,7 +257,12 @@ export function FindBar({
       : null
   /* all pages: one row per frame, stepped frame by frame; the libraries: one row per family */
   const groups = useMemo(
-    () => (scope === 'library' ? (libraryAnswer ? libraryRows(libraryAnswer) : []) : groupByFrame(remoteHits, query)),
+    () =>
+      scope === 'library'
+        ? libraryAnswer
+          ? libraryRows(libraryAnswer)
+          : []
+        : bySection(groupByFrame(remoteHits, query)),
     [scope, libraryAnswer, remoteHits, query],
   )
   const [open, setOpen] = useState<Set<string>>(() => new Set())
@@ -241,6 +275,26 @@ export function FindBar({
   const listLength = isRemote(scope) ? groups.length : hits.length
   const active = listLength ? Math.min(cursor, listLength - 1) : -1
   const pointedRow = rows.find((r) => r.key === pointed) ?? null
+
+  function toggle(key: string) {
+    setOpen((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  /* the pane's variant chips: the family opens in the list, the variant is pointed */
+  function showVariant(row: ResultRow, label: string | null) {
+    const g = row.group
+    window.clearTimeout(intent.current)
+    if (label !== null) setOpen((prev) => (prev.has(groupKey(g)) ? prev : new Set(prev).add(groupKey(g))))
+    const key = label === null ? rowKey(g) : rowKey(g, label)
+    setPointed(key)
+    setCursor(row.groupIndex)
+    window.requestAnimationFrame(() => document.getElementById(rowDomId(key))?.scrollIntoView({ block: 'nearest' }))
+  }
 
   function hover(key: string) {
     window.clearTimeout(intent.current)
@@ -380,6 +434,7 @@ export function FindBar({
     s.select(hit.frame.id)
     s.pickElement({ frameId: hit.frame.id, selector: hit.match.selector }, true)
     s.requestFlyTo(hit.frame.id)
+    document.getElementById(`find-hit-${index}`)?.scrollIntoView({ block: 'nearest' })
   }
 
   function move(dir: 1 | -1) {
@@ -419,9 +474,16 @@ export function FindBar({
     if (e.key === 'Escape') {
       e.preventDefault()
       onClose()
-    } else if (isRemote(scope) && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
-      point(e.key === 'ArrowDown' ? 1 : -1)
+      const dir = e.key === 'ArrowDown' ? 1 : -1
+      if (isRemote(scope)) point(dir)
+      else move(dir)
+    } else if (e.key === 'Enter' && e.altKey && isRemote(scope) && !e.nativeEvent.isComposing) {
+      /* ⌥↩ opens or closes the pointed family's variants */
+      e.preventDefault()
+      const row = currentRow()
+      if (row?.group.inside.length) toggle(groupKey(row.group))
     } else if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
       e.preventDefault()
       const row = isRemote(scope) ? currentRow() : null
@@ -443,9 +505,11 @@ export function FindBar({
   const hintRow = isRemote(scope) ? currentRow() : null
   const hint = hintRow ? footerHint(useStore.getState(), sourceOf(hintRow)) : null
 
-  const count = !query.trim()
+  const q = query.trim()
+  const waiting = isRemote(scope) && (searching || (scope === 'library' ? !libraryAnswer : remote?.q !== q))
+  const count = !q
     ? ''
-    : isRemote(scope) && (searching || (scope === 'library' ? !libraryAnswer : remote?.q !== query.trim()))
+    : waiting
       ? '…'
       : listLength
         ? t('actions.findCount', {
@@ -454,240 +518,297 @@ export function FindBar({
           })
         : t('actions.findNone')
 
+  /* the row the pane shows: the pointed one, else the active family */
+  const shownIndex = Math.max(active, 0)
+  const shownGroup = pointedRow?.group ?? groups[shownIndex]
+  const shownRow: ResultRow | null =
+    pointedRow ?? (shownGroup ? { key: rowKey(shownGroup), group: shownGroup, groupIndex: shownIndex } : null)
+  const shownSource = shownRow ? sourceOf(shownRow) : null
+  const place = placeOf(scope)
+  const noLibrary = scope === 'library' && !isLibraryCanvas && !hasLibrary
+  const wide = isRemote(scope) && !!q
+  const results = isRemote(scope) ? groups.length : hits.length
+
   return (
     <div
       role="search"
       aria-label={t('actions.findLabel')}
       className={cn(
-        'absolute z-40 flex flex-col gap-1.5 rounded-panel bg-surface p-2 shadow-float',
-        isRemote(scope) ? 'w-[min(460px,calc(100vw-24px))]' : 'w-[min(360px,calc(100vw-24px))]',
+        'absolute z-40 flex max-h-[calc(100vh-var(--chrome-top,0px)-24px)] flex-col overflow-hidden rounded-panel bg-surface shadow-float',
+        'animate-in fade-in-0 slide-in-from-top-1 duration-150 motion-reduce:animate-none',
+        wide ? 'w-[min(820px,calc(100vw-24px))]' : 'w-[min(460px,calc(100vw-24px))]',
       )}
       style={{ top: 'calc(var(--chrome-top, 0px) + 10px)', right: 'calc(var(--chrome-right, 0px) + 10px)' }}
     >
-      <div className="flex items-center gap-1">
-        {canEdit && (
-          <IconButton
-            size="sm"
-            aria-label={t('actions.showReplace')}
-            on={showReplace}
-            onClick={() => setShowReplace((v) => !v)}
-          >
-            <ChevronRightIcon
-              width={14}
-              height={14}
-              aria-hidden
-              className={cn('transition-transform', showReplace && 'rotate-90')}
-            />
-          </IconButton>
-        )}
-        <SearchField
-          ref={inputRef}
-          className="min-w-0 flex-1"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            setCursor(0)
-          }}
-          onKeyDown={onKeyDown}
-          placeholder={t('actions.findPlaceholder')}
-          aria-label={t('actions.findPlaceholder')}
-          trailing={<span className="flex-none font-mono text-caption text-ink-faint">{count}</span>}
-        />
-        {/* where to look: this page, every page, every canvas, the libraries */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+      <div className="flex flex-none flex-col gap-2 p-2">
+        <div className="flex items-center gap-1">
+          {canEdit && (
             <IconButton
               size="sm"
-              aria-label={t('library.scopeMenu')}
-              title={t(SCOPE_LABEL[scope].long)}
-              on={isRemote(scope)}
-            >
-              <span className="font-mono text-caption">{t(SCOPE_LABEL[scope].short)}</span>
-            </IconButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent width="md" align="end">
-            <DropdownMenuRadioGroup
-              value={scope}
-              onValueChange={(next) => {
-                scopeTouched.current = true
-                setScope(next as Scope)
-                setCursor(0)
-                setPointed(null)
+              aria-label={t('actions.showReplace')}
+              on={showReplace}
+              onClick={() => {
+                const next = !showReplace
+                setShowReplace(next)
+                /* replacing works on the page's own HTML */
+                if (next) pickScope('page')
               }}
             >
-              {SCOPES.filter((s) => s !== 'canvas' || pageCount > 1).map((s) => (
-                <DropdownMenuRadioItem key={s} value={s}>
-                  {t(SCOPE_LABEL[s].long)}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <IconButton
-          size="sm"
-          aria-label={t('actions.matchCase')}
-          on={matchCase}
-          onClick={() => setMatchCase((v) => !v)}
-        >
-          <span className="font-mono text-caption">Aa</span>
-        </IconButton>
-        <IconButton size="sm" aria-label={t('actions.previousMatch')} disabled={!listLength} onClick={() => move(-1)}>
-          <ArrowUpIcon width={14} height={14} aria-hidden />
-        </IconButton>
-        <IconButton size="sm" aria-label={t('actions.nextMatch')} disabled={!listLength} onClick={() => move(1)}>
-          <ArrowDownIcon width={14} height={14} aria-hidden />
-        </IconButton>
-        <IconButton size="sm" aria-label={t('actions.closeFind')} onClick={onClose}>
-          <XIcon width={14} height={14} aria-hidden />
-        </IconButton>
-      </div>
-      {canEdit && showReplace && scope === 'page' && (
-        <div className="flex items-center gap-1 pl-7">
-          <Input
-            inputSize="sm"
-            className="min-w-0 flex-1"
-            value={replacement}
-            onChange={(e) => setReplacement(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') onClose()
-              else if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-                e.preventDefault()
-                replaceOne()
-              }
-            }}
-            placeholder={t('actions.replacePlaceholder')}
-            aria-label={t('actions.replacePlaceholder')}
-          />
-          <Button size="sm" disabled={active === -1 || !!hits[active]?.match.locked} onClick={replaceOne}>
-            {t('actions.replaceOne')}
-          </Button>
-          <Button size="sm" disabled={!hits.length} onClick={replaceAll}>
-            {t('actions.replaceAll')}
-          </Button>
-        </div>
-      )}
-      {scope === 'library' && (libraryAnswer?.facets.kind.length ?? 0) > 1 && (
-        <ToggleChipGroup
-          className="gap-1 px-1"
-          aria-label={t('library.kinds')}
-          value={kind || 'all'}
-          onValueChange={(next) => {
-            setKind(next === 'all' ? '' : next)
-            setCursor(0)
-          }}
-        >
-          <ToggleChipItem size="sm" value="all">
-            {t('library.allKinds')}
-          </ToggleChipItem>
-          {libraryAnswer!.facets.kind.map((k) => (
-            <ToggleChipItem key={k.value} size="sm" value={k.value}>
-              {k.label} {k.count}
-            </ToggleChipItem>
-          ))}
-        </ToggleChipGroup>
-      )}
-      {isRemote(scope) && groups.length > 0 && (
-        <>
-          {/* the frame under the pointer, else the active one, live and framed on what matched */}
-          {(() => {
-            const shown = pointedRow?.group ?? groups[Math.max(active, 0)]
-            if (!shown) return null
-            const row = pointedRow?.group === shown ? pointedRow : { key: rowKey(shown), group: shown, groupIndex: 0 }
-            const source = sourceOf(row)
-            const library = isLibraryItem(source)
-            return (
-              <FindPreview
-                frameId={source.frameId}
-                focus={source.item ? libraryFocus(row) : textFocus(focusOf(row, query))}
-                staticNote={library ? t('actions.findStaticNote') : undefined}
+              <ChevronRightIcon
+                width={14}
+                height={14}
+                aria-hidden
+                className={cn('transition-transform motion-reduce:transition-none', showReplace && 'rotate-90')}
               />
-            )
-          })()}
-          <p className="px-1 text-caption text-ink-faint">
-            {scope === 'library'
-              ? t('library.findSummary', { count: libraryAnswer?.total ?? groups.length })
-              : t('actions.findFramesSummary', { frames: groups.length, total: remote?.total ?? remoteHits.length })}
-          </p>
-          <FindResultList
-            groups={groups}
-            open={open}
-            pointed={pointed}
-            hasPointedRow={!!pointedRow}
-            active={active}
-            showCanvas={scope === 'all' || scope === 'library'}
-            onToggle={(key) =>
-              setOpen((prev) => {
-                const next = new Set(prev)
-                if (next.has(key)) next.delete(key)
-                else next.add(key)
-                return next
-              })
-            }
-            onHover={hover}
-            onLeave={() => window.clearTimeout(intent.current)}
-            onPress={pressRow}
-            onActivate={activate}
+            </IconButton>
+          )}
+          <SearchField
+            ref={inputRef}
+            className="min-w-0 flex-1"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setCursor(0)
+            }}
+            onKeyDown={onKeyDown}
+            placeholder={t('actions.findPlaceholder')}
+            aria-label={t('actions.findPlaceholder')}
+            trailing={<span className="flex-none font-mono text-caption text-ink-faint">{count}</span>}
           />
-          {hint && hint.kind !== 'none' && (
-            <p
-              className="truncate border-t border-line-soft px-1 pt-1.5 text-caption text-ink-faint"
-              aria-live="polite"
+          <IconButton
+            size="sm"
+            aria-label={t('actions.matchCase')}
+            on={matchCase}
+            onClick={() => setMatchCase((v) => !v)}
+          >
+            <span className="font-mono text-caption">Aa</span>
+          </IconButton>
+          <IconButton size="sm" aria-label={t('actions.previousMatch')} disabled={!listLength} onClick={() => move(-1)}>
+            <ArrowUpIcon width={14} height={14} aria-hidden />
+          </IconButton>
+          <IconButton size="sm" aria-label={t('actions.nextMatch')} disabled={!listLength} onClick={() => move(1)}>
+            <ArrowDownIcon width={14} height={14} aria-hidden />
+          </IconButton>
+          <IconButton size="sm" aria-label={t('actions.closeFind')} onClick={onClose}>
+            <XIcon width={14} height={14} aria-hidden />
+          </IconButton>
+        </div>
+        {canEdit && showReplace && scope === 'page' && (
+          <div className="flex items-center gap-1 pl-7">
+            <Input
+              inputSize="sm"
+              className="min-w-0 flex-1"
+              value={replacement}
+              onChange={(e) => setReplacement(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') onClose()
+                else if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                  e.preventDefault()
+                  replaceOne()
+                }
+              }}
+              placeholder={t('actions.replacePlaceholder')}
+              aria-label={t('actions.replacePlaceholder')}
+            />
+            <Button size="sm" disabled={active === -1 || !!hits[active]?.match.locked} onClick={replaceOne}>
+              {t('actions.replaceOne')}
+            </Button>
+            <Button size="sm" disabled={!hits.length} onClick={replaceAll}>
+              {t('actions.replaceAll')}
+            </Button>
+          </div>
+        )}
+        {/* where to look: this canvas (its page or every page), the libraries, everything */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Segmented
+            aria-label={t('library.scopeMenu')}
+            value={place}
+            onValueChange={(next) => pickScope(next === 'canvas' ? canvasScope.current : (next as Place & Scope))}
+          >
+            {PLACES.map((p) => (
+              <SegmentedItem key={p.place} value={p.place} title={t(p.title)}>
+                {t(p.label)}
+              </SegmentedItem>
+            ))}
+          </Segmented>
+          {place === 'canvas' && pageCount > 1 && (
+            <ToggleChipGroup
+              className="gap-1"
+              aria-label={t('actions.findScopeCanvas')}
+              value={scope}
+              onValueChange={(next) => pickScope(next as Scope)}
             >
+              <ToggleChipItem size="sm" value="page" title={t('actions.findScopePage')}>
+                {t('actions.findThisPage')}
+              </ToggleChipItem>
+              <ToggleChipItem size="sm" value="canvas" title={t('actions.findAllPages')}>
+                {t('actions.findEveryPage')}
+              </ToggleChipItem>
+            </ToggleChipGroup>
+          )}
+        </div>
+        {scope === 'library' && (libraryAnswer?.facets.kind.length ?? 0) > 1 && (
+          <ToggleChipGroup
+            className="gap-1"
+            aria-label={t('library.kinds')}
+            value={kind || 'all'}
+            onValueChange={(next) => {
+              setKind(next === 'all' ? '' : next)
+              setCursor(0)
+            }}
+          >
+            <ToggleChipItem size="sm" value="all">
+              {t('library.allKinds')}
+            </ToggleChipItem>
+            {libraryAnswer!.facets.kind.map((k) => (
+              <ToggleChipItem key={k.value} size="sm" value={k.value}>
+                {k.label} <span className="font-mono text-ink-faint tabular-nums">{k.count}</span>
+              </ToggleChipItem>
+            ))}
+          </ToggleChipGroup>
+        )}
+      </div>
+      {/* side by side; on a phone the pane goes above the list */}
+      <div className={cn('flex min-h-0 flex-1 border-t border-line-soft', mobile && 'flex-col-reverse')}>
+        <div
+          className={cn(
+            'max-h-[min(440px,calc(100vh-240px))] min-w-0 overflow-y-auto',
+            wide && !mobile ? 'w-[360px] flex-none border-r border-line-soft' : 'w-full',
+          )}
+        >
+          {!q ? (
+            <p className="px-3 py-3 text-caption text-ink-faint">
+              {noLibrary ? t('library.noLibrary') : t(PLACES.find((p) => p.place === place)!.start)}
+            </p>
+          ) : waiting && !results ? (
+            <div className="flex flex-col gap-1.5 p-2" aria-label={t('actions.findSearching')} aria-busy>
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} index={i} className="h-12 rounded-row" />
+              ))}
+            </div>
+          ) : !results ? (
+            <div className="flex flex-col gap-1 px-3 py-4" aria-live="polite">
+              <p className="text-body text-ink">{t('actions.findNoneFor', { query: q })}</p>
+              <p className="text-caption text-ink-faint">
+                {noLibrary ? t('library.noLibrary') : t('actions.findNoneHint')}
+              </p>
+            </div>
+          ) : isRemote(scope) ? (
+            <FindResultList
+              groups={groups}
+              open={open}
+              pointed={pointed}
+              hasPointedRow={!!pointedRow}
+              active={active}
+              showCanvas={scope === 'all' || scope === 'library'}
+              onToggle={toggle}
+              onHover={hover}
+              onLeave={() => window.clearTimeout(intent.current)}
+              onPress={pressRow}
+              onActivate={activate}
+            />
+          ) : (
+            <FindTextList hits={hits} active={active} onGo={go} />
+          )}
+        </div>
+        {wide && (
+          <div className={cn('flex min-w-0 flex-1', mobile && 'border-b border-line-soft')}>
+            {shownRow && shownSource ? (
+              <FindPreviewPane
+                compact={mobile}
+                row={shownRow}
+                frameId={shownSource.frameId}
+                focus={shownSource.item ? libraryFocus(shownRow) : textFocus(focusOf(shownRow, query))}
+                hint={footerHint(useStore.getState(), shownSource)}
+                busy={inserting}
+                {...(isLibraryItem(shownSource) ? { staticNote: t('actions.findStaticNote') } : {})}
+                onVariant={(label) => showVariant(shownRow, label)}
+                onInsert={() => {
+                  const action = rowAction(useStore.getState(), shownSource, false)
+                  if (action.kind === 'insert') void insertRow(shownRow, action.target)
+                }}
+                onGo={() => goRow(shownRow)}
+              />
+            ) : (
+              <p className="m-auto px-6 text-center text-caption text-ink-faint">
+                {waiting ? t('actions.findSearching') : t('actions.findPreviewEmpty')}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+      {results > 0 && (
+        <div className="flex flex-none flex-wrap items-center gap-x-3 gap-y-1 border-t border-line-soft px-3 py-1.5 text-caption text-ink-faint">
+          {isRemote(scope) ? (
+            <>
+              <KeyHint keys="↩" label={hint?.kind === 'insert' ? t('actions.findKeyInsert') : t('actions.findKeyGo')} />
+              {hint?.kind === 'insert' && <KeyHint keys="⇧↩" label={t('actions.findKeyGo')} />}
+              {hintRow && hintRow.group.inside.length > 0 && <KeyHint keys="⌥↩" label={t('actions.findKeyVariants')} />}
+              {hintRow && (rowItem(hintRow)?.id ?? hintRow.group.id) && (
+                <KeyHint keys="⌘C" label={t('actions.findKeyCopy')} />
+              )}
+            </>
+          ) : (
+            <>
+              <KeyHint keys="↩" label={t('actions.findKeyNext')} />
+              <KeyHint keys="⇧↩" label={t('actions.findKeyPrevious')} />
+            </>
+          )}
+          <span className="ml-auto flex items-center gap-2">
+            {isRemote(scope) && (
+              <span className="tabular-nums">
+                {scope === 'library'
+                  ? t('library.findSummary', { count: libraryAnswer?.total ?? groups.length })
+                  : t('actions.findFramesSummary', {
+                      frames: groups.length,
+                      total: remote?.total ?? remoteHits.length,
+                    })}
+              </span>
+            )}
+            {scope === 'library' && (
+              <Button
+                size="inline"
+                onClick={() => {
+                  const lib = shownGroup?.libraryId
+                  const from = useStore.getState().canvas?.id
+                  const frame = useStore.getState().selectedId
+                  const params = new URLSearchParams({ q })
+                  if (from && from !== lib) params.set('from', from)
+                  if (from && from !== lib && frame) {
+                    params.set('frame', frame)
+                    const name = useStore.getState().canvas?.frames.find((f) => f.id === frame)?.name
+                    if (name) params.set('fname', name)
+                  }
+                  if (lib) navigate(`/l/${lib}?${params}`)
+                }}
+              >
+                {t('library.openInGallery')}
+              </Button>
+            )}
+          </span>
+          {hint && hint.kind !== 'none' && (
+            <span className="sr-only" aria-live="polite">
               {hint.kind === 'insert'
                 ? t('actions.findHintInsert', { frame: hint.frameName })
                 : hint.kind === 'select'
                   ? t('actions.findHintSelect')
                   : t('actions.findHintGo')}
-            </p>
+            </span>
           )}
-        </>
-      )}
-      {scope === 'library' && groups.length > 0 && (
-        <Button
-          size="inline"
-          className="self-start px-1"
-          onClick={() => {
-            const lib = (pointedRow?.group ?? groups[Math.max(active, 0)])?.libraryId
-            const from = useStore.getState().canvas?.id
-            const frame = useStore.getState().selectedId
-            const params = new URLSearchParams({ q: query.trim() })
-            if (from && from !== lib) params.set('from', from)
-            if (from && from !== lib && frame) {
-              params.set('frame', frame)
-              const name = useStore.getState().canvas?.frames.find((f) => f.id === frame)?.name
-              if (name) params.set('fname', name)
-            }
-            if (lib) navigate(`/l/${lib}?${params}`)
-          }}
-        >
-          {t('library.openInGallery')}
-        </Button>
-      )}
-      {scope === 'page' && hits.length > 0 && (
-        <ul className="max-h-56 overflow-y-auto" aria-label={t('actions.findLabel')}>
-          {hits.slice(0, 200).map((hit, i) => (
-            <li key={`${hit.frame.id}:${i}`}>
-              <Pressable
-                focus="none"
-                onClick={() => go(i)}
-                className={cn(
-                  'flex w-full flex-col items-start rounded-row px-2 py-1 text-left',
-                  i === active ? 'bg-paper-deep' : 'hover:bg-sub',
-                )}
-              >
-                <span className="text-caption text-ink-faint">{hit.frame.name}</span>
-                <span className="w-full truncate text-body text-ink-soft">
-                  {hit.match.before}
-                  <mark className="rounded-tag bg-brand/20 text-ink">{hit.match.text}</mark>
-                  {hit.match.after}
-                </span>
-              </Pressable>
-            </li>
-          ))}
-        </ul>
+        </div>
       )}
       {drag.overlay}
     </div>
+  )
+}
+
+/** One keyboard hint in the footer: the keys, then what they do. */
+function KeyHint({ keys, label }: { keys: string; label: string }) {
+  return (
+    <span className="flex items-center gap-1">
+      <Kbd>{keys}</Kbd>
+      {label}
+    </span>
   )
 }
 
