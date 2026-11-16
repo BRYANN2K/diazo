@@ -813,7 +813,11 @@ fn poll_row(identity: &str, row: Option<&Value>) -> Value {
             .and_then(Value::as_str),
         "outcome": outcome,
         "lastAssistantMessage": agent.and_then(|a| a.get("lastAssistantMessage")).and_then(Value::as_str),
-        "linkedPR": row.get("linkedPR"),
+        /* Orca may report linkedPR as an object — the report schema takes
+           a string, so reduce it to its URL here */
+        "linkedPR": row
+            .get("linkedPR")
+            .and_then(|pr| pr.as_str().or_else(|| pr.get("url").and_then(Value::as_str))),
         "orcaSessionId": agent.and_then(|a| a.get("orcaSessionId")).and_then(Value::as_str),
         "branch": row
             .get("branch")
@@ -1174,6 +1178,14 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
         assert_eq!(trimmed["outcome"], "success");
         assert_eq!(trimmed["branch"], "doop/x");
         assert_eq!(trimmed["linkedPR"], "https://github.com/a/b/pull/3");
+        /* a linkedPR object reduces to its url; any other shape drops out */
+        let obj = json!({"linkedPR": {"url": "https://github.com/a/b/pull/9", "title": "x"}});
+        assert_eq!(
+            poll_row("wt2:x:y", Some(&obj))["linkedPR"],
+            "https://github.com/a/b/pull/9"
+        );
+        let odd_pr = json!({"linkedPR": {"htmlUrl": "https://x", "n": 1}});
+        assert_eq!(poll_row("wt2:x:y", Some(&odd_pr))["linkedPR"], Value::Null);
         /* the absolute path is trimmed away, never reported */
         assert!(!trimmed.to_string().contains("/secret"));
         let missing = poll_row("wt2:vps:inst-9", None);
