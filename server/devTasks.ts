@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns, inArray, sql } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { frameDevTasks } from './db/schema.ts'
 import { env } from './env.ts'
@@ -56,9 +56,16 @@ function announce(task: DevTask): void {
 
 type Row = typeof frameDevTasks.$inferSelect
 
+/** Every column but the stored pack. `handoff` holds the frame PNGs in
+ *  base64 — megabytes per row — so status reads (the REST lists, the
+ *  report merge, get_canvas's dev_tasks) select these columns only and
+ *  the pack leaves Postgres solely through `handoffFor`. */
+const { handoff: _handoff, ...STATUS_COLUMNS } = getTableColumns(frameDevTasks)
+type StatusRow = Omit<Row, 'handoff'>
+
 /** The public shape: the stored handoff pack and the agent-merge column
  *  stay inside the server. */
-function toTask(row: Row): DevTask {
+function toTask(row: StatusRow): DevTask {
   return {
     id: row.id,
     canvasId: row.canvasId,
@@ -89,8 +96,8 @@ function toTask(row: Row): DevTask {
   }
 }
 
-export async function devTaskRow(id: string): Promise<Row | undefined> {
-  const [row] = await db.select().from(frameDevTasks).where(eq(frameDevTasks.id, id))
+export async function devTaskRow(id: string): Promise<StatusRow | undefined> {
+  const [row] = await db.select(STATUS_COLUMNS).from(frameDevTasks).where(eq(frameDevTasks.id, id))
   return row
 }
 
@@ -101,7 +108,7 @@ export async function devTaskFor(id: string): Promise<DevTask | undefined> {
 
 export async function devTasksForCanvas(canvasId: string): Promise<DevTask[]> {
   const rows = await db
-    .select()
+    .select(STATUS_COLUMNS)
     .from(frameDevTasks)
     .where(eq(frameDevTasks.canvasId, canvasId))
     .orderBy(desc(frameDevTasks.createdAt))
@@ -109,9 +116,10 @@ export async function devTasksForCanvas(canvasId: string): Promise<DevTask[]> {
   return rows.map(toTask)
 }
 
-/** The stored pack — `get_handoff`'s payload, read only there. */
+/** The stored pack — `get_handoff`'s payload, the one place the full row
+ *  (handoff column included) is selected. */
 export async function handoffFor(taskId: string): Promise<{ row: Row; pack: HandoffPack } | undefined> {
-  const row = await devTaskRow(taskId)
+  const [row] = await db.select().from(frameDevTasks).where(eq(frameDevTasks.id, taskId))
   return row ? { row, pack: row.handoff } : undefined
 }
 
@@ -145,7 +153,7 @@ export function pollStateOf(poll: DevTaskPollReport): DevTaskState | null {
 /** The poll's verdict against what's already stored — the agent's own push
  *  wins the states only it can truly know (a PR it opened, a task it
  *  finished); a person's cancel always wins. */
-export function mergedPollState(task: Row, next: DevTaskState | null): DevTaskState {
+export function mergedPollState(task: StatusRow, next: DevTaskState | null): DevTaskState {
   if (!next) return task.state
   if (task.state === 'cancelled') return task.state
   if (task.agentState === 'done' || task.agentState === 'failed') return task.state
@@ -160,7 +168,7 @@ export function mergedPollState(task: Row, next: DevTaskState | null): DevTaskSt
 
 /** The launch answer against the row — a fresh launch revives a task the
  *  bridge expiry failed, but never a cancelled one. */
-function launchState(task: Row, launch: DevTaskLaunchReport): DevTaskState {
+function launchState(task: StatusRow, launch: DevTaskLaunchReport): DevTaskState {
   if (launch.cancelled) return 'cancelled'
   if (launch.ok === false) return 'failed'
   if (task.state === 'cancelled') return task.state
@@ -178,7 +186,7 @@ async function patch(id: string, set: Partial<typeof frameDevTasks.$inferInsert>
     .update(frameDevTasks)
     .set({ ...set, updatedAt: Date.now() })
     .where(eq(frameDevTasks.id, id))
-    .returning()
+    .returning(STATUS_COLUMNS)
   const task = rows[0] ? toTask(rows[0]) : undefined
   if (task) announce(task)
   return task
