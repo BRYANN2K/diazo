@@ -14,7 +14,7 @@ import { useAgentRunners } from '../lib/runnerPick'
 import { RUNNER_BRAND } from '../lib/runnerMarks'
 import { useT } from '../lib/i18n'
 import { cn } from '@/lib/utils'
-import { ModelMenu, type PickedModel } from './ModelMenu'
+import { EffortGlyph, EffortMenu, ModelMenu, type PickedEffort, type PickedModel } from './ModelMenu'
 import { BrandMark } from './ui/brand-mark'
 import { Button } from './ui/button'
 import { DropdownMenuItem, DropdownMenuSeparator } from './ui/dropdown-menu'
@@ -95,9 +95,11 @@ export function duelRepeats(slots: readonly (RunnerPick | undefined)[]): Map<num
   return repeats
 }
 
-/** One duel slot: a compact button in the brief's foot that opens the
- *  composer's model menu. Empty it reads "Model 2"; filled, the connection's
- *  mark, the model and its effort. Delete or Backspace on it clears it. */
+/** One duel slot: a model button and an effort button in the brief's foot,
+ *  opening the same menus as the composer's two pills. Empty the model button
+ *  reads "Model 2"; filled, the connection's mark and the model. Delete or
+ *  Backspace on it clears it; the effort button shows only where the slot's
+ *  connection has a dial. */
 function DuelSlot({
   index,
   runners,
@@ -114,6 +116,7 @@ function DuelSlot({
   const t = useT()
   const n = index + 1
   const optional = index >= DUEL_MIN
+  const runner = pick ? runners?.find((r) => r.provider === pick.provider) : undefined
 
   function chooseModel(runner: AgentRunner, model: string) {
     /* the effort stays with the connection: kept across its own models, its
@@ -127,36 +130,29 @@ function DuelSlot({
     onPick({ provider: pick.provider, model: pick.model, ...(effort ? { effort } : {}) })
   }
 
-  const trigger = (picked: PickedModel | undefined) => {
+  const modelTrigger = (picked: PickedModel | undefined) => {
     const mark = picked ? RUNNER_BRAND[picked.runner.provider] : undefined
-    const label = picked ? [picked.name, picked.effortText].filter(Boolean).join(' · ') : ''
     return (
       <MenuButton
-        variant="ring"
+        variant="quiet"
         data-slot-index={n}
         data-filled={picked ? '' : undefined}
         disabled={!runners}
         aria-label={
           picked
-            ? t('duel.slotAria', { n, label })
+            ? t('duel.slotAria', { n, label: picked.name })
             : optional
               ? t('duel.slotOptionalAria', { n })
               : t('duel.slotEmptyAria', { n })
         }
-        title={picked ? `${picked.runner.name} · ${label}` : undefined}
+        title={picked ? `${picked.runner.name} · ${picked.name}` : undefined}
         onKeyDown={(e) => {
           if (pick && (e.key === 'Delete' || e.key === 'Backspace')) {
             e.preventDefault()
             onPick(undefined)
           }
         }}
-        className={cn(
-          /* Duel 1: each slot is a card — the caption, the model with the
-             agent dot, the connection; a repeated pick reads in danger ink */
-          'h-auto w-full min-w-0 max-w-none items-start gap-2 rounded-card bg-surface px-3 py-2.5 text-left text-label shadow-ring hover:bg-well [&>svg:last-child]:mt-0.5',
-          !picked && 'text-ink-3',
-          repeated && 'text-danger shadow-[0_0_0_1px_var(--danger)]',
-        )}
+        className="h-auto w-full min-w-0 max-w-none items-start gap-2 px-1.5 py-1 text-left [&>svg:last-child]:mt-0.5"
         icon={
           <span className="mt-0.5 grid size-3 flex-none place-items-center">
             {picked ? mark && <BrandMark brand={mark} size={12} /> : <PlusIcon className="size-3" strokeWidth={1.6} />}
@@ -173,11 +169,6 @@ function DuelSlot({
             <span className="flex min-w-0 items-center gap-1.5">
               <span aria-hidden className="size-1.5 flex-none rounded-full bg-agent" />
               <span className="truncate font-semibold text-ink">{picked.name}</span>
-              {picked.effortText && (
-                <span className="ml-auto flex-none rounded-tag bg-well px-1.5 font-mono text-micro text-ink-2">
-                  {picked.effortText}
-                </span>
-              )}
             </span>
           )}
         </span>
@@ -185,24 +176,53 @@ function DuelSlot({
     )
   }
 
+  const effortTrigger = (picked: PickedEffort) => (
+    <MenuButton
+      variant="quiet"
+      data-effort-index={n}
+      aria-label={t('duel.slotEffortAria', { n, label: picked.text })}
+      className="mx-1.5 mb-1 mt-0.5 h-6 gap-1.5 self-start rounded-pill bg-well px-2 font-mono text-micro text-ink-2 hover:bg-well hover:text-ink"
+      icon={<EffortGlyph fraction={picked.fraction} size={10} />}
+    >
+      {picked.text}
+    </MenuButton>
+  )
+
   return (
-    <ModelMenu
-      runners={runners}
-      value={pick}
-      onModel={chooseModel}
-      onEffort={chooseEffort}
-      effortDefault
-      side="bottom"
-      trigger={trigger}
-      footer={
-        pick && (
-          <>
-            <DropdownMenuItem onSelect={() => onPick(undefined)}>{t('duel.clear', { n })}</DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </>
-        )
-      }
-    />
+    /* each slot is a card: the model button on top, its effort pill beneath */
+    <div
+      className={cn(
+        'flex min-w-0 flex-col rounded-card bg-surface p-1.5 text-label shadow-ring',
+        !pick && 'text-ink-3',
+        repeated && 'text-danger shadow-[0_0_0_1px_var(--danger)]',
+      )}
+    >
+      <ModelMenu
+        runners={runners}
+        value={pick}
+        onModel={chooseModel}
+        side="bottom"
+        trigger={modelTrigger}
+        footer={
+          pick && (
+            <>
+              <DropdownMenuItem onSelect={() => onPick(undefined)}>{t('duel.clear', { n })}</DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )
+        }
+      />
+      {pick && (
+        <EffortMenu
+          runner={runner}
+          effort={pick.effort}
+          onEffort={chooseEffort}
+          effortDefault
+          side="bottom"
+          trigger={effortTrigger}
+        />
+      )}
+    </div>
   )
 }
 

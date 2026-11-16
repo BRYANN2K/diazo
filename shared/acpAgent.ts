@@ -243,11 +243,18 @@ export interface AcpMenu {
   efforts: RunnerOption[]
 }
 
+/** The menu each agent's pickers show: the curated entries flagged as the
+ *  recommendations, what the CLI lists beyond them folded under Older. */
 export function acpMenu(agent: AcpAgent, catalog: readonly AcpCatalogModel[] = []): AcpMenu {
-  if (agent === 'grok') return { models: grokModels(catalog), efforts: effortOptions(GROK_EFFORTS) }
+  const recommended =
+    (ids: readonly { id: string }[]) =>
+    (model: RunnerOption): RunnerOption =>
+      ids.some((known) => known.id === model.id) ? { ...model, recommended: true } : model
+  if (agent === 'grok')
+    return { models: grokModels(catalog).map(recommended(GROK_MODELS)), efforts: effortOptions(GROK_EFFORTS) }
   const families = devinFamilies(catalog)
   return {
-    models: families.map(({ id, name, blurb }) => ({ id, name, blurb })),
+    models: families.map(({ id, name, blurb }) => ({ id, name, blurb })).map(recommended(DEVIN_FAMILIES)),
     /* the dial covers every step some family has; each run snaps to its own */
     efforts: effortOptions(ACP_EFFORT_ORDER.filter((e) => families.some((f) => f.efforts.includes(e)))),
   }

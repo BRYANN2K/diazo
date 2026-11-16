@@ -42,21 +42,72 @@ const both: AgentRunners = {
   default: 'claude-local',
 }
 
+/* a connection whose list flags its recommended entries: the rest folds */
+const folded: AgentRunners = {
+  runners: [
+    {
+      provider: 'chatgpt',
+      name: 'ChatGPT',
+      model: 'gpt-5.6-terra',
+      effort: 'medium',
+      models: [
+        { id: 'gpt-6-astra', name: 'GPT-6 Astra', blurb: '', recommended: true },
+        { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', blurb: '', recommended: true },
+        { id: 'gpt-5.5', name: 'GPT-5.5', blurb: '' },
+        { id: 'gpt-5', name: 'GPT-5', blurb: '' },
+        { id: 'gpt-4.9', name: 'GPT-4.9', blurb: '' },
+      ],
+      efforts: [{ id: 'medium', name: 'Medium', blurb: '' }],
+    },
+  ],
+  default: 'chatgpt',
+}
+
+/* an API key with no effort dial */
+const noDial: AgentRunners = {
+  runners: [
+    {
+      provider: 'anthropic-key',
+      name: 'Claude API',
+      model: 'claude-sonnet-5',
+      models: [{ id: 'claude-sonnet-5', name: 'Sonnet 5', blurb: '' }],
+    },
+  ],
+  default: 'anthropic-key',
+}
+
 let root: Root
 let container: HTMLDivElement
-const trigger = () => container.querySelector('button')!
-const open = () =>
+const buttons = () => [...container.querySelectorAll('button')]
+/* the composer foot is two pills: the model, then the effort */
+const trigger = () => buttons()[0]!
+const effortButton = () => buttons()[1]
+const open = (button: HTMLButtonElement = trigger()) =>
   act(() => {
     /* Radix opens a menu on pointerdown, not click */
-    trigger().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
+    button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
   })
-const radio = (label: string) =>
-  [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((el) => el.textContent?.startsWith(label))
+const menu = () => document.querySelector<HTMLElement>('[role="menu"]')
+const radios = () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
+/* a row's label only: rows with a blurb render it under the label */
+const labelOf = (el: HTMLElement) =>
+  el.querySelector('[data-slot="dropdown-menu-item-text"] > span')?.textContent ?? el.textContent
+const radioLabels = () => radios().map(labelOf)
+const radio = (label: string) => radios().find((el) => labelOf(el) === label)
 const pickItem = (label: string) =>
   act(() => {
-    const item = radio(label)!
-    item.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
-    item.click()
+    /* a click alone selects; pointerup would add a second one in happy-dom */
+    radio(label)!.click()
+  })
+const search = () => document.querySelector<HTMLInputElement>('input[aria-label="Search models"]')
+const type = (input: HTMLInputElement, value: string) =>
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+const keydown = (el: Element, key: string) =>
+  act(() => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
   })
 const settle = () => act(async () => {})
 
@@ -97,8 +148,9 @@ it('sends the next task to the picked connection and remembers it in this browse
   await settle()
   await open()
   await pickItem('GPT-5.6 Terra')
-  /* the effort reads after the model, in a lighter span */
-  expect(trigger().textContent).toBe('GPT-5.6 TerraMedium')
+  /* the model and the effort are two pills now */
+  expect(trigger().textContent).toBe('GPT-5.6 Terra')
+  expect(effortButton()?.textContent).toBe('Medium')
   expect(currentRunnerPick()).toEqual({ provider: 'chatgpt', model: 'gpt-5.6-terra', effort: 'medium' })
   expect(JSON.parse(localStorage.getItem(RUNNER_PICK_KEY)!)).toEqual({
     provider: 'chatgpt',
@@ -112,17 +164,99 @@ it('sends the next task to the picked connection and remembers it in this browse
   })
 })
 
-it('keeps a stored pick for the Plan with its effort, and shows the dial', async () => {
+it('keeps a stored pick for the Plan with its effort, and opens the effort’s own menu', async () => {
   useRunnerPick.setState({ stored: { provider: 'claude-local', model: 'opus', effort: 'max' } })
   await act(async () => root.render(<ModelPicker />))
   await settle()
-  expect(trigger().textContent).toBe('OpusMax')
+  expect(trigger().textContent).toBe('Opus')
   expect(trigger().getAttribute('aria-label')).toBe('Model: Opus')
+  expect(effortButton()?.textContent).toBe('Max')
+  expect(effortButton()?.getAttribute('aria-label')).toBe('Reasoning effort: Max')
   expect(currentRunnerPick()).toEqual({ provider: 'claude-local', model: 'opus', effort: 'max' })
+  /* the effort menu: the levels as radios, the dial's scale under them */
+  await open(effortButton())
+  expect(radioLabels()).toEqual(['Default', 'Medium', 'Max'])
+  expect(radio('Max')?.getAttribute('aria-checked')).toBe('true')
+  expect(menu()!.textContent).toContain('Faster')
+  expect(menu()!.textContent).toContain('Smarter')
+})
+
+it('picks an effort from its own menu, or Default which sends none', async () => {
+  useRunnerPick.setState({ stored: { provider: 'claude-local', model: 'opus' } })
+  await act(async () => root.render(<ModelPicker />))
+  await settle()
+  expect(effortButton()?.textContent).toBe('Default')
+  await open(effortButton())
+  await pickItem('Medium')
+  expect(currentRunnerPick()).toEqual({ provider: 'claude-local', model: 'opus', effort: 'medium' })
+  await open(effortButton())
+  await pickItem('Default')
+  expect(currentRunnerPick()).toEqual({ provider: 'claude-local', model: 'opus' })
+  expect(mocks.capture).toHaveBeenCalledWith('agent_effort_changed', {
+    effort: 'default',
+    provider: 'claude-local',
+    via: 'composer',
+  })
+})
+
+it('hides the effort pill where the connection has no dial', async () => {
+  mocks.runners.mockResolvedValue(noDial)
+  await act(async () => root.render(<ModelPicker />))
+  await settle()
+  expect(trigger().textContent).toBe('Sonnet 5')
+  expect(container.querySelectorAll('button')).toHaveLength(1)
+})
+
+it('folds the non-recommended entries under "Older (N)", which expands in place', async () => {
+  mocks.runners.mockResolvedValue(folded)
+  await act(async () => root.render(<ModelPicker />))
+  await settle()
   await open()
-  /* effort is a stepped slider under the models, naming its level */
-  const slider = document.querySelector<HTMLInputElement>('input[type="range"][aria-label="Reasoning effort"]')
-  expect(slider?.getAttribute('aria-valuetext')).toBe('Max')
+  expect(radioLabels()).toEqual(['GPT-6 Astra', 'GPT-5.6 Terra'])
+  const fold = menu()!.querySelector<HTMLElement>('[role="menuitem"][aria-expanded]')!
+  expect(fold.textContent).toBe('Older (3)')
+  await act(async () => {
+    fold.click()
+  })
+  /* the fold stays in place, the menu open, and the older rows are radios too */
+  expect(fold.getAttribute('aria-expanded')).toBe('true')
+  expect(radioLabels()).toEqual(['GPT-6 Astra', 'GPT-5.6 Terra', 'GPT-5.5', 'GPT-5', 'GPT-4.9'])
+  expect(menu()).toBeTruthy()
+})
+
+it('opens a fold on its own when the pick sits inside it', async () => {
+  mocks.runners.mockResolvedValue(folded)
+  useRunnerPick.setState({ stored: { provider: 'chatgpt', model: 'gpt-5', effort: 'medium' } })
+  await act(async () => root.render(<ModelPicker />))
+  await settle()
+  await open()
+  expect(radio('GPT-5')?.getAttribute('aria-checked')).toBe('true')
+  expect(radio('GPT-4.9')).toBeTruthy()
+})
+
+it('filters the rows as the search types, folding nothing', async () => {
+  mocks.runners.mockResolvedValue(folded)
+  await act(async () => root.render(<ModelPicker />))
+  await settle()
+  await open()
+  expect(search()).toBeTruthy()
+  type(search()!, 'gpt-5')
+  expect(radioLabels()).toEqual(['GPT-5.6 Terra', 'GPT-5.5', 'GPT-5'])
+  /* an older row surfaces without opening the fold */
+  expect(menu()!.textContent).not.toContain('Older')
+  type(search()!, 'zzz')
+  expect(radios()).toHaveLength(0)
+  expect(menu()!.textContent).toContain('No model matches')
+})
+
+it('takes the search’s first row on Enter', async () => {
+  mocks.runners.mockResolvedValue(folded)
+  await act(async () => root.render(<ModelPicker />))
+  await settle()
+  await open()
+  type(search()!, '5.5')
+  keydown(search()!, 'Enter')
+  expect(currentRunnerPick()).toEqual({ provider: 'chatgpt', model: 'gpt-5.5', effort: 'medium' })
 })
 
 it('falls back to the default when the stored connection is gone', async () => {

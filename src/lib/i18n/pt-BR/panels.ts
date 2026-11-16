@@ -276,6 +276,12 @@ export const panels: Catalog['panels'] = {
   modelOffline: 'App de desktop fechado',
   modelEffortDefault: 'Padrão',
   modelEffortDefaultBlurb: 'O que estiver configurado na conexão',
+  modelEffortAria: 'Esforço de raciocínio: {label}',
+  modelSearch: 'Buscar modelos',
+  modelNoMatch: 'Nenhum modelo corresponde a “{query}”.',
+  modelOlder: 'Antigos ({count})',
+  effortFaster: 'Mais rápido',
+  effortSmarter: 'Mais inteligente',
 
   shareAccessNone: 'Sem acesso',
   shareAccessView: 'Ver',

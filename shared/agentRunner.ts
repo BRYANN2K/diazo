@@ -95,6 +95,9 @@ export interface RunnerOption {
   id: string
   name: string
   blurb: string
+  /** a curated or alias entry the menus show up front; unflagged rows fold
+   *  under "Older" once any row of the group is flagged */
+  recommended?: boolean
 }
 
 /** One connection the composer may send a task to, as the server lists it. */

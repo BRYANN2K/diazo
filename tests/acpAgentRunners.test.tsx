@@ -38,7 +38,10 @@ const runners: AgentRunners = { runners: [grok, devin], default: 'grok-local' }
 
 let root: Root
 let container: HTMLDivElement
-const trigger = () => container.querySelector('button')!
+const buttons = () => [...container.querySelectorAll('button')]
+/* two pills: the model, then the effort */
+const trigger = () => buttons()[0]!
+const effortButton = () => buttons()[1]
 const radio = (label: string) =>
   [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((el) => el.textContent?.startsWith(label))
 
@@ -61,7 +64,8 @@ describe('the desktop agents in the composer and the duel', () => {
   it('offers both agents with their models, and asks no provider catalog for them', async () => {
     await act(async () => root.render(<ModelPicker />))
     await act(async () => {})
-    expect(trigger().textContent).toBe('Grok 4.7High')
+    expect(trigger().textContent).toBe('Grok 4.7')
+    expect(effortButton()?.textContent).toBe('High')
     expect(currentRunnerPick()).toEqual({ provider: 'grok-local', model: 'grok-4.7', effort: 'high' })
     act(() => {
       trigger().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))

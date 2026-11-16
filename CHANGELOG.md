@@ -45,6 +45,9 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 - The chat opens with canvas suggestions, a turn layout, a jump to the latest message and a calmer composer.
 - Server renders go through one bounded gate, recover from a wedged Chromium, and can run in a remote Chrome over CDP.
 - Work merges through `dev` and `staging` before `main`; CI runs on all three.
+- The model picker splits into two pills: the model opens a short searchable menu grouped by
+  connection (recommended entries up front, the rest under "Older"), and the reasoning effort
+  gets its own radio popover with a dial glyph on the pill. Duel slots split the same way.
 
 ### Fixed
 
