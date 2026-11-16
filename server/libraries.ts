@@ -3,7 +3,7 @@
  * row. This module keeps those rows in memory (hydrated at boot, written
  * through to the database), mirrors each one onto `canvas.library`, and is
  * the one access gate for library routes and tools (`libraryRole`).
- * Spec: .context/specs/design-libraries.md.
+ * Spec: .workflow/specs/design-libraries.md.
  */
 import type { Actor, Canvas } from '../shared/types.ts'
 import type {

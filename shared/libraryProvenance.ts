@@ -5,7 +5,7 @@
  * meta, or an explicit `data-doop-source-url`), and the frame a copy was
  * taken from (`data-doop-origin="<canvasId>:<frameId>"`, written by every
  * import and curation copy, the first one kept along a chain of copies).
- * Spec: .context/specs/design-libraries.md, "Duplicates on import".
+ * Spec: .workflow/specs/design-libraries.md, "Duplicates on import".
  */
 
 export const ORIGIN_ATTR = 'data-doop-origin'

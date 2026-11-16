@@ -23,7 +23,7 @@ const dropdownMenuContentVariants = cva(
   /* never taller than the room Radix measured beside the trigger: a long menu
      (the model list, with its wrapping blurbs) scrolls instead of running off a
      short window */
-  'z-[70] max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto rounded-[12px] bg-surface p-1.5 shadow-pop animate-[chip-in_0.18s_ease] data-[state=closed]:animate-none motion-reduce:animate-none',
+  'z-[70] max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto rounded-card bg-surface p-1.5 text-body text-ink shadow-pop animate-[menu-in_200ms_var(--ease-out)] data-[state=closed]:animate-none',
   {
     variants: {
       width: {
@@ -60,7 +60,7 @@ function DropdownMenuContent({
 
 /* what every row in the menu shares, whichever primitive renders it */
 const itemClass =
-  'cursor-pointer gap-2.5 rounded-[8px] px-2.5 py-2 text-[12.5px] outline-none data-[highlighted]:bg-sub data-[disabled]:pointer-events-none data-[disabled]:text-ink-faint'
+  'cursor-pointer gap-2.5 rounded-row px-2.5 py-1 text-body outline-none data-[highlighted]:bg-well data-[state=checked]:bg-signal-wash data-[disabled]:pointer-events-none data-[disabled]:text-ink-3'
 
 /** The line under a row's label ("2 takes, side by side"). Children become the label. */
 type ItemDescription = {
@@ -118,7 +118,7 @@ function DropdownMenuRadioItem({
       {...props}
     >
       {description === undefined ? children : <ItemText description={description}>{children}</ItemText>}
-      <DropdownMenuPrimitive.ItemIndicator className="ml-auto flex flex-none text-ink">
+      <DropdownMenuPrimitive.ItemIndicator className="ml-auto flex flex-none text-signal">
         <CheckIcon width={14} height={14} aria-hidden />
       </DropdownMenuPrimitive.ItemIndicator>
     </DropdownMenuPrimitive.RadioItem>
@@ -129,7 +129,7 @@ function DropdownMenuSeparator({ className, ...props }: React.ComponentProps<typ
   return (
     <DropdownMenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
-      className={cn('my-1.5 h-px bg-line-soft', className)}
+      className={cn('-mx-1.5 my-1.5 h-px bg-line', className)}
       {...props}
     />
   )
@@ -145,7 +145,7 @@ function DropdownMenuCaption({ className, ...props }: React.ComponentProps<typeo
   return (
     <DropdownMenuPrimitive.Label
       data-slot="dropdown-menu-caption"
-      className={cn('px-2.5 pb-1 pt-[7px] text-caption text-ink-faint', className)}
+      className={cn('truncate px-2.5 pt-2 pb-0.75 text-caption font-semibold text-ink-2', className)}
       {...props}
     />
   )
@@ -163,7 +163,7 @@ function DropdownMenuCheckboxItem({
       className={cn(menuItemVariants(), itemClass, 'relative pl-7', className)}
       {...props}
     >
-      <DropdownMenuPrimitive.ItemIndicator className="absolute left-2 flex text-ink">
+      <DropdownMenuPrimitive.ItemIndicator className="absolute left-2 flex text-signal">
         <CheckIcon width={14} height={14} aria-hidden />
       </DropdownMenuPrimitive.ItemIndicator>
       {children}
@@ -182,7 +182,7 @@ function DropdownMenuSubTrigger({
   return (
     <DropdownMenuPrimitive.SubTrigger
       data-slot="dropdown-menu-sub-trigger"
-      className={cn(menuItemVariants(), itemClass, 'data-[state=open]:bg-sub', className)}
+      className={cn(menuItemVariants(), itemClass, 'data-[state=open]:bg-well', className)}
       {...props}
     >
       {children}

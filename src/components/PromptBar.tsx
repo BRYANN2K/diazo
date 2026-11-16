@@ -338,10 +338,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
 
   return (
     <div
-      className={cn(
-        'flex shrink-0 flex-col gap-1.5 border-t border-line-soft bg-surface px-3 pt-2.5 pb-2',
-        dropping && 'bg-paper-deep',
-      )}
+      className={cn('flex shrink-0 flex-col gap-1.5 px-2.5 pt-1 pb-2.5', dropping && 'bg-well')}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
@@ -364,8 +361,10 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
           ))}
         </div>
       )}
+      {/* Composer: a surface card on the line ring; typing gives it the
+          signal ring, a run morphs Send into a Stop square in an orange ring */}
       <form
-        className="rounded-[10px]"
+        className="rounded-card bg-surface pt-2.5 pr-2.5 pb-2 pl-3 shadow-ring transition-shadow duration-fast focus-within:shadow-[0_0_0_1px_var(--signal),0_0_0_3px_var(--signal-wash)]"
         onSubmit={(e) => {
           e.preventDefault()
           void submit(text)
@@ -415,7 +414,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
           variant="bare"
           rows={1}
           aria-label={t('panels.promptAria')}
-          className="block overflow-y-auto px-0.5 text-[12.5px] leading-[1.45] placeholder:text-ink-ghost md:text-[12.5px]"
+          className="block min-h-[42px] overflow-y-auto px-0.5 text-copy leading-normal placeholder:text-ink-3 md:text-copy"
           value={text}
           disabled={busy}
           placeholder={
@@ -435,11 +434,11 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
             }
           }}
         />
-        <div className="mt-2 flex items-center gap-1">
+        <div className="mt-1.5 flex items-center gap-1.5">
           <Button
             variant="bare"
             size="icon-sm"
-            className="size-7 rounded-[7px] text-ink-faint hover:bg-paper-deep hover:text-ink"
+            className="size-7 rounded-control text-ink-2 hover:bg-well hover:text-ink"
             aria-label={t('panels.promptAttach')}
             title={t('panels.promptAttachTitle')}
             disabled={busy}
@@ -447,23 +446,23 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
           >
             <AttachmentIcon className="size-3.5" />
           </Button>
-          <span className="flex-1" />
+          <ModelPicker disabled={busy} />
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 px-2 text-[11.5px] text-ink-faint hover:text-ink"
+            className="h-[26px] rounded-pill px-[9px] text-label text-ink-2 shadow-ring hover:text-ink"
             title={t('duel.openTitle')}
             disabled={busy}
             onClick={() => setDuelOpen(true)}
           >
             {t('duel.open')}
           </Button>
-          <ModelPicker disabled={busy} />
+          <span className="flex-1" />
           {/* the meter rides on the send button; a disabled button takes no
               pointer events, so the span under it is what the tooltip hangs on */}
           <Tooltip label={meter ?? t('panels.promptSendTooltip')} side="top" align="end">
             <span
-              className="inline-flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint"
+              className="inline-flex rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
               /* while the button is disabled the wrapper takes its tab stop,
                  so the meter can be reached and read without a pointer */
               tabIndex={busy || !text.trim() ? 0 : -1}
@@ -472,12 +471,22 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
               <Button
                 variant="primary"
                 size="icon-sm"
-                className="size-7 rounded-full"
+                className={cn(
+                  'size-[30px] rounded-full disabled:bg-ink-3 disabled:opacity-100',
+                  busy && 'disabled:bg-ink shadow-[0_0_0_2px_var(--surface),0_0_0_3.5px_var(--agent)]',
+                )}
                 type="submit"
                 aria-label={t('panels.promptSend')}
                 disabled={busy || !text.trim()}
               >
-                {busy ? <span aria-hidden>…</span> : <ArrowUpIcon className="size-3.5" strokeWidth={1.6} />}
+                {busy ? (
+                  <span
+                    aria-hidden
+                    className="size-2.5 rounded-[2px] bg-on-ink animate-[stop-in_320ms_var(--spring-snap)_both]"
+                  />
+                ) : (
+                  <ArrowUpIcon className="size-3.5" strokeWidth={2} />
+                )}
               </Button>
             </span>
           </Tooltip>

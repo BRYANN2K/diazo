@@ -23,7 +23,8 @@ export function hasExecutableContent(html: string): boolean {
   return /<script[\s>]|\son[a-z]+\s*=|javascript:/i.test(html)
 }
 import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
-import { frameImageUrl, type FrameLod } from '../lib/frameLod'
+import { type FrameLod } from '../lib/frameLod'
+import { FrameImage } from './FrameImage'
 import { dropEntry, recordCreate, recordUpdate, recordUpdates, trackSave, type HistoryEntry } from '../lib/history'
 import { snapFrame } from '../lib/snap'
 import { visibleGuides } from '../lib/guides'
@@ -139,28 +140,6 @@ const EDITOR_CHIP =
 const EDITOR_CHIP_TEXT = '@max-[180px]/title:hidden'
 /* the element toolbar's buttons sit on ink and stay compact */
 const EL_TOOLBAR_BTN = 'rounded-[7px] px-2 py-1 text-xs'
-
-/** What a culled frame shows instead of its document: the persisted preview
- *  render (`/i/<id>.jpg?preview`, the top `PREVIEW_MAX_HEIGHT` px of the frame)
- *  across the frame's width, so a zoomed-out page reads as its screens and not
- *  as blank boxes. `version` gives a changed frame a fresh URL past the
- *  browser cache; a render that fails leaves the hatch underneath. */
-function FramePlaceholderPreview({ frameId, version }: { frameId: string; version: number }) {
-  const src = `/i/${frameId}.jpg?preview&v=${version}`
-  const [failedSrc, setFailedSrc] = useState<string | null>(null)
-  if (failedSrc === src) return null
-  return (
-    <img
-      src={src}
-      alt=""
-      loading="lazy"
-      decoding="async"
-      draggable={false}
-      className="block w-full select-none"
-      onError={() => setFailedSrc(src)}
-    />
-  )
-}
 
 /** A hidden frame's place on the stage: nothing, unless it is selected —
  *  then a dashed box with its name, so a pick from the Layers panel still
@@ -856,7 +835,10 @@ export const FrameView = memo(function FrameView({
   const [wasMounted, setWasMounted] = useState(mounted)
   if (mounted !== wasMounted) {
     setWasMounted(mounted)
-    if (!mounted) setRuntimeReady(false)
+    if (!mounted) {
+      setRuntimeReady(false)
+      setRuntimeDocument(null)
+    }
   }
 
   /* a live frame's stored HTML is only the placeholder card: the desktop
@@ -1242,10 +1224,19 @@ export const FrameView = memo(function FrameView({
      resolved into a probe by asking the runtime for the element behind the
      selector */
   const previousProbe = useRef<string | null>(null)
+  /* the probe a `doop:select` answer resolved from the store's own pick, as
+     opposed to one a click found; set by that answer, consumed by the next
+     run of the effect below */
+  const resolvedProbe = useRef<string | null>(null)
   useEffect(() => {
     const previous = previousProbe.current
     previousProbe.current = probeSel
+    const resolved = probeSel !== null && probeSel === resolvedProbe.current
+    resolvedProbe.current = null
     const cur = useStore.getState().selectedElement
+    /* the pick moved on between that answer and this effect (a paste picked
+       its copies): handing the store the old element back would undo it */
+    if (resolved && (cur?.frameId !== frame.id || cur.selector !== probeSel)) return
     if (probeSel === FRAME_COMMENT_SELECTOR) {
       /* a comment on the whole frame is no element pick: `body` in the
          selection would hand Delete, Duplicate and the Design panel the
@@ -1382,6 +1373,7 @@ export const FrameView = memo(function FrameView({
         const hit = (ev.data.hit ?? null) as ProbeHit | null
         closePopovers()
         if (hit) {
+          resolvedProbe.current = hit.selector
           setProbe(hit)
           /* an element link names the element by id; from here on the
              selection speaks the positional path the Layers panel knows */
@@ -1682,10 +1674,13 @@ export const FrameView = memo(function FrameView({
         <div
           /* the Stage reads this: a press on a locked frame is a press on the canvas */
           data-frame-locked={frame.locked ? '' : undefined}
+          data-selected={selected ? '' : undefined}
           className={cn(
             'group absolute',
+            /* an agent writing into the frame: a 1px orange beam travels round
+               its edge over a faint orange ring (frozen under reduced motion) */
             stream &&
-              "before:pointer-events-none before:absolute before:-inset-[3px] before:border-2 before:border-dashed before:border-[var(--editing-color,var(--brand))] before:content-[''] before:animate-[stream-pulse_1.1s_ease-in-out_infinite]",
+              "agent-beam before:z-[3] after:pointer-events-none after:absolute after:-inset-px after:z-[3] after:border after:border-agent/35 after:content-['']",
           )}
           style={
             {
@@ -1828,7 +1823,7 @@ export const FrameView = memo(function FrameView({
                 {stream && (
                   <span
                     className={EDITOR_CHIP}
-                    style={{ background: stream.color }}
+                    style={{ background: 'var(--agent)' }}
                     title={t('stage.isDesigning', { name: stream.name })}
                   >
                     <AgentIcon name={stream.name} size={9} color="#fff" />
@@ -1992,29 +1987,24 @@ export const FrameView = memo(function FrameView({
                   }}
                 />
               )
-            ) : lod === 'image' && frame.html ? (
-              /* the server's render of the current design (frameImageUrl):
-                 one decoded bitmap instead of a whole document. The world's
-                 zoom scales it like any other box, so no counter-zoom. */
-              <img
-                className={cn('block', isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white')}
-                src={frameImageUrl(frame, isCanvasElement(frame.html))}
-                alt=""
-                draggable={false}
-                decoding="async"
-                style={{ width: frame.width, height: frame.height }}
-              />
             ) : (
-              /* no document behind it: the frame's last preview render over the
-                 hatch of an empty frame, which shows while it loads or if it fails */
-              <div
-                data-frame-placeholder=""
-                className="absolute inset-0 overflow-hidden bg-[repeating-linear-gradient(45deg,transparent_0_10px,rgba(28,26,21,0.025)_10px_20px)]"
-              >
-                {(frame.htmlDeferred || (frame.html && !isCanvasElement(frame.html))) && (
-                  <FramePlaceholderPreview frameId={frame.id} version={frame.updatedAt} />
-                )}
-              </div>
+              /* no document behind it: the server's render of the design
+                 (FrameImage), fetched while the frame is on screen and shown
+                 from the cache off it. Never the frame's HTML, so a deferred
+                 frame stays deferred. */
+              (frame.html || frame.htmlDeferred) && (
+                <FrameImage frame={frame} ext={isCanvasElement(frame.html) ? 'png' : 'jpg'} load={lod !== 'none'} />
+              )
+            )}
+            {/* a document mounting under a picture the cache already holds:
+                the picture stays until the design shows, then fades */}
+            {mounted && !liveMounted && (
+              <FrameImage
+                frame={frame}
+                ext={isCanvasElement(frame.html) ? 'png' : 'jpg'}
+                load={false}
+                covering={!runtimeReady || runtimeDocument === null}
+              />
             )}
             {/* a standalone element is see-through: the paper's grid shows —
                 not over a live frame, whose placeholder is not artwork */}
@@ -2209,7 +2199,8 @@ export const FrameView = memo(function FrameView({
                     const thread: [ElementComment, ...ElementComment[]] = [c, ...replies.sort((a, b) => a.at - b.at)]
                     return (
                       <CommentPin
-                        key={c.id}
+                        /* keyed by its anchor too: a re-anchored pin lands with the pop */
+                        key={`${c.id}@${c.elementId ?? `${c.x},${c.y}`}`}
                         thread={thread}
                         open={open}
                         left={pos.x}

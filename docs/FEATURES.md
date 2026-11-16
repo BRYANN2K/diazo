@@ -1,8 +1,10 @@
 # Diazo features
 
 What this fork adds on top of [kgoedecke/doop](https://github.com/kgoedecke/doop), and the
-upstream pull requests it merged ahead of upstream. Resync notes and the deploy recipe are in
-[FORK.md](../FORK.md). Screenshots of most of these are in the [README](../README.md#what-it-does).
+upstream pull requests it merged ahead of upstream. Resync notes are in
+[runbooks/upstream-resync.md](runbooks/upstream-resync.md) and the deploy recipe in
+[runbooks/k3s-deploy.md](runbooks/k3s-deploy.md). The README sums them up in
+[What it does today](../README.md#what-it-does-today).
 
 ## Features added in this fork
 
@@ -12,7 +14,7 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   `@diazo` mentions (`@doop` still routes), the desktop app `Diazo.app` (`dev.bryann2k.diazo`,
   data copied over from the doop shell on first launch) and the install scripts. Internal
   identifiers (`data-doop-*`, `DOOP_*`, tables, MCP tool names) are unchanged
-  ([DESIGN.md, Marks](../.context/DESIGN.md#marks-diazo)).
+  ([DESIGN.md, Marks](DESIGN.md#marks-diazo)).
 
 - **⌘F across every page** — a palette: This canvas (this page or all pages), Library or All as
   one segmented control, results in sections (canvas matches, then library items with their
@@ -54,7 +56,8 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   one). ⌘F everywhere answers libraries from their index, without loading them. Search knows common
   UI synonyms ("login" finds "sign in") and ranks what is used most first. A library can let a
   model describe and tag its thin items (off by default, 200 a day, suggestions wait in the inbox).
-  `scripts/pull-library.ts` copies a library from another doop or Diazo instance (see FORK.md).
+  `scripts/pull-library.ts` copies a library from another doop or Diazo instance
+  ([runbooks/design-library-migration.md](runbooks/design-library-migration.md)).
   The category tree the convert wizard proposes drops page numbers ("16 "), alphabetical splits
   ("· A–L") and continuations, and folds the categories that then collide.
 - **Organise a library with AI** — Libraries → Organise with AI (also offered by the convert
@@ -120,6 +123,10 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
 - **Handoff to Stip** — a frame marked ready for dev builds a Stip change pack, previewed in the
   Inspector and plan cards, then written into the linked repo by the desktop app's single write
   command (`repo_write_change`). Agents call `create_handoff`.
+- **Zoomed-out frame pictures** — frames too small for live documents show stored previews at
+  their on-screen width. Edits keep the previous picture until its replacement loads. Unchanged
+  previews survive a server restart, and moving a frame does not render it again. A neutral
+  placeholder and bounded retries cover cold or busy renderers. Preview work starts on demand.
 - **Live frames** (desktop app) — a frame that shows a local dev server (`localhost` only) with a
   LIVE badge, created from the import picker or with `create_live_frame`, and snapshotted at the
   frame's size.
@@ -207,6 +214,42 @@ compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per bu
   invented product (Fieldnote), with a scripted stand-in for the model API and a fake desktop
   device serving a demo repo, so the agent, usage, duel, curation and repo features run without a
   provider. `scripts/readme-shots.ts` takes the README screenshots from it.
+- **Redesign 2026-11 (Cyanotype bench)** — the interface follows the redesign frames of the canvas
+  "redoop — Redesign 2026-11": a graphite palette with signal blue for people and selection and
+  agent orange for anything an agent does, Atkinson Hyperlegible Next / Mono with Familjen Grotesk
+  for headings (self-hosted), named motion tokens (durations, three `linear()` springs, a 30 ms
+  stagger) with a reduced-motion fallback, restyled primitives (gliding tabs and segmented
+  controls, number roll, agent thinking line), the floating editor shell (title and presence in
+  one island, Import / Export / Motion / Play / Share in another, Connect AI in the agent panel),
+  the orange beam round a frame an agent is writing, the new composer and the dotted home hero
+  ([DESIGN.md](DESIGN.md)).
+- **Motion Studio (timeline UI)** — the bar's Motion button opens a timeline under the stage for
+  the page: transport and timecode, a ruler, the camera lane with its keys, the shots between them
+  and any element lanes, one playhead to scrub. Playing or scrubbing moves the editor's own view
+  through the camera's shots (cuts instead of glides under reduced motion). "Key the camera here"
+  keyframes the current view at the playhead; "Animate storyboard" asks the Diazo Agent to turn
+  the page's frames into shots and camera moves. Export renders MP4 or WebM in the browser
+  (MediaRecorder over a compositor that draws every frame from the time alone) or, in a desktop
+  shell that offers it, frame by frame with ffmpeg through the `/c/<id>/motion-render` harness.
+  Built against the contract in `docs/motion-api.md` (`feat/motion-backend`); the client types in
+  `src/lib/motion/contract.ts` are an adapter until that branch merges.
+- **Motion Studio ("Rostrum") — a page can be a film (backend, MVP)** — an ordinary page gains a
+  seekable, deterministic timeline: duration/fps/size, camera tracks over the page's world,
+  per-element property tracks, clips, audio and captions (contract in `shared/motion.ts`, API in
+  `docs/motion-api.md`). `shared/motionRuntime.ts` evaluates the frame state at time t as a pure
+  function — the player seeks, never runs clocks — and `shared/motionLint.ts` flags non-seek-safe
+  markup (wall clocks, free-running loops, unseeded random, CSS animations, GSAP, autoplaying
+  media). Compositions persist per page with bounded version history, copy with page/canvas
+  duplication and broadcast live over the canvas room (`composition`, `composition:playhead`,
+  `render:progress`). REST under `/api/canvases/:id/pages/:pageId/composition` (+ `/renders`,
+  `/api/renders/:id` upload into `/a/` assets) behind the view/edit gates; agents get
+  `get_composition`, `set_composition` (whole body or ops), `animate_storyboard`, `lint_motion`
+  and `render_composition`, resident-agent included. Renders are queued jobs: the browser renders
+  them (MediaRecorder/WebCodecs) or the desktop shell does deterministically — a hidden webview
+  seeks the page frame by frame and a local, allowlisted `ffmpeg` encodes, all behind
+  `__DOOP_MOTION_RENDER__`. A disabled-by-default Blender bridge (`DOOP_BLENDER_BRIDGE`) can spawn
+  an allowlisted `blender-mcp` and relay a read-only tool set. Server-side and Blender renders
+  land in later phases.
 
 ## Merged upstream PRs
 

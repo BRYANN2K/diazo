@@ -38,7 +38,10 @@ jobs:
           v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1 | tr -d '\r')
           perl -0pi -e "s/(name = \"doop-desktop-chromium\"\r?\nversion = \")[^\"]+/\${1}$v/" Cargo.lock
           grep -A1 'name = "doop-desktop-chromium"' Cargo.lock
+      # a bound well above a cold build plus the suite (under 10 min), so a
+      # test that hangs fails the job instead of holding it for six hours
       - run: cargo test --locked
+        timeout-minutes: 30
         working-directory: desktop/src-tauri-chromium
       # .app only: unsigned (ad-hoc), dmg packaging is left to local/signed
       # release builds where a Developer ID is available
@@ -66,7 +69,10 @@ jobs:
           v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1 | tr -d '\r')
           perl -0pi -e "s/(name = \"doop-desktop\"\r?\nversion = \")[^\"]+/\${1}$v/" Cargo.lock
           grep -A1 'name = "doop-desktop"' Cargo.lock
+      # a bound well above a cold build plus the suite (under 10 min), so a
+      # test that hangs fails the job instead of holding it for six hours
       - run: cargo test --locked
+        timeout-minutes: 30
         working-directory: desktop/src-tauri
       - run: bunx tauri build --bundles nsis
         working-directory: desktop
@@ -91,7 +97,10 @@ jobs:
           v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1 | tr -d '\r')
           perl -0pi -e "s/(name = \"doop-desktop\"\r?\nversion = \")[^\"]+/\${1}$v/" Cargo.lock
           grep -A1 'name = "doop-desktop"' Cargo.lock
+      # a bound well above a cold build plus the suite (under 10 min), so a
+      # test that hangs fails the job instead of holding it for six hours
       - run: cargo test --locked
+        timeout-minutes: 30
         working-directory: desktop/src-tauri
       - run: |
           bunx tauri build --bundles deb,rpm,appimage

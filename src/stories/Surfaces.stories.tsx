@@ -10,7 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { MetaLine, Tile, TileBody, TileCover } from '@/components/ui/tile'
 import { AvatarStack } from '@/components/ui/avatar'
 import { FramePreview } from '@/components/FramePreview'
-import { Toast, ToastAction, ToastSpinner } from '@/components/ui/toast'
+import { Toast, ToastAction, ToastSpinner, ToastStack } from '@/components/ui/toast'
 import { CodeBlock } from '@/components/ui/code-block'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -211,10 +211,14 @@ export const Loading: Story = {
         <Skeleton index={1} shape="card" />
       </div>
       <div className="relative h-20">
-        <Toast className="absolute bottom-0 left-0">
-          <ToastSpinner /> Duplicating canvas…
-          <ToastAction>Undo</ToastAction>
-        </Toast>
+        <ToastStack className="absolute! right-auto! bottom-0! left-0! translate-x-0!">
+          <Toast tone="ok">Library created</Toast>
+          <Toast>Link copied</Toast>
+          <Toast tone="agent">
+            <ToastSpinner /> Duplicating canvas…
+            <ToastAction>Undo</ToastAction>
+          </Toast>
+        </ToastStack>
       </div>
     </div>
   ),

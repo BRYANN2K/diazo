@@ -13,6 +13,7 @@ const meta = {
         'default',
         'primary',
         'ghost',
+        'agent',
         'danger',
         'bare',
         'bare-danger',
@@ -33,7 +34,7 @@ type Story = StoryObj<typeof meta>
 
 export const Playground: Story = {}
 
-/** One black primary per screen; everything else is a white ring button. */
+/** One ink primary per screen; the ring button is the workhorse, ghost sits in toolbars, agent is an action an agent will run. */
 export const Variants: Story = {
   render: () => (
     <div className="flex flex-wrap items-center gap-3">
@@ -44,6 +45,7 @@ export const Variants: Story = {
         <UploadIcon width={15} height={15} /> Import
       </Button>
       <Button variant="ghost">Manage</Button>
+      <Button variant="agent">Ask Diazo</Button>
       <Button variant="danger">Disconnect</Button>
       <Button variant="bare">Cancel</Button>
       <Button variant="link">Codex &amp; other clients →</Button>

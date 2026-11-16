@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { DialogFamilyTabs } from './DialogFamily'
 import type { Frame } from '../../shared/types'
 import { readingOrder } from '../../shared/frameOrder'
 import { MAX_PDF_FRAMES } from '../../shared/pdfLimits'
@@ -82,6 +83,7 @@ export function ExportModal({
         title={t('panels.exportPdfTitle')}
         lede={t('panels.exportPdfLede')}
       />
+      <DialogFamilyTabs active="export" />
       <SelectionBar
         className="mt-5"
         count={chosen.length}

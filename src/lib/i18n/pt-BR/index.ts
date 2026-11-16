@@ -31,6 +31,7 @@ import { replay } from './replay'
 import { duel } from './duel'
 import { library } from './library'
 import { updates } from './updates'
+import { motion } from './motion'
 
 export const ptBR: Catalog = {
   common,
@@ -65,4 +66,5 @@ export const ptBR: Catalog = {
   duel,
   library,
   updates,
+  motion,
 }

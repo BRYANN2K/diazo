@@ -60,17 +60,17 @@ const LEGACY_CHROME = [
 const COMPONENT_LAYER_MESSAGE =
   'Compose the primitives in src/components/ui (Button, IconButton, Pressable, Input, SearchField, Textarea, Select…) instead of a raw element.'
 const TYPE_SCALE_MESSAGE =
-  'Use the named type scale (text-micro … text-display) and corner shapes (rounded-row/control/pill/card/panel) from .context/DESIGN.md, not an arbitrary size.'
+  'Use the named type scale (text-micro … text-display) and corner shapes (rounded-row/control/pill/card/panel) from docs/DESIGN.md, not an arbitrary size.'
 const STOCK_TYPE_MESSAGE =
-  "Use the named type scale (text-micro … text-display) from .context/DESIGN.md, not Tailwind's stock sizes: text-xs is text-label or text-caption, text-sm is text-body or text-copy, text-lg is text-lead or text-heading."
+  "Use the named type scale (text-micro … text-display) from docs/DESIGN.md, not Tailwind's stock sizes: text-xs is text-label or text-caption, text-sm is text-body or text-copy, text-lg is text-lead or text-heading."
 const STOCK_RADIUS_MESSAGE =
-  "Use the named corner shapes (rounded-row/control/pill/card/panel) from .context/DESIGN.md, not Tailwind's stock radii (rounded, rounded-sm/md/lg/xl)."
+  "Use the named corner shapes (rounded-row/control/pill/card/panel) from docs/DESIGN.md, not Tailwind's stock radii (rounded, rounded-sm/md/lg/xl)."
 const LINE_MESSAGE =
-  'Each step of the type scale carries its own line height and tracking; drop leading-[…] and tracking-[…] (a leading modifier such as text-body/4 is the one adjustment, per .context/DESIGN.md).'
+  'Each step of the type scale carries its own line height and tracking; drop leading-[…] and tracking-[…] (a leading modifier such as text-body/4 is the one adjustment, per docs/DESIGN.md).'
 const WEIGHT_MESSAGE =
-  'Use 400 for text and font-medium for labels, buttons and emphasis; font-semibold is for card and modal headings only, and nothing goes heavier (.context/DESIGN.md).'
+  'Use 400 for text and font-medium for labels, buttons and emphasis; font-semibold is for card and modal headings only, and nothing goes heavier (docs/DESIGN.md).'
 const COLOUR_MESSAGE =
-  'Use a colour token (bg-line, text-ink-soft, bg-brand, bg-success, border-line…) from .context/DESIGN.md, not a hex value: tokens flip with the theme.'
+  'Use a colour token (bg-line, text-ink-soft, bg-brand, bg-success, border-line…) from docs/DESIGN.md, not a hex value: tokens flip with the theme.'
 const ROLE_MESSAGE =
   'Use Pressable (or Button / IconButton) from src/components/ui instead of role="button" or role="link" on a plain element: it brings the keyboard handling and the focus ring.'
 

@@ -3,14 +3,15 @@ import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/lib/utils'
 
-/* Doop labels a control three ways, all sentence case in the UI sans: a quiet
-   caption over a field in a dense panel, the label step over a form row, or a
-   bolder body line that heads a group. (The mono uppercase voice is retired.) */
-const labelVariants = cva('block text-ink-soft', {
+/* Diazo labels a control three ways, all sentence case in the UI sans: a
+   quiet caption over a field in a dense panel, the label step over a form row
+   (01 Foundations · Field: 12px medium ink, 6px above the well), or a bolder
+   body line that heads a group. Labels never wrap. */
+const labelVariants = cva('block truncate text-ink-2', {
   variants: {
     variant: {
-      caption: 'mb-1 text-caption text-ink-faint',
-      form: 'mb-1.5 text-label font-medium text-ink-soft',
+      caption: 'mb-1 text-caption text-ink-3',
+      form: 'mb-1.5 text-label font-medium text-ink',
       plain: 'mb-1 text-body/4 font-semibold text-ink',
     },
   },
@@ -44,7 +45,7 @@ function Field({
         </Label>
       ) : null}
       {children}
-      {hint ? <p className="mt-1.5 text-xs leading-snug text-ink-faint">{hint}</p> : null}
+      {hint ? <p className="mt-1.5 text-caption text-ink-3">{hint}</p> : null}
     </div>
   )
 }

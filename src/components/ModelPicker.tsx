@@ -50,7 +50,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
             variant="quiet"
             disabled={disabled || !runners}
             aria-label={t('panels.modelAria', { label })}
-            className="min-w-0 gap-[5px]"
+            className="h-[26px] min-w-0 gap-[5px] rounded-pill px-[9px] text-ink shadow-ring hover:bg-well"
             icon={
               <span className="grid size-3 flex-none place-items-center">
                 {mark ? (

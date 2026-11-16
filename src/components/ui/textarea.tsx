@@ -4,14 +4,14 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 
 const textareaVariants = cva(
-  'w-full min-w-0 resize-none font-[inherit] text-base text-ink outline-none placeholder:text-ink-faint disabled:cursor-not-allowed disabled:opacity-60 md:text-copy/4',
+  'w-full min-w-0 resize-none font-[inherit] text-base text-ink outline-none placeholder:text-ink-3 disabled:cursor-not-allowed disabled:opacity-60 md:text-body/5 aria-invalid:border-danger aria-invalid:animate-[field-shake_300ms_var(--ease-out)]',
   {
     variants: {
       variant: {
         default:
-          'rounded-row border border-line bg-surface px-3 py-2.5 transition-[border-color,box-shadow] focus:border-ink focus:ring-[3px] focus:ring-ink/[0.07]',
-        /* the Input well: paper inside a hairline, the surface on focus */
-        well: 'rounded-pill border border-line bg-paper px-3 py-2.5 transition-[border-color,background-color] focus:border-ink focus:bg-surface',
+          'rounded-control border border-line bg-well px-2.5 py-2 transition-[border-color,box-shadow,background-color] duration-fast focus:border-signal focus:bg-surface focus:ring-[3px] focus:ring-signal-wash',
+        /* the Input well */
+        well: 'rounded-control border border-line bg-well px-2.5 py-2 transition-[border-color,box-shadow,background-color] duration-fast focus:border-signal focus:bg-surface focus:ring-[3px] focus:ring-signal-wash',
         /* an HTML editor: the dark code well at the caption step, tabs two wide */
         code: 'border-0 bg-code p-3 font-mono text-caption/normal text-code-ink [tab-size:2] md:text-caption/normal',
         /* composers: the surrounding card is the field, this is just the text */

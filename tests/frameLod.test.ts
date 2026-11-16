@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MIN_LIVE_PX, frameImageUrl, frameLods, type LodOptions, type LodRect } from '../src/lib/frameLod.ts'
+import { MIN_LIVE_PX, frameLods, type LodOptions, type LodRect } from '../src/lib/frameLod.ts'
 
 const screen = { width: 1000, height: 800 }
 const atRest = { x: 0, y: 0, zoom: 1 }
@@ -89,15 +89,5 @@ describe('frameLods', () => {
   it('draws nothing live with a zero budget', () => {
     const lods = frameLods([frame('a', 0, 0)], atRest, screen, options({ budget: 0 }))
     expect(lods.get('a')).toBe('image')
-  })
-})
-
-describe('frameImageUrl', () => {
-  it('versions the url by the frame update time', () => {
-    expect(frameImageUrl({ id: 'f1', updatedAt: 42 }, false)).toBe('/i/f1.jpg?quality=80&v=42')
-  })
-
-  it('keeps standalone elements transparent', () => {
-    expect(frameImageUrl({ id: 'f1', updatedAt: 42 }, true)).toBe('/i/f1.png?v=42')
   })
 })

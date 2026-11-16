@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "id": "zoomed-out-frames",
+  "target": "zoomed-out-frames",
+  "extensions": [
+    "frontend-engineering",
+    "backend-engineering"
+  ],
+  "target_before": null,
+  "created_at": "2026-11-16T20:07:29.354208+00:00",
+  "phase": "documented",
+  "updated_at": "2026-11-16T20:21:16.760120+00:00",
+  "approval": {
+    "contract_digest": "5d814e8f7d3064e88f4aa510afa965afa04b4be2d00a5495d047ba93d411b36f",
+    "by": "owner",
+    "recorded_at": "2026-11-16T20:07:52.975141+00:00"
+  },
+  "preexisting_dirty": [
+    ".workflow/changes/zoomed-out-frames/evidence.md",
+    ".workflow/changes/zoomed-out-frames/proposal.md",
+    ".workflow/changes/zoomed-out-frames/spec.md",
+    ".workflow/changes/zoomed-out-frames/state.json",
+    ".workflow/changes/zoomed-out-frames/tasks.md",
+    "server/actions.ts",
+    "server/previews.ts",
+    "server/thumbs.ts",
+    "src/components/FrameImage.tsx",
+    "src/components/FrameView.tsx",
+    "src/lib/framePreviews.ts",
+    "src/lib/thumbLoader.ts",
+    "tests/canvasPageFixture.ts",
+    "tests/framePreviewHttp.test.ts",
+    "tests/framePreviews.test.ts",
+    "tests/framePreviewsBrowser.test.ts",
+    "tests/previews.test.ts",
+    "tests/thumbLoader.test.ts",
+    "tests/thumbs.test.ts"
+  ],
+  "base_head": "49295835773e2afb3908bbf465a715a690a37cfc",
+  "check": {
+    "report": {
+      "subject_digest": "05d89398867bc6594a380b7ca40acbf047d040621a448587fddc025b1e05830d",
+      "criteria": [
+        {
+          "id": "AC-1",
+          "status": "passed",
+          "evidence": "tests/previews.test.ts: concurrent first-render edit stays stale for both callers; tests/thumbs.test.ts: renderedAt remains old; versioned object key assertions. tests/framePreviewHttp.test.ts: stale is no-store, current version immutable."
+        },
+        {
+          "id": "AC-2",
+          "status": "passed",
+          "evidence": "tests/thumbs.test.ts: no-write move stays fresh; fresh-module restart reuses version/fingerprint ledger; persisted edit with lost notification is stale."
+        },
+        {
+          "id": "AC-3",
+          "status": "passed",
+          "evidence": "tests/thumbs.test.ts: live invalidation persists again, purge during render/put cannot leave a current object, undo can persist after pending work, deletion concurrency stays four."
+        },
+        {
+          "id": "AC-4",
+          "status": "passed",
+          "evidence": "tests/thumbLoader.test.ts and tests/framePreviews.test.ts: network/429/503, 60-second Retry-After, bounded attempts, stale retries, failure recovery on re-entry; browser 429 and stale scenarios pass."
+        },
+        {
+          "id": "AC-5",
+          "status": "passed",
+          "evidence": "tests/framePreviews.test.ts: format comparison; byte/count limits, inactive subscribers, eviction on visible-holder release and subscriber notification. HTTP shape test checks actual transparent alpha."
+        },
+        {
+          "id": "AC-6",
+          "status": "passed",
+          "evidence": "tests/framePreviews.test.ts: notifications flush once per frame. src/lib/framePreviews.ts retains decoded Image in entry; FrameImage has only the live-cover fade. Trace arrival maximum 15.572 ms."
+        },
+        {
+          "id": "AC-7",
+          "status": "passed",
+          "evidence": "tests/framePreviewsBrowser.test.ts: painted pictures, no iframe, deferred stays deferred, stale/429, edit keeps old image then swaps, shape format, cover fades and leaves a live document. tests/frameImage.test.tsx: synchronous cover and three-second missing-runtime expiry."
+        },
+        {
+          "id": "AC-8",
+          "status": "passed",
+          "evidence": "tests/framePreviewHttp.test.ts: real HTTP immutable fresh stage, short cache for old/missing versions and dashboard, stale no-store, invalid lod 400; shape returned as transparent PNG under initial jpg ask."
+        },
+        {
+          "id": "AC-9",
+          "status": "passed",
+          "evidence": "tests/framePreviewPerformance.test.ts passed, 200 real cold server renders with production client fixture, 1440x900 dpr1. /tmp/zoom-first-out-metrics.json: longest first zoom-out 46.023 ms, arrivals 15.572 ms, zero tasks over 50 ms, 200 pictures and zero iframes. /tmp/zoom-first-out-trace.json retains trace. Mutation completion avoids polling overhead; fixture supplies canvas/session/room, not image bytes."
+        },
+        {
+          "id": "AC-10",
+          "status": "passed",
+          "evidence": "Typecheck and required type-aware lint/ESLint exit 0; 11 relevant test files / 106 tests pass plus performance file / 1 test; doc-lint passed. Standing docs and /tmp/pr-drafts/zoomed-out-frames.md updated. Changed-file formatting is checked before commit; no publication or container build."
+        }
+      ]
+    },
+    "at": "2026-11-16T20:21:16.649998+00:00",
+    "subject_digest": "05d89398867bc6594a380b7ca40acbf047d040621a448587fddc025b1e05830d"
+  },
+  "documentation": {
+    "paths": [
+      "CHANGELOG.md",
+      "docs/FEATURES.md",
+      "docs/GLOSSARY.md",
+      "docs/TECHSTACK.md"
+    ],
+    "summary": "Verified previews, restart recovery, memory/retry behavior and trace measurements; doc-lint passed. Existing decisions and terms retained; no new architectural decision.",
+    "at": "2026-11-16T20:21:16.759959+00:00",
+    "subject_digest": "05d89398867bc6594a380b7ca40acbf047d040621a448587fddc025b1e05830d"
+  },
+  "baseline_digest": "8428f328e34b6039143e9f5fded46e888d2d1b309f10232bea9d13efb6252993",
+  "snapshot_artifact": "/tmp/zoom-workflow-state-full.json"
+}

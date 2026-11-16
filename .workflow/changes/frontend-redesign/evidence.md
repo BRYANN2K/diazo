@@ -1,0 +1,15 @@
+# Evidence
+
+Recorded 2026-11-16 on `feat/frontend-redesign` after merging `origin/dev` (`cda02310`).
+
+| AC   | Result | Evidence                                                                                                                                                                                                                                                                                                       |
+| ---- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AC-1 | passed | `src/styles.css` `:root` and `.dark` role tokens with aliases; `tests/motionTokens.test.ts`, `tests/cn.test.ts` pass.                                                                                                                                                                                          |
+| AC-2 | passed | `src/assets/fonts/*.woff2` with `*-LICENSE.txt`; `index.html` and `.storybook/preview-head.html` carry no Google Fonts link.                                                                                                                                                                                   |
+| AC-3 | passed | `--dur-*`, `--ease-*`, `--spring-*` in `src/styles.css` mirrored by `src/lib/motion.ts` (`tests/motionTokens.test.ts`); the global reduced-motion rule in `src/styles.css`.                                                                                                                                    |
+| AC-4 | passed | `src/components/ui/*` restyled; stories in `src/stories/` (Foundations, AI states, Surfaces with the toast stack); Storybook screenshots compared on 2026-11-15.                                                                                                                                               |
+| AC-5 | passed | Local app screenshots compared side by side with frames `c836jog-Mh`, `ohPA06XGY7`, `ZPYLf_Ww82`, `5fcE26shUJ`, `lywtOtrsd_`, `_hd6H01xFk`, `XftPAhtrLd`, `gyqEPd1ZQp` (Chrome for Testing, deleted after). Motion Studio run end to end: `/tmp/diazo-shots/studio-*.png`, `film.webm` (VP9 1280×720, 6.18 s). |
+| AC-6 | passed | Agent states carry the orange dot, mark or beam (`Badge` agent tone, `Chip` agent tone, `ThinkingStatus`, `agent-beam` on streamed frames); selection and people use `--signal`.                                                                                                                               |
+| AC-7 | failed | Full suite 2026-11-16: 4022 passed, 11 failed; 9 fixed in `218b63b1` and re-run green. Still failing: `tests/customProvider.test.ts` (known environment failure) and `cli/test/server.test.ts` (fails under load, passes alone). Typecheck, lint, format:check and doc-lint pass after the merge.              |
+
+Open: tasks 21 to 23 in `tasks.md`.

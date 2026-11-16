@@ -21,7 +21,7 @@ const topBarVariants = cva(
            Only the pills take the pointer; the gaps between them pan and
            select as canvas. */
         canvas:
-          'pointer-events-none absolute inset-x-0 top-0 h-[50px] items-start gap-2.5 bg-transparent px-3.5 pt-3.5 max-md:h-14 max-md:items-center max-md:gap-2 max-md:px-3 max-md:pt-0 [&>*]:pointer-events-auto',
+          'pointer-events-none absolute inset-x-0 top-0 h-[58px] items-start gap-2.5 bg-transparent px-3 pt-3 max-md:h-14 max-md:items-center max-md:gap-2 max-md:px-3 max-md:pt-0 [&>*]:pointer-events-auto',
         /* the canvas editor with docked panels: a solid strip over the
            columns, the pills flat inside it. The leading folder glyph lines
            up with the Layers panel's own icon, 14px in. */
@@ -155,7 +155,7 @@ export function BarPill({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="bar-pill"
       className={cn(
-        'flex h-9 min-w-0 items-center gap-0.5 rounded-[10px] bg-surface px-1 text-[12px] text-ink-soft shadow-ring',
+        'flex h-9 min-w-0 items-center gap-0.5 rounded-panel bg-paper px-1 text-label text-ink-2 shadow-panel',
         className,
       )}
       {...props}

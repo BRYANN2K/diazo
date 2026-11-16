@@ -1,5 +1,6 @@
 import { env } from './env.ts'
 import type { Frame } from '../shared/types.ts'
+import type { FramePreviewWidth } from '../shared/framePreview.ts'
 import { withRenderSlot } from './renderLimits.ts'
 import * as thumbs from './thumbs.ts'
 import { store } from './store.ts'
@@ -42,15 +43,33 @@ export interface ImageRequest {
    *  meaningful for jpg — a png?preview would serve jpeg bytes under an
    *  image/png content-type, so the flag is ignored there. */
   preview: boolean
+  /** a stage image (`?lod=<width>`): the whole frame this many px wide,
+   *  persisted per width (thumbs.ts); `scale` and `preview` are ignored */
+  lod?: FramePreviewWidth
   ip: string
   /** consulted only when the render budget is exhausted */
   isAuthenticated: () => Promise<boolean>
 }
 
-export type ImageResult = { status: 'ok'; buf: Buffer } | { status: 'rate-limited' }
+export type ImageResult =
+  | {
+      status: 'ok'
+      buf: Buffer
+      /** false when a stored preview of an older design was served while
+       *  the current one renders in the background (stage images only) */
+      fresh?: boolean
+      ext?: 'jpg' | 'png'
+    }
+  | { status: 'rate-limited' }
 
 /** May reject when the render itself fails — the caller owns the 500. */
 export async function getImage(frame: Frame, req: ImageRequest): Promise<ImageResult> {
+  if (req.lod) {
+    const source = await store.renderSource(frame)
+    const ext = /<body\b[^>]*\bdata-doop-canvas-element=/i.test(source.html) ? 'png' : req.ext
+    const result = await getStageImage(frame, req.lod, { ...req, ext })
+    return result.status === 'ok' ? { ...result, ext } : result
+  }
   const preview = req.preview && req.ext === 'jpg'
   const key = imageKey(frame.id, req.ext, req.scale, req.ext === 'jpg' ? req.quality : '', preview)
   const cached = imgCache.get(key)
@@ -63,31 +82,62 @@ export async function getImage(frame: Frame, req: ImageRequest): Promise<ImageRe
   if (!pending && preview) {
     const stored = await thumbs.getStored(frame)
     if (stored) {
-      pending = Promise.resolve(stored)
+      pending = Promise.resolve(stored.buf)
       remember(key, pending, frame.updatedAt)
     }
   }
 
   if (!pending) {
     if (!(await consumeRenderBudget(req.ip, req.isAuthenticated))) return { status: 'rate-limited' }
-    pending = preview
-      ? /* renders AND persists — the next cold start serves from storage */
-        thumbs.create(frame)
-      : withRenderSlot(async () => {
-          const { renderFrame } = await loadScreenshot()
-          /* the html is read when the render starts, not when it was queued */
-          return renderFrame(await store.renderSource(frame), req.scale, {
-            type: req.ext === 'jpg' ? 'jpeg' : 'png',
-            quality: req.quality,
-          })
-        })
+    if (preview) {
+      /* renders AND persists — the next cold start serves from storage.
+         Only a render of the current design enters the cache: a write that
+         landed while it drew leaves the bytes a version behind */
+      const { buf, renderedAt } = await thumbs.create(frame)
+      if (thumbs.freshAt(frame, renderedAt)) remember(key, Promise.resolve(buf), frame.updatedAt)
+      return { status: 'ok', buf }
+    }
+    pending = withRenderSlot(async () => {
+      const { renderFrame } = await loadScreenshot()
+      /* the html is read when the render starts, not when it was queued */
+      return renderFrame(await store.renderSource(frame), req.scale, {
+        type: req.ext === 'jpg' ? 'jpeg' : 'png',
+        quality: req.quality,
+      })
+    })
     remember(key, pending, frame.updatedAt)
   }
 
   return { status: 'ok', buf: await pending }
 }
 
-function imageKey(id: string, ext: 'png' | 'jpg', scale: number, quality: number | '', preview: boolean): string {
+/** A stage image: the stored render of this width when there is one (served
+ *  at once, stale or not, so a zoom-out never waits on Chromium), else a
+ *  background-priority render that is persisted for the next viewer. Only a
+ *  current render enters the in-process cache: a stale one must not be
+ *  served again once the refresh has landed. */
+async function getStageImage(frame: Frame, width: FramePreviewWidth, req: ImageRequest): Promise<ImageResult> {
+  const variant: thumbs.ThumbVariant = { kind: 'stage', width, ext: req.ext }
+  const key = imageKey(frame.id, req.ext, 0, `w${width}`, false)
+  const cached = imgCache.get(key)
+  if (cached && cached.updatedAt === frame.updatedAt && Date.now() - cached.at < IMG_CACHE_MS)
+    return { status: 'ok', buf: await cached.buf, fresh: true }
+  const stored = await thumbs.getStored(frame, variant)
+  if (stored) {
+    if (stored.fresh) remember(key, Promise.resolve(stored.buf), frame.updatedAt)
+    return { status: 'ok', buf: stored.buf, fresh: stored.fresh }
+  }
+  if (!(await consumeRenderBudget(req.ip, req.isAuthenticated))) return { status: 'rate-limited' }
+  /* the render may have been started by an earlier request and seen a write
+     land while it drew: those bytes are an older design — served stale, never
+     cached, and never marked immutable under the new version's URL */
+  const { buf, renderedAt } = await thumbs.create(frame, variant)
+  const fresh = thumbs.freshAt(frame, renderedAt)
+  if (fresh) remember(key, Promise.resolve(buf), frame.updatedAt)
+  return { status: 'ok', buf, fresh }
+}
+
+function imageKey(id: string, ext: 'png' | 'jpg', scale: number, quality: number | string, preview: boolean): string {
   return `${id}:${ext}:${scale}:${quality}:${preview ? 'p' : ''}`
 }
 

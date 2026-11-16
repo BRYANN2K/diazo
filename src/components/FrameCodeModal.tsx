@@ -132,7 +132,7 @@ export function FrameCodeModal({ frameId, onClose }: { frameId: string; onClose:
         </form>
       </div>
       {!preview && !error && <ModalLede className="mt-4">{t('inspector.frameCodeBuilding')}</ModalLede>}
-      {error && <p className="mt-3 text-copy text-accent-ink">{error}</p>}
+      {error && <p className="mt-3 text-copy text-danger">! {error}</p>}
       {preview && code && (
         <>
           <ModalLede className="mt-3">

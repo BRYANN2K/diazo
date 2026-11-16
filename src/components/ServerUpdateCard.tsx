@@ -50,13 +50,13 @@ export function ServerUpdateCardView({ status, onDismiss, className }: ServerUpd
       aria-labelledby="server-update-title"
       aria-describedby="server-update-body"
       className={cn(
-        'flex w-[340px] flex-col gap-3 rounded-panel bg-surface px-5 pt-4 pb-5 shadow-pop animate-[chip-in_0.2s_ease]',
+        'flex w-[320px] flex-col gap-2.5 rounded-panel bg-surface p-3.5 shadow-pop animate-[toast-in_400ms_var(--spring-soft)_both]',
         className,
       )}
     >
       <header className="flex items-center justify-between">
-        <h2 id="server-update-title" className="flex items-center gap-2 text-lead font-semibold text-ink">
-          <DownloadIcon size="rail" className="text-brand" aria-hidden />
+        <h2 id="server-update-title" className="flex items-center gap-2 text-body font-semibold text-ink">
+          <DownloadIcon size="rail" className="text-signal" aria-hidden />
           {t('updates.cardTitle')}
         </h2>
         <IconButton size="sm" className="-mr-1" aria-label={t('updates.cardDismiss')} onClick={onDismiss}>

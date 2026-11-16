@@ -17,6 +17,14 @@ import {
   roleName,
 } from '../shared/agents.ts'
 import { canvasPages } from '../shared/pages.ts'
+import {
+  applyCompositionOps,
+  newComposition,
+  type Composition,
+  type CompositionBody,
+  type CompositionOp,
+} from '../shared/motion.ts'
+import { dropRenderJobs } from './motionJobs.ts'
 import { FRAME_COMMENT_SELECTOR, isCanvasComment, type CommentAnchorInput } from '../shared/comments.ts'
 import { isElementId } from '../shared/elementId.ts'
 import {
@@ -2324,7 +2332,72 @@ export function setCanvasPages(canvasId: string, pages: import('../shared/types.
   const next = saved?.pages ?? pages
   broadcast(canvasId, { type: 'canvas:pages', pages: next, actor })
   for (const guide of saved?.dropped ?? []) broadcast(canvasId, { type: 'guide', id: guide.id, guide: null, actor })
+  /* a page that went away takes its timeline: peers drop it too */
+  for (const comp of saved?.droppedCompositions ?? []) {
+    broadcast(canvasId, { type: 'composition', pageId: comp.pageId, composition: null, actor })
+  }
   return next
+}
+
+/* ---- Motion Studio: a page's timeline (shared/motion.ts) ---- */
+
+/**
+ * Create or replace a page's composition (validated upstream). Revision is
+ * stamped here: a fresh timeline is 1, a replace bumps. Peers get the full
+ * document — multiplayer timeline edits land like page list changes.
+ */
+export function setComposition(canvasId: string, body: CompositionBody, pageId: string, actor: Actor): Composition {
+  const existing = store.getComposition(canvasId, pageId)
+  const comp: Composition = {
+    ...(existing ?? newComposition({ canvasId, pageId, body, updatedBy: actor.name, now: Date.now() })),
+    duration: body.duration,
+    fps: body.fps,
+    width: body.width,
+    height: body.height,
+    posterTime: body.posterTime,
+    tracks: body.tracks,
+    revision: (existing?.revision ?? 0) + 1,
+    updatedAt: Date.now(),
+    updatedBy: actor.name,
+  }
+  if (comp.posterTime === undefined) delete comp.posterTime
+  const saved = store.setComposition(canvasId, comp, { name: actor.name, kind: actor.kind, runId: actor.runId })
+  broadcast(canvasId, { type: 'composition', pageId, composition: saved, actor })
+  touch(canvasId, actor)
+  return saved
+}
+
+/** Apply patch ops to a page's composition, atomically: one bad op fails the
+ *  whole batch. Peers get the resulting document. */
+export function patchComposition(
+  canvasId: string,
+  pageId: string,
+  ops: readonly CompositionOp[],
+  actor: Actor,
+): { ok: true; composition: Composition } | { ok: false; error: string } {
+  const existing = store.getComposition(canvasId, pageId)
+  if (!existing) return { ok: false, error: 'the page has no composition — create one first' }
+  const applied = applyCompositionOps(existing, ops)
+  if (!applied.ok) return { ok: false, error: applied.error }
+  const comp: Composition = {
+    ...applied.value,
+    revision: existing.revision + 1,
+    updatedAt: Date.now(),
+    updatedBy: actor.name,
+  }
+  const saved = store.setComposition(canvasId, comp, { name: actor.name, kind: actor.kind, runId: actor.runId })
+  broadcast(canvasId, { type: 'composition', pageId, composition: saved, actor })
+  touch(canvasId, actor)
+  return { ok: true, composition: saved }
+}
+
+/** Remove a page's timeline; peers get `composition: null`. */
+export function deleteComposition(canvasId: string, pageId: string, actor: Actor): boolean {
+  const removed = store.deleteComposition(canvasId, pageId)
+  if (!removed) return false
+  broadcast(canvasId, { type: 'composition', pageId, composition: null, actor })
+  touch(canvasId, actor)
+  return true
 }
 
 /** Add one page at the end of the canvas, named `name`, with a fresh id; peers
@@ -2601,6 +2674,7 @@ export function deleteCanvas(canvasId: string): boolean {
     bursts.delete(f.id)
   }
   broadcast(canvasId, { type: 'canvas:deleted' })
+  dropRenderJobs(canvasId)
   taskLog.delete(canvasId)
   feedbackLog.delete(canvasId)
   commentLog.delete(canvasId)
@@ -2906,7 +2980,9 @@ function restyleTokenFrames(canvasId: string, actor: Actor, rename?: TokenRename
     const prevHtml = frame.html
     const updated = store.updateFrame(frame.id, { html }, actor.name, { annotation: true })
     if (!updated) continue
-    thumbs.purge(frame.id)
+    /* the frame lives on — its stored previews are dropped, not the frame's
+       right to have any (thumbs.invalidate, not purge) */
+    thumbs.invalidate(frame.id)
     const openReveal = reveals.get(frame.id)
     if (openReveal) {
       /* mid-playback: rewind to where the documents diverge, as a rewrite does */

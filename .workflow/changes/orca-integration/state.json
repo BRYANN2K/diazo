@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "orca-integration",
+  "target": "orca-integration",
+  "extensions": ["desktop-engineering", "backend-engineering", "ai-engineering", "security-engineering"],
+  "target_before": null,
+  "created_at": "2026-11-16T17:57:38.287399+00:00",
+  "phase": "exploring",
+  "updated_at": "2026-11-16T17:57:38.287507+00:00"
+}

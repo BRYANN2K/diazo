@@ -23,12 +23,12 @@ function SelectValue(props: React.ComponentProps<typeof SelectPrimitive.Value>) 
 }
 
 const selectTriggerVariants = cva(
-  'flex min-w-0 cursor-pointer items-center justify-between gap-2 rounded-control bg-surface pl-[11px] pr-2.5 text-left font-medium text-ink shadow-ring transition-shadow outline-none select-none hover:shadow-ring-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60 data-[placeholder]:font-normal data-[placeholder]:text-ink-faint *:data-[slot=select-value]:truncate',
+  'flex min-w-0 cursor-pointer items-center justify-between gap-2 whitespace-nowrap rounded-control bg-surface pl-2.5 pr-2 text-left text-ink shadow-ring transition-[background-color,box-shadow] duration-fast outline-none select-none hover:bg-well hover:duration-instant focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal disabled:cursor-not-allowed disabled:opacity-60 data-[placeholder]:text-ink-3 *:data-[slot=select-value]:truncate',
   {
     variants: {
       size: {
-        sm: 'h-8 text-body',
-        md: 'h-9 text-copy',
+        sm: 'h-[30px] text-body',
+        md: 'h-8 text-body',
       },
     },
     defaultVariants: { size: 'md' },
@@ -76,7 +76,7 @@ function SelectContent({
         collisionPadding={12}
         className={cn(
           'relative z-[70] max-h-[min(320px,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-card bg-surface shadow-pop',
-          'animate-[chip-in_0.18s_ease] data-[state=closed]:animate-none',
+          'animate-[menu-in_200ms_var(--ease-out)] data-[state=closed]:animate-none',
           className,
         )}
         {...props}
@@ -98,13 +98,13 @@ function SelectItem({ className, children, ...props }: React.ComponentProps<type
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        'relative flex w-full cursor-pointer items-center gap-2.5 rounded-control py-2 pl-2.5 pr-8 text-body text-ink outline-none select-none data-[disabled]:pointer-events-none data-[highlighted]:bg-sub data-[disabled]:text-ink-faint',
+        'relative flex min-h-[30px] w-full cursor-pointer items-center gap-2.5 rounded-row py-1 pl-2.5 pr-8 text-body text-ink outline-none select-none data-[disabled]:pointer-events-none data-[highlighted]:bg-well data-[state=checked]:bg-signal-wash data-[disabled]:text-ink-3',
         className,
       )}
       {...props}
     >
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
-      <SelectPrimitive.ItemIndicator className="absolute right-2.5 flex text-ink">
+      <SelectPrimitive.ItemIndicator className="absolute right-2.5 flex text-signal">
         <CheckIcon width={14} height={14} />
       </SelectPrimitive.ItemIndicator>
     </SelectPrimitive.Item>

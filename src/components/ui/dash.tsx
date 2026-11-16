@@ -20,7 +20,7 @@ function DashLayout({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot="dash-layout"
-      className={cn('grid h-full grid-cols-1 bg-paper md:grid-cols-[236px_1fr]', className)}
+      className={cn('grid h-full grid-cols-1 bg-ground md:grid-cols-[236px_1fr]', className)}
       {...props}
     />
   )
@@ -32,7 +32,7 @@ const dashSidebarVariants = cva('hidden flex-col overflow-y-auto md:flex', {
       /* a bordered white panel */
       default: 'border-r border-line bg-surface px-3.5 pb-[18px] pt-5',
       /* the app rail: borderless on the sub fill, 236px wide */
-      rail: 'overflow-x-hidden bg-sub px-3 pb-3 pt-3.5 md:w-[236px]',
+      rail: 'overflow-x-hidden border-r border-line bg-paper px-3 pb-3 pt-3.5 md:w-[236px]',
     },
   },
   defaultVariants: { variant: 'default' },
@@ -290,13 +290,7 @@ function DashContent({ className, ...props }: React.ComponentProps<'div'>) {
 }
 
 function DashTitle({ className, ...props }: React.ComponentProps<'h1'>) {
-  return (
-    <h1
-      data-slot="dash-title"
-      className={cn('font-sans text-title font-medium tracking-[-0.01em]', className)}
-      {...props}
-    />
-  )
+  return <h1 data-slot="dash-title" className={cn('font-display text-title font-semibold', className)} {...props} />
 }
 
 function DashSubtitle({ className, ...props }: React.ComponentProps<'p'>) {

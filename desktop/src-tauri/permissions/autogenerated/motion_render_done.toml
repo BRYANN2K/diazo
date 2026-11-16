@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-motion-render-done"
+description = "Enables the motion_render_done command without any pre-configured scope."
+commands.allow = ["motion_render_done"]
+
+[[permission]]
+identifier = "deny-motion-render-done"
+description = "Denies the motion_render_done command without any pre-configured scope."
+commands.deny = ["motion_render_done"]

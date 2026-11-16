@@ -27,6 +27,12 @@
           store.select('f')
           for (const selector of selectors) store.toggleElement({ frameId: 'f', selector })
         },
+        /* what a paste does to the pick: drop it, then pick each pasted layer */
+        repick: (...selectors) => {
+          const store = useStore.getState()
+          store.pickElement(null)
+          for (const selector of selectors) store.toggleElement({ frameId: 'f', selector })
+        },
         frames: () => useStore.getState().canvas.frames,
         picked: () => pickedSelectors(useStore.getState()),
         lockFrame: () => useStore.getState().patchFrameLocal('f', { locked: true }),

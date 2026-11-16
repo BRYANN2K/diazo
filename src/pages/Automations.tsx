@@ -167,7 +167,7 @@ export function Automations() {
                     <span className="h-px w-[22px] bg-ink-ghost" aria-hidden />
                     <MetaTile size={36} className="border border-line bg-surface" />
                     <span className="h-px w-[22px] bg-ink-ghost" aria-hidden />
-                    <span className="grid size-9 place-items-center rounded-pill border border-line bg-surface text-ink">
+                    <span className="grid size-9 place-items-center rounded-control border border-line bg-surface text-ink">
                       <GridIcon />
                     </span>
                   </>
