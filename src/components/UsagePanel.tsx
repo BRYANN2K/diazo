@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { NumberRoll } from './ui/number-roll'
 import { formatCost, formatTokens, type AgentRunRecord, type UsageReport } from '../../shared/agentRuns'
 import { api, errorMessage } from '../lib/api'
 import { timeAgo } from '../lib/time'
@@ -61,7 +62,11 @@ export function UsagePanel({ canvasId }: { canvasId: string }) {
         </Button>
       </ListSection>
       <ListItem>
-        <ListTitle>{t('usage.totalCost', { cost: formatCost(total.costUsd) })}</ListTitle>
+        {/* the total rolls its changed digits (NumberRoll, 28px) as runs land */}
+        <ListTitle>
+          <span className="sr-only">{t('usage.totalCost', { cost: formatCost(total.costUsd) })}</span>
+          <NumberRoll size="lg" value={formatCost(total.costUsd)} aria-hidden />
+        </ListTitle>
         <ListSummary>
           {t('usage.tokensInOut', { input: formatTokens(total.inputTokens), output: formatTokens(total.outputTokens) })}
           {' · '}
