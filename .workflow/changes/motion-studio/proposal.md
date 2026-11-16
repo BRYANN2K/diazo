@@ -327,7 +327,7 @@ frame, token names kept), a HyperFrames project zip.
 8. Seek-safe rewrite of the library's Motion items (14.12): agent-rewritten variants on demand, or
    one curated pass over the most used 100 first? Recommended: on demand, plus the top 100.
 9. ~~Voiceover in phase 3?~~ Decided 2026-11-16: in, on ElevenLabs (own key) or a local engine
-   (section 18). Its own questions are in 18.12.
+   (section 18). Its own questions are in 18.16.
 10. Shared components still wear the Doop brand (`ShellTitle` mark, `Avatar kind=agent`, "Doop"
     labels in `StageBoard`). Motion screens use `DiazoMark` and `DiazoAgentMark`; the shared ones
     need one brand pass.
@@ -686,10 +686,13 @@ The first pass had 7 screens and sections 1 to 13. What was missing or thin, and
 
 ## 18. Voice and transcription
 
-Research dated 2026-11-16 (sources in 18.13). Decisions by Bryan the same day: transcription and
+Research dated 2026-11-16 (sources in 18.17). Decisions by Bryan the same day: transcription and
 voice-over install in **one click**, on the person's Mac (desktop app) or on the Diazo server,
 **their choice**, with the **model of their choice**; voice-over also runs on **ElevenLabs** with
-their own key. Recorded in
+their own key. Second round, the same day: the Mac offers all three studio voices, every target
+also takes a model the person (or, on the server, an instance admin) adds, cloud transcription
+(ElevenLabs Scribe, OpenAI) and speaker labels are in v1, only instance admins install on the
+server, and we mirror Pocket TTS's weights ourselves. Recorded in
 [ADR 0014](../../../docs/adr/0014-run-speech-engines-on-the-desktop-or-the-server.md).
 
 ### 18.1 Terms
@@ -698,7 +701,10 @@ their own key. Recorded in
   sherpa-onnx, whisper.cpp, mlx-audio, Pocket TTS.
 - **Speech model:** one weights file an engine loads, with a pinned revision and a SHA-256.
 - **Target:** where an engine runs. `desktop` (the person's Mac, through the app) or `server` (the
-  Diazo instance, through the speech sidecar). ElevenLabs is a **provider**, not a target.
+  Diazo instance, through the speech sidecar), or `cloud` (ElevenLabs or OpenAI on the person's
+  own key, only when they pick it).
+- **Custom model:** a model the person, or an instance admin on the server, adds from Hugging Face
+  or a local file, for a runtime from a fixed set (18.9).
 - **Install:** one engine plus one model on one target, downloaded, verified and ready.
 
 ### 18.2 Transcription: what exists today
@@ -751,9 +757,10 @@ divided by two to three for VPS cores). The first build task measures them on th
   language, engine, model and target. Parakeet's tokens are joined into words at `▁` marks (a test
   covers French elisions such as `l'interface`). Whisper's DTW timings are approximate; a word
   whose span is implausible (under 20 ms, or overlapping the next) is snapped to the VAD boundary.
-- **Out of scope for the first version:** speaker labels (diarization needs the gated pyannote
-  model), live transcription, and translation by the ASR model (captions are translated by the
-  person's chat model, 14.9).
+- **Also in v1:** the person's own model (18.9), cloud transcription on their own key (18.7) and
+  speaker labels (18.8).
+- **Out of scope for the first version:** live transcription, and translation by the ASR model
+  (captions are translated by the person's chat model, 14.9).
 
 ### 18.4 Local voice-over: what exists today
 
@@ -783,7 +790,10 @@ F5-TTS (CC-BY-NC weights, per secondary sources only).
 
 ### 18.5 Local voice-over: the choice
 
-- **Default: VoxCPM2** (OpenBMB, 2B, Apache-2.0). It is the only candidate with all of these:
+- **The Mac offers three studio voices**, all with permissive weights and French: VoxCPM2,
+  Qwen3-TTS and Ming-3.0. The person picks one in the model menu, or adds their own (18.9).
+  VoxCPM2 is preselected until the listening test below says otherwise.
+- **Preselected: VoxCPM2** (OpenBMB, 2B, Apache-2.0). It is the only candidate with all of these:
   weights a fork may sell, native French with the best French WER we found, cloning from a short
   clip, voice design from a sentence ("a warm, low female voice, calm"), style hints, and 48 kHz
   output. On a Mac it runs through mlx-audio at RTF 0.48 in bf16 and 0.85 in 8-bit, so faster
@@ -794,8 +804,13 @@ F5-TTS (CC-BY-NC weights, per secondary sources only).
   CPU-only VPS it is slower than real time.
 - **Guard:** before the build starts, Bryan runs a blind listening test on the Mac, with one
   2-minute French script and one English script: VoxCPM2 against Qwen3-TTS 1.7B and Ming-3.0
-  0.5B. If Qwen3-TTS wins, it takes the default slot: same licence class, more CPU ports.
-- **Fallback, and the server default: Kyutai Pocket TTS** (100M, CC-BY-4.0). French and cloning,
+  0.5B. The winner is preselected; the other two stay in the menu.
+- **Qwen3-TTS 1.7B** (Apache-2.0): French among 10 languages, cloning from 3 s plus its
+  transcript, instructions for style. More CPU ports than VoxCPM2.
+- **Ming-3.0-tts 0.5B** (MIT): the best-ranked open model with permissive weights (Elo 1183),
+  with emotion, speed, pitch and voice design. Its authors call French its clearest gap, and its
+  official runtime is CUDA, so the Mac path rests on mlx-audio.
+- **Fast voice, and the server default: Kyutai Pocket TTS** (100M, CC-BY-4.0). French and cloning,
   any text length, about 6x real time on two cores of an M4, and an official Rust binary. It is
   less expressive than the 2B models, and it is the one that sounds good on a CPU-only VPS.
 - **Not the default, and why:** Fish, Breeze, Higgs, Voxtral TTS and XTTS have non-commercial or
@@ -803,11 +818,28 @@ F5-TTS (CC-BY-NC weights, per secondary sources only).
   watermarks every file. Kokoro has one weak French voice, so it stays as an English-only quick
   preview. IndexTTS has no French. Piper sounds robotic next to the rest.
 
-| Menu label                  | Engine, model            | Desktop (Mac)         | Server (8 CPU cores)               |
-| --------------------------- | ------------------------ | --------------------- | ---------------------------------- |
-| Studio voice (default)      | mlx-audio, VoxCPM2 8-bit | Faster than real time | Not offered on CPU in v1 (18.12)   |
-| Fast voice (server default) | Pocket TTS (Rust)        | About 6x real time    | Faster than real time (to measure) |
-| Quick preview, English only | Kokoro 82M               | Instant               | About 5x real time                 |
+Desktop menu (Mac, Apple silicon):
+
+| Menu label                    | Engine, model                | Speed on the Mac                 |
+| ----------------------------- | ---------------------------- | -------------------------------- |
+| Studio: VoxCPM2 (preselected) | mlx-audio, VoxCPM2 8-bit     | Faster than real time (RTF 0.85) |
+| Studio: Qwen3-TTS             | mlx-audio, Qwen3-TTS 1.7B    | To measure                       |
+| Studio: Ming-3.0              | mlx-audio, Ming-3.0-tts 0.5B | To measure                       |
+| Fast voice                    | Pocket TTS (Rust)            | About 6x real time               |
+| Quick preview, English only   | Kokoro 82M                   | Instant                          |
+| Your own model                | 18.9                         | Smoke-tested before use          |
+
+Server menu (8 CPU cores, no GPU), the curated list an instance admin installs from:
+
+| Menu label                  | Engine, model                        | Expected on the VPS                                                             |
+| --------------------------- | ------------------------------------ | ------------------------------------------------------------------------------- |
+| Fast voice (default)        | Pocket TTS (Rust), mirrored (18.15)  | Faster than real time (to measure)                                              |
+| Studio on CPU (slow)        | Qwen3-TTS 0.6B int8 (GGUF, C++ port) | Slower than real time: about 3x RTF on 4 vCPU by a third party; to measure on 8 |
+| Quick preview, English only | Kokoro 82M (sherpa-onnx)             | About 5x real time                                                              |
+| An admin's own model        | 18.9                                 | Smoke-tested before use                                                         |
+
+VoxCPM2 and Ming-3.0 are not on the server list: their CPU paths are PyTorch only or missing. An
+admin may still add one as their own model (18.9), and its smoke test marks it slow.
 
 - **Long form:** the text is cut into sentences, each generated with the previous one as context
   where the engine takes it, then joined with 30 ms crossfades. Each sentence keeps its take, so
@@ -844,10 +876,97 @@ English only and not offered.
 - **Cost:** before a run, the panel shows the character count times the model's price, and the
   run lands in the usage meter (`shared/modelPrices.ts` gains the ElevenLabs rows). Prices are
   dated in that file, and the panel says "as of" that date.
-- **Not in the first version:** ElevenLabs Scribe (`scribe_v3`) for transcription. It would be
-  the one cloud transcription route; see 18.12.
+- **The same key transcribes:** ElevenLabs Scribe runs on this connection (18.7).
 
-### 18.7 One-click install, on the desktop
+### 18.7 Cloud transcription on the person's key
+
+For people who want speed, a language Parakeet lacks, or have neither the app nor a server
+install. Both routes are opt-in, per job or by preference, and the panel says the audio leaves the
+instance.
+
+| Route                               | Connection                  | Model            | Word timings                           | Speakers                                 | Limits            | Price (2026-11-16)                     |
+| ----------------------------------- | --------------------------- | ---------------- | -------------------------------------- | ---------------------------------------- | ----------------- | -------------------------------------- |
+| **ElevenLabs Scribe** (recommended) | `elevenlabs-key`            | `scribe_v3`      | Yes (`timestamps_granularity: word`)   | Yes (`diarize`, `num_speakers` up to 32) | Files under 5 GB  | $0.20 an hour of audio                 |
+| OpenAI, words                       | `openai-key` (API key only) | `whisper-1`      | Yes (`timestamp_granularities[]=word`) | No                                       | 25 MB per request | Read from OpenAI's price list at build |
+| OpenAI, text only                   | `openai-key` (API key only) | `gpt-transcribe` | No                                     | No                                       | 25 MB per request | Read from OpenAI's price list at build |
+
+- **OpenAI's catch:** its recommended `gpt-transcribe` returns text and languages only. Word
+  timings come only from `whisper-1`, and speakers only from `gpt-4o-transcribe-diarize`; both are
+  deprecated and shut down on 2027-02-26. So v1 offers `whisper-1`, labelled with that date, and
+  `gpt-transcribe` as "text only, no cuts by word". When `whisper-1` is gone, an OpenAI text is
+  aligned to the audio by the installed local model where there is one (18.16).
+- **Size:** Diazo sends mono 16 kHz Opus. Past 25 MB (about an hour), an OpenAI request is cut at
+  silences with a one-second overlap, and the parts are joined by time.
+- **Cost:** the duration times the route's price is shown before the run, and the run lands in the
+  usage meter (`shared/modelPrices.ts` gains the rows, dated).
+- **Results:** the same word list as a local transcript, with `target: 'cloud'` and the provider.
+
+### 18.8 Speaker labels
+
+- **Cloud:** Scribe labels speakers itself (`diarize: true`, an optional speaker count). Each word
+  arrives with its `speaker_id`.
+- **Local, the default on both targets:** sherpa-onnx's speaker diarization. It pairs pyannote's
+  segmentation-3.0 model (MIT; sherpa-onnx publishes the ONNX conversion in its
+  `speaker-segmentation-models` release, with no gate and no token, about 7 MB) with a 3D-Speaker
+  CAM++ embedding (about 30 MB, from its `speaker-recongition-models` release, licence confirmed
+  at build) and clusters the result. It runs on the CPU in the same engine as Parakeet, with no
+  Python. Each word takes the speaker of the segment it overlaps most.
+- **Better quality, with the person's own token:** pyannote's `speaker-diarization-community-1`
+  (CC-BY-4.0, gated behind accepting its terms) is offered as an add-your-own model (18.9) with
+  the `pyannote` runtime. The person (or an admin, on the server) pastes their own Hugging Face
+  token once; it is sealed, used only to download, and never shown back. Diazo does not mirror it,
+  since its gate asks each user to accept the terms.
+- **Excluded:** sherpa-onnx's Rev diarization models (non-commercial).
+- **Editing:** speakers are listed as `S1`, `S2` and so on, and renamed once per media ("Bryan",
+  "Guest"). A word's speaker can be corrected, which splits the turn. Captions may show the name.
+- **Off by default** for a single voice; the panel offers it when the clip has more than one.
+
+### 18.9 Add your own model
+
+One contract for every target and both kinds. A person adds one on their Mac; on the server, only
+instance admins do (18.11).
+
+- **Source**, one of:
+  - a Hugging Face repository id (`owner/name`) and a revision. The revision is resolved to a
+    commit hash when the model is added, and every later download uses that commit. A gated
+    repository takes the person's own token (sealed, download only).
+  - on the desktop only, files picked in the native file panel (`speech_choose_files`). The page
+    never sends a path; the shell copies the files into its own folder.
+- **Runtime**, from a fixed set; anything else is refused:
+
+| Runtime       | Kind               | Targets         | What it loads                                                                                                                 |
+| ------------- | ------------------ | --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `sherpa-onnx` | ASR, TTS, speakers | Desktop, server | ONNX: transducer, CTC, Whisper and Parakeet for ASR; VITS, Matcha and Kokoro for TTS; segmentation and embedding for speakers |
+| `whisper.cpp` | ASR                | Desktop, server | ggml or GGUF Whisper weights                                                                                                  |
+| `mlx-audio`   | TTS, ASR           | Desktop only    | A model type mlx-audio lists (VoxCPM2, Qwen3-TTS, Ming, Kokoro, Parakeet and others)                                          |
+| `pocket-tts`  | TTS                | Desktop, server | Pocket TTS-format weights, such as fine-tunes                                                                                 |
+| `pyannote`    | Speakers           | Desktop, server | pyannote pipelines, in a private Python environment                                                                           |
+
+A llama.cpp-style GGUF runtime for TTS is not in v1: each GGUF TTS port ships its own binary,
+and there is no common one to pin. It joins the set once one settles.
+
+- **Files:** safetensors, ONNX, ggml or GGUF only. Pickle files (`.bin`, `.pt`, `.ckpt`) are
+  refused, and no runtime runs with remote code enabled.
+- **Checks:** the SHA-256 of every file comes from Hugging Face's file metadata at the pinned
+  commit (or is computed when a local file is picked), and is checked again after the download.
+  The size is shown before anything downloads, and refused past a cap: free disk minus 5 GB on the
+  desktop; 15 GB a model, and the volume's free space, on the server.
+- **Licence:** the dialog shows the licence the repository declares (an SPDX id, or the text of a
+  custom one), and the person ticks "I have read the licence and my use complies". A licence that
+  is non-commercial, research-only or unknown gets a warning line. Diazo checks no licence; it
+  records the acknowledgement (who, when, which licence text).
+- **Smoke test** before the model is enabled. It stays disabled, with the log, until one passes:
+  - ASR: a bundled 8-second clip (French, then English) must come back as at least five words with
+    timings inside the clip, under 50% WER.
+  - TTS: a fixed sentence must come back as 1 to 20 seconds of audio that is not silence, and the
+    installed ASR model, when there is one, must hear at least half its words.
+  - Speakers: a bundled two-voice clip must come back with two speakers.
+  - Every test records how long it took, so the menu can mark the model slow.
+- **In the menus:** a "Custom" badge, the licence and the measured speed. Agents may use it by its
+  model id like any other. Uninstall works as for the curated models. There are no updates, since
+  the commit is pinned: a new revision is a new model.
+
+### 18.10 One-click install, on the desktop
 
 - **Where:** `~/Library/Application Support/design.doop.desktop/speech/`, holding
   `engines/<engine>/<version>/`, `models/<model id>/<revision>/` and `speech.json` (what is
@@ -855,7 +974,9 @@ English only and not offered.
 - **What the page can ask:** `speech_status`, `speech_install(modelId)`,
   `speech_uninstall(modelId)` and `speech_cancel(jobId)` (`desktop/src-tauri/src/speech.rs`,
   advertised as `__DIAZO_SPEECH__`). A model id names an entry of the catalog compiled into the
-  shell; the page never sends a URL, a path or an argument.
+  shell, or a custom model the person added (18.9), which carries only a Hugging Face repository
+  id and a commit hash, both checked for shape, and downloads only from `huggingface.co`. The page
+  never sends a URL, a path or an argument.
 - **Download:** engine binaries come from Diazo's own `speech-engines-v*` release, built in CI from
   pinned upstream tags (sherpa-onnx, whisper.cpp with Metal, Pocket TTS) and signed with the
   updater's minisign key. Python engines (mlx-audio) are installed by a pinned `uv` binary into a
@@ -879,7 +1000,7 @@ English only and not offered.
 - **Updates:** a catalog entry with a newer revision shows "Update" on its row. The new files
   install beside the old ones, which go only once the new model has warmed up.
 
-### 18.8 One-click install, on the server
+### 18.11 One-click install, on the server
 
 - **A sidecar, not the app process:** a `diazo-speech` service runs the engines, so a transcript
   can never starve or kill the canvas. In k3s it is a Deployment in the `doop` namespace with a
@@ -892,25 +1013,29 @@ English only and not offered.
   idle minutes.
 - **Models:** a `speech-models` volume (a 20 Gi PVC) is mounted at `/models`. The image carries
   the engine binaries (the same `speech-engines-v*` builds), never the weights.
-- **One click:** Admin, Speech (instance admins only, since the cores are shared) lists the
-  catalog. Install calls `POST /api/speech/server/installs/:modelId`; the app asks the sidecar to
+- **Only instance admins** install, uninstall, update or add their own model on the server
+  (decided by Bryan, 2026-11-16): the cores and the volume are shared by everyone on the
+  instance. Everyone else uses the models the admins installed, or installs on their own Mac.
+- **One click:** Admin, Speech lists the curated catalog and the admins' own models. Install calls `POST /api/speech/server/installs/:modelId`; the app asks the sidecar to
   download, verify and warm up, and progress reaches the page as `speech:progress`. Uninstall and
   Update work as on the desktop.
 - **Sidecar API** (internal only): `GET /v1/installs`, `POST /v1/installs`,
   `DELETE /v1/installs/:id`, `POST /v1/transcribe`, `POST /v1/speak`, `GET /healthz`.
 
-### 18.9 Which target runs a job
+### 18.12 Which target runs a job
 
 - Each person has `speech_preferences`: a target for transcription and one for voice-over
-  (`auto`, `desktop`, `server`), a model, a voice provider (`local` or `elevenlabs`), a voice and
-  a language.
+  (`auto`, `desktop`, `server`, `cloud`), a model, a cloud provider for transcription
+  (`elevenlabs` or `openai`), a voice provider (`local` or `elevenlabs`), a voice, a language, and
+  whether to label speakers.
 - `auto` means the desktop when this person's app is online and has the model, else the server
   when it has the model, else the panel offers to install (on the desktop first when the person is
-  in the app). An agent's call follows the same rule for the person it acts for.
+  in the app). `auto` never picks `cloud`: sending audio out is always the person's explicit
+  choice. An agent's call follows the same rule for the person it acts for.
 - The editor shows where a job runs ("On your Mac", "On the Diazo server", "ElevenLabs, about
   $0.12"), and the person can switch it per job.
 
-### 18.10 Data model, API and tools
+### 18.13 Data model, API and tools
 
 - `speech_installs` (server target only): model id, engine, revision, state (`downloading`,
   `verifying`, `ready`, `failed`), bytes, installed by, installed at, last used. Desktop installs
@@ -918,59 +1043,94 @@ English only and not offered.
   device.
 - `speech_jobs`: id, kind (`transcribe`, `speak`), target, device, model, input asset, state,
   progress, output (words, or an audio asset with its words), requested by, error, timestamps.
-- `speech_preferences`: one row per person (18.9).
+- `speech_preferences`: one row per person (18.12).
+- `speech_custom_models`: an added model (18.9): owner (a person, or the instance for the server),
+  target, kind, runtime, source (repository and commit, or `local`), files with size and SHA-256,
+  licence id and text, acknowledged by and at, sealed Hugging Face token, smoke test result and
+  timing, enabled. Desktop custom models also live in the shell's `speech.json`; the row keeps
+  what the server needs to route a job.
 - `voices`: a cloned voice per person: name, sample asset, sample transcript, consent time, and
   the engines it works with. Samples are private assets of their owner.
 - The media row (`scene_media`, renamed after the branch's tables when built) gains
-  `transcript = { language, words[], engine, model, target, jobId }`. A voice-over layer keeps
+  `transcript = { language, words[], speakers, engine, model, target, provider, jobId }`, where a
+  word is `{ text, start, end, confidence, speaker? }` and `speakers` maps `S1` to a name. A voice-over layer keeps
   `generation = { provider, model, voice, text, style, cost }` (14.11).
 - REST: `GET /api/speech/catalog` (models, and installs per target),
-  `POST`/`DELETE /api/speech/server/installs/:modelId`, `POST /api/speech/jobs`,
+  `POST`/`DELETE /api/speech/server/installs/:modelId` (admins),
+  `POST /api/speech/custom-models` (resolve, then add; admins for the server),
+  `POST /api/speech/custom-models/:id/test`, `DELETE /api/speech/custom-models/:id`,
+  `PUT /api/speech/media/:mediaId/speakers`, `POST /api/speech/jobs`,
   `GET /api/speech/jobs/:id`, `GET`/`PUT /api/speech/preferences`, `GET`/`POST`/`DELETE
 /api/voices`, `GET /api/model-account/voices?kind=elevenlabs-key`, and the desktop relay
   `/api/speech/desktop/poll` and `/api/speech/desktop/finish/:id`.
 - Room messages: `speech:progress`, `media:transcribed`.
 - MCP and resident agent, same names:
   - `list_speech_engines`: what is installed, and where.
-  - `transcribe_clip { canvas_id, media_id, language?, target?, model? }`: waits up to 60 s, else
-    returns the job to poll with `get_transcript`.
+  - `transcribe_clip { canvas_id, media_id, language?, target?, model?, provider?, speakers? }`:
+    waits up to 60 s, else returns the job to poll with `get_transcript`. `target: 'cloud'` runs
+    only when the person's preference allows the cloud; otherwise it is refused with the reason.
+  - `set_speakers { canvas_id, media_id, names }`: renames speakers.
   - `get_transcript`, `list_voices`.
   - `generate_voiceover { canvas_id, page_id, text, provider?, voice?, model?, language?, style?, at? }`:
     adds an audio layer at `at` seconds, with its words.
-  - An agent can neither install nor uninstall.
+  - An agent can neither install, uninstall nor add a model.
 - Env: `DOOP_SPEECH_URL`, `DOOP_SPEECH_TOKEN`; `DOOP_SPEECH=false` turns every target off, and
   `DOOP_ELEVENLABS=false` hides the connection.
 
-### 18.11 Privacy and licences
+### 18.14 Privacy and licences
 
 - **Local stays local:** a desktop job sends nothing to a third party. The audio already lives on
   the person's Diazo server, and only the words or the generated audio go back to it. A server
-  job stays on the instance. Only ElevenLabs, picked by name, receives anything, and only text:
-  never audio or a sample.
+  job stays on the instance. Only a cloud provider the person picks by name receives anything:
+  ElevenLabs gets the script for a voice-over, and ElevenLabs or OpenAI get the audio for a cloud
+  transcript, each time with a line saying so. A voice sample never leaves the instance.
 - **Cloning needs consent:** a voice is cloned only from a sample the person uploads with a
   checkbox saying it is their voice or that they have the speaker's permission. The sample is
   never shared, copied with a canvas or sent to a provider.
-- **Attribution:** Parakeet v3 and Pocket TTS (CC-BY-4.0), VoxCPM2 (Apache-2.0) and the engines
-  are listed in `THIRD-PARTY-LICENSES` and in Settings, About. Weights are downloaded at install
+- **Attribution:** Parakeet v3, Pocket TTS and the speaker models (CC-BY-4.0, MIT), VoxCPM2 and
+  Qwen3-TTS (Apache-2.0), Ming-3.0 (MIT) and the engines are listed in `THIRD-PARTY-LICENSES` and in Settings, About. Weights are downloaded at install
   and never committed to the repository.
 - **A generated voice says so:** the voice-over layer and the export's metadata mark it as
   synthetic, as VoxCPM2's card asks.
 
-### 18.12 Open questions
+### 18.15 Mirrored weights: Pocket TTS
 
-1. Pocket TTS sits in a gated Hugging Face repository. Mirror it in our own release (CC-BY-4.0
-   allows it, once the gate's terms are read), or ask for a Hugging Face token once? Recommended:
-   mirror, after reading the terms.
-2. VoxCPM2 on the CPU-only VPS is slower than real time. Offer it there marked "slow", or keep the
-   server on Pocket TTS? Recommended: Pocket TTS only in v1.
-3. A cloud transcription route (ElevenLabs Scribe, or the person's OpenAI account) for people with
-   neither the app nor a server install: add it, off by default, or leave it out? Recommended:
-   leave it out of v1.
-4. Speaker labels: out of v1, or worth the gated pyannote model? Recommended: out.
-5. Server installs by instance admins only, or by anyone? Recommended: admins only.
-6. The listening test (18.5) decides the Studio voice: VoxCPM2, Qwen3-TTS or Ming-3.0.
+Decided by Bryan, 2026-11-16: we mirror Pocket TTS's weights, so the one click needs no Hugging
+Face account.
 
-### 18.13 Sources (all read 2026-11-16)
+- **What the gate asks** (read 2026-11-16): users share their Hugging Face details, comply with
+  the law, never clone or impersonate a voice without explicit and lawful consent, and never
+  present generated audio as a genuine recording of real people or events. The licence is
+  CC-BY-4.0, which allows redistribution with attribution. The gate's conditions are terms of use,
+  and Diazo passes them on: the install dialog shows them, and the consent rule and the synthetic
+  mark (18.14) already meet them.
+- **Where: a GitHub release asset,** `speech-models-v<n>` on `BRYANN2K/diazo`, beside
+  `speech-engines-v*`: the files at the pinned upstream commit, unchanged, a `SHA256SUMS` signed
+  with the updater's minisign key, and the attribution file. The catalog points at the release, and
+  the installer checks the signature, then each hash. Anonymous, no token, the same download path
+  as the engines, and far under the 2 GB asset limit.
+- **Rejected: a GHCR OCI artifact** (`oras push`). Anonymous pulls work for a public package, but
+  it adds an OCI client to the shell and the sidecar for a 100M model.
+- **Attribution** (`ATTRIBUTION.md` in the release and beside the weights on every target, in
+  `THIRD-PARTY-LICENSES` and in Settings, About): "Pocket TTS" by Manu Orsini, Simon Rouard,
+  Gabriel De Marmiesse, Václav Volhejn, Neil Zeghidour and Alexandre Défossez (Kyutai), the paper
+  (arXiv:2509.06926), the source `https://huggingface.co/kyutai/pocket-tts` at the pinned commit,
+  the licence (CC-BY-4.0, linked), "not modified", and the gate's conditions of use.
+- **Updates:** a new upstream commit is read, mirrored as a new release by hand, and the catalog
+  revision is bumped in the same pull request.
+
+### 18.16 Open questions
+
+1. When OpenAI shuts `whisper-1` down (2027-02-26), keep OpenAI as a text-only route aligned by
+   the local model, or drop it? Recommended: keep it text-only, aligned where a local model exists.
+2. The listening test (18.5) decides which studio voice is preselected: VoxCPM2, Qwen3-TTS or
+   Ming-3.0. All three stay in the menu.
+3. The 3D-Speaker CAM++ embedding's licence is confirmed at build; if it is not permissive, a
+   WeSpeaker or NeMo embedding from the same release takes its place.
+4. OpenAI's transcription prices were not on the pricing page we read; they are read again, and
+   dated, when the route is built.
+
+### 18.17 Sources (all read 2026-11-16)
 
 - Open ASR Leaderboard: https://huggingface.co/spaces/hf-audio/open_asr_leaderboard
 - Parakeet TDT 0.6B v3: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
@@ -1000,6 +1160,11 @@ English only and not offered.
 - IndexTTS: https://github.com/index-tts/index-tts; Piper: https://github.com/OHF-Voice/piper1-gpl;
   VibeVoice: https://github.com/microsoft/VibeVoice
 - mlx-audio: https://github.com/Blaizzy/mlx-audio
+- Qwen3-TTS on CPU: https://ocdevel.com/blog/20260711-quantized-cpu-tts
+- sherpa-onnx speaker diarization: https://k2-fsa.github.io/sherpa/onnx/speaker-diarization/index.html
+  and https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models
+- ElevenLabs Scribe: https://elevenlabs.io/docs/api-reference/speech-to-text/convert
+- OpenAI speech to text: https://developers.openai.com/api/docs/guides/speech-to-text
 - ElevenLabs: https://elevenlabs.io/docs/overview/models, https://elevenlabs.io/pricing/api,
   https://elevenlabs.io/docs/api-reference/text-to-speech/convert-with-timestamps,
   https://elevenlabs.io/docs/api-reference/voices/search
