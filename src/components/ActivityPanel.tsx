@@ -462,7 +462,8 @@ function ActivityList() {
       {activity.length === 0 && <div className={emptyNote}>{t('panels.activityEmpty')}</div>}
       {activity.map((a) => (
         <div key={a.id} className="flex animate-[chip-in_0.25s_ease] gap-2.5 px-3.5 py-2 text-[12px] leading-[1.45]">
-          <Dot className="mt-[5px]" style={{ background: a.actorColor }} />
+          {/* anything an agent does wears the agent orange, people their own colour */}
+          <Dot className="mt-[5px]" style={{ background: a.actorKind === 'agent' ? 'var(--agent)' : a.actorColor }} />
           <div className="min-w-0">
             <div>
               <span className="font-medium">
