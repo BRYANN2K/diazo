@@ -3999,7 +3999,16 @@ export function buildMcpServer(
       if (!updated.ok) return err(updated.error)
       const frame = updated.value
       return withPreview(
-        withFeedback(text({ ok: true, frame: frameRef(frame) }), frame.canvasId, actorFrom(agent_name)),
+        withFeedback(
+          text({
+            ok: true,
+            /* the one answer the caller cannot predict: the stored rotation is
+               normalized server-side, so the lean pointer echoes it back */
+            frame: { ...frameRef(frame), ...(frame.rotation !== undefined ? { rotation: frame.rotation } : {}) },
+          }),
+          frame.canvasId,
+          actorFrom(agent_name),
+        ),
         frame.canvasId,
         [frame],
       )
