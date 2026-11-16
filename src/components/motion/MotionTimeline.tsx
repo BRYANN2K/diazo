@@ -207,7 +207,7 @@ export function MotionTimeline({
       aria-label={t('motion.timelineAria')}
       data-slot="motion-timeline"
       className={cn(
-        'pointer-events-auto absolute z-[45] flex h-[232px] flex-col overflow-hidden rounded-panel bg-paper text-label text-ink shadow-panel animate-enter',
+        '@container pointer-events-auto absolute z-[45] flex h-[232px] flex-col overflow-hidden rounded-panel bg-paper text-label text-ink shadow-panel animate-enter',
         className,
       )}
       style={style}
@@ -230,7 +230,7 @@ export function MotionTimeline({
           {timecode(time, comp?.fps ?? NEW_COMPOSITION.fps)}
         </span>
         {comp && (
-          <span className="font-mono text-caption text-ink-3">
+          <span className="font-mono text-caption text-ink-3 @max-[820px]:hidden">
             {t('motion.length', {
               duration: comp.duration,
               fps: comp.fps,
@@ -240,7 +240,7 @@ export function MotionTimeline({
           </span>
         )}
         <span aria-hidden className="h-[18px] w-px flex-none bg-line" />
-        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
           {comp && (
             <Button size="sm" title={t('motion.addKeyTitle')} onClick={keyCameraHere}>
               {t('motion.addKey')}
