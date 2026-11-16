@@ -60,6 +60,7 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 - Presence: no ghost presences on overlapping joins, and a leave is broadcast when a connection switches canvas.
 - `edit_frame_html` inserts its replacement text literally.
 - Settings → Diazo Agent: Connect on a Devin or Grok desktop agent did nothing — the shell refused the agent commands, and the row hid the error. Connect now shows progress and any error under the row.
+- An unsent Agents-tab composer draft survives a reload or an app relaunch: the text is parked per account and canvas in the browser, removed on sign-out, and pruned past 30 days or 50 canvases.
 
 ### Security
 

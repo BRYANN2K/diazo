@@ -27,6 +27,7 @@ import {
 } from './ui/dropdown-menu'
 import { DesktopIcon, ExportIcon, GearIcon, HelpIcon, LogOutIcon, ShieldIcon } from './ui/icons'
 import { DOWNLOAD_URL, WEBSITE_URL } from '../lib/siteLinks'
+import { purgeComposerDrafts } from '../lib/composerDrafts'
 
 /** The account menu the signed-in shell repeats on every page: in the rail
  *  and in the settings header. It lives here so they cannot drift apart. */
@@ -152,6 +153,8 @@ export function AccountMenu({
           onSelect={() =>
             authClient.signOut().then(() => {
               posthog.reset()
+              /* an unsent prompt is not for whoever signs in next */
+              purgeComposerDrafts()
               /* the shell has no marketing site: a signed-out reload of /
                  would show the landing page, so it goes to the sign-in form
                  the shell opens on (main.rs) */

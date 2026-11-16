@@ -9,6 +9,7 @@ import { Field } from './ui/field'
 import { Note } from './ui/note'
 import { Modal, ModalActions, ModalLede, ModalTitle } from './ui/modal'
 import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from './ui/card'
+import { purgeComposerDrafts } from '../lib/composerDrafts'
 
 /** Whether this account can prove itself with a password: one that only ever
  *  signed in through Google / Microsoft / Apple / SSO has none, and better-auth
@@ -24,6 +25,7 @@ async function accountHasPassword(): Promise<boolean> {
  *  page the way logging out does (the desktop shell opens on /auth). */
 function leaveDeletedAccount() {
   posthog.reset()
+  purgeComposerDrafts()
   location.assign(isDesktopShell() ? '/auth' : '/')
 }
 
