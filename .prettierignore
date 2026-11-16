@@ -20,3 +20,8 @@ storybook-static/
 
 # agent worktrees (git worktrees under the repo)
 .claude/
+
+# Stip domain extensions are vendored and bound to change approvals by digest
+.workflow/extensions/
+# Stip state files are written by its engine
+.workflow/**/state.json

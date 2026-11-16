@@ -8,4 +8,4 @@ folder is only the listing: `plugin.json` (identity, listing copy, review test c
 Build the ZIP with `node scripts/build-chatgpt-plugin.mjs` (writes `chatgpt-plugin/dist/doop.zip`,
 gitignored). Before uploading, replace `review.demo_recording_url` with a reviewer-accessible video.
 Reviewer test credentials are entered in the dashboard (Metadata & Skills → Review information),
-never in this package. Process and field limits: `.context/specs/chatgpt-app.md`.
+never in this package. Process and field limits: `.workflow/specs/chatgpt-app.md`.

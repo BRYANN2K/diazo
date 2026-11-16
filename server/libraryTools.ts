@@ -3,7 +3,7 @@
  * the resident agent (server/resident.ts): one schema and one handler each,
  * under the same names, so the two cannot drift. A library the account
  * cannot read answers exactly like one that does not exist.
- * Spec: .context/specs/design-libraries.md, "Agent tools".
+ * Spec: .workflow/specs/design-libraries.md, "Agent tools".
  */
 import { z } from 'zod'
 import type { Actor, Canvas } from '../shared/types.ts'

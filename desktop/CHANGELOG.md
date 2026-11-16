@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.0 (diazo)
+
+### Features
+
+* **desktop:** a Local Server submenu in the app menu (macOS) for the server `scripts/install.sh` sets up on this Mac: its status and address, Start, Stop and Restart (each confirmed), Open Logs, Use This Mac’s Server and Use Another Server…; the page can read the status (`local_server_status`, `__DIAZO_LOCAL_SERVER__`)
+* **desktop:** the first launch still brings the doop-era sign-in over when the installer has already written the server choice
+
 ## 0.14.0 (redoop)
 
 ### Features

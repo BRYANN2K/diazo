@@ -2,7 +2,7 @@
  * The import pipeline, planned: what a library's rules do to frames
  * entering it, stage by stage, as a report a dry run returns and an apply
  * carries out. Pure over its arguments: no store, no database.
- * Spec: .context/specs/design-libraries.md, "Import rules".
+ * Spec: .workflow/specs/design-libraries.md, "Import rules".
  */
 import type { ImportFrameReport, ImportReport, LibraryTaxonomy, RuleFinding } from '../shared/library.ts'
 import type { DesignToken } from '../shared/designTokens.ts'

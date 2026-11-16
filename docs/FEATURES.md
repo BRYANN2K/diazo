@@ -1,8 +1,10 @@
 # Diazo features
 
 What this fork adds on top of [kgoedecke/doop](https://github.com/kgoedecke/doop), and the
-upstream pull requests it merged ahead of upstream. Resync notes and the deploy recipe are in
-[FORK.md](../FORK.md). Screenshots of most of these are in the [README](../README.md#what-it-does).
+upstream pull requests it merged ahead of upstream. Resync notes are in
+[runbooks/upstream-resync.md](runbooks/upstream-resync.md) and the deploy recipe in
+[runbooks/k3s-deploy.md](runbooks/k3s-deploy.md). The README sums them up in
+[What it does today](../README.md#what-it-does-today).
 
 ## Features added in this fork
 
@@ -12,7 +14,7 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   `@diazo` mentions (`@doop` still routes), the desktop app `Diazo.app` (`dev.bryann2k.diazo`,
   data copied over from the doop shell on first launch) and the install scripts. Internal
   identifiers (`data-doop-*`, `DOOP_*`, tables, MCP tool names) are unchanged
-  ([DESIGN.md, Marks](../.context/DESIGN.md#marks-diazo)).
+  ([DESIGN.md, Marks](DESIGN.md#marks-diazo)).
 
 - **⌘F across every page** — a palette: This canvas (this page or all pages), Library or All as
   one segmented control, results in sections (canvas matches, then library items with their
@@ -54,7 +56,8 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   one). ⌘F everywhere answers libraries from their index, without loading them. Search knows common
   UI synonyms ("login" finds "sign in") and ranks what is used most first. A library can let a
   model describe and tag its thin items (off by default, 200 a day, suggestions wait in the inbox).
-  `scripts/pull-library.ts` copies a library from another doop or Diazo instance (see FORK.md).
+  `scripts/pull-library.ts` copies a library from another doop or Diazo instance
+  ([runbooks/design-library-migration.md](runbooks/design-library-migration.md)).
   The category tree the convert wizard proposes drops page numbers ("16 "), alphabetical splits
   ("· A–L") and continuations, and folds the categories that then collide.
 - **Organise a library with AI** — Libraries → Organise with AI (also offered by the convert
@@ -131,6 +134,14 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   its designed frame (matched by route mapping or name), scored as a drift comparison, and
   rewritten in place on the next delivery. Payload and CI recipe in
   [docs/built-page.md](built-page.md).
+- **All-in-one Mac install** — `scripts/install.sh` (`curl … | sh`) sets up the local server
+  (through `install-local.sh`), a LaunchAgent that starts it at login (logs in
+  `~/Library/Logs/Diazo`), `Diazo.app` (through `install-desktop.sh`) pointed at
+  `http://127.0.0.1:4400`, and the `diazo` command (start, stop, restart, status, logs, update,
+  open, uninstall); `--app-only`, `--server-only`, `--use-local`, `--dry-run`. The app's
+  Diazo → Local Server menu (macOS, desktop 0.16) shows the server's status and starts, stops or
+  restarts it, opens its logs and switches the app to it; Settings → About shows the same status
+  ([Install](../README.md#install)).
 - **Local install on a Mac** — one `curl … | sh` runs Diazo in a single Apple `container` on
   `127.0.0.1:4400`, with PGlite and uploads in `~/.diazo/data` (an older `~/.doop` is kept in
   place) and secrets generated on the Mac ([Install](../README.md#install)).
@@ -207,7 +218,7 @@ compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per bu
   controls, number roll, agent thinking line), the floating editor shell (title and presence in
   one island, Import / Export / Motion / Play / Share in another, Connect AI in the agent panel),
   the orange beam round a frame an agent is writing, the new composer and the dotted home hero
-  ([DESIGN.md](../.context/DESIGN.md)).
+  ([DESIGN.md](DESIGN.md)).
 - **Motion Studio (timeline UI)** — the bar's Motion button opens a timeline under the stage for
   the page: transport and timecode, a ruler, the camera lane with its keys, the shots between them
   and any element lanes, one playhead to scrub. Playing or scrubbing moves the editor's own view

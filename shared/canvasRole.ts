@@ -1,5 +1,5 @@
 /* Share-link roles, shared by the server's access gate and the editor's
-   read-only mode. Spec: .context/specs/share-link-roles.md */
+   read-only mode. Spec: .workflow/specs/share-link-roles.md */
 
 /** What a canvas's share link grants people who are not its owner, an
  *  invited member or a member of its workspace. */

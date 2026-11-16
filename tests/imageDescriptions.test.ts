@@ -25,7 +25,7 @@ import { store } from '../server/store.ts'
 import type { AgentTurnRequest } from '../server/agentModel.ts'
 
 /**
- * Image descriptions (.context/specs/image-descriptions.md): a stored image
+ * Image descriptions (.workflow/specs/image-descriptions.md): a stored image
  * is an event, the owner's preference and account pick the describer, and
  * the worker writes one paragraph per asset — once, with retries bounded,
  * within a day's budget, and over the backlog an earlier process left.

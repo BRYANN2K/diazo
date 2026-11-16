@@ -8,7 +8,7 @@ import type { Actor, Canvas, CanvasPageInfo } from '../shared/types.ts'
  * The prototype tools every agent gets, whether it connects over MCP
  * (server/mcp.ts) or runs in the server (server/resident.ts): one reading of
  * the wiring and one way to move a page's flow start, so the two surfaces
- * cannot drift apart. Spec: .context/specs/prototyping.md.
+ * cannot drift apart. Spec: .workflow/specs/prototyping.md.
  */
 
 export function prototypeUrl(canvasId: string): string {

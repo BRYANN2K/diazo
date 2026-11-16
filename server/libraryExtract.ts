@@ -3,7 +3,7 @@
  * items it holds out (a family and its variants, or one whole-frame item).
  * No browser and no store: pure over its arguments. A scripted sheet only
  * yields its family here; its variants come from the rendered pass.
- * Spec: .context/specs/design-libraries.md, "How frames map to items".
+ * Spec: .workflow/specs/design-libraries.md, "How frames map to items".
  */
 import { createHash } from 'node:crypto'
 import type { LibraryItem, LibraryTaxonomy, RuleFinding } from '../shared/library.ts'

@@ -1,7 +1,7 @@
 /**
  * Library imports: what the library's rules do to frames entering it, and
  * moving curation between libraries. Planning is pure; applying writes.
- * Spec: .context/specs/design-libraries.md, "Import rules" and "Migration".
+ * Spec: .workflow/specs/design-libraries.md, "Import rules" and "Migration".
  */
 import type { Actor, Canvas } from '../shared/types.ts'
 import type { LibraryItem, LibraryItemMeta } from '../shared/library.ts'
