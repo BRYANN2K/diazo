@@ -2,11 +2,13 @@
   "schema_version": 1,
   "id": "composer-draft",
   "target": "composer-draft",
-  "extensions": ["frontend-engineering"],
+  "extensions": [
+    "frontend-engineering"
+  ],
   "target_before": null,
   "created_at": "2026-11-16T00:00:00.000000+00:00",
   "phase": "docs",
-  "updated_at": "2026-11-16T21:30:00.000000+00:00",
+  "updated_at": "2026-11-16T23:59:00.000000+00:00",
   "approval": {
     "by": "owner",
     "recorded_at": "2026-11-16T00:00:00.000000+00:00"
@@ -42,7 +44,17 @@
         {
           "id": "AC-6",
           "status": "passed",
-          "evidence": "bunx vitest run tests/composerDrafts.test.ts tests/promptComposer.test.tsx tests/homePrompt.test.ts tests/viewOptions.test.ts --maxWorkers=2: 4 files, 31 tests pass."
+          "evidence": "bunx vitest run tests/composerDrafts.test.ts tests/promptComposer.test.tsx tests/homePrompt.test.ts --maxWorkers=2: 3 files, 35 tests pass."
+        },
+        {
+          "id": "AC-8",
+          "status": "passed",
+          "evidence": "tests/composerDrafts.test.ts 'the composer draft owner'; tests/promptComposer.test.tsx 'never shows one account the draft another parked'; purge calls in DashShell.tsx and DeleteAccount.tsx."
+        },
+        {
+          "id": "AC-9",
+          "status": "passed",
+          "evidence": "tests/composerDrafts.test.ts 'the composer draft limits': length cap, prune before write on a full storage; visibilitychange flush in src/main.tsx (code read)."
         },
         {
           "id": "AC-7",

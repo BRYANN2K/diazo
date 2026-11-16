@@ -32,7 +32,7 @@ vi.mock('../src/components/ChatPanel', () => ({ ChatPanel: () => null }))
 vi.mock('../src/components/MemoryPanel', () => ({ MemoryPanel: () => null }))
 
 const { useStore } = await import('../src/lib/store')
-const { flushComposerDrafts } = await import('../src/lib/composerDrafts')
+const { flushComposerDrafts, setComposerDraftOwner } = await import('../src/lib/composerDrafts')
 const { ActivityPanel } = await import('../src/components/ActivityPanel')
 const { TooltipProvider } = await import('../src/components/ui/tooltip')
 
@@ -91,6 +91,7 @@ beforeEach(() => {
      then the wipe takes it with the parked drafts */
   flushComposerDrafts()
   localStorage.clear()
+  setComposerDraftOwner('alice')
   useStore.setState({
     canvas,
     panelTab: 'tasks',
@@ -232,7 +233,7 @@ describe('the Agents tab composer', () => {
     await render()
     await type('half a thought')
     flushComposerDrafts()
-    expect(localStorage.getItem('doop:composer-draft:c1')).toContain('half a thought')
+    expect(localStorage.getItem('doop:composer-draft:alice:c1')).toContain('half a thought')
 
     /* a reload forgets memory but keeps storage; the next mount restores */
     await act(async () => useStore.setState({ composerDrafts: {} }))
@@ -247,7 +248,7 @@ describe('the Agents tab composer', () => {
     flushComposerDrafts()
     await press('Enter')
     expect(composer().value).toBe('')
-    expect(localStorage.getItem('doop:composer-draft:c1')).toBeNull()
+    expect(localStorage.getItem('doop:composer-draft:alice:c1')).toBeNull()
   })
 
   it('keeps each canvas its own draft across reloads', async () => {
@@ -268,14 +269,28 @@ describe('the Agents tab composer', () => {
     useStore.setState({ composerDrafts: {} })
     await render('c1')
     expect(composer().value).toBe('first canvas')
-    expect(localStorage.getItem('doop:composer-draft:c2')).toContain('second canvas')
+    expect(localStorage.getItem('doop:composer-draft:alice:c2')).toContain('second canvas')
   })
 
   it('prefers an in-memory draft over an older parked one', async () => {
-    localStorage.setItem('doop:composer-draft:c1', JSON.stringify({ text: 'parked earlier', at: Date.now() }))
+    localStorage.setItem('doop:composer-draft:alice:c1', JSON.stringify({ text: 'parked earlier', at: Date.now() }))
     useStore.setState({ composerDrafts: { c1: 'typed this session' } })
     await render()
     expect(composer().value).toBe('typed this session')
+  })
+
+  it('never shows one account the draft another parked', async () => {
+    await render()
+    await type('alice was writing this')
+    flushComposerDrafts()
+    await unmount()
+
+    /* bob signs in on the same browser: fresh memory, alice's text gone */
+    setComposerDraftOwner('bob')
+    useStore.setState({ composerDrafts: {} })
+    await render()
+    expect(composer().value).toBe('')
+    expect(localStorage.getItem('doop:composer-draft:alice:c1')).toBeNull()
   })
 
   it('fills the composer from a draft handed off before mount', async () => {

@@ -1,24 +1,28 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  MAX_PARKED_CHARS,
   clearComposerDraft,
   flushComposerDrafts,
   pruneComposerDrafts,
+  purgeComposerDrafts,
   readComposerDraft,
+  setComposerDraftOwner,
   writeComposerDraft,
 } from '../src/lib/composerDrafts'
 
 /**
- * The composer's parked drafts: one `doop:composer-draft:<canvasId>` key per
- * canvas, written on a debounce, cleared the moment the card queues, and
- * pruned by age and count so the scratchpad never becomes an archive.
+ * The composer's parked drafts: one `doop:composer-draft:<userId>:<canvasId>`
+ * key per account and canvas, written on a debounce, cleared the moment the
+ * card queues, pruned by age and count so the scratchpad never becomes an
+ * archive, and removed when the account signs out or another one signs in.
  */
 
-const KEY = (id: string) => `doop:composer-draft:${id}`
+const KEY = (id: string, user = 'u1') => `doop:composer-draft:${user}:${id}`
 const DAY_MS = 24 * 60 * 60 * 1000
 
-function park(id: string, text: string, at: number) {
-  localStorage.setItem(KEY(id), JSON.stringify({ text, at }))
+function park(id: string, text: string, at: number, user = 'u1') {
+  localStorage.setItem(KEY(id, user), JSON.stringify({ text, at }))
 }
 
 function parkedKeys(): string[] {
@@ -32,6 +36,7 @@ function parkedKeys(): string[] {
 
 beforeEach(() => {
   localStorage.clear()
+  setComposerDraftOwner('u1')
 })
 
 afterEach(() => {
@@ -39,6 +44,8 @@ afterEach(() => {
      real clock back — several tests swap it for a fake one */
   flushComposerDrafts()
   localStorage.clear()
+  /* back to signed out, so the next test's owner is a change */
+  setComposerDraftOwner(null)
   vi.useRealTimers()
 })
 
@@ -130,5 +137,86 @@ describe('the composer draft parking', () => {
     pruneComposerDrafts()
     expect(localStorage.getItem(KEY('expired'))).toBeNull()
     expect(localStorage.getItem(KEY('fresh'))).not.toBeNull()
+  })
+})
+
+describe('the composer draft owner', () => {
+  it('scopes the draft to the signed-in account', () => {
+    park('c1', 'alice was here', Date.now())
+    expect(readComposerDraft('c1')).toBe('alice was here')
+    /* another account reads nothing, and its arrival removes the other's */
+    setComposerDraftOwner('u2')
+    expect(readComposerDraft('c1')).toBeNull()
+    expect(localStorage.getItem(KEY('c1'))).toBeNull()
+  })
+
+  it('parks nothing while signed out', () => {
+    setComposerDraftOwner(null)
+    writeComposerDraft('c1', 'nobody owns this')
+    flushComposerDrafts()
+    expect(parkedKeys()).toEqual([])
+    expect(readComposerDraft('c1')).toBeNull()
+  })
+
+  it('purges every draft when the session ends', () => {
+    vi.useFakeTimers()
+    park('c1', 'parked', Date.now())
+    park('c2', 'other account', Date.now(), 'u9')
+    writeComposerDraft('c3', 'still in the window')
+    setComposerDraftOwner(null)
+    vi.advanceTimersByTime(1000)
+    expect(parkedKeys()).toEqual([])
+  })
+
+  it('purges every draft, any account, on sign-out', () => {
+    vi.useFakeTimers()
+    park('c1', 'mine', Date.now())
+    park('c1', 'theirs', Date.now(), 'u9')
+    localStorage.setItem('doop:layers-open', '1')
+    writeComposerDraft('c2', 'still in the window')
+    purgeComposerDrafts()
+    vi.advanceTimersByTime(1000)
+    expect(parkedKeys()).toEqual([])
+    expect(localStorage.getItem('doop:layers-open')).toBe('1')
+  })
+
+  it("keeps the same account's drafts when it is set again", () => {
+    park('c1', 'mine', Date.now())
+    expect(setComposerDraftOwner('u1')).toBe(false)
+    expect(readComposerDraft('c1')).toBe('mine')
+  })
+
+  it('drops drafts parked before the key carried an account', () => {
+    localStorage.setItem('doop:composer-draft:c1', JSON.stringify({ text: 'unscoped', at: Date.now() }))
+    pruneComposerDrafts()
+    expect(localStorage.getItem('doop:composer-draft:c1')).toBeNull()
+  })
+})
+
+describe('the composer draft limits', () => {
+  it('does not park a draft past the length cap, and drops the shorter copy', () => {
+    vi.useFakeTimers()
+    park('c1', 'short', Date.now())
+    writeComposerDraft('c1', 'x'.repeat(MAX_PARKED_CHARS + 1))
+    vi.advanceTimersByTime(400)
+    expect(localStorage.getItem(KEY('c1'))).toBeNull()
+    writeComposerDraft('c1', 'x'.repeat(MAX_PARKED_CHARS))
+    vi.advanceTimersByTime(400)
+    expect(readComposerDraft('c1')).toHaveLength(MAX_PARKED_CHARS)
+  })
+
+  it('prunes before writing, so a full storage gets room back', () => {
+    vi.useFakeTimers()
+    park('expired', 'old', Date.now() - 31 * DAY_MS)
+    /* a storage that refuses every write while the expired entry is there */
+    const setItem = Storage.prototype.setItem
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (this.getItem(KEY('expired')) !== null) throw new DOMException('full', 'QuotaExceededError')
+      setItem.call(this, key, value)
+    })
+    writeComposerDraft('c1', 'fits now')
+    vi.advanceTimersByTime(400)
+    spy.mockRestore()
+    expect(readComposerDraft('c1')).toBe('fits now')
   })
 })

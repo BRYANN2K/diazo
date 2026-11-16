@@ -15,7 +15,7 @@ sign-in and connect handoffs) and `src/pages/AuthPage.tsx`.
 ## AC-1 — parked on a debounce, cleared at once
 
 `src/lib/composerDrafts.ts`: `writeComposerDraft` batches keystrokes into
-one write 400 ms after the last one, under `doop:composer-draft:<canvasId>`
+one write 400 ms after the last one, under `doop:composer-draft:<userId>:<canvasId>`
 as `{ text, at }`. `clearComposerDraft` cancels a pending write and removes
 the key immediately. `store.setComposerDraft` writes on non-empty text and
 clears on empty — `sendPrompt` clears through it once the card is queued,
@@ -56,13 +56,42 @@ survive a reload). Stated in the PR draft.
 
 ## AC-6 — tests
 
-`bunx vitest run tests/composerDrafts.test.ts tests/promptComposer.test.tsx tests/homePrompt.test.ts tests/viewOptions.test.ts --maxWorkers=2` —
-4 files, 31 tests, all pass.
+`bunx vitest run tests/composerDrafts.test.ts tests/promptComposer.test.tsx tests/homePrompt.test.ts --maxWorkers=2` —
+3 files, 35 tests, all pass (after the review fixes).
+`bunx vitest run tests/accountMenu.test.tsx tests/deleteAccount.test.tsx tests/composerDrafts.test.ts --maxWorkers=2` —
+3 files, 24 tests, all pass.
+
+## AC-8 — drafts belong to the account
+
+`setComposerDraftOwner` (`src/lib/composerDrafts.ts`) is called by
+`src/App.tsx` during render once the session has resolved without error:
+the composer hydrates in a mount effect, which runs before App's effects.
+A new account removes every key not under its own id; the owner going
+from an account to null purges all keys. An owner change also resets the
+store's in-memory `composerDrafts` (App effect). `purgeComposerDrafts` is
+called after `authClient.signOut()` in `src/components/DashShell.tsx` (the
+only sign-out call in `src/`) and in `leaveDeletedAccount` in
+`src/components/DeleteAccount.tsx`. Signed out, writes and reads are
+no-ops. Keys from before the account prefix (no `:` after the prefix) are
+pruned.
+
+Tests: `tests/composerDrafts.test.ts` "the composer draft owner" (scoping,
+signed out, session end, sign-out purge across accounts, same owner kept,
+legacy keys); `tests/promptComposer.test.tsx` "never shows one account the
+draft another parked".
+
+## AC-9 — limits
+
+`store()` prunes (keeping a seat for the key being written) before
+`setItem`; `MAX_PARKED_CHARS` is 20,000; `src/main.tsx` flushes on
+`visibilitychange` to hidden. Tests: "the composer draft limits" (length
+cap drops the shorter copy; a storage refusing writes until an expired
+entry is pruned accepts the write).
 
 ## AC-7 — checks
 
 - `bun run typecheck` — exit 0.
-- `bunx oxlint --type-aware --deny-warnings --ignore-pattern '.claude/**' .` — exit 0.
+- `bunx oxlint --type-aware --deny-warnings .` — exit 0.
 - `bunx eslint . --max-warnings 0` — exit 0.
 - `bunx prettier --check` on changed files — clean after one format fix.
 - `bun run doc-lint` — passed, 0 warnings.

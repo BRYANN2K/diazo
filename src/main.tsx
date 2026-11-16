@@ -15,8 +15,13 @@ installTranslateGuard()
 initDesktopShell()
 initTheme()
 
-/* a composer draft inside its debounce window still lands before a reload */
+/* a composer draft inside its debounce window still lands before a reload,
+   and when the page is hidden: a desktop quit or a mobile tab kill may
+   never fire pagehide */
 window.addEventListener('pagehide', flushComposerDrafts)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushComposerDrafts()
+})
 
 /* the language is settled first, so the first paint already speaks it */
 void initLocale().then(() =>

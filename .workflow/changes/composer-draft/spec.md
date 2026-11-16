@@ -11,7 +11,7 @@ than recent drafts.
 ## Acceptance criteria
 
 - AC-1: Typing in the composer writes the draft to `localStorage` under
-  `doop:composer-draft:<canvasId>` on a debounce; clearing the field or
+  `doop:composer-draft:<userId>:<canvasId>` on a debounce; clearing the field or
   queueing the card removes the key immediately, including a pending
   debounced write.
 - AC-2: A composer mounting for a canvas whose memory has no draft
@@ -27,6 +27,16 @@ than recent drafts.
 - AC-6: Tests cover: type then come back to the canvas after a simulated
   reload (text restored), send (storage cleared), two canvases keeping
   separate drafts, and the prune rules.
+- AC-8: A parked draft belongs to the signed-in account: another account
+  signing in on the same browser never sees it, and its arrival removes
+  the other accounts' drafts. Signing out (the account menu, account
+  deletion, or the session ending in the tab) removes every parked draft,
+  including writes still inside the debounce window. Signed out, nothing
+  is parked. Tests cover each case.
+- AC-9: Each write prunes before it stores, so a full storage gets room
+  back; a draft longer than 20,000 characters stays in memory only and
+  drops a shorter parked copy; pending writes also flush when the page is
+  hidden (`visibilitychange`), not only on `pagehide`.
 - AC-7: Required checks run before a scoped local commit: typecheck,
   `oxlint --type-aware --deny-warnings`, `eslint --max-warnings 0`,
   Prettier on changed files, affected tests with `--maxWorkers=2`.
