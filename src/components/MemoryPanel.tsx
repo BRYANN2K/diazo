@@ -109,7 +109,7 @@ export function MemoryPanel() {
           </Badge>
           <p className="text-copy font-medium text-ink">{p.rule.replace(/^-\s*/, '')}</p>
           <p className="text-caption text-ink-2">{p.rationale}</p>
-          <p className="truncate text-caption text-ink-3">
+          <p className="truncate text-caption text-ink-3" title={p.guideTitle ?? guideTitle({ name: p.guideName })}>
             {t('panels.memoryFromDecisions', { count: p.basedOn.length })} →{' '}
             <span className="font-medium text-ink-2">{p.guideTitle ?? guideTitle({ name: p.guideName })}</span>
           </p>

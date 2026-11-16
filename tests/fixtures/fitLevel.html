@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { flushSync } from 'react-dom'
+      import { useFitLevel } from '/src/hooks/use-fit-level.ts'
+      import { PanelIconTab, PanelTabs, PanelTabsRoot } from '/src/components/ui/panel.tsx'
+      import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
+      import '/src/styles.css'
+
+      const h = React.createElement
+      const glyph = () => h('svg', { viewBox: '0 0 14 14' }, h('rect', { width: 14, height: 14 }))
+
+      /* the Layers island's strip as LayersPanel builds it: every tab grows to
+         an equal share, the tabs not in view fold first, then the open one */
+      function Strip({ width, active, tabs }) {
+        const { measure, level } = useFitLevel(2, [active, tabs.join(',')].join('|'))
+        const fold = (value) => (value === active ? level >= 2 : level >= 1)
+        return h(
+          'div',
+          { id: 'island', style: { width: `${width}px`, display: 'flex' } },
+          h(
+            PanelTabsRoot,
+            { value: active, className: 'flex-none w-full' },
+            h(
+              PanelTabs,
+              { ref: measure, className: 'flex-1 [&>[role=tab]]:flex-1 [&>[role=tab]]:justify-center' },
+              tabs.map((name) => h(PanelIconTab, { key: name, value: name, compact: fold(name), icon: glyph() }, name)),
+            ),
+          ),
+        )
+      }
+
+      const root = createRoot(document.getElementById('root'))
+      window.renderStrip = (props) => flushSync(() => root.render(h(TooltipProvider, null, h(Strip, props))))
+    </script>
+  </body>
+</html>
