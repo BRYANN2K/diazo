@@ -13,11 +13,11 @@ Built on `feat/motion-backend-next` (from `dev`), worktree `doop-wt/motion-next`
 
 ## Phase 3 — media, speech and generation
 
-- [ ] 7. Media contract: `scene_media`, clip speed/fades/cuts, beats, transcript, generation recipe, ducking, captions from transcript.
-- [ ] 8. `generate_video` on OpenRouter and Gemini.
-- [ ] 9. Speech: catalog, installs, jobs, preferences, voices, REST.
+- [x] 7. Media contract: `scene_media`, clip speed/fades/cuts, beats, transcript, generation recipe, ducking, captions from transcript.
+- [x] 8. `generate_video` on OpenRouter and Gemini.
+- [x] 9. Speech: catalog, installs, jobs, preferences, voices, REST.
 - [ ] 10. Speech: desktop bridge (`desktop/src-tauri/src/speech.rs`).
-- [ ] 11. Speech: cloud transcription (ElevenLabs Scribe, OpenAI), ElevenLabs voice-over, custom models, MCP tools, `diazo-speech` sidecar client.
+- [x] 11. Speech: cloud transcription (ElevenLabs Scribe, OpenAI), ElevenLabs voice-over, custom models, MCP tools, `diazo-speech` sidecar client.
 - [ ] 12. Pocket TTS mirror: design doc and script (not published).
 
 ## Phase 4 — 3D and Blender

@@ -7,8 +7,15 @@ import * as speech from './speech.ts'
 import { isAdmin } from './access.ts'
 import { canAccessCanvas, canEditCanvas } from './access.ts'
 import { store } from './store.ts'
-import { speechRequestSchema, ROUTE_TARGETS } from '../shared/speech.ts'
-import { completeSpeechJob, estimateSpeech, sniffSpeechAudio, submitSpeech } from './speechJobs.ts'
+import {
+  customModelInputSchema,
+  smokeReportSchema,
+  speakerNamesSchema,
+  speechRequestSchema,
+  voiceInputSchema,
+  ROUTE_TARGETS,
+} from '../shared/speech.ts'
+import { completeSpeechJob, estimateSpeech, renameSpeakers, sniffSpeechAudio, submitSpeech } from './speechJobs.ts'
 import { storeAsset } from './assets.ts'
 import { speechProgress } from './actions.ts'
 
@@ -25,7 +32,11 @@ const preferences = z
   })
   .strict()
 const poll = z
-  .object({ deviceId: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/), models: z.array(z.string().max(100)).max(100) })
+  .object({
+    deviceId: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/),
+    models: z.array(z.string().max(100)).max(100),
+    smoke: z.array(smokeReportSchema).max(50).optional(),
+  })
   .strict()
 const finish = z
   .object({
@@ -134,10 +145,80 @@ export function registerSpeechRoutes(app: Express): void {
       }),
     )
   app.post(
+    '/api/speech/custom-models',
+    handle(async (req, res) => {
+      const input = customModelInputSchema.parse(req.body)
+      if (input.target === 'server' && !isAdmin(req.user)) return res.status(403).end()
+      return res.status(201).json({ model: await speech.addCustomModel(req.user!.id, input) })
+    }),
+  )
+  app.post(
+    '/api/speech/custom-models/:id/test',
+    handle(async (req, res) =>
+      res.json({ model: await speech.testCustomModel(req.params.id ?? '', req.user!.id, isAdmin(req.user)) }),
+    ),
+  )
+  app.delete(
+    '/api/speech/custom-models/:id',
+    handle(async (req, res) => {
+      if (!(await speech.deleteCustomModel(req.params.id ?? '', req.user!.id, isAdmin(req.user))))
+        return res.status(404).end()
+      return res.json({ ok: true })
+    }),
+  )
+  app.get(
+    '/api/speech/custom-models/:id/token',
+    handle(async (req, res) => {
+      // the person's own HF token, download-only, for their desktop shell
+      const token = await speech.customModelTokenFor(req.params.id ?? '', req.user!.id)
+      if (!token) return res.status(404).end()
+      return res.json({ token })
+    }),
+  )
+  app.put(
+    '/api/speech/media/:mediaId/speakers',
+    handle(async (req, res) => {
+      const { canvas_id, names } = speakerNamesSchema.parse(req.body)
+      return res.json({ transcript: await renameSpeakers(req.user!.id, canvas_id, req.params.mediaId ?? '', names) })
+    }),
+  )
+  /* cloned voices (18.14): the consent sample is a private audio asset —
+     uploaded raw, sniffed, owned by the person, never canvas-scoped */
+  app.put(
+    '/api/speech/voices/sample',
+    express.raw({ type: () => true, limit: 25 * 1024 * 1024 }),
+    handle(async (req, res) => {
+      if (!Buffer.isBuffer(req.body)) throw new speech.SpeechError('send raw audio bytes')
+      const asset = await storeAsset(req.body, sniffSpeechAudio(req.body), {
+        ownerId: req.user!.id,
+        uploadedBy: req.user!.id,
+      })
+      return res.status(201).json({ asset })
+    }),
+  )
+  app.get(
+    '/api/speech/voices',
+    handle(async (req, res) => res.json({ voices: await speech.listVoices(req.user!.id) })),
+  )
+  app.post(
+    '/api/speech/voices',
+    handle(async (req, res) => {
+      const input = voiceInputSchema.parse(req.body)
+      return res.status(201).json({ voice: await speech.addVoice(req.user!.id, input) })
+    }),
+  )
+  app.delete(
+    '/api/speech/voices/:id',
+    handle(async (req, res) => {
+      if (!(await speech.deleteVoice(req.params.id ?? '', req.user!.id))) return res.status(404).end()
+      return res.json({ ok: true })
+    }),
+  )
+  app.post(
     '/api/speech/desktop/poll',
     handle(async (req, res) => {
       const body = poll.parse(req.body)
-      return res.json({ jobs: await speech.pollDesktopJobs(body.deviceId, req.user!.id, body.models) })
+      return res.json({ jobs: await speech.pollDesktopJobs(body.deviceId, req.user!.id, body.models, body.smoke) })
     }),
   )
   app.post(

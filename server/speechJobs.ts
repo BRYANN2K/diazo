@@ -252,6 +252,35 @@ export async function completeSpeechJob(job: SpeechJob, raw: unknown, outputAsse
   return finished
 }
 
+/** speakers are renamed once per media; a name may only label an S<n> the
+ *  transcript actually produced (18.8) */
+export async function renameSpeakers(
+  userId: string,
+  canvasId: string,
+  mediaId: string,
+  names: Record<string, string>,
+): Promise<Transcript> {
+  assertEditor(userId, canvasId)
+  const [media] = await db
+    .select()
+    .from(t.sceneMedia)
+    .where(and(eq(t.sceneMedia.id, mediaId), eq(t.sceneMedia.canvasId, canvasId)))
+  if (!media?.transcript) throw new speech.SpeechError('media has no transcript yet')
+  for (const key of Object.keys(names))
+    if (!media.transcript.words.some((word) => word.speaker === key))
+      throw new speech.SpeechError(`${key} is not a speaker of this media`)
+  const transcript: Transcript = {
+    ...media.transcript,
+    speakers: { ...media.transcript.speakers, ...names },
+  }
+  await db
+    .update(t.sceneMedia)
+    .set({ transcript, updatedAt: Date.now() })
+    .where(and(eq(t.sceneMedia.id, mediaId), eq(t.sceneMedia.canvasId, canvasId)))
+  mediaTranscribed(canvasId, mediaId, transcript)
+  return transcript
+}
+
 export function sniffSpeechAudio(bytes: Buffer): { mime: string; ext: string } {
   if (bytes.length === 0 || bytes.length > 25 * 1024 * 1024) throw new speech.SpeechError('audio must be within 25 MiB')
   if (bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WAVE')

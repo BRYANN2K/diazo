@@ -265,6 +265,64 @@ export interface CustomModel {
   createdAt: number
 }
 
+/** what a custom-model row keeps beyond the public shape: the sealed
+ *  download token. `listCustomModels` strips it into `hasToken`. */
+export type StoredCustomModel = CustomModel & { token?: string }
+
+/** the POST body: shape is zod-checked, semantics go through
+ *  `validateCustomModel` in server/speech.ts (18.9) */
+export const customModelInputSchema = z
+  .object({
+    kind: z.enum(SPEECH_KINDS),
+    runtime: z.enum(SPEECH_RUNTIMES),
+    target: z.enum(['desktop', 'server']),
+    source: z.union([
+      z.object({ type: z.literal('hf'), repo: z.string().max(200), commit: z.string().max(60) }).strict(),
+      z.object({ type: z.literal('local') }).strict(),
+    ]),
+    files: z
+      .array(z.object({ path: z.string().max(200), bytes: z.number(), sha256: z.string().max(80) }).strict())
+      .min(1)
+      .max(100),
+    licenseId: z.string().max(200).optional(),
+    licenseText: z.string().max(20_000).optional(),
+    licenseAck: z.boolean(),
+    /** download-only HF token for gated repos — sealed before it persists */
+    token: z.string().max(300).optional(),
+  })
+  .strict()
+export type CustomModelInput = z.infer<typeof customModelInputSchema>
+
+/** a shell-reported smoke test outcome for a custom model (18.9) */
+export const smokeReportSchema = z
+  .object({
+    modelId: z.string().min(1).max(100),
+    ok: z.boolean(),
+    log: z.string().max(4000),
+    tookMs: z.number().finite().min(0).max(3_600_000),
+  })
+  .strict()
+export type SmokeReport = z.infer<typeof smokeReportSchema>
+
+/** PUT speakers: rename S1, S2… once per media (18.8) */
+export const speakerNamesSchema = z
+  .object({
+    canvas_id: z.string().min(1),
+    names: z.record(z.string().regex(/^S\d{1,2}$/), z.string().trim().min(1).max(80)),
+  })
+  .strict()
+
+/** POST a cloned voice: consent is the recorded checkbox (18.14) */
+export const voiceInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    sampleAssetId: z.string().min(1).max(100),
+    sampleTranscript: z.string().max(4000).optional(),
+    engines: z.array(z.enum(SPEECH_RUNTIMES)).max(8).optional(),
+    consent: z.literal(true),
+  })
+  .strict()
+
 export interface Voice {
   id: string
   ownerId: string

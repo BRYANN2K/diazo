@@ -54,6 +54,15 @@ All routes require the existing authenticated API session. `DOOP_SPEECH=false` h
 | `DELETE /api/speech/jobs/:id`                 | Cancels this person's active job. A late engine result cannot complete a canceled job.                                                                                            |
 | `POST /api/speech/server/installs/:modelId`   | Admin only. Refuses unpinned manifests and missing per-file sizes or hashes.                                                                                                      |
 | `DELETE /api/speech/server/installs/:modelId` | Admin only. Relays uninstall to the configured sidecar before removing its record.                                                                                                |
+| `POST /api/speech/custom-models`              | Register a model (18.9). Server target is admin only; local files and mlx-audio are desktop only. The model stays `enabled: false` until its smoke test.                          |
+| `POST /api/speech/custom-models/:id/test`     | Re-run the smoke test on a server-target model. Desktop models are tested by their shell and report on the next poll.                                                             |
+| `DELETE /api/speech/custom-models/:id`        | Remove it — the owner, or an admin for an instance row. A server row also uninstalls on the sidecar.                                                                              |
+| `GET /api/speech/custom-models/:id/token`     | `{ token }` — the owner's sealed HF token back once, for the desktop shell's download of a gated repo. Instance tokens never return.                                              |
+| `PUT /api/speech/media/:mediaId/speakers`     | `{ canvas_id, names: { S1: 'Ana' } }` — rename the speakers a transcript produced (18.8); an `S<n>` the media does not carry is refused.                                          |
+| `PUT /api/speech/voices/sample`               | Raw consent-sample audio (WAV or MP3, ≤ 25 MiB). Stored as a private asset owned by the person, never canvas-scoped. Returns `{ asset }`.                                         |
+| `GET /api/speech/voices`                      | `{ voices }` — this person's cloned voices.                                                                                                                                       |
+| `POST /api/speech/voices`                     | `{ name, sampleAssetId, sampleTranscript?, engines?, consent: true }`. The sample must be one of their uploaded audio files.                                                      |
+| `DELETE /api/speech/voices/:id`               | Remove the voice and its private sample together.                                                                                                                                 |
 | `GET /api/speech/elevenlabs/voices?search=…`  | Provider voices on this person's key, with a short cache.                                                                                                                         |
 
 The ElevenLabs key connects through `POST /api/model-account/elevenlabs-key` with `{ apiKey }`, using the existing sealed account storage and disconnect/toggle routes. `DOOP_ELEVENLABS=false` disables its speech adapters.
@@ -64,7 +73,7 @@ Invalid input, unavailable models and active-job conflicts return 400 with an er
 
 The backend relay is implemented. The shell installer and engine worker are pending; a browser must not treat this relay as evidence that speech runs on the Mac.
 
-1. `POST /api/speech/desktop/poll` with `{ deviceId, models: string[] }` reports this user's ready models and atomically claims matching jobs. Only this person's jobs with current canvas edit access are returned. The response is `{ jobs }`, each claimed job running with deviceId set. Availability expires after 30 seconds.
+1. `POST /api/speech/desktop/poll` with `{ deviceId, models: string[], smoke? }` reports this user's ready models and atomically claims matching jobs. Only this person's jobs with current canvas edit access are returned. The response is `{ jobs }`, each claimed job running with deviceId set. Availability expires after 30 seconds. `smoke` carries the shell's custom-model smoke reports `[{ modelId, ok, log, tookMs }]`; only the reporting user's own desktop rows take them, and a pass flips `enabled` to true.
 2. A transcription worker reads the job's canvas asset using the authenticated session and runs its local engine. It posts `POST /api/speech/desktop/finish/:id` with `{ deviceId, state: 'done', transcript }`. The server validates the words and stores them on the original media row in the same transaction as the terminal job update.
 3. A voice worker uploads WAV or MP3 bytes to `PUT /api/speech/desktop/audio/:id`, `Content-Type: application/octet-stream`, `X-Speech-Device: <deviceId>`, at most 25 MiB. The server checks requester, claiming device, active state and canvas edit access, sniffs the file, and returns `{ asset }`.
 4. It finishes with `{ deviceId, state: 'done', transcript, outputAssetId }`. The audio must belong to this requester and canvas. The result creates an audio media row with the script/voice/model recipe, then inserts an audio clip on the timeline at `at`.
@@ -83,7 +92,7 @@ MCP takes `canvas_id` and `agent_name`; resident tools use the run's canvas and 
 - `transcribe_clip` takes the request fields except kind, text and voice; kind is fixed to transcribe.
 - `generate_voiceover` takes the request fields except kind and media_id; kind is fixed to speak.
 - `get_transcript { job_id? , media_id? }` returns this person's job on this canvas, or a canvas media transcript. Poll this after a queued job; tool submission does not block on an engine.
-- `list_voices {}` lists this person's persisted local voices. Voice creation and cloning are pending.
+- `list_voices {}` lists this person's persisted local voices. Voice creation goes through the REST routes above (sample upload, then the voice with recorded consent).
 
 ## Sidecar adapter and outstanding work
 
@@ -95,8 +104,7 @@ Still required for the phase 3 acceptance criteria:
 
 - Desktop engine installer, signed release verification, resumed downloads, native file selection, Metal execution, cancellation and smoke tests.
 - The actual speech sidecar, its 6 CPU / 10 Gi limits and 20 Gi volume, benchmark and operational checks.
-- Custom-model registration and smoke-test routes, gated tokens, enabled-state lifecycle, voice sample consent/storage and local cloning.
-- Local diarization and editable speaker names; cloud text-only transcription and local alignment.
+- Local diarization; cloud text-only transcription and local alignment.
 - Pocket TTS mirror design and preparation script, attribution and signature verification. Nothing has been published.
 - Listening tests, real ten-minute French transcripts on both local targets and live provider verification on an explicitly selected account.
 

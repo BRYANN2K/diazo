@@ -15,13 +15,18 @@ import { db } from './db/index.ts'
 import * as t from './db/schema.ts'
 import { env } from './env.ts'
 import { store } from './store.ts'
+import * as storage from './storage.ts'
 import { canEditCanvas } from './access.ts'
 import { getAccounts } from './modelAccounts.ts'
+import { open, seal } from './secretBox.ts'
 import {
   catalogEntry,
   installableEntry,
   INSTALL_STATES,
+  type CustomModelInput,
+  type SmokeReport,
   type SpeechRequest,
+  type StoredCustomModel,
   DEFAULT_PREFERENCES,
   ELEVENLABS_MODELS,
   routeTarget,
@@ -146,12 +151,23 @@ export async function savePreferences(userId: string, prefs: SpeechPreferences):
     .onConflictDoUpdate({ target: t.speechPreferences.userId, set: { prefs, updatedAt: Date.now() } })
 }
 
-export async function listCustomModels(): Promise<CustomModel[]> {
-  const rows = await db.select().from(t.speechCustomModels)
-  return rows.map((r) => r.model)
+/** the public shape never carries the sealed download token */
+function publicCustomModel(model: StoredCustomModel): CustomModel {
+  const { token, ...rest } = model
+  return { ...rest, hasToken: Boolean(token) || model.hasToken }
 }
 
-export async function saveCustomModel(model: CustomModel): Promise<void> {
+export async function listCustomModels(): Promise<CustomModel[]> {
+  const rows = await db.select().from(t.speechCustomModels)
+  return rows.map((r) => publicCustomModel(r.model as StoredCustomModel))
+}
+
+export async function getCustomModel(id: string): Promise<CustomModel | undefined> {
+  const [row] = await db.select().from(t.speechCustomModels).where(eq(t.speechCustomModels.id, id))
+  return row ? publicCustomModel(row.model as StoredCustomModel) : undefined
+}
+
+export async function saveCustomModel(model: StoredCustomModel): Promise<void> {
   await db
     .insert(t.speechCustomModels)
     .values({ id: model.id, model, createdAt: model.createdAt })
@@ -187,6 +203,18 @@ export async function routeFor(
 ): Promise<import('../shared/speech.ts').RouteAnswer> {
   const prefs = await getPreferences(userId)
   const chosen = want ?? (kind === 'asr' ? prefs.transcribeTarget : prefs.voiceTarget)
+  const requested = modelId ?? prefs.modelId
+  if (requested) {
+    const custom = (await listCustomModels()).find(
+      (m) => m.id === requested && (m.owner === userId || m.owner === 'instance'),
+    )
+    if (custom && !custom.enabled)
+      return {
+        target: 'install',
+        modelId: requested,
+        reason: 'custom model stays disabled until its smoke test passes',
+      }
+  }
   const serverInstalled = await installedModelIds()
   const desktopOnline = [...desktops.values()].some((d) => d.userId === userId && Date.now() - d.at < DESKTOP_ONLINE_MS)
   const desktopInstalled = [
@@ -201,7 +229,7 @@ export async function routeFor(
     kind,
     { desktop: desktopOnline, server: Boolean(sidecarUrl() && sidecarToken()) },
     { desktop: desktopInstalled, server: serverInstalled },
-    modelId ?? prefs.modelId,
+    requested,
   )
 }
 
@@ -245,9 +273,31 @@ export async function createJob(
   return job
 }
 
+/** the shell reports custom-model smoke test outcomes with its poll (18.9):
+ *  only the owner's desktop-target rows may be updated */
+async function recordSmokeReports(userId: string, reports: SmokeReport[]): Promise<void> {
+  for (const report of reports) {
+    const [row] = await db.select().from(t.speechCustomModels).where(eq(t.speechCustomModels.id, report.modelId))
+    if (!row) continue
+    const model = row.model as StoredCustomModel
+    if (model.owner !== userId || model.target !== 'desktop') continue
+    await saveCustomModel({
+      ...model,
+      smokeTest: { ok: report.ok, log: report.log, tookMs: report.tookMs, at: Date.now() },
+      enabled: report.ok,
+    })
+  }
+}
+
 /** the desktop relay: a shell polls for its queued jobs, then finishes them */
-export async function pollDesktopJobs(deviceId: string, userId: string, models: string[]): Promise<SpeechJob[]> {
+export async function pollDesktopJobs(
+  deviceId: string,
+  userId: string,
+  models: string[],
+  smoke?: SmokeReport[],
+): Promise<SpeechJob[]> {
   reportDesktop(deviceId, userId, models)
+  if (smoke?.length) await recordSmokeReports(userId, smoke)
   // Atomic compare-and-set: two polling devices cannot receive the same job.
   const rows = await db
     .select()
@@ -590,6 +640,13 @@ export function charsToWords(chars: string[], starts: number[], ends: number[]):
 
 const SAFE_EXTS = new Set(['.safetensors', '.onnx', '.gguf', '.bin.ggml', '.onnx_data'])
 
+/** which runtimes load which kind (18.9) — anything outside is refused */
+const KIND_RUNTIMES: Record<CustomModel['kind'], readonly SpeechRuntime[]> = {
+  asr: ['sherpa-onnx', 'whisper.cpp', 'mlx-audio'],
+  tts: ['sherpa-onnx', 'mlx-audio', 'pocket-tts'],
+  speakers: ['sherpa-onnx', 'pyannote'],
+}
+
 export function validateCustomModel(input: {
   kind: CustomModel['kind']
   runtime: string
@@ -603,6 +660,8 @@ export function validateCustomModel(input: {
   if (!runtimes.includes(input.runtime)) return `runtime must be one of ${runtimes.join(', ')}`
   const src = input.source as { type?: string; repo?: string; commit?: string } | undefined
   if (!['asr', 'tts', 'speakers'].includes(input.kind)) return 'unknown speech kind'
+  if (!KIND_RUNTIMES[input.kind].includes(input.runtime as SpeechRuntime))
+    return `${input.runtime} does not run ${input.kind}`
   if (src?.type === 'hf') {
     if (typeof src.repo !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(src.repo)) return 'source.repo must be owner/name'
     if (typeof src.commit !== 'string' || !/^[0-9a-f]{40}$/.test(src.commit))
@@ -631,6 +690,194 @@ export function validateCustomModel(input: {
   if (!input.licenseAck) return 'tick "I have read the licence and my use complies"'
   if (!input.licenseId && !input.licenseText) return 'name the licence the repository declares'
   return null
+}
+
+/** the sealed download token, opened for a sidecar call only — the route
+ *  layer never sees plaintext */
+async function customModelToken(id: string): Promise<string | undefined> {
+  const [row] = await db.select().from(t.speechCustomModels).where(eq(t.speechCustomModels.id, id))
+  const token = (row?.model as StoredCustomModel | undefined)?.token
+  return token ? open(token) : undefined
+}
+
+/** GET …/custom-models/:id/token: the person's own HF token hands back only
+ *  for a desktop-target row they own — the shell needs it to download a
+ *  gated repo. A server ('instance') token never leaves the backend. */
+export async function customModelTokenFor(id: string, userId: string): Promise<string | undefined> {
+  const [row] = await db.select().from(t.speechCustomModels).where(eq(t.speechCustomModels.id, id))
+  const model = row?.model as StoredCustomModel | undefined
+  if (!model || model.target !== 'desktop' || model.owner !== userId || !model.token) return undefined
+  return open(model.token)
+}
+
+/** a server-target add is also the install click (18.9): the sidecar
+ *  downloads, verifies and warms up; the row tracks it like a catalog one */
+async function installCustomOnServer(model: CustomModel, installedBy: string): Promise<void> {
+  await db.insert(t.speechInstalls).values({
+    id: nanoid(10),
+    modelId: model.id,
+    engine: model.runtime,
+    revision: model.source.type === 'hf' ? model.source.commit : 'local',
+    state: 'downloading',
+    bytes: model.files.reduce((n, f) => n + f.bytes, 0),
+    installedBy,
+    installedAt: Date.now(),
+  })
+  try {
+    const token = await customModelToken(model.id)
+    const body = await sidecar('/v1/installs', {
+      method: 'POST',
+      body: JSON.stringify({
+        model_id: model.id,
+        runtime: model.runtime,
+        source: model.source,
+        files: model.files,
+        ...(token ? { hf_token: token } : {}),
+      }),
+    })
+    if (!INSTALL_STATES.includes(body.state as SpeechInstall['state']))
+      throw new SpeechError('sidecar returned an invalid install state')
+    await db
+      .update(t.speechInstalls)
+      .set({ state: body.state as SpeechInstall['state'], error: typeof body.error === 'string' ? body.error : null })
+      .where(eq(t.speechInstalls.modelId, model.id))
+  } catch (error) {
+    await db
+      .update(t.speechInstalls)
+      .set({ state: 'failed', error: 'install failed; check the speech service' })
+      .where(eq(t.speechInstalls.modelId, model.id))
+    throw error
+  }
+}
+
+/** register a model the person adds (18.9): pinned commit, per-file size +
+ *  SHA-256, licence acknowledged, disabled until its smoke test passes. The
+ *  server target is admin-only, enforced by the route. */
+export async function addCustomModel(userId: string, input: CustomModelInput): Promise<CustomModel> {
+  if (input.target === 'server' && input.source.type === 'local')
+    throw new SpeechError('local files install on the desktop only')
+  if (input.target === 'server' && input.runtime === 'mlx-audio')
+    throw new SpeechError('mlx-audio runs on Apple silicon — the desktop only')
+  const invalid = validateCustomModel(input)
+  if (invalid) throw new SpeechError(invalid)
+  const now = Date.now()
+  const model: StoredCustomModel = {
+    id: nanoid(10),
+    owner: input.target === 'server' ? 'instance' : userId,
+    target: input.target,
+    kind: input.kind,
+    runtime: input.runtime,
+    source:
+      input.source.type === 'hf'
+        ? { type: 'hf', repo: input.source.repo, commit: input.source.commit }
+        : { type: 'local' },
+    files: input.files.map((f) => ({ path: f.path, bytes: f.bytes, sha256: f.sha256 })),
+    licenseId: input.licenseId,
+    licenseText: input.licenseText,
+    licenseAckBy: userId,
+    licenseAckAt: now,
+    hasToken: Boolean(input.token),
+    token: input.token ? seal(input.token) : undefined,
+    enabled: false,
+    createdAt: now,
+  }
+  await saveCustomModel(model)
+  if (model.target === 'server') await installCustomOnServer(model, userId)
+  return publicCustomModel(model)
+}
+
+/** the smoke test gate (18.9): server models ask the sidecar; desktop models
+ *  are tested by the shell after install and report with the next poll */
+export async function testCustomModel(id: string, userId: string, admin: boolean): Promise<CustomModel> {
+  const [row] = await db.select().from(t.speechCustomModels).where(eq(t.speechCustomModels.id, id))
+  if (!row) throw new SpeechError('no such custom model')
+  const model = row.model as StoredCustomModel
+  if (model.owner === 'instance' ? !admin : model.owner !== userId) throw new SpeechError('no such custom model')
+  if (model.target === 'desktop')
+    throw new SpeechError('the desktop runs its own smoke test after install and reports it with the next poll')
+  const started = Date.now()
+  const token = model.token ? open(model.token) : undefined
+  const body = await sidecar('/v1/test', {
+    method: 'POST',
+    body: JSON.stringify({
+      model_id: model.id,
+      kind: model.kind,
+      runtime: model.runtime,
+      source: model.source,
+      files: model.files,
+      ...(token ? { hf_token: token } : {}),
+    }),
+  })
+  const tookMs =
+    typeof body.took_ms === 'number' && Number.isFinite(body.took_ms) && body.took_ms >= 0
+      ? Math.min(body.took_ms, 3_600_000)
+      : Date.now() - started
+  const next: StoredCustomModel = {
+    ...model,
+    smokeTest: {
+      ok: body.ok === true,
+      log: typeof body.log === 'string' ? body.log.slice(0, 4000) : '',
+      tookMs,
+      at: Date.now(),
+    },
+    enabled: body.ok === true,
+  }
+  await saveCustomModel(next)
+  return publicCustomModel(next)
+}
+
+export async function deleteCustomModel(id: string, userId: string, admin: boolean): Promise<boolean> {
+  const [row] = await db.select().from(t.speechCustomModels).where(eq(t.speechCustomModels.id, id))
+  if (!row) return false
+  const model = row.model as StoredCustomModel
+  if (model.owner === 'instance' ? !admin : model.owner !== userId) return false
+  if (model.target === 'server') {
+    await sidecar(`/v1/installs/${model.id}`, { method: 'DELETE' })
+    await db.delete(t.speechInstalls).where(eq(t.speechInstalls.modelId, model.id))
+  }
+  await db.delete(t.speechCustomModels).where(eq(t.speechCustomModels.id, id))
+  return true
+}
+
+/* ---------------------------------------------------------------- */
+/* cloned voices (18.14): consent recorded, the sample stays private   */
+/* ---------------------------------------------------------------- */
+
+export async function addVoice(
+  userId: string,
+  input: { name: string; sampleAssetId: string; sampleTranscript?: string; engines?: SpeechRuntime[] },
+): Promise<Voice> {
+  const [asset] = await db
+    .select()
+    .from(t.assets)
+    .where(and(eq(t.assets.id, input.sampleAssetId), eq(t.assets.ownerId, userId)))
+  if (!asset || asset.canvasId || !asset.mime.startsWith('audio/'))
+    throw new SpeechError('the sample must be one of your uploaded audio files')
+  const voice: Voice = {
+    id: nanoid(10),
+    ownerId: userId,
+    name: input.name,
+    sampleAssetId: input.sampleAssetId,
+    sampleTranscript: input.sampleTranscript,
+    consentAt: Date.now(),
+    engines: input.engines?.length ? input.engines : ['mlx-audio', 'pocket-tts', 'sherpa-onnx'],
+    createdAt: Date.now(),
+  }
+  await db.insert(t.voices).values({ id: voice.id, ownerId: userId, voice, createdAt: voice.createdAt })
+  return voice
+}
+
+/** deleting a voice removes its private sample with it */
+export async function deleteVoice(id: string, ownerId: string): Promise<boolean> {
+  const [row] = await db.select().from(t.voices).where(eq(t.voices.id, id))
+  if (!row || row.ownerId !== ownerId) return false
+  await db.delete(t.voices).where(eq(t.voices.id, id))
+  const [asset] = await db.select().from(t.assets).where(eq(t.assets.id, row.voice.sampleAssetId))
+  if (asset && asset.ownerId === ownerId && !asset.canvasId) {
+    await db.delete(t.assets).where(eq(t.assets.id, asset.id))
+    await storage.deleteObject(`${asset.id}.${asset.ext}`).catch(() => {})
+  }
+  return true
 }
 
 /* ---------------------------------------------------------------- */
