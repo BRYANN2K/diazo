@@ -335,9 +335,15 @@ fn server_name(server: &str) -> String {
 }
 
 /// The bundled page that asks for a server's address (shell-dist), as the
-/// window loads it on this platform.
+/// window loads it on this platform: WebView2 and the CEF runtime (the macOS
+/// Chromium shell) serve bundled pages on `http://tauri.localhost`, WebKit on
+/// the `tauri://` scheme.
 fn chooser_url() -> &'static str {
-    if cfg!(windows) {
+    chooser_url_for(cfg!(any(windows, chromium)))
+}
+
+fn chooser_url_for(http_scheme: bool) -> &'static str {
+    if http_scheme {
         "http://tauri.localhost/index.html"
     } else {
         "tauri://localhost/index.html"
@@ -522,6 +528,13 @@ pub mod menu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opens_the_chooser_where_each_runtime_serves_bundled_pages() {
+        assert_eq!(chooser_url_for(true), "http://tauri.localhost/index.html");
+        assert_eq!(chooser_url_for(false), "tauri://localhost/index.html");
+        assert_eq!(chooser_url(), chooser_url_for(cfg!(any(windows, chromium))));
+    }
 
     #[test]
     fn names_the_local_server_as_this_computers() {
