@@ -46,14 +46,19 @@ describe('bench:agent-cost transcripts', () => {
 
 describe('quality-gate scaffold (AC-22/23)', () => {
   it('passes when medians match and blind pairs go half or better', () => {
-    const frame = (errs: string[]) => ({ frameId: 'f', measures: { lint_errors: 1 }, errors: errs })
+    const frame = (errs: string[]) => ({
+      frameId: 'f',
+      measures: Object.fromEntries(MEASURES.map((m) => [m, 1])),
+      errors: errs,
+    })
     const tools = [{ briefId: 'b1', kind: 'landing', mode: 'tools' as const, frames: [frame(['A'])] }]
     const script = [{ briefId: 'b1', kind: 'landing', mode: 'script' as const, frames: [frame(['A'])] }]
     const pairs = [
       { briefId: 'b1', first: 'tools' as const, winner: 'tie' as const, judge: 'vision' as const },
       { briefId: 'b1', first: 'script' as const, winner: 'first' as const, judge: 'vision' as const },
     ]
-    expect(gateVerdict(tools, script, pairs).pass).toBe(true)
+    const humans = Array.from({ length: 24 }, (_, i) => ({ ...pairs[0]!, pairId: String(i), judge: 'human' as const }))
+    expect(gateVerdict(tools, script, [...pairs, ...humans]).pass).toBe(true)
   })
 
   it('fails on worse medians, new errors, or losing the blind pairs', () => {
@@ -72,4 +77,8 @@ describe('quality-gate scaffold (AC-22/23)', () => {
     expect(median([frame(3), frame(1), frame(9)], 'lint_errors')).toBe(3)
     expect(MEASURES).toContain('token_coverage')
   })
+})
+
+it('fails the gate when measurements or the human sample are missing', () => {
+  expect(gateVerdict([], [], []).pass).toBe(false)
 })

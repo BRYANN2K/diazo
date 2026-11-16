@@ -20,6 +20,11 @@
 
 /** Every measure a frame is scored on; names match the finding rule ids. */
 export const MEASURES = [
+  'lint_score',
+  'check_score',
+  'overflow_px',
+  'clipped_text',
+  'component_reuse',
   'lint_errors', // anti-slop lint findings at error level
   'lint_warnings',
   'responsive_errors', // overflow / clipped text at the checked breakpoints
@@ -33,7 +38,12 @@ export const MEASURES = [
 export type Measure = (typeof MEASURES)[number]
 
 /** Higher-is-better measures; everything else counts down to zero. */
-export const HIGHER_BETTER: ReadonlySet<Measure> = new Set(['token_coverage'])
+export const HIGHER_BETTER: ReadonlySet<Measure> = new Set([
+  'token_coverage',
+  'lint_score',
+  'check_score',
+  'component_reuse',
+])
 
 export interface FrameScore {
   frameId: string
@@ -46,10 +56,13 @@ export interface BriefResult {
   briefId: string
   kind: string
   mode: 'tools' | 'script'
+  tier?: string
+  repetition?: number
   frames: FrameScore[]
 }
 
 export interface PairVerdict {
+  pairId?: string
   briefId: string
   /** which mode was shown first in this judging pass */
   first: 'tools' | 'script'
@@ -87,15 +100,38 @@ export function gateVerdict(
   for (const measure of MEASURES) {
     const t = median(toolsFrames, measure)
     const s = median(scriptFrames, measure)
-    if (t === undefined || s === undefined) continue
+    if (t === undefined || s === undefined) {
+      reasons.push(`${measure}: missing measurements`)
+      continue
+    }
     const better = HIGHER_BETTER.has(measure) ? s < t : s > t
     if (better) reasons.push(`${measure}: script median ${s} vs tools ${t}`)
   }
-  const newErrors = scriptFrames
-    .flatMap((f) => f.errors)
-    .filter((e) => !toolsFrames.some((tf) => tf.errors.includes(e)))
-  if (newErrors.length) reasons.push(`${newErrors.length} error-level finding(s) tool mode does not have`)
-  const decided = pairs.filter((p) => p.judge === 'vision')
+  if (!tools.length || !script.length) reasons.push('missing benchmark runs')
+  for (const candidate of script) {
+    const baseline = tools.filter((r) => r.briefId === candidate.briefId)
+    if (!baseline.length) reasons.push(`${candidate.briefId}: missing tool baseline`)
+    if (candidate.frames.some((f) => f.errors.length) && baseline.every((r) => r.frames.every((f) => !f.errors.length)))
+      reasons.push(`${candidate.briefId}: new error-level findings`)
+  }
+  const humans = pairs.filter((p) => p.judge === 'human')
+  if (humans.length < 24) reasons.push('blind human sample needs at least 24 pairs')
+  const resolved = (p: PairVerdict) =>
+    p.winner === 'tie' ? 'tie' : p.winner === 'first' ? p.first : p.first === 'script' ? 'tools' : 'script'
+  const disagreement = humans.filter((h) => {
+    const vision = pairs.find((v) => v.judge === 'vision' && v.briefId === h.briefId && v.first === h.first)
+    return !vision || resolved(vision) !== resolved(h)
+  }).length
+  const decided =
+    humans.length && disagreement / humans.length > 0.3 ? humans : pairs.filter((p) => p.judge === 'vision')
+  for (const brief of tools) {
+    if (
+      !['tools', 'script'].every((first) =>
+        pairs.some((p) => p.briefId === brief.briefId && p.judge === 'vision' && p.first === first),
+      )
+    )
+      reasons.push(`${brief.briefId}: judge both presentation orders`)
+  }
   const winsOrTies = decided.filter(
     (p) => p.winner === 'tie' || (p.winner === 'first') === (p.first === 'script'),
   ).length
