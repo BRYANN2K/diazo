@@ -1,5 +1,7 @@
 import { SPEECH_TOOLS, runSpeechTool } from './speechTools.ts'
 import { BLENDER_TOOLS, runBlenderTool } from './blenderTools.ts'
+import { scriptRunDeps } from './scriptRuns.ts'
+import { SCRIPT_TOOL_NAMES, scriptToolShapes, getSdkDocs, runScript, undoScript } from './scriptTools.ts'
 import { findInCanvas } from './canvasFind.ts'
 import { findInLibrary } from './libraryQueries.ts'
 import { env } from './env.ts'
@@ -116,7 +118,7 @@ import {
   fitExportScale,
   parseExportScale,
 } from '../shared/exportScale.ts'
-import { DOOP_GUIDE, GUIDE_TOPICS } from './guide.ts'
+import { guideTopic, GUIDE_TOPICS } from './guide.ts'
 import {
   describeInspiration,
   INSPIRATION_NO_MATCH_NOTE,
@@ -432,6 +434,7 @@ export function buildMcpServer(
   owner?: string,
   ownerId?: string,
   clientName?: () => Promise<string | undefined>,
+  profile?: 'code',
 ): McpServer {
   const actorFrom = (agent_name?: string) => actions.resolveActor({ name: agent_name, kind: 'agent', owner })
   /* Canvas access for agents mirrors the web UI: the OAuth user's id runs
@@ -517,6 +520,55 @@ export function buildMcpServer(
   const server = new McpServer({ name: 'diazo-canvas', version: packageJson.version }, { instructions: INSTRUCTIONS })
   loadToolTargets(server, () => ({ ownerId, ownerName: owner }))
   registerFramePreview(server)
+  for (const name of SCRIPT_TOOL_NAMES) {
+    if (!env.DOOP_AGENT_SCRIPTS && (name === 'query_script' || name === 'run_script')) continue
+    server.registerTool(
+      name,
+      {
+        title:
+          name === 'get_sdk_docs'
+            ? 'Read an SDK namespace'
+            : name === 'revert_script_run'
+              ? 'Undo a script run'
+              : name === 'query_script'
+                ? 'Query the canvas with a script'
+                : 'Edit the canvas with a script',
+        description:
+          name === 'get_sdk_docs'
+            ? 'Read one namespace of the typed diazo SDK and examples.'
+            : name === 'revert_script_run'
+              ? 'Undo one script run on this canvas.'
+              : 'Run bounded TypeScript against the canvas SDK. Script mode is opt-in. Read SDK docs first.',
+        annotations: {
+          readOnlyHint: name === 'query_script' || name === 'get_sdk_docs',
+          destructiveHint: name === 'run_script' || name === 'revert_script_run',
+          openWorldHint: false,
+        },
+        inputSchema: scriptToolShapes[name],
+      },
+      async (raw: unknown) => {
+        const input = raw as Record<string, unknown>
+        try {
+          if (name === 'get_sdk_docs') return text(getSdkDocs(String(input.namespace)))
+          const caller = {
+            canvasId: String(input.canvas_id),
+            userId: ownerId,
+            actor: actorFrom(input.agent_name as string | undefined),
+            source: 'mcp' as const,
+          }
+          if (name === 'revert_script_run') return text(await undoScript(String(input.run_id), caller))
+          const result = await runScript(
+            input as unknown as import('./scriptRunner.ts').ScriptInput,
+            caller,
+            name === 'run_script',
+          )
+          return { ...text(result), ...(result.ok ? {} : { isError: true }) }
+        } catch (error) {
+          return err(error instanceof Error ? error.message : String(error))
+        }
+      },
+    )
+  }
 
   server.registerTool(
     'get_guide',
@@ -529,7 +581,7 @@ export function buildMcpServer(
         topic: z.enum(GUIDE_TOPICS).describe('Guide topic to load'),
       },
     },
-    async () => text(DOOP_GUIDE),
+    async ({ topic }) => text(guideTopic(topic)),
   )
 
   server.registerTool(
@@ -1014,8 +1066,10 @@ export function buildMcpServer(
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
       const report = await usageReport(canvas_id)
       const calls = await toolCallReport(canvas_id).catch(() => undefined)
+      const scriptRuns = await scriptRunDeps.list(canvas_id).catch(() => undefined)
       const body = {
         ...report,
+        ...(scriptRuns ? { scriptRuns } : {}),
         ...(calls ? { toolCalls: calls } : {}),
         runs: report.runs.slice(0, limit ?? 20),
       }
@@ -4082,6 +4136,12 @@ export function buildMcpServer(
     },
   )
 
+  if (profile === 'code') {
+    const allowed = new Set(['get_guide', 'get_sdk_docs', 'query_script', 'run_script', 'get_frame_screenshot'])
+    const registered = (server as unknown as { _registeredTools: Record<string, { remove: () => void }> })
+      ._registeredTools
+    for (const [name, tool] of Object.entries(registered)) if (!allowed.has(name)) tool.remove()
+  }
   return server
 }
 
@@ -4225,7 +4285,12 @@ export async function handleMcpRequest(req: Request, res: Response) {
   const clientName = async () =>
     (bearer ? clientNamesByCredential.get(credentialKey(bearer)) : undefined) ??
     (oauthClientId ? await oauthClientName(oauthClientId) : undefined)
-  const server = buildMcpServer(owner, session?.userId ?? undefined, clientName)
+  const server = buildMcpServer(
+    owner,
+    session?.userId ?? undefined,
+    clientName,
+    req.query.profile === 'code' ? 'code' : undefined,
+  )
   /* Stateless, and plain JSON rather than an SSE stream per response: no
      tool here sends notifications mid-call, so a stream carries nothing a
      JSON body does not, and JSON is what every client — including ChatGPT's

@@ -8,7 +8,15 @@ import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 
 /** `diazo-instructions` is the guide's name since the rename; `doop-instructions`
  *  stays accepted for agents, prompts and skills written before it. */
-export const GUIDE_TOPICS = ['diazo-instructions', 'doop-instructions'] as const
+export const GUIDE_TOPICS = [
+  'diazo-instructions',
+  'doop-instructions',
+  'core',
+  'scripts',
+  'design',
+  'streaming',
+  'reference',
+] as const
 
 /** The taste doctrine every design surface shares. The MCP guide serves it to
  *  external agents and the resident system prompt embeds it verbatim, so the
@@ -646,3 +654,20 @@ Two tools reach the Diazo team, never the humans on the canvas, and change no ca
 
 Never include secrets. A human's design feedback is not this: record that with save_decision.
 `
+
+export const SCRIPT_GUIDE = `Scripts are opt-in until a dated quality benchmark passes for the job kind.
+Use query_script for reading and run_script for bounded multi-step edits. Read get_sdk_docs for the namespace first.
+Begin with await diazo.canvas.summary({brief: "the request"}); reuse its tokens, components and matching library items before drawing new markup.
+Use frames.stream to send whole sections live. Do not delete, change sharing, import a website, generate an image or read a repo inside a script: use the dedicated tools.
+Every HTML write returns a numeric review. Fix all error-level findings; use at most three refinement rounds and name any errors left after those rounds.
+Then request one full-resolution screenshot for every delivered frame and inspect it before finishing. Numeric checks cannot replace that review.
+Default limits: 30 seconds, 64 MB, 200 SDK calls, 40 frame writes, 256 KB source, 8 KB returned result (32 KB maximum).
+Failure automatically rolls back. Use an idempotency key when retrying; dry_run computes planned changes without changing the canvas. revert_script_run undoes a successful run and refuses conflicting later edits.`
+
+export function guideTopic(topic: string): string {
+  if (topic === 'scripts') return SCRIPT_GUIDE
+  if (topic === 'reference') return DOOP_GUIDE
+  if (topic === 'design') return DESIGN_QUALITY + '\n' + DOOP_GUIDE.slice(0, 7000)
+  if (topic === 'streaming') return DOOP_GUIDE.slice(0, 9000)
+  return `Diazo canvas workflow. Read canvas guidelines before designing. Read get_guide(reference) for the full reference, design for design rules, streaming for the edit workflow, or scripts for bounded programs.\n${SCRIPT_GUIDE}\n${DESIGN_QUALITY}`
+}

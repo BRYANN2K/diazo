@@ -1,5 +1,7 @@
 import { SPEECH_TOOLS, runSpeechTool } from './speechTools.ts'
 import { BLENDER_TOOLS, runBlenderTool } from './blenderTools.ts'
+import { SCRIPT_TOOL_NAMES, scriptToolShapes, getSdkDocs, runScript, undoScript } from './scriptTools.ts'
+import { SCRIPT_GUIDE } from './guide.ts'
 import { env } from './env.ts'
 import { skillSlug } from '../shared/skills.ts'
 import { DRIFT_SEVERITIES, isDriftSeverity } from '../shared/drift.ts'
@@ -276,6 +278,10 @@ interface FeedbackItem {
 }
 
 interface RunState {
+  scriptReviews?: Record<string, { errors?: unknown[] }>
+  scriptRefinements?: number
+  scriptUsed?: boolean
+  scriptRemaining?: string
   mutatedFrames: Set<string>
   sourceFrames: Set<string>
   verificationFrames: Set<string>
@@ -912,7 +918,12 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       const runTools = [
         /* a batched run serving several people is not offered the tools
            that spend or read what only one of them owns */
-        ...TOOLS.filter((tool) => !runState.mixedRequesters || !REQUESTER_OWNED_TOOLS.has(tool.name)),
+        ...TOOLS.filter(
+          (tool) =>
+            (!runState.mixedRequesters || !REQUESTER_OWNED_TOOLS.has(tool.name)) &&
+            (!['query_script', 'run_script'].includes(tool.name) ||
+              (env.DOOP_AGENT_SCRIPTS && /\bscript mode\b|\bmode script\b/i.test(workText))),
+        ),
         ...(repoLink ? REPO_TOOLS : []),
         ...(cards.some((c) => c.kind === 'drift') ? DRIFT_TOOLS : []),
       ]
@@ -930,6 +941,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           prompt: kickoff,
           system: [
             systemFor(role),
+            SCRIPT_GUIDE,
             ...guidelinesBlock.map((b) => b.text),
             ...skillsBlock.map((b) => b.text),
             ...fontsBlock.map((b) => b.text),
@@ -1089,6 +1101,40 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             })
             continue
           }
+          if (runState.scriptUsed) {
+            const remaining = Object.entries(runState.scriptReviews ?? {}).filter(
+              ([, review]) => (review.errors?.length ?? 0) > 0,
+            )
+            if (remaining.length && (runState.scriptRefinements ?? 0) < 3) {
+              runState.scriptRefinements = (runState.scriptRefinements ?? 0) + 1
+              messages.push({
+                role: 'user',
+                content: `Script refinement ${runState.scriptRefinements}/3. Fix these full reviews before finishing: ${JSON.stringify(runState.scriptReviews)}`,
+              })
+              continue
+            }
+            const frames = verificationFrameIds(runState).filter((id) => !runState.verifiedFrames.has(id))
+            if (runState.vision && frames.length) {
+              const images: Anthropic.ContentBlockParam[] = []
+              for (const id of frames) {
+                const frame = store.getFrame(id)
+                if (!frame) continue
+                images.push(
+                  { type: 'text', text: `Final full-resolution review: ${id}` },
+                  ...(await frameImageBlocks(frame, true)).filter(
+                    (b): b is Anthropic.ImageBlockParam | Anthropic.TextBlockParam =>
+                      b.type === 'image' || b.type === 'text',
+                  ),
+                )
+                runState.verifiedFrames.add(id)
+              }
+              messages.push({ role: 'user', content: images })
+              continue
+            }
+            if (remaining.length) {
+              runState.scriptRemaining = `Unresolved script findings after three refinement rounds: ${JSON.stringify(remaining)}`
+            }
+          }
           const unverified = runState.vision
             ? verificationFrameIds(runState).filter((id) => !runState.verifiedFrames.has(id))
             : []
@@ -1178,6 +1224,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           .map((b) => b.text)
           .join(' ')
         console.log(`[resident] summary canvas=${canvasId} ${summary.replace(/\s+/g, ' ').trim().slice(0, 500)}`)
+        if (runState.scriptRemaining) summary += '\n' + runState.scriptRemaining
         actions.agentSummary(canvasId, actor, summary)
       }
     }
@@ -3138,6 +3185,18 @@ export const DRIFT_TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+for (const name of SCRIPT_TOOL_NAMES) {
+  if (!env.DOOP_AGENT_SCRIPTS && (name === 'query_script' || name === 'run_script')) continue
+  TOOLS.push({
+    name,
+    description:
+      name === 'get_sdk_docs'
+        ? 'Read the typed diazo SDK namespace and examples.'
+        : 'Execute or undo a bounded canvas script. Use only when the person requests script mode.',
+    input_schema: zodToJsonSchema(z.object(scriptToolShapes[name])) as Anthropic.Tool['input_schema'],
+  })
+}
+
 /** How many findings one drift run may post — more buries the report. */
 const MAX_DRIFT_FINDINGS = 20
 
@@ -3186,12 +3245,13 @@ const MAX_SHOT_HEIGHT = 4000
 
 async function frameImageBlocks(
   f: Frame,
+  fullResolution = false,
 ): Promise<NonNullable<Exclude<Anthropic.ToolResultBlockParam['content'], string>>> {
-  const cropped = f.height > MAX_SHOT_HEIGHT
-  const scale = Math.min(1, 7000 / f.width)
+  const cropped = !fullResolution && f.height > MAX_SHOT_HEIGHT
+  const scale = fullResolution ? 1 : Math.min(1, 7000 / f.width)
   const big = Math.max(f.width, Math.min(f.height, MAX_SHOT_HEIGHT)) * scale > 2000
   const buf = await renderFrame(f, scale, {
-    maxHeight: MAX_SHOT_HEIGHT,
+    ...(fullResolution ? {} : { maxHeight: MAX_SHOT_HEIGHT }),
     ...(big ? { type: 'jpeg' as const, quality: 80 } : {}),
   })
   const blocks: NonNullable<Exclude<Anthropic.ToolResultBlockParam['content'], string>> = [
@@ -3322,6 +3382,37 @@ async function execToolInner(
 
   try {
     switch (block.name) {
+      case 'get_sdk_docs':
+        return ok(JSON.stringify(getSdkDocs(String(input.namespace))))
+      case 'query_script':
+      case 'run_script':
+      case 'revert_script_run': {
+        const raw = block.input as Record<string, unknown>
+        if (raw.canvas_id !== undefined && raw.canvas_id !== canvasId) return fail('scripts are bound to this canvas')
+        const caller = {
+          canvasId,
+          userId: runState.payerId ?? store.getCanvas(canvasId)?.ownerId,
+          actor,
+          source: 'resident' as const,
+        }
+        if (block.name === 'revert_script_run') return ok(JSON.stringify(await undoScript(String(raw.run_id), caller)))
+        const result = await runScript(
+          raw as unknown as import('./scriptRunner.ts').ScriptInput,
+          caller,
+          block.name === 'run_script',
+        )
+        if (result.ok && !result.dry_run && block.name === 'run_script') {
+          runState.scriptUsed = true
+          Object.assign((runState.scriptReviews ??= {}), result.checks)
+          for (const [frameId] of Object.entries(result.checks)) {
+            runState.mutatedFrames.add(frameId)
+            runState.verifiedFrames.delete(frameId)
+          }
+          runState.tokenWrites += result.writes.filter((w) => w.fn.startsWith('tokens.')).length
+        }
+        return result.ok ? ok(JSON.stringify(result)) : fail(JSON.stringify(result))
+      }
+
       case 'set_status': {
         actions.setAgentStatus(canvasId, actor, String(input.status ?? ''))
         return ok('ok')

@@ -3,6 +3,7 @@ import { registerBlenderRoutes } from './blenderRoutes.ts'
 import { queueServerRender, renderAccess } from './motionRender.ts'
 import { recoverSpeechJobs } from './speechJobs.ts'
 import { recoverBlenderOps } from './blenderOps.ts'
+import { scriptRunDeps } from './scriptRuns.ts'
 import * as libraries from './libraries.ts'
 import * as libraryThumbQueue from './libraryThumbQueue.ts'
 import * as libraryIndex from './libraryIndex.ts'
@@ -3889,7 +3890,7 @@ app.get('/api/canvases/:id/find', (req, res) => {
 app.get('/api/canvases/:id/usage', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   const [report, calls] = await Promise.all([usageReport(req.params.id), toolCallReport(req.params.id)])
-  res.json({ ...report, toolCalls: calls })
+  res.json({ ...report, toolCalls: calls, scriptRuns: await scriptRunDeps.list(req.params.id) })
 })
 
 /* run replay (server/runReplay.ts): one resident run's activity and the
