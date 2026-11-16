@@ -938,6 +938,7 @@ version = "0.16.0"
 dependencies = [
  "base64 0.22.1",
  "dirs",
+ "libc",
  "objc2",
  "objc2-app-kit",
  "regex",
