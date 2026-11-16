@@ -82,7 +82,7 @@ it('shows an open plan with its screens and the editor actions', () => {
   expect(container.textContent).toContain('Landing')
   expect(container.textContent).toContain('1280×800')
   expect(container.textContent).toContain('Which brand font?')
-  expect(container.textContent).toContain('proposed')
+  expect(container.textContent).toContain('Proposed')
   expect(button('Go design')).toBeTruthy()
   expect(button('Edit')).toBeTruthy()
   expect(button('Revise')).toBeTruthy()
@@ -119,7 +119,7 @@ it('a launched plan says who queued the cards and closes the actions', () => {
     ],
   })
   act(() => root.render(<ChatPanel canvasId="c" />))
-  expect(container.textContent).toContain('launched')
+  expect(container.textContent).toContain('Launched')
   expect(container.textContent).toContain('2 cards queued by Bryan')
   expect(button('Go design')).toBeUndefined()
 })
