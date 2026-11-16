@@ -6,13 +6,20 @@ import { useStore } from '@/lib/store'
 import { currentRunnerPick } from '@/lib/runnerPick'
 import { useReducedMotion } from '@/lib/motion'
 import {
-  cameraAt,
   cameraKeyTimes,
   cameraTrack,
+  frameStateAt,
   NEW_COMPOSITION,
+  resolveEasing,
   timecode,
   type Composition,
 } from '@/lib/motion/contract'
+import { pageFrames } from '../../../shared/pages'
+import { setFrameMotion } from '@/lib/frameBridge'
+import { sendWs } from '@/lib/ws'
+import { isScene } from '@/lib/motion/compositor'
+import { frameMotionCss } from '@/lib/motion/elementCss'
+import { useMotionStore } from '@/lib/motion/store'
 import { cameraToViewport, stageBox, viewportToCamera } from '@/lib/motion/stageCamera'
 import { useComposition } from '@/lib/motion/useComposition'
 import { Button } from '../ui/button'
@@ -62,17 +69,41 @@ export function MotionTimeline({
   const setViewport = useStore((s) => s.setViewport)
 
   /* show the shot at `at` on the stage */
+  /* the frames the film moves on the stage, put back as saved on close */
+  const touched = useRef(new Set<string>())
+  const lastSent = useRef(0)
+  useEffect(
+    () => () => {
+      for (const frameId of touched.current) setFrameMotion(frameId, null, '')
+      touched.current.clear()
+    },
+    [pageId],
+  )
+
   const showShot = useCallback(
-    (film: Composition, at: number) => {
-      const box = stageBox()
-      if (!box) return
+    (film: Composition, at: number, isPlaying = false) => {
       const keys = cameraKeyTimes(film)
       /* reduced motion: hold each key until the next one (a cut, not a glide) */
       const shown = reduced ? ([...keys].reverse().find((k) => k <= at) ?? at) : at
-      const camera = cameraAt(film, shown)
-      if (camera) setViewport(cameraToViewport(camera, film, box))
+      const state = frameStateAt(film, shown, { resolveEasing })
+      const box = stageBox()
+      if (box && state.camera) setViewport(cameraToViewport(state.camera, film, box))
+      /* element tracks and seek-safe scenes step inside the live frames */
+      const canvas = useStore.getState().canvas
+      for (const frame of canvas ? pageFrames(canvas, pageId) : []) {
+        const css = frameMotionCss(state, frame.id)
+        if (!css && !isScene(frame.html) && !touched.current.has(frame.id)) continue
+        touched.current.add(frame.id)
+        setFrameMotion(frame.id, state.t, css)
+      }
+      /* the playhead is presence: collaborators see where this one is */
+      const now = performance.now()
+      if (now - lastSent.current > 120 || !isPlaying) {
+        lastSent.current = now
+        sendWs({ type: 'composition:playhead', pageId, t: state.t, playing: isPlaying })
+      }
     },
-    [reduced, setViewport],
+    [reduced, setViewport, pageId],
   )
 
   const seek = useCallback(
@@ -103,7 +134,7 @@ export function MotionTimeline({
       }
       timeRef.current = at
       setTime(at)
-      showShot(comp, at)
+      showShot(comp, at, true)
       frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
@@ -256,7 +287,7 @@ export function MotionTimeline({
           </div>
         </div>
       )}
-      {comp && <Lanes comp={comp} time={time} onSeek={seek} onPickKey={seek} />}
+      {comp && <Lanes comp={comp} time={time} pageId={pageId} onSeek={seek} onPickKey={seek} />}
 
       {exporting && comp && (
         <MotionExportDialog
@@ -275,15 +306,22 @@ export function MotionTimeline({
 function Lanes({
   comp,
   time,
+  pageId,
   onSeek,
   onPickKey,
 }: {
   comp: Composition
   time: number
+  pageId: string
   onSeek: (t: number) => void
   onPickKey: (t: number) => void
 }) {
   const t = useT()
+  /* collaborators' playheads on this film, in their presence colour */
+  const playheads = useMotionStore((s) => s.playheads)
+  const presences = useStore((s) => s.presences)
+  /* only people still in the room */
+  const peers = Object.values(playheads).filter((p) => p.pageId === pageId && presences[p.clientId])
   const body = useRef<HTMLDivElement>(null)
   const scrubbing = useRef(false)
   const keys = cameraKeyTimes(comp)
@@ -398,6 +436,20 @@ function Lanes({
           </div>
         </div>
       ))}
+      {peers.map((peer) => {
+        const who = presences[peer.clientId]
+        return (
+          <span
+            key={peer.clientId}
+            title={who?.name}
+            className="pointer-events-none absolute top-0 bottom-0 z-[2] w-px opacity-70"
+            style={{
+              left: `calc(${LABEL_W}px + (100% - ${LABEL_W}px) * ${Math.min(1, peer.t / comp.duration)})`,
+              background: who?.kind === 'agent' ? 'var(--agent)' : (who?.color ?? 'var(--ink-3)'),
+            }}
+          />
+        )
+      })}
       <span
         aria-hidden
         className="pointer-events-none absolute top-0 bottom-0 z-[3] w-px bg-signal before:absolute before:top-0 before:-left-[5px] before:h-[13px] before:w-[11px] before:rounded-b-tag before:bg-signal before:content-['']"

@@ -1004,23 +1004,27 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `render_composition`. Tests: `motion.test.ts`, `motionHttp.test.ts`, `motion::tests`,
   `blender::tests`.
 
-- Motion Studio UI (`src/components/motion/`, `src/lib/motion/`, contract `docs/motion-api.md` of
-  `feat/motion-backend`): the bar's Motion button mounts `MotionTimeline` over the stage for the
-  active page (transport, ruler, camera lane, shots, element lanes, one playhead). The player owns
-  the clock and moves the editor's view through `cameraAt(comp, t)` (`stageCamera.ts` maps a
-  composition camera to the stage `Viewport` and back; reduced motion cuts key to key). "Key the
-  camera here" sends a `set_camera` op with the playhead and the current view; "Animate storyboard"
-  queues a board card asking the resident agent for `animate_storyboard` + `set_camera` moves.
-  Writes are `PATCH …/composition` ops with `expectedRevision` (409 reloads). Export
-  (`MotionExportDialog.tsx`): `POST …/renders`, then `renderInBrowser` (the compositor draws each
-  frame from `t` onto a canvas — page frames rasterised once by `rasterizeFrame` — recorded by
-  MediaRecorder, uploaded to `PUT /api/renders/:id/upload`) or, behind `__DOOP_MOTION_RENDER__`,
-  `renderOnDesktop` (`motion_render` drives `/c/<id>/motion-render`, `MotionRenderHarness.tsx`,
-  through `__doopMotionSeek` / `__doopMotionCapture`). `src/lib/motion/contract.ts` mirrors the
-  backend types and is an adapter until that branch merges; the room's `composition` message is not
-  handled yet (the timeline refetches on focus). MVP limits: frames are still pictures in the
-  render, element tracks are drawn but not applied, camera rotation shows only in the render.
-  Tests: `motionStudio.test.ts`, `motion.test.ts`.
+- Motion Studio UI (`src/components/motion/`, `src/lib/motion/`, contract `docs/motion-api.md`):
+  the bar's Motion button mounts `MotionTimeline` over the stage for the active page (transport,
+  ruler, camera lane, shots, element lanes, one playhead, collaborators' playheads). The room is
+  the source: `init.canvas.compositions`, `composition` and `composition:playhead` messages land
+  in `src/lib/motion/store.ts` (src/lib/ws.ts); REST answers a page the room has not mentioned.
+  `src/lib/motion/contract.ts` re-exports `shared/motion.ts` / `shared/motionRuntime.ts` and
+  resolves `token` easings from the CSS custom properties. The player owns the clock: each tick
+  calls `frameStateAt`, moves the editor's view (`stageCamera.ts`; reduced motion cuts key to key),
+  and sends each page frame its element-track values (`elementCss.ts`) with `--t` and a
+  `doop:seek` event through the runtime's `doop:motion` message (an adopted sheet, never saved).
+  "Key the camera here" sends `set_camera`; "Animate storyboard" queues a board card asking the
+  resident agent for `animate_storyboard` + `set_camera` moves. Writes are `PATCH …/composition`
+  ops with `expectedRevision` (409 reloads). Export (`MotionExportDialog.tsx`): `POST …/renders`,
+  then `renderInBrowser` (the compositor, `compositor.ts`, paints each frame from `t`: still frames
+  rasterised once, frames with element tracks or seek-safe scene markup re-rasterised per frame
+  from their HTML with the values and `--t` written in; MediaRecorder records in real time, so a
+  slow paint stretches the browser render) or `renderOnDesktop` (`motion_render` drives
+  `/c/<id>/motion-render`, `MotionRenderHarness.tsx`, through `__doopMotionSeek` /
+  `__doopMotionCapture`), uploaded to `PUT /api/renders/:id/upload`. Limits: camera rotation shows
+  only in renders; spring tokens written as `linear()` resolve to linear. Tests:
+  `motionStudio.test.ts`, `motionElementCss.test.ts`, `motionTokens.test.ts`.
 
 ## 5. Security and Secrets
 

@@ -49,12 +49,13 @@ describe('Motion Studio client contract', () => {
     expect(ease({ type: 'steps', steps: 4 }, 0.3, 0.3)).toBe(0.25)
   })
 
-  it('eases cubic-bezier and token curves from 0 to 1, and an unknown token linearly', () => {
+  it('eases cubic-bezier and named token curves, and an unknown token linearly', () => {
     const curve = { type: 'cubic-bezier' as const, x1: 0.22, y1: 1, x2: 0.36, y2: 1 }
     expect(ease(curve, 0, 0)).toBeCloseTo(0)
     expect(ease(curve, 1, 1)).toBeCloseTo(1)
     expect(ease(curve, 0.5, 0.5)).toBeGreaterThan(0.5)
-    expect(ease({ type: 'token', name: '--ease-out' }, 0.5, 0.5)).toBeCloseTo(ease(curve, 0.5, 0.5))
+    /* a CSS name resolves through the contract's named easings (no stylesheet in node) */
+    expect(ease({ type: 'token', name: 'ease-in-out' }, 0.25, 0.25)).toBeLessThan(0.25)
     expect(ease({ type: 'token', name: '--nope' }, 0.3, 0.3)).toBe(0.3)
   })
 

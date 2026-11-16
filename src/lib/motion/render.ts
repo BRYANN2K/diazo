@@ -1,5 +1,5 @@
 import { motionApi } from './api'
-import { drawAt, type FilmStage } from './compositor'
+import { paintAt, type FilmStage } from './compositor'
 import type { Composition, RenderFormat, RenderJob } from './contract'
 
 /* Rendering a film to a video file, on either path the contract names:
@@ -63,15 +63,15 @@ export async function renderOnDesktop(
   if (!tauri || !hasDesktopRender()) throw new Error('This desktop app cannot render films yet. Update it.')
   const frames = Math.max(1, Math.round((job.range.end - job.range.start) * job.fps))
   await motionApi.updateRender(job.id, { status: 'rendering', claimedBy: 'desktop', progress: 0 })
-  /* ADAPTER: the event payload and command arguments follow the contract's
-     "Desktop bridge" section; the harness adds `start` to the shell's t */
+  /* desktop/src-tauri/src/motion.rs: the driver seeks t = i / fps, the
+     harness adds the range start; progress names the job as `job` */
   const unlisten = await tauri.event.listen<{
-    jobId: string
+    job: string
     phase: 'capture' | 'encode'
     done: number
     total: number
   }>('motion-render://progress', ({ payload }) => {
-    if (payload.jobId !== job.id) return
+    if (payload.job !== job.id) return
     const part = payload.total ? payload.done / payload.total : 0
     onProgress({
       phase: payload.phase,
@@ -154,18 +154,21 @@ export async function renderInBrowser(
   await motionApi.updateRender(job.id, { status: 'rendering', claimedBy: 'browser', progress: 0 })
   const total = Math.max(1, Math.round((job.range.end - job.range.start) * job.fps))
   const frameMs = 1000 / job.fps
-  drawAt(ctx, scaledComp, scaled, job.range.start)
+  await paintAt(ctx, scaledComp, scaled, job.range.start, signal)
   recorder.start()
   let lastBeat = 0
   try {
     for (let i = 0; i < total; i++) {
       if (signal?.aborted) throw new DOMException('canceled', 'AbortError')
       const t = job.range.start + i / job.fps
-      drawAt(ctx, scaledComp, scaled, t)
+      const began = performance.now()
+      await paintAt(ctx, scaledComp, scaled, t, signal)
       requestFrame?.()
       /* MediaRecorder timestamps frames by wall clock, so frames are paced at
          the film's rate; the picture itself only ever depends on t */
-      await new Promise((r) => setTimeout(r, frameMs))
+      /* a frame that took longer to paint than its slot stretches the
+         recording; the desktop render has exact timing */
+      await new Promise((r) => setTimeout(r, Math.max(0, frameMs - (performance.now() - began))))
       const progress = ((i + 1) / total) * 0.9
       onProgress({ phase: 'capture', progress })
       if (performance.now() - lastBeat > 1000) {

@@ -53,6 +53,7 @@ const FRAME_BOOTSTRAP_TEMPLATE = `<!doctype html>
   /* ⌘Y outline mode: every box drawn as a hairline, fills and shadows off.
      Adopted like the sheet above, so no save or export ever carries it. */
   var vOutlineSheet = null
+  var vMotionSheet = null
   try {
     vOutlineSheet = new CSSStyleSheet()
     vOutlineSheet.replaceSync('html,body{background:transparent!important}body *{outline:1px solid rgba(1,119,211,.6)!important;outline-offset:-1px!important;background:transparent!important;box-shadow:none!important;text-shadow:none!important}body img,body video,body canvas,body svg{opacity:.25!important}')
@@ -1506,6 +1507,23 @@ const FRAME_BOOTSTRAP_TEMPLATE = `<!doctype html>
       parent.postMessage({ type: 'doop:inspect-result', reqId: d.reqId, info: inspect(d.selector) }, '*')
     }
     if (d.type === 'doop:outlines') setOutlines(d.on === true)
+    /* Motion Studio's player: the film's time on the root as --t, a
+       doop:seek event for seek-safe scripts, and the element tracks' values
+       as one adopted sheet (never saved). css '' clears it. */
+    if (d.type === 'doop:motion') {
+      try {
+        if (!vMotionSheet) vMotionSheet = new CSSStyleSheet()
+        vMotionSheet.replaceSync(typeof d.css === 'string' ? d.css : '')
+        var others = document.adoptedStyleSheets.filter(function (s) { return s !== vMotionSheet })
+        document.adoptedStyleSheets = d.css ? others.concat(vMotionSheet) : others
+      } catch (e) {}
+      if (typeof d.t === 'number') {
+        document.documentElement.style.setProperty('--t', String(d.t))
+        document.dispatchEvent(new CustomEvent('doop:seek', { detail: { t: d.t } }))
+      } else {
+        document.documentElement.style.removeProperty('--t')
+      }
+    }
     if (d.type === 'doop:computed' && Array.isArray(d.properties)) {
       var computedEl = styleTarget(d.selector)
       var values = null

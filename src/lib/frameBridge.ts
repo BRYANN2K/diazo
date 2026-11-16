@@ -406,3 +406,10 @@ export function setOutlines(on: boolean) {
 export function outlinesOn() {
   return outlines
 }
+
+/** Motion Studio: show a frame at film time `t` — its element tracks' values
+ *  as `css`, `--t` on its root and a `doop:seek` event; `t` null ends the
+ *  preview and puts the frame back as saved. */
+export function setFrameMotion(frameId: string, t: number | null, css: string) {
+  windows.get(frameId)?.postMessage({ type: 'doop:motion', t: t ?? undefined, css: t === null ? '' : css }, '*')
+}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { pageFrames } from '../../shared/pages'
 import { api } from '../lib/api'
 import { motionApi } from '../lib/motion/api'
-import { drawAt, prepareStage, type FilmStage } from '../lib/motion/compositor'
+import { paintAt, prepareStage, type FilmStage } from '../lib/motion/compositor'
 import type { Composition } from '../lib/motion/contract'
 
 declare global {
@@ -38,7 +38,7 @@ export function MotionRenderHarness({ canvasId }: { canvasId: string }) {
     window.__doopMotionSeek = async (t: number) => {
       await window.__doopMotionReady
       const ctx = canvasRef.current?.getContext('2d')
-      if (film && ctx) drawAt(ctx, film.comp, film.stage, start + t)
+      if (film && ctx) await paintAt(ctx, film.comp, film.stage, start + t)
     }
     window.__doopMotionCapture = () => canvasRef.current?.toDataURL('image/png') ?? ''
     void (async () => {

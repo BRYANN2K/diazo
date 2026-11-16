@@ -5,6 +5,7 @@ import { isPeerViewport } from '../../shared/viewport'
 import { roleAllows } from '../../shared/canvasRole'
 import { getIdentity } from './identity'
 import { useStore } from './store'
+import { useMotionStore } from './motion/store'
 
 let socket: WebSocket | null = null
 let currentCanvasId: string | null = null
@@ -162,6 +163,7 @@ function handle(msg: ServerMessage) {
   const me = getIdentity().clientId
   switch (msg.type) {
     case 'init':
+      useMotionStore.getState().seed(msg.canvas.compositions ?? [])
       /* a reconnect that lands on a different build means this page is
          running a stale bundle — offer a reload instead of forcing one,
          so in-progress work is never yanked away */
@@ -261,6 +263,14 @@ function handle(msg: ServerMessage) {
       break
     case 'guide':
       s.setGuideLocal(msg.id, msg.guide)
+      break
+    /* Motion Studio: a page's timeline written or removed, and where each
+       collaborator's playhead is */
+    case 'composition':
+      useMotionStore.getState().setComposition(msg.pageId, msg.composition)
+      break
+    case 'composition:playhead':
+      if (msg.clientId !== me) useMotionStore.getState().setPlayhead(msg)
       break
     case 'canvas:renamed':
       s.renameCanvasLocal(msg.name)
