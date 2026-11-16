@@ -1,0 +1,19 @@
+{
+  "$schema": "gen/schemas/desktop-schema.json",
+  "identifier": "motion-render",
+  "description": "The hidden webview a desktop motion render drives (src/motion.rs): the render page inside it may invoke exactly two commands — motion_render_frame posts one captured png, motion_render_done ends the run. Nothing else is reachable from the page; the origins it can ever load are re-checked natively before the window exists (the app's own server or loopback).",
+  "windows": ["motion-render-*"],
+  "remote": {
+    "urls": [
+      "https://doop.design",
+      "https://www.doop.design",
+      "http://localhost*",
+      "https://localhost*",
+      "http://*.localhost*",
+      "https://*.localhost*",
+      "http://127.*",
+      "https://127.*"
+    ]
+  },
+  "permissions": ["allow-motion-render-frame", "allow-motion-render-done"]
+}

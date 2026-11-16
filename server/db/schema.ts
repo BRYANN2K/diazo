@@ -37,6 +37,7 @@ import type {
   ComponentSlot,
   ComponentSnapshot,
 } from '../../shared/components.ts'
+import type { Composition, MotionTrack, RenderFormat, RenderStatus, RenderTarget } from '../../shared/motion.ts'
 
 /** A credential kept on a user's behalf: sealed on write and opened on read
  *  (server/secretBox.ts), so call sites see plaintext and the row does not.
@@ -1347,4 +1348,86 @@ export const libraryCurations = pgTable(
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
   },
   (t) => [index('library_curations_owner_idx').on(t.ownerId)],
+)
+
+/** Motion Studio compositions (shared/motion.ts): one timeline per page —
+ *  duration/fps/size as columns, the tracks document as JSON. Mirrored in
+ *  memory on the canvas like skills, so they hydrate with it and fall with
+ *  page/canvas deletion. `revision` powers the writers' expectedRevision. */
+export const compositions = pgTable(
+  'compositions',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    pageId: text('page_id').notNull(),
+    duration: doublePrecision('duration').notNull(),
+    fps: integer('fps').notNull(),
+    width: integer('width').notNull(),
+    height: integer('height').notNull(),
+    posterTime: doublePrecision('poster_time'),
+    tracks: jsonb('tracks').$type<MotionTrack[]>().notNull(),
+    revision: integer('revision').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+    updatedBy: text('updated_by').notNull(),
+  },
+  (t) => [
+    uniqueIndex('compositions_page_idx').on(t.canvasId, t.pageId),
+    index('compositions_canvas_idx').on(t.canvasId),
+  ],
+)
+
+/** Composition history, undo-friendly like frame_versions: the state a
+ *  composition had before a write replaced it. Append-only, pruned to the
+ *  newest few per composition; cold path — no in-memory mirror. */
+export const compositionVersions = pgTable(
+  'composition_versions',
+  {
+    id: text('id').primaryKey(),
+    compositionId: text('composition_id').notNull(),
+    canvasId: text('canvas_id').notNull(),
+    /** the whole composition document (minus bookkeeping) before the write */
+    state: jsonb('state').$type<Composition>().notNull(),
+    savedAt: bigint('saved_at', { mode: 'number' }).notNull(),
+    savedBy: text('saved_by').notNull(),
+    savedByKind: text('saved_by_kind'),
+    runId: text('run_id'),
+  },
+  (t) => [
+    index('composition_versions_composition_idx').on(t.compositionId),
+    index('composition_versions_canvas_idx').on(t.canvasId),
+  ],
+)
+
+/** Motion render jobs (shared/motion.ts RenderJob): records, not a runner —
+ *  a browser or the desktop shell claims one, reports progress and uploads
+ *  the file, which lands as an /a/ asset. Rows survive restarts; a job
+ *  still 'rendering' across a boot is marked failed at hydrate. */
+export const renderJobs = pgTable(
+  'render_jobs',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    pageId: text('page_id').notNull(),
+    compositionId: text('composition_id').notNull(),
+    format: text('format').$type<RenderFormat>().notNull(),
+    target: text('target').$type<RenderTarget>().notNull(),
+    width: integer('width').notNull(),
+    height: integer('height').notNull(),
+    fps: integer('fps').notNull(),
+    rangeStart: doublePrecision('range_start').notNull(),
+    rangeEnd: doublePrecision('range_end').notNull(),
+    status: text('status').$type<RenderStatus>().notNull(),
+    progress: real('progress').notNull(),
+    outputAssetId: text('output_asset_id'),
+    error: text('error'),
+    claimedBy: text('claimed_by'),
+    claimedAt: bigint('claimed_at', { mode: 'number' }),
+    createdBy: text('created_by').notNull(),
+    createdByName: text('created_by_name').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+    finishedAt: bigint('finished_at', { mode: 'number' }),
+  },
+  (t) => [index('render_jobs_canvas_idx').on(t.canvasId), index('render_jobs_composition_idx').on(t.compositionId)],
 )

@@ -5,6 +5,7 @@ import { canvasPages, copyPageName, pageFrames, samePages } from '../shared/page
 import * as persist from './db/persist.ts'
 import type { LinkAccess } from '../shared/canvasRole.ts'
 import { MAX_GUIDES } from '../shared/guides.ts'
+import { remapCompositionRefs, type Composition } from '../shared/motion.ts'
 import { remapFrameTargets } from '../shared/prototype.ts'
 import type { ComponentDef } from '../shared/components.ts'
 import { byStack, frontOf, stackOf } from '../shared/frameStack.ts'
@@ -47,6 +48,8 @@ type PageCopy = {
   pages: CanvasPageInfo[]
   frames: Frame[]
   guides: CanvasGuide[]
+  /** the source page's timeline, copied onto the new page when it had one */
+  composition?: Composition
 }
 
 const names = (pages: CanvasPageInfo[]) => pages.map((page) => page.name)
@@ -409,6 +412,20 @@ class Store {
       ...(tokens?.length ? { tokens } : {}),
       ...(source.tokenThemes?.length ? { tokenThemes: [...source.tokenThemes] } : {}),
       ...(references?.length ? { references } : {}),
+      ...(source.compositions?.length
+        ? {
+            compositions: source.compositions.map((comp) => ({
+              /* pages keep their ids on a canvas copy, so pageId stays;
+                 element/frame refs inside tracks follow the frame copies */
+              ...remapCompositionRefs(comp, frameIds),
+              id: nanoid(10),
+              canvasId,
+              createdAt: now,
+              updatedAt: now,
+              updatedBy: by,
+            })),
+          }
+        : {}),
     }
     await persist.saveCanvasCopy(canvas)
     this.canvases.set(canvas.id, canvas)
@@ -472,11 +489,25 @@ class Store {
       .map((guide) => ({ ...guide, id: nanoid(10), pageId: page.id }))
     /* the copy's guides count against the canvas like any other */
     if ((canvas.guides?.length ?? 0) + guides.length > MAX_GUIDES) throw new GuideLimitError()
+    /* the source page's timeline follows its frames to the copy: fresh id,
+       frame refs remapped through the page's own copy ids */
+    const sourceComp = canvas.compositions?.find((c) => c.pageId === pageId)
+    const composition: Composition | undefined = sourceComp
+      ? {
+          ...remapCompositionRefs(structuredClone(sourceComp), frameIds),
+          id: nanoid(10),
+          pageId: page.id,
+          createdAt: now,
+          updatedAt: now,
+          updatedBy: by,
+        }
+      : undefined
     const next = [...pages]
     next.splice(pages.indexOf(source) + 1, 0, page)
     await persist.savePageCopy(
       { ...canvas, pages: next, guides: [...(canvas.guides ?? []), ...guides], updatedAt: now },
       frames,
+      composition ? [composition] : [],
     )
     if (this.canvases.get(canvasId) !== canvas) return undefined
     /* a page save may have landed during the write: slot the copy after the
@@ -497,9 +528,10 @@ class Store {
     const room = Math.max(0, MAX_GUIDES - (canvas.guides?.length ?? 0))
     if (guides.length > room) guides.splice(room)
     if (guides.length) canvas.guides = [...(canvas.guides ?? []), ...guides]
+    if (composition) canvas.compositions = [...(canvas.compositions ?? []), composition]
     canvas.updatedAt = Math.max(canvas.updatedAt, now)
     if (!samePages(canvas.pages, next) || copied) persist.saveCanvas(canvas)
-    return { source, page, pages: canvas.pages, frames, guides }
+    return { source, page, pages: canvas.pages, frames, guides, composition }
   }
 
   /** Replace the page list. Returns the saved pages (flow starts kept) and
@@ -508,7 +540,13 @@ class Store {
   setPages(
     canvasId: string,
     pages: import('../shared/types.ts').CanvasPageInfo[],
-  ): { pages: import('../shared/types.ts').CanvasPageInfo[]; dropped: CanvasGuide[] } | undefined {
+  ):
+    | {
+        pages: import('../shared/types.ts').CanvasPageInfo[]
+        dropped: CanvasGuide[]
+        droppedCompositions: Composition[]
+      }
+    | undefined {
     const canvas = this.canvases.get(canvasId)
     if (!canvas) return undefined
     const firstId = canvasPages(canvas)[0]!.id
@@ -539,13 +577,72 @@ class Store {
       for (const frame of canvas.frames) {
         if (frame.pageId && renamed.has(frame.pageId)) this.emitFrameWrite(canvasId, frame.id, 'move')
       }
-    /* a deleted page takes its guides with it */
+    /* a deleted page takes its guides and its timeline with it */
     const kept = (guide: CanvasGuide) => merged.some((page) => page.id === guide.pageId)
     const dropped = (canvas.guides ?? []).filter((guide) => !kept(guide))
     if (dropped.length) canvas.guides = canvas.guides!.filter(kept)
+    const keptComp = (comp: Composition) => merged.some((page) => page.id === comp.pageId)
+    const droppedCompositions = (canvas.compositions ?? []).filter((comp) => !keptComp(comp))
+    if (droppedCompositions.length) {
+      canvas.compositions = canvas.compositions!.filter(keptComp)
+      for (const comp of droppedCompositions) persist.deleteComposition(canvasId, comp.pageId)
+    }
     canvas.updatedAt = Date.now()
     persist.saveCanvas(canvas)
-    return { pages: merged, dropped }
+    return { pages: merged, dropped, droppedCompositions }
+  }
+
+  /* ---- Motion Studio compositions (shared/motion.ts) ---- */
+
+  /** the timeline of a page, when it has one */
+  getComposition(canvasId: string, pageId: string): Composition | undefined {
+    return this.canvases.get(canvasId)?.compositions?.find((c) => c.pageId === pageId)
+  }
+
+  /** Upsert a page's composition: the state it replaces is filed as a
+   *  version first (undo-friendly, like frame versions); the row follows
+   *  write-through. The caller stamps revision/updatedAt/updatedBy. */
+  setComposition(
+    canvasId: string,
+    comp: Composition,
+    by: { name: string; kind?: string; runId?: string },
+  ): Composition {
+    const canvas = this.canvases.get(canvasId)
+    if (!canvas) return comp
+    const list = (canvas.compositions ??= [])
+    const i = list.findIndex((c) => c.pageId === comp.pageId || c.id === comp.id)
+    const prev = i >= 0 ? list[i]! : undefined
+    if (prev) {
+      persist.saveCompositionVersion({
+        id: nanoid(10),
+        compositionId: prev.id,
+        canvasId,
+        state: prev,
+        savedAt: Date.now(),
+        savedBy: by.name,
+        savedByKind: by.kind,
+        runId: by.runId,
+      })
+      /* a replace keeps the composition's id and createdAt so its version
+         chain and open render jobs stay attached */
+      const kept = { ...comp, id: prev.id, createdAt: prev.createdAt }
+      list[i] = kept
+      persist.saveComposition(kept)
+      return kept
+    }
+    list.push(comp)
+    persist.saveComposition(comp)
+    return comp
+  }
+
+  /** Remove a page's timeline; returns it when one was there. */
+  deleteComposition(canvasId: string, pageId: string): Composition | undefined {
+    const canvas = this.canvases.get(canvasId)
+    const i = canvas?.compositions?.findIndex((c) => c.pageId === pageId) ?? -1
+    if (!canvas || i < 0) return undefined
+    const [removed] = canvas.compositions!.splice(i, 1)
+    persist.deleteComposition(canvasId, pageId)
+    return removed
   }
 
   /** Set (frameId) or clear (null) the frame a page's prototype starts on. */

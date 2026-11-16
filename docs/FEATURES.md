@@ -210,6 +210,23 @@ compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per bu
   invented product (Fieldnote), with a scripted stand-in for the model API and a fake desktop
   device serving a demo repo, so the agent, usage, duel, curation and repo features run without a
   provider. `scripts/readme-shots.ts` takes the README screenshots from it.
+- **Motion Studio ("Rostrum") — a page can be a film (backend, MVP)** — an ordinary page gains a
+  seekable, deterministic timeline: duration/fps/size, camera tracks over the page's world,
+  per-element property tracks, clips, audio and captions (contract in `shared/motion.ts`, API in
+  `docs/motion-api.md`). `shared/motionRuntime.ts` evaluates the frame state at time t as a pure
+  function — the player seeks, never runs clocks — and `shared/motionLint.ts` flags non-seek-safe
+  markup (wall clocks, free-running loops, unseeded random, CSS animations, GSAP, autoplaying
+  media). Compositions persist per page with bounded version history, copy with page/canvas
+  duplication and broadcast live over the canvas room (`composition`, `composition:playhead`,
+  `render:progress`). REST under `/api/canvases/:id/pages/:pageId/composition` (+ `/renders`,
+  `/api/renders/:id` upload into `/a/` assets) behind the view/edit gates; agents get
+  `get_composition`, `set_composition` (whole body or ops), `animate_storyboard`, `lint_motion`
+  and `render_composition`, resident-agent included. Renders are queued jobs: the browser renders
+  them (MediaRecorder/WebCodecs) or the desktop shell does deterministically — a hidden webview
+  seeks the page frame by frame and a local, allowlisted `ffmpeg` encodes, all behind
+  `__DOOP_MOTION_RENDER__`. A disabled-by-default Blender bridge (`DOOP_BLENDER_BRIDGE`) can spawn
+  an allowlisted `blender-mcp` and relay a read-only tool set. Server-side and Blender renders
+  land in later phases.
 
 ## Merged upstream PRs
 
