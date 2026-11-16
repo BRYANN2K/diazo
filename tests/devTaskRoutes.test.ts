@@ -193,6 +193,50 @@ describe('POST /api/frames/:id/dev-tasks', () => {
     room.close()
   }, 30_000)
 
+  it('a poll carries the dev-server URL, and only http(s) links land', async () => {
+    const frame = await makeFrame('Dev server')
+    await approve(frame)
+    const claimed = deviceOnline()
+    const { task } = await (await owner.post(`/api/frames/${frame.id}/dev-tasks`, { agent: 'claude' })).json()
+    const { request } = await claimed.then((r) => r.json())
+    await owner.post(`/api/dev-tasks/${task.id}/report`, {
+      deviceId: DEVICE,
+      requestId: request.id,
+      launch: { ok: true, orcaIdentity: 'wt2:mac:i3' },
+    })
+
+    /* devUrl travels the report schema to the row the canvas sees */
+    const attached = await owner.post(`/api/dev-tasks/${task.id}/report`, {
+      deviceId: DEVICE,
+      poll: { found: true, devUrl: 'http://localhost:5173/' },
+    })
+    expect((await attached.json()).task.devUrl).toBe('http://localhost:5173/')
+
+    /* a non-http(s) devUrl clears the field, never stores a bad link */
+    const badUrl = await owner.post(`/api/dev-tasks/${task.id}/report`, {
+      deviceId: DEVICE,
+      poll: { found: true, devUrl: 'javascript:alert(1)' },
+    })
+    expect((await badUrl.json()).task.devUrl).toBeNull()
+
+    /* a linkedPR that is not an http(s) URL neither stores nor claims pr_open */
+    const noPr = await owner.post(`/api/dev-tasks/${task.id}/report`, {
+      deviceId: DEVICE,
+      poll: { found: true, linkedPR: 'not a url' },
+    })
+    const noPrTask = (await noPr.json()).task
+    expect(noPrTask.prUrl).toBeNull()
+    expect(noPrTask.state).not.toBe('pr_open')
+
+    const pr = await owner.post(`/api/dev-tasks/${task.id}/report`, {
+      deviceId: DEVICE,
+      poll: { found: true, linkedPR: 'https://github.com/acme/proj/pull/4' },
+    })
+    const prTask = (await pr.json()).task
+    expect(prTask.prUrl).toBe('https://github.com/acme/proj/pull/4')
+    expect(prTask.state).toBe('pr_open')
+  }, 30_000)
+
   it('report is requester-and-device scoped', async () => {
     const frame = await makeFrame('Scoped')
     await approve(frame)

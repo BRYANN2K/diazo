@@ -342,10 +342,14 @@ export async function applyDeviceReport(userId: string, taskId: string, report: 
 
   const poll = report.poll
   if (poll) {
-    const next = mergedPollState(row, pollStateOf(poll))
+    /* `linkedPR` rides a `worktree ps` row — only an http(s) URL may reach
+       the room as a link, the same rule update_dev_task's pr_url gets.
+       A non-URL value drops out entirely: never stored, never a pr_open. */
+    const linkedPR = typeof poll.linkedPR === 'string' && /^https?:\/\//.test(poll.linkedPR) ? poll.linkedPR : null
+    const next = mergedPollState(row, pollStateOf({ ...poll, linkedPR }))
     set.state = next
     if (poll.lastAssistantMessage) set.summary = poll.lastAssistantMessage.slice(0, DEV_TASK_SUMMARY_CHARS)
-    if (poll.linkedPR) set.prUrl = poll.linkedPR.slice(0, 500)
+    if (linkedPR) set.prUrl = linkedPR.slice(0, 500)
     if (poll.orcaSessionId) set.orcaSessionId = poll.orcaSessionId.slice(0, 200)
     if (poll.branch) set.branch = poll.branch.slice(0, 200)
     if (poll.devUrl !== undefined) {

@@ -1402,6 +1402,7 @@ const devTaskReportSchema = z.object({
       orcaSessionId: z.string().max(200).optional(),
       branch: z.string().max(200).optional(),
       workspaceStatus: z.string().max(60).optional(),
+      devUrl: z.string().max(500).nullable().optional(),
     })
     .optional(),
 })
