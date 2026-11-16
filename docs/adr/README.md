@@ -33,4 +33,4 @@ ADRs 0001 to 0012 record decisions Bryan made before this index existed; their d
 | [0010](0010-adopt-the-hyperframes-contract-with-a-waapi-runtime.md)   | Adopt the HyperFrames timing contract with a WAAPI and CSS runtime, without GSAP   | Accepted, 2026-11-15         |
 | [0011](0011-reach-blender-through-the-desktop-app.md)                 | Reach Blender as an MCP server through the desktop app                             | Accepted, 2026-11-15         |
 | [0012](0012-self-host-the-ui-fonts.md)                                | Self-host the UI fonts (Direction B Hyperlegible)                                  | Accepted, 2026-11-15         |
-| [0013](0013-plan-work-with-stip.md)                                   | Plan and track work with Stip                                                      | Proposed, updated 2026-11-16 |
+| [0013](0013-plan-work-with-stip.md)                                   | Plan and track work with Stip                                                      | Accepted, updated 2026-11-16 |

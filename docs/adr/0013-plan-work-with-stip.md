@@ -4,7 +4,7 @@ One architecture decision for Diazo. Read by anyone, human or agent, about to ch
 
 ## Status
 
-Proposed, updated 2026-11-16.
+Accepted, updated 2026-11-16.
 
 ## Context
 
