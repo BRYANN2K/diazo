@@ -26,7 +26,7 @@ import { Button } from '../ui/button'
 import { IconButton } from '../ui/icon-button'
 import { Skeleton } from '../ui/skeleton'
 import { Pressable } from '../ui/pressable'
-import { PauseIcon, PlayIcon, SkipBackIcon, XIcon } from '../ui/icons'
+import { MinusIcon, PauseIcon, PlayIcon, SkipBackIcon, XIcon } from '../ui/icons'
 import { MotionExportDialog } from './MotionExportDialog'
 
 /** the label column of every lane, as 04 · Timeline editor draws it */
@@ -242,19 +242,35 @@ export function MotionTimeline({
         <span aria-hidden className="h-[18px] w-px flex-none bg-line" />
         <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
           {comp && (
-            <Button size="sm" title={t('motion.addKeyTitle')} onClick={keyCameraHere}>
+            <Button size="sm" className="flex-none" title={t('motion.addKeyTitle')} onClick={keyCameraHere}>
               {t('motion.addKey')}
             </Button>
           )}
           {comp && onKey !== undefined && (
-            <Button size="sm" variant="ghost" onClick={() => removeKeysAt(onKey)}>
-              {t('motion.removeKey')}
+            /* the longest label in the strip folds to its glyph on a narrow timeline */
+            <Button
+              size="sm"
+              variant="ghost"
+              className="flex-none"
+              title={t('motion.removeKey')}
+              onClick={() => removeKeysAt(onKey)}
+            >
+              <MinusIcon className="hidden size-3.5 @max-[760px]:block" />
+              <span className="@max-[760px]:sr-only">{t('motion.removeKey')}</span>
             </Button>
           )}
-          <Button size="sm" variant="agent" title={t('motion.animateTitle')} onClick={() => void animateStoryboard()}>
-            {t('motion.animate')}
-          </Button>
         </div>
+        {/* the agent action sits with Export, out of the strip that clips when
+            the timeline runs narrow (MotionTimeline frame) */}
+        <Button
+          size="sm"
+          variant="agent"
+          className="flex-none"
+          title={t('motion.animateTitle')}
+          onClick={() => void animateStoryboard()}
+        >
+          {t('motion.animate')}
+        </Button>
         {comp && (
           <Button size="sm" onClick={() => setExporting(true)}>
             {t('motion.export')}
