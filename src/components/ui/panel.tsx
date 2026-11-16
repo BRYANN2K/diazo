@@ -143,9 +143,13 @@ function Panel({
 
 /** Sticky header: title or tabs on the left, actions on the right. Sentence
  *  case in the UI sans — the white system has no uppercase mono headers. */
-function PanelHeader({ className, ...props }: React.ComponentProps<'header'>) {
+const PanelHeader = React.forwardRef<HTMLElement, React.ComponentProps<'header'>>(function PanelHeader(
+  { className, ...props },
+  ref,
+) {
   return (
     <header
+      ref={ref}
       data-slot="panel-header"
       className={cn(
         'sticky top-0 z-[2] flex h-[42px] shrink-0 items-center justify-between gap-2 border-b border-line bg-paper pr-1.5 pl-1.5 text-body font-semibold text-ink [&>:first-child:not([data-slot=panel-tabs])]:pl-2',
@@ -154,7 +158,7 @@ function PanelHeader({ className, ...props }: React.ComponentProps<'header'>) {
       {...props}
     />
   )
-}
+})
 
 const PanelBody = React.forwardRef<HTMLDivElement, React.ComponentProps<'div'>>(function PanelBody(
   { className, ...props },
@@ -182,11 +186,15 @@ function PanelTabsRoot({ className, ...props }: React.ComponentProps<typeof Tabs
   )
 }
 
-function PanelTabs({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.List>) {
+const PanelTabs = React.forwardRef<
+  React.ComponentRef<typeof TabsPrimitive.List>,
+  React.ComponentProps<typeof TabsPrimitive.List>
+>(function PanelTabs({ className, ...props }, ref) {
   /* min-w-0 so a long tab strip shrinks instead of shoving the close button
      out through the panel's padding */
   return (
     <TabsPrimitive.List
+      ref={ref}
       data-slot="panel-tabs"
       className={cn('relative flex min-w-0 gap-0.5 rounded-[9px] bg-well p-0.75', className)}
       {...props}
@@ -195,7 +203,7 @@ function PanelTabs({ className, ...props }: React.ComponentProps<typeof TabsPrim
       {props.children}
     </TabsPrimitive.List>
   )
-}
+})
 
 /* forwards its ref so a Tooltip can anchor on an icon-only tab */
 const PanelTab = React.forwardRef<
@@ -216,15 +224,18 @@ const PanelTab = React.forwardRef<
 })
 
 /** A tab with an icon and its label (the redesign retires icon-only strips:
- *  tabs are icon + label), on the strip's gliding surface. */
+ *  tabs are icon + label), on the strip's gliding surface. `compact` folds
+ *  the label away when the strip runs out of room (useFitLevel): the icon
+ *  stays, the label is kept for screen readers and the title for a hover. */
 const PanelIconTab = React.forwardRef<
   HTMLButtonElement,
   React.ComponentProps<typeof TabsPrimitive.Trigger> & {
     icon: React.ReactNode
     /** a count pinned to the tab's corner, outside the folding label */
     badge?: React.ReactNode
+    compact?: boolean
   }
->(function PanelIconTab({ className, icon, badge, children, ...props }, ref) {
+>(function PanelIconTab({ className, icon, badge, compact = false, children, ...props }, ref) {
   return (
     <TabsPrimitive.Trigger
       ref={ref}
@@ -236,7 +247,7 @@ const PanelIconTab = React.forwardRef<
       {...props}
     >
       <span className="grid size-3.5 shrink-0 place-items-center [&>svg]:size-3.5">{icon}</span>
-      <span className="block whitespace-nowrap pl-1.25">{children}</span>
+      <span className={compact ? 'sr-only' : 'block whitespace-nowrap pl-1.25'}>{children}</span>
       {badge}
     </TabsPrimitive.Trigger>
   )
