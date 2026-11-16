@@ -458,3 +458,17 @@ Contract changes after the first commit land here, dated.
   item after its stored seek-safe verdict (`lint_motion` with
   `library_id`+`item_id` computes/stores it on `library_item_meta`).
   Page comments accept `timeStart`/`timeEnd` — scene-time threads.
+- **2026-02 — phase 3 (media).** Clips carry `speed` (0.25–4, one value per
+  clip), `fadeIn`/`fadeOut` and caption sources carry per-word `words`.
+  `scene_media` is the per-page state of a media asset: `trimIn`/`trimOut`,
+  `cuts` (source-time ranges playback and export skip — transcript edits are
+  data), `beats` (`{markers, bpm}`), `transcript` (`{language, words[],
+speakers{S1:name}, engine, model, target, provider, jobId}`) and
+  `generation` (`{provider, model, prompt, seed, refs, voice, text, style,
+cost}`). Routes: `GET …/pages/:pageId/media`,
+  `PUT …/pages/:pageId/media/:assetId`, `DELETE …/pages/:pageId/media/:mediaId`.
+  Tools (MCP + resident): `list_media`, `set_media`, `build_captions`
+  (transcript → word-timed caption clips on the caption track, cut words
+  dropped, times shifted onto the clip's window), `duck_audio` (voice ranges
+  → editable gain keyframes on an audio track; a media_id's transcript marks
+  the speech), `suggest_cuts` (fillers + silences as cut candidates).

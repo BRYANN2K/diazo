@@ -11,6 +11,7 @@ import { storedLinkAccess } from '../../shared/canvasRole.ts'
 import type { ComponentDef } from '../../shared/components.ts'
 import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
 import type { Composition, RenderJob } from '../../shared/motion.ts'
+import type { SceneMedia } from '../../shared/motionMedia.ts'
 import type { CanvasSkill } from '../../shared/skills.ts'
 import type {
   LibraryIndexState,
@@ -327,12 +328,103 @@ export function deleteComposition(canvasId: string, pageId: string) {
       ),
   )
   swallow(db.delete(t.renderJobs).where(and(eq(t.renderJobs.canvasId, canvasId), eq(t.renderJobs.pageId, pageId))))
+  swallow(db.delete(t.sceneMedia).where(and(eq(t.sceneMedia.canvasId, canvasId), eq(t.sceneMedia.pageId, pageId))))
 }
 
 export function deleteCompositions(canvasId: string) {
   swallow(db.delete(t.compositions).where(eq(t.compositions.canvasId, canvasId)))
   swallow(db.delete(t.compositionVersions).where(eq(t.compositionVersions.canvasId, canvasId)))
   swallow(db.delete(t.renderJobs).where(eq(t.renderJobs.canvasId, canvasId)))
+  swallow(db.delete(t.sceneMedia).where(eq(t.sceneMedia.canvasId, canvasId)))
+}
+
+/* ---- scene_media: per-page media state (phase 3) ---- */
+
+export function saveSceneMedia(m: SceneMedia & { canvasId: string; createdAt: number; updatedAt: number }) {
+  swallow(
+    db
+      .insert(t.sceneMedia)
+      .values({
+        id: m.id,
+        canvasId: m.canvasId,
+        pageId: m.pageId,
+        assetId: m.assetId,
+        kind: m.kind,
+        trimIn: m.trimIn,
+        trimOut: m.trimOut,
+        cuts: m.cuts,
+        beats: m.beats ?? null,
+        transcript: m.transcript ?? null,
+        generation: m.generation ?? null,
+        createdAt: m.createdAt,
+        updatedAt: m.updatedAt,
+      })
+      .onConflictDoUpdate({
+        target: [t.sceneMedia.pageId, t.sceneMedia.assetId],
+        set: {
+          kind: m.kind,
+          trimIn: m.trimIn,
+          trimOut: m.trimOut,
+          cuts: m.cuts,
+          beats: m.beats ?? null,
+          transcript: m.transcript ?? null,
+          generation: m.generation ?? null,
+          updatedAt: m.updatedAt,
+        },
+      }),
+  )
+}
+
+type SceneMediaRow = SceneMedia & { canvasId: string; createdAt: number; updatedAt: number }
+
+function mediaRow(r: typeof t.sceneMedia.$inferSelect): SceneMediaRow {
+  return {
+    id: r.id,
+    canvasId: r.canvasId,
+    pageId: r.pageId,
+    assetId: r.assetId,
+    kind: r.kind,
+    trimIn: r.trimIn,
+    trimOut: r.trimOut,
+    cuts: r.cuts,
+    beats: r.beats ?? undefined,
+    transcript: r.transcript ?? undefined,
+    generation: r.generation ?? undefined,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  }
+}
+
+export async function listSceneMedia(canvasId: string, pageId: string): Promise<SceneMediaRow[]> {
+  const rows = await db
+    .select()
+    .from(t.sceneMedia)
+    .where(and(eq(t.sceneMedia.canvasId, canvasId), eq(t.sceneMedia.pageId, pageId)))
+  return rows.map(mediaRow)
+}
+
+export async function getSceneMedia(canvasId: string, mediaId: string): Promise<SceneMediaRow | undefined> {
+  const rows = await db
+    .select()
+    .from(t.sceneMedia)
+    .where(and(eq(t.sceneMedia.canvasId, canvasId), eq(t.sceneMedia.id, mediaId)))
+  return rows[0] ? mediaRow(rows[0]) : undefined
+}
+
+export async function findSceneMediaByAsset(
+  canvasId: string,
+  pageId: string,
+  assetId: string,
+): Promise<SceneMediaRow | undefined> {
+  const rows = await db
+    .select()
+    .from(t.sceneMedia)
+    .where(and(eq(t.sceneMedia.canvasId, canvasId), eq(t.sceneMedia.pageId, pageId), eq(t.sceneMedia.assetId, assetId)))
+  return rows[0] ? mediaRow(rows[0]) : undefined
+}
+
+export function deleteSceneMedia(canvasId: string, mediaId: string) {
+  swallow(db.delete(t.sceneMedia).where(and(eq(t.sceneMedia.canvasId, canvasId), eq(t.sceneMedia.id, mediaId))))
 }
 
 /** a composition keeps its last 20 states (spec's undo budget) */

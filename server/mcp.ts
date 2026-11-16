@@ -35,13 +35,18 @@ import { webFontFamilies, webFontsBrief } from '../shared/webFonts.ts'
 import * as actions from './actions.ts'
 import {
   animateStoryboard,
+  buildCaptions,
   checkLibraryItemMotion,
+  duckAudio,
   exportComposition,
   getCompositionData,
   insertClip,
   lintMotion,
+  listMedia,
   renderComposition,
   setCompositionData,
+  setMedia,
+  suggestCuts,
 } from './motionTools.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
@@ -2038,6 +2043,139 @@ export function buildMcpServer(
       if (!c) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
       const out = await exportComposition(c, page_id)
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, ...(out.data as object) })
+    },
+  )
+
+  server.registerTool(
+    'list_media',
+    {
+      title: 'List media on a page',
+      description:
+        "The page's scene_media rows: every video/audio asset on the timeline with its trim, transcript-cut ranges, beat markers, transcript (word timings and speakers) and the recipe a generated layer was made with.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { canvas_id: z.string(), page_id: z.string(), agent_name: agentName },
+    },
+    async ({ canvas_id, page_id, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await listMedia(c, page_id)
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, media: out.data })
+    },
+  )
+
+  server.registerTool(
+    'set_media',
+    {
+      title: 'Write a media row',
+      description:
+        "Create or update a page's scene_media row for an asset: kind, trimIn/trimOut (source seconds), cuts (source-time ranges excluded at play and export — transcript editing is data, nothing re-encodes), beats ({markers, bpm}), transcript ({language, words[{text,start,end,confidence?,speaker?}], speakers{S1:name}, engine, model, target}), and generation ({provider, model, prompt, seed, refs, voice, text, cost}).",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        asset_id: z.string().describe('The /a/ asset this row describes'),
+        kind: z.enum(['video', 'audio']),
+        trimIn: z.number().optional(),
+        trimOut: z.number().nullable().optional(),
+        cuts: z.array(z.object({ start: z.number(), end: z.number() })).optional(),
+        beats: z.object({ markers: z.array(z.number()), bpm: z.number().optional() }).optional(),
+        transcript: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe('A Transcript object (shared/motionMedia.ts)'),
+        generation: z.record(z.string(), z.unknown()).optional().describe('A GenerationRecipe object'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, asset_id, agent_name, ...body }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await setMedia(c, page_id, { asset_id, ...body })
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, media: out.data }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'build_captions',
+    {
+      title: 'Build captions from a transcript',
+      description:
+        "Fold a media row's transcript into word-timed caption clips and land them on the page's caption track. Words inside the row's cut ranges are dropped; times shift from source media time onto the clip's window on the composition clock (or `at` seconds when placing by hand). style names an editor preset (word highlight rides the per-word timings).",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        media_id: z.string(),
+        style: z.string().optional(),
+        at: z.number().optional().describe('Seconds on the clock the first word starts'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, media_id, style, at, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await buildCaptions(c, page_id, { media_id, style, at }, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'duck_audio',
+    {
+      title: 'Duck music under speech',
+      description:
+        "Write editable gain keyframes on an audio track so the music dips under speech: pass ranges on the composition clock, or a media_id whose transcript's words mark the voice (shifted by its clip's window). depth is the ducked gain (default 0.25), attack/release the ramp seconds. The keyframes land as ordinary add_keyframe ops — the person can retime them.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        media_id: z.string().optional().describe('Transcript marks the speech'),
+        ranges: z.array(z.object({ start: z.number(), end: z.number() })).optional(),
+        track_id: z.string().optional().describe('The music lane; default the first audio track'),
+        depth: z.number().optional(),
+        attack: z.number().optional(),
+        release: z.number().optional(),
+        gain: z.number().optional().describe('Unducked level, default 1'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await duckAudio(c, page_id, input, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'suggest_cuts',
+    {
+      title: 'Suggest transcript cuts',
+      description:
+        "The transcript-editing assist: filler words (um/uh/euh) and silences over min_silence seconds in a media row's transcript, as source-time ranges. Write the ones to keep out with set_media's cuts — playback and export skip them, nothing re-encodes.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        media_id: z.string(),
+        min_silence: z.number().optional().describe('Seconds, default 0.3'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, media_id, min_silence, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await suggestCuts(c, { media_id, min_silence })
       if (!out.ok) return err(out.error)
       return text({ ok: true, ...(out.data as object) })
     },

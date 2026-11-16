@@ -40,6 +40,7 @@ import type {
 import type { Composition, MotionTrack, RenderFormat, RenderStatus, RenderTarget } from '../../shared/motion.ts'
 import type { DevTaskDrift, DevTaskState } from '../../shared/devTasks.ts'
 import type { HandoffPack } from '../../shared/handoff.ts'
+import type { GenerationRecipe, Transcript } from '../../shared/motionMedia.ts'
 
 /** A credential kept on a user's behalf: sealed on write and opened on read
  *  (server/secretBox.ts), so call sites see plaintext and the row does not.
@@ -1495,4 +1496,32 @@ export const frameDevTasks = pgTable(
     finishedAt: bigint('finished_at', { mode: 'number' }),
   },
   (t) => [index('frame_dev_tasks_canvas_idx').on(t.canvasId)],
+)
+
+/** Per-page state of one media asset on the timeline (shared/motionMedia.ts):
+ *  trim, transcript-cut ranges, beat markers, the transcript with word
+ *  timings and speakers, and the recipe a generated layer was made with.
+ *  Clips reference the asset; this row is what they play. */
+export const sceneMedia = pgTable(
+  'scene_media',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    pageId: text('page_id').notNull(),
+    assetId: text('asset_id').notNull(),
+    kind: text('kind').$type<'video' | 'audio'>().notNull(),
+    trimIn: doublePrecision('trim_in').notNull(),
+    /** null = to the asset's end */
+    trimOut: doublePrecision('trim_out'),
+    cuts: jsonb('cuts').$type<{ start: number; end: number }[]>().notNull(),
+    beats: jsonb('beats').$type<{ markers: number[]; bpm?: number }>(),
+    transcript: jsonb('transcript').$type<Transcript>(),
+    generation: jsonb('generation').$type<GenerationRecipe>(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    index('scene_media_page_idx').on(t.canvasId, t.pageId),
+    uniqueIndex('scene_media_asset_idx').on(t.pageId, t.assetId),
+  ],
 )

@@ -56,13 +56,18 @@ import { searchIndex } from '../shared/librarySearch.ts'
 import { CodeLinkError, SET_CODE_LINK_DESCRIPTION, componentCodeLink, setCodeLinkTool } from './codeLinks.ts'
 import {
   animateStoryboard,
+  buildCaptions,
   checkLibraryItemMotion,
+  duckAudio,
   exportComposition,
   getCompositionData,
   insertClip,
   lintMotion,
+  listMedia,
   renderComposition,
   setCompositionData,
+  setMedia,
+  suggestCuts,
 } from './motionTools.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
@@ -2602,6 +2607,82 @@ const TOOLS: Anthropic.Tool[] = [
       required: ['page_id'],
     },
   },
+  {
+    name: 'list_media',
+    description:
+      "The page's scene_media rows: every video/audio asset on the timeline with trim, transcript-cut ranges, beats, transcript (word timings, speakers) and the generation recipe.",
+    input_schema: { type: 'object', properties: { page_id: { type: 'string' } }, required: ['page_id'] },
+  },
+  {
+    name: 'set_media',
+    description:
+      "Create or update a page's media row for an asset: kind, trimIn/trimOut, cuts (source-time ranges playback and export skip), beats, transcript ({language, words[], speakers}), generation recipe.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        asset_id: { type: 'string' },
+        kind: { type: 'string', enum: ['video', 'audio'] },
+        trimIn: { type: 'number' },
+        trimOut: { type: ['number', 'null'] },
+        cuts: {
+          type: 'array',
+          items: { type: 'object', properties: { start: { type: 'number' }, end: { type: 'number' } } },
+        },
+        beats: { type: 'object' },
+        transcript: { type: 'object' },
+        generation: { type: 'object' },
+      },
+      required: ['page_id', 'asset_id', 'kind'],
+    },
+  },
+  {
+    name: 'build_captions',
+    description:
+      "Fold a media row's transcript into word-timed caption clips on the page's caption track. Words inside cut ranges are dropped; times shift onto the clip's window (or `at` seconds).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        media_id: { type: 'string' },
+        style: { type: 'string' },
+        at: { type: 'number' },
+      },
+      required: ['page_id', 'media_id'],
+    },
+  },
+  {
+    name: 'duck_audio',
+    description:
+      'Duck the music under speech: editable gain keyframes on an audio track. Pass ranges on the clock or a media_id whose transcript marks the voice; depth (default 0.25), attack, release, gain.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        media_id: { type: 'string' },
+        ranges: {
+          type: 'array',
+          items: { type: 'object', properties: { start: { type: 'number' }, end: { type: 'number' } } },
+        },
+        track_id: { type: 'string' },
+        depth: { type: 'number' },
+        attack: { type: 'number' },
+        release: { type: 'number' },
+        gain: { type: 'number' },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'suggest_cuts',
+    description:
+      'Filler words and silences over min_silence seconds in a media transcript, as source-time ranges — write the kept-out ones with set_media cuts.',
+    input_schema: {
+      type: 'object',
+      properties: { media_id: { type: 'string' }, min_silence: { type: 'number' } },
+      required: ['media_id'],
+    },
+  },
 ]
 
 /* the same tools as MCP, minus the arguments a resident run already has */
@@ -3717,6 +3798,72 @@ export async function execTool(
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
         const out = await exportComposition(canvas, String(input.page_id ?? ''))
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'list_media': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const out = await listMedia(canvas, String(input.page_id ?? ''))
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'set_media': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as Record<string, unknown>
+        const out = await setMedia(canvas, String(raw.page_id ?? ''), {
+          asset_id: String(raw.asset_id ?? ''),
+          ...raw,
+        })
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'build_captions': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const out = await buildCaptions(
+          canvas,
+          String(input.page_id ?? ''),
+          {
+            media_id: String(input.media_id ?? ''),
+            style: typeof input.style === 'string' ? input.style : undefined,
+            at: typeof input.at === 'number' ? input.at : undefined,
+          },
+          actor,
+        )
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'duck_audio': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as Record<string, unknown>
+        const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+        const out = await duckAudio(
+          canvas,
+          String(raw.page_id ?? ''),
+          {
+            media_id: typeof raw.media_id === 'string' ? raw.media_id : undefined,
+            ranges: Array.isArray(raw.ranges) ? (raw.ranges as { start: number; end: number }[]) : undefined,
+            track_id: typeof raw.track_id === 'string' ? raw.track_id : undefined,
+            depth: num(raw.depth),
+            attack: num(raw.attack),
+            release: num(raw.release),
+            gain: num(raw.gain),
+          },
+          actor,
+        )
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'suggest_cuts': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const out = await suggestCuts(canvas, {
+          media_id: String(input.media_id ?? ''),
+          min_silence: typeof input.min_silence === 'number' ? input.min_silence : undefined,
+        })
         if (!out.ok) return fail(out.error)
         return ok(JSON.stringify(out.data))
       }

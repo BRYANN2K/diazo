@@ -159,7 +159,9 @@ import {
   patchRenderJob,
   wireRenderJobs,
 } from './motionJobs.ts'
+import { nanoid } from 'nanoid'
 import { MOTION_LIMITS, parseCompositionBody, parseOps } from '../shared/motion.ts'
+import { parseMediaBody } from '../shared/motionMedia.ts'
 import { exportComposition } from './motionTools.ts'
 import { placeImage, placedImageResult } from './placeImage.ts'
 import * as ingest from './ingest.ts'
@@ -3144,6 +3146,46 @@ app.get('/api/canvases/:id/pages/:pageId/composition/export', async (req, res) =
   const out = await exportComposition(canvas, req.params.pageId)
   if (!out.ok) return res.status(404).json({ error: out.error })
   res.json(out.data)
+})
+
+/* ---- scene_media (phase 3): per-page state of a media asset — trim, cuts,
+   beats, transcript, generation recipe (shared/motionMedia.ts) ---- */
+
+app.get('/api/canvases/:id/pages/:pageId/media', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  res.json({ media: await persist.listSceneMedia(canvas.id, req.params.pageId) })
+})
+
+app.put('/api/canvases/:id/pages/:pageId/media/:assetId', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const body = parseMediaBody(req.body)
+  if (!body) return res.status(400).json({ error: 'not a valid scene_media body' })
+  const pageId = req.params.pageId
+  const assetId = req.params.assetId
+  const now = Date.now()
+  const prev = await persist.findSceneMediaByAsset(canvas.id, pageId, assetId)
+  const media = {
+    id: prev?.id ?? nanoid(10),
+    canvasId: canvas.id,
+    pageId,
+    assetId,
+    ...body,
+    createdAt: prev?.createdAt ?? now,
+    updatedAt: now,
+  }
+  persist.saveSceneMedia(media)
+  res.json({ media })
+})
+
+app.delete('/api/canvases/:id/pages/:pageId/media/:mediaId', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const media = await persist.getSceneMedia(canvas.id, req.params.mediaId)
+  if (!media || media.pageId !== req.params.pageId) return res.status(404).json({ error: 'no such media row' })
+  persist.deleteSceneMedia(canvas.id, media.id)
+  res.json({ ok: true })
 })
 
 app.get('/api/renders/:id', (req, res) => {

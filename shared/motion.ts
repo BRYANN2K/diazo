@@ -56,6 +56,17 @@ export const TEXT_SPLIT_ATTR = 'data-doop-split'
 export const TEXT_SPLITS = ['line', 'word', 'char'] as const
 export type TextSplit = (typeof TEXT_SPLITS)[number]
 
+/** one transcribed word on the media's own clock; `speaker` names an `S*`
+ *  label when speaker labels ran (proposal 18.8) */
+export interface TranscriptWord {
+  text: string
+  /** seconds in source media time */
+  start: number
+  end: number
+  confidence?: number
+  speaker?: string
+}
+
 /** scroll/pointer-driven layers (phase 4): a 3d or timed subtree can name a
  *  driver other than the composition clock */
 export const DRIVER_ATTR = 'data-doop-driver'
@@ -265,8 +276,10 @@ export type MotionClipSource =
   | { type: 'library'; itemId: string; variantId?: string }
   /** an /a/ asset: uploaded or generated media (video, audio, image) */
   | { type: 'asset'; assetId: string }
-  /** caption text drawn by the caption lane; `style` names an editor preset */
-  | { type: 'caption'; text: string; style?: string }
+  /** caption text drawn by the caption lane; `style` names an editor preset.
+   *  `words` carries per-word timings so word-highlight styles can light the
+   *  current word — written by build_captions from a transcript */
+  | { type: 'caption'; text: string; style?: string; words?: TranscriptWord[] }
 
 /* ---- transitions (proposal 14.4) ----
  * A transition is the overlap of two visibility windows plus one paired
@@ -302,8 +315,14 @@ export interface MotionClip {
   name?: string
   /** trim: seconds into the source media the clip opens at (video/audio) */
   mediaStart?: number
+  /** playback rate of the media inside this clip, 0.25× to 4×; 1 when absent.
+   *  One value per clip — a speed ramp is several clips (proposal 14.10) */
+  speed?: number
   /** audio level, 1 = 0 dB */
   gain?: number
+  /** seconds the audio fades in/out inside this clip's window (audio clips) */
+  fadeIn?: number
+  fadeOut?: number
   muted?: boolean
   /** how this clip takes over from the previous clip on the same track;
    *  absent = a hard cut */
@@ -405,7 +424,10 @@ export type CompositionOp =
       start?: number
       duration?: number
       mediaStart?: number
+      speed?: number
       gain?: number
+      fadeIn?: number
+      fadeOut?: number
       muted?: boolean
       name?: string
       source?: MotionClipSource
@@ -702,9 +724,34 @@ function parseClipSource(input: unknown): ParseResult<MotionClipSource> {
       }
       out.style = input.style
     }
+    if (input.words !== undefined) {
+      if (!Array.isArray(input.words) || input.words.length > 512) return bad('clip.source.words must be ≤512 words')
+      const words: TranscriptWord[] = []
+      for (const w of input.words) {
+        const parsed = parseTranscriptWord(w)
+        if (!parsed) return bad('clip.source.words must be {text,start,end}')
+        words.push(parsed)
+      }
+      out.words = words
+    }
     return ok(out)
   }
   return bad(`unknown clip source type "${input.type}"`)
+}
+
+/** validates one transcript word: non-empty text, 0 ≤ start < end, finite */
+export function parseTranscriptWord(input: unknown): TranscriptWord | null {
+  if (!isRecord(input)) return null
+  const { text, start, end } = input
+  if (typeof text !== 'string' || text.length < 1 || text.length > 200) return null
+  if (typeof start !== 'number' || typeof end !== 'number' || !Number.isFinite(start) || !Number.isFinite(end)) {
+    return null
+  }
+  if (start < 0 || end <= start || end > MOTION_LIMITS.MAX_DURATION_S) return null
+  const out: TranscriptWord = { text, start, end }
+  if (typeof input.confidence === 'number' && Number.isFinite(input.confidence)) out.confidence = input.confidence
+  if (typeof input.speaker === 'string' && input.speaker.length <= 40) out.speaker = input.speaker
+  return out
 }
 
 function parseClip(input: unknown, duration: number): ParseResult<MotionClip> {
@@ -735,6 +782,18 @@ function parseClip(input: unknown, duration: number): ParseResult<MotionClip> {
   if (input.muted !== undefined) {
     if (typeof input.muted !== 'boolean') return bad('clip.muted must be a boolean')
     clip.muted = input.muted
+  }
+  if (input.speed !== undefined) {
+    const s = parseSeconds(input.speed, 'clip.speed', 0.25, 4)
+    if (!s.ok) return s
+    clip.speed = s.value
+  }
+  for (const f of ['fadeIn', 'fadeOut'] as const) {
+    if (input[f] !== undefined) {
+      const n = parseSeconds(input[f], `clip.${f}`, 0, length.value)
+      if (!n.ok) return n
+      clip[f] = n.value
+    }
   }
   if (input.transition !== undefined) {
     const transition = parseTransition(input.transition)
@@ -1041,12 +1100,15 @@ function parseOp(input: unknown, duration: number): ParseResult<CompositionOp> {
         trackId: trackId.value,
         clipId: clipId.value,
       }
-      for (const f of ['start', 'duration', 'mediaStart', 'gain'] as const) {
+      for (const f of ['start', 'duration', 'mediaStart', 'speed', 'gain', 'fadeIn', 'fadeOut'] as const) {
         if (input[f] !== undefined) {
           const n = parseSeconds(input[f], f, f === 'duration' ? 0.01 : 0, MOTION_LIMITS.MAX_DURATION_S)
           if (!n.ok) return n
           op[f] = n.value
         }
+      }
+      if (op.speed !== undefined && (op.speed < 0.25 || op.speed > 4)) {
+        return bad('speed must be between 0.25 and 4')
       }
       if (input.muted !== undefined) {
         if (typeof input.muted !== 'boolean') return bad('muted must be a boolean')
@@ -1223,7 +1285,10 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
       if (op.start !== undefined) clip.start = op.start
       if (op.duration !== undefined) clip.duration = op.duration
       if (op.mediaStart !== undefined) clip.mediaStart = op.mediaStart
+      if (op.speed !== undefined) clip.speed = op.speed
       if (op.gain !== undefined) clip.gain = op.gain
+      if (op.fadeIn !== undefined) clip.fadeIn = op.fadeIn
+      if (op.fadeOut !== undefined) clip.fadeOut = op.fadeOut
       if (op.muted !== undefined) clip.muted = op.muted
       if (op.name !== undefined) clip.name = op.name
       if (op.source !== undefined) {

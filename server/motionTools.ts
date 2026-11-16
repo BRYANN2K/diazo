@@ -6,7 +6,9 @@
  * into its transport.
  */
 
+import { nanoid } from 'nanoid'
 import * as actions from './actions.ts'
+import * as persist from './db/persist.ts'
 import { store } from './store.ts'
 import { createRenderJob } from './motionJobs.ts'
 import { elementHtml, lintComposition, lintMotionHtml, motionLintSummary } from '../shared/motionLint.ts'
@@ -26,6 +28,7 @@ import {
 } from '../shared/motion.ts'
 import type { Actor, Canvas } from '../shared/types.ts'
 import type { LibraryItem, LibraryItemMeta } from '../shared/library.ts'
+import { captionsFromTranscript, duckingKeyframes, findFillers, parseMediaBody } from '../shared/motionMedia.ts'
 
 type Outcome = { ok: true; data: unknown } | { ok: false; error: string }
 const ok = <T>(data: T) => ({ ok: true as const, data })
@@ -398,6 +401,152 @@ export async function insertClip(
     clip: { ...clip, trackId: clipTrack?.id ?? 'library-clips' },
     seekSafe: verdict,
   })
+}
+
+/* ---- scene_media tools (phase 3) ---- */
+
+export async function listMedia(canvas: Canvas, pageId: string): Promise<Outcome> {
+  if (!pageOn(canvas, pageId)) return fail(`no page ${pageId} on this canvas`)
+  return ok(await persist.listSceneMedia(canvas.id, pageId))
+}
+
+/** create or update the media row for an asset (keyed on pageId+assetId) */
+export async function setMedia(
+  canvas: Canvas,
+  pageId: string,
+  input: { asset_id: string } & Record<string, unknown>,
+): Promise<Outcome> {
+  if (!pageOn(canvas, pageId)) return fail(`no page ${pageId} on this canvas`)
+  const body = parseMediaBody(input)
+  if (!body) return fail('not a valid scene_media body — see shared/motionMedia.ts')
+  const now = Date.now()
+  const prev = await persist.findSceneMediaByAsset(canvas.id, pageId, input.asset_id)
+  const media = {
+    id: prev?.id ?? nanoid(10),
+    canvasId: canvas.id,
+    pageId,
+    assetId: input.asset_id,
+    ...body,
+    createdAt: prev?.createdAt ?? now,
+    updatedAt: now,
+  }
+  persist.saveSceneMedia(media)
+  return ok(media)
+}
+
+/**
+ * Fold a media row's transcript into caption clips and land them on the
+ * page's caption track (proposal 14.9). Words inside cut ranges are dropped,
+ * times shift from source-media time onto the clip's window on the clock.
+ */
+export async function buildCaptions(
+  canvas: Canvas,
+  pageId: string,
+  input: { media_id: string; style?: string; at?: number },
+  actor: Actor,
+): Promise<Outcome> {
+  if (!pageOn(canvas, pageId)) return fail(`no page ${pageId} on this canvas`)
+  const comp = store.getComposition(canvas.id, pageId)
+  if (!comp) return fail(`page ${pageId} has no composition`)
+  const media = await persist.getSceneMedia(canvas.id, input.media_id)
+  if (!media || media.pageId !== pageId) return fail(`no media row ${input.media_id} on this page`)
+  if (!media.transcript?.words.length) return fail('the media has no transcript — run transcribe_clip first')
+  const clips = captionsFromTranscript(
+    {
+      ...media.transcript,
+      words: media.transcript.words.filter((w) => !media.cuts.some((c) => w.start < c.end && w.end > c.start)),
+    },
+    { style: input.style },
+  )
+  /* captions sit where the media's clip does: its start − trimIn maps words
+     from source time onto the clock; `at` overrides when the caller places
+     them by hand */
+  const clip = comp.tracks
+    .flatMap((t) => t.clips ?? [])
+    .find((c) => c.source.type === 'asset' && c.source.assetId === media.assetId)
+  const offset = input.at !== undefined ? input.at - media.trimIn : clip ? clip.start - media.trimIn : 0
+  for (const c of clips) c.start += offset
+  const captionTrack = comp.tracks.find((t) => t.kind === 'caption' && !t.muted)
+  const ops = captionTrack
+    ? clips.map((c) => ({ op: 'add_clip' as const, trackId: captionTrack.id, clip: c }))
+    : [{ op: 'add_track' as const, track: { id: 'captions', kind: 'caption' as const, name: 'Captions', clips } }]
+  const applied = actions.patchComposition(canvas.id, pageId, ops, actor)
+  if (!applied.ok) return fail(applied.error ?? 'captions rejected')
+  return ok({ composition: applied.composition, captions: clips.length })
+}
+
+/**
+ * Voice ranges duck the music: gain keyframes land on the page's first
+ * audio track (or a named one) and stay editable (proposal 14.8). Ranges are
+ * source words/ranges on the clock — pass `ranges`, or a `media_id` whose
+ * transcript's words are taken as speech. */
+export async function duckAudio(
+  canvas: Canvas,
+  pageId: string,
+  input: {
+    media_id?: string
+    ranges?: { start: number; end: number }[]
+    track_id?: string
+    depth?: number
+    attack?: number
+    release?: number
+    gain?: number
+  },
+  actor: Actor,
+): Promise<Outcome> {
+  if (!pageOn(canvas, pageId)) return fail(`no page ${pageId} on this canvas`)
+  const comp = store.getComposition(canvas.id, pageId)
+  if (!comp) return fail(`page ${pageId} has no composition`)
+  let ranges = input.ranges
+  if (!ranges) {
+    if (!input.media_id) return fail('send ranges, or a media_id whose transcript marks the speech')
+    const media = await persist.getSceneMedia(canvas.id, input.media_id)
+    if (!media?.transcript?.words.length) return fail('the media has no transcript')
+    ranges = speechRanges(media.transcript.words)
+    /* words are source-time; shift by the clip's window like build_captions */
+    const clip = comp.tracks
+      .flatMap((t) => t.clips ?? [])
+      .find((c) => c.source.type === 'asset' && c.source.assetId === media.assetId)
+    const offset = (clip?.start ?? 0) - media.trimIn
+    ranges = ranges.map((r) => ({ start: r.start + offset, end: r.end + offset }))
+  }
+  const track = input.track_id
+    ? comp.tracks.find((t) => t.id === input.track_id && t.kind === 'audio')
+    : comp.tracks.find((t) => t.kind === 'audio' && !t.muted)
+  if (!track) return fail('no audio track to duck — add the music first')
+  const keyframes = duckingKeyframes(ranges, {
+    gain: input.gain,
+    depth: input.depth,
+    attack: input.attack,
+    release: input.release,
+  })
+  const applied = actions.patchComposition(
+    canvas.id,
+    pageId,
+    keyframes.map((keyframe) => ({ op: 'add_keyframe' as const, trackId: track.id, keyframe })),
+    actor,
+  )
+  if (!applied.ok) return fail(applied.error ?? 'ducking rejected')
+  return ok({ composition: applied.composition, keyframes: keyframes.length, trackId: track.id })
+}
+
+/** contiguous speech from a word list: a gap over 0.6 s starts a new range */
+function speechRanges(words: readonly { start: number; end: number }[]): { start: number; end: number }[] {
+  const out: { start: number; end: number }[] = []
+  for (const w of words) {
+    const last = out[out.length - 1]
+    if (last && w.start - last.end <= 0.6) last.end = w.end
+    else out.push({ start: w.start, end: w.end })
+  }
+  return out
+}
+
+/** suggested transcript edits: filler words and long silences (14.10) */
+export async function suggestCuts(canvas: Canvas, input: { media_id: string; min_silence?: number }): Promise<Outcome> {
+  const media = await persist.getSceneMedia(canvas.id, input.media_id)
+  if (!media || media.canvasId !== canvas.id) return fail(`no media row ${input.media_id}`)
+  if (!media.transcript?.words.length) return fail('the media has no transcript')
+  return ok(findFillers(media.transcript.words, input.min_silence))
 }
 
 export type { Composition }
