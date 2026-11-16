@@ -3331,7 +3331,10 @@ app.put('/api/frames/:id/lint', (req, res) => {
   if (!requireFrame(req, res, req.params.id, 'edit')) return
   const parsed = lintBody.safeParse(req.body?.lint)
   if (!parsed.success) return res.status(400).json({ error: 'bad lint payload' })
-  const lint = { ...parsed.data, checkedAt: parsed.data.checkedAt ?? Date.now() }
+  /* a client clock running ahead must not make a verdict look newer than
+     the document's next change (the client skips a current verdict) */
+  const now = Date.now()
+  const lint = { ...parsed.data, checkedAt: Math.min(parsed.data.checkedAt ?? now, now) }
   const frame = actions.setFrameLint(req.params.id, lint as Frame['lint'], userActor(req))
   if (!frame) return res.status(404).json({ error: 'frame not found' })
   res.json({ ok: true })

@@ -6,7 +6,7 @@
  * result from the server (server/lint.ts); this path covers human edits.
  */
 import type { Frame } from '../../shared/types'
-import { lintSnapshot } from '../../shared/slopRules'
+import { SLOP_RULES_VERSION, lintSnapshot } from '../../shared/slopRules'
 import { slopSnapshotOf } from './frameBridge'
 import { api } from './api'
 import { useStore } from './store'
@@ -20,10 +20,26 @@ const timers = new Map<string, number>()
    for the same document does not stack another render of the same snapshot */
 const inflight = new Map<string, string>()
 
+/* frameId → the html this tab last scored: the verdict it wrote comes back
+   as a new frame object (`frame:lint`), which must not score it again */
+const scored = new Map<string, string>()
+
+/** Whether the frame's stored verdict already covers its document: a pass
+ *  with computed styles, under today's rules, taken after its last change.
+ *  Opening a canvas then re-scores nothing that has not moved on. */
+export function lintIsCurrent(frame: Pick<Frame, 'lint' | 'updatedAt'>): boolean {
+  const lint = frame.lint
+  return !!lint && lint.engine === 'dom' && lint.version === SLOP_RULES_VERSION && lint.checkedAt >= frame.updatedAt
+}
+
 export function scheduleFrameLint(frame: Frame) {
   if (!frame.html || frame.demo) return
   const html = frame.html
-  if (inflight.get(frame.id) === html) return
+  if (inflight.get(frame.id) === html || scored.get(frame.id) === html) return
+  if (lintIsCurrent(frame)) {
+    scored.set(frame.id, html)
+    return
+  }
   const timer = timers.get(frame.id)
   if (timer !== undefined) window.clearTimeout(timer)
   timers.set(
@@ -49,6 +65,7 @@ async function runFrameLint(frameId: string, html: string) {
     const lint = lintSnapshot(snap)
     /* show it at once; the server's frame:lint confirms it to the room */
     useStore.getState().patchFrameLocal(frameId, { lint })
+    scored.set(frameId, html)
     await api.setFrameLint(frameId, lint)
   } catch (error) {
     console.error('frame lint failed', error)
