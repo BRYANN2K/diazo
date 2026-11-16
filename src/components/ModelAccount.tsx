@@ -852,7 +852,12 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
   return (
     <div className="mt-4 flex flex-col gap-7 sm:mt-5">
       {connected.length > 0 ? (
-        <ConnectionSection title={t('models.connectedTitle')}>{connected.map((entry) => entry.node)}</ConnectionSection>
+        <ConnectionSection
+          title={t('models.connectedTitle')}
+          caption={t('models.connectedCaption', { count: connected.length })}
+        >
+          {connected.map((entry) => entry.node)}
+        </ConnectionSection>
       ) : (
         <p className="ml-1 text-body text-ink-soft">{t('models.noConnections')}</p>
       )}

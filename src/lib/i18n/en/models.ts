@@ -12,6 +12,7 @@ export const models = {
   modelFor: 'Model for {name}',
   apiKeyAria: 'API key',
   chatgptName: 'ChatGPT',
+  connectedCaption: { one: '{count} · runs on your own account', other: '{count} · each runs on your own account' },
   connectedTitle: 'Connected',
   addConnection: 'Add an agent',
   noConnections: 'Nothing connected yet. Connect one below and the Diazo Agent runs on it.',
