@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "motion-backend-next",
+  "target": "motion-backend-next",
+  "extensions": ["backend-engineering", "database-engineering", "desktop-engineering", "ai-engineering", "security-engineering"],
+  "target_before": null,
+  "created_at": "2026-11-16T20:30:00.000000+00:00",
+  "phase": "applying",
+  "updated_at": "2026-11-16T20:30:00.000000+00:00"
+}

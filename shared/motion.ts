@@ -50,6 +50,18 @@ export type MarkupTrackKind = (typeof MARKUP_TRACK_KINDS)[number]
 export const TIME_CSS_VAR = '--t'
 export const SEEK_EVENT = 'doop:seek'
 
+/** text animator: the element carries this attr naming its split mode; the
+ *  player derives units at runtime while the HTML keeps one editable string */
+export const TEXT_SPLIT_ATTR = 'data-doop-split'
+export const TEXT_SPLITS = ['line', 'word', 'char'] as const
+export type TextSplit = (typeof TEXT_SPLITS)[number]
+
+/** scroll/pointer-driven layers (phase 4): a 3d or timed subtree can name a
+ *  driver other than the composition clock */
+export const DRIVER_ATTR = 'data-doop-driver'
+export const DRIVERS = ['time', 'scroll', 'pointer'] as const
+export type MotionDriver = (typeof DRIVERS)[number]
+
 /** prefixes a frame's custom properties use for motion tokens */
 export const MOTION_TOKEN_PREFIXES = ['--dur-', '--ease-', '--spring-'] as const
 
@@ -218,6 +230,17 @@ export const ELEMENT_PROPERTIES = [
   'borderRadius',
   'color',
   'backgroundColor',
+  /* masks, shapes and paths (proposal 14.6): clip-path forms, trim-path
+     dash pairs, morphing `d`, motion-path offset-* and paint colours */
+  'clipPath',
+  'offsetPath',
+  'offsetDistance',
+  'offsetRotate',
+  'strokeDashoffset',
+  'strokeDasharray',
+  'd',
+  'fill',
+  'stroke',
 ] as const
 
 const PROPERTY_RE = /^(--)?[A-Za-z][A-Za-z0-9-]{0,59}$/
@@ -245,6 +268,31 @@ export type MotionClipSource =
   /** caption text drawn by the caption lane; `style` names an editor preset */
   | { type: 'caption'; text: string; style?: string }
 
+/* ---- transitions (proposal 14.4) ----
+ * A transition is the overlap of two visibility windows plus one paired
+ * animation. It hangs on the incoming clip: when the clip takes over from
+ * the previous clip on the same track, `transition` says how. `cut` is the
+ * default — no transition, the field is simply absent. */
+
+export const TRANSITION_KINDS = ['cut', 'dissolve', 'push', 'wipe', 'zoom', 'shared-element'] as const
+export type TransitionKind = (typeof TRANSITION_KINDS)[number]
+
+export const TRANSITION_DIRECTIONS = ['left', 'right', 'up', 'down'] as const
+export type TransitionDirection = (typeof TRANSITION_DIRECTIONS)[number]
+
+export interface MotionTransition {
+  kind: TransitionKind
+  /** seconds the two clips' windows overlap */
+  duration: number
+  /** the `--dur-*` token the duration came from — kept so a token change can
+   *  retime it; `duration` stays the resolved fallback for renderers */
+  token?: string
+  /** push/wipe travel direction; default left for push, right for wipe */
+  direction?: TransitionDirection
+  /** interpolation of the paired animation; default is per-kind */
+  easing?: MotionEasing
+}
+
 export interface MotionClip {
   id: string
   /** seconds on the composition clock; visible over [start, start+duration) */
@@ -257,6 +305,9 @@ export interface MotionClip {
   /** audio level, 1 = 0 dB */
   gain?: number
   muted?: boolean
+  /** how this clip takes over from the previous clip on the same track;
+   *  absent = a hard cut */
+  transition?: MotionTransition
 }
 
 export const TRACK_KINDS = ['camera', 'element', 'clip', 'audio', 'caption'] as const
@@ -358,6 +409,8 @@ export type CompositionOp =
       muted?: boolean
       name?: string
       source?: MotionClipSource
+      /** null clears the transition (back to a hard cut) */
+      transition?: MotionTransition | null
     }
   | { op: 'remove_clip'; trackId: string; clipId: string }
 
@@ -375,9 +428,49 @@ export interface FrameMotionKeyframe {
   ease?: MotionEasing
 }
 
+/* ---- text animators (proposal 14.5) ----
+ * The element's text stays one editable string; `data-doop-split` names the
+ * unit split and an animator spec here says how the units arrive. The
+ * player derives the units at runtime; `expandTextAnimator` (shared/
+ * motionText.ts) folds a spec into ordinary keyframes on generated unit
+ * targets — `unitSelector(el, i)` — so renderers need no DOM. */
+
+export const TEXT_ANIMATOR_PRESETS = [
+  'rise-blur',
+  'typewriter',
+  'scale-pop',
+  'mask-wipe',
+  'tracking-in',
+  'scramble',
+] as const
+export type TextAnimatorPreset = (typeof TEXT_ANIMATOR_PRESETS)[number]
+
+export const TEXT_ORDERS = ['forward', 'center', 'random'] as const
+export type TextOrder = (typeof TEXT_ORDERS)[number]
+
+export interface FrameTextAnimator {
+  /** the text element's data-doop-id (which carries data-doop-split) */
+  el: string
+  split: TextSplit
+  preset: TextAnimatorPreset
+  /** seconds on the composition clock the first unit starts */
+  start: number
+  /** per-unit animation length, seconds */
+  duration: number
+  /** seconds between unit starts */
+  stagger: number
+  /** unit order; default forward */
+  order?: TextOrder
+  /** per-unit easing; default per preset */
+  ease?: MotionEasing
+  /** seed for 'random' order and the 'scramble' preset */
+  seed?: number
+}
+
 export interface FrameMotionBlock {
   v: 1
   keyframes: FrameMotionKeyframe[]
+  animators?: FrameTextAnimator[]
 }
 
 export function parseMotionBlock(text: string): FrameMotionBlock | null {
@@ -403,7 +496,56 @@ export function parseMotionBlock(text: string): FrameMotionBlock | null {
     }
     keyframes.push({ el, prop, t, value: value as number | string, ease: easing })
   }
-  return { v: 1, keyframes }
+  const block: FrameMotionBlock = { v: 1, keyframes }
+  if (json.animators !== undefined) {
+    if (!Array.isArray(json.animators)) return null
+    const animators: FrameTextAnimator[] = []
+    for (const raw of json.animators) {
+      const parsed = parseTextAnimator(raw)
+      if (!parsed) return null
+      animators.push(parsed)
+    }
+    block.animators = animators
+  }
+  return block
+}
+
+function parseTextAnimator(input: unknown): FrameTextAnimator | null {
+  if (!isRecord(input)) return null
+  const { el, split, preset, start, duration, stagger, order, ease, seed } = input
+  if (typeof el !== 'string' || !el || el.length > 100) return null
+  if (!TEXT_SPLITS.includes(split as TextSplit)) return null
+  if (!TEXT_ANIMATOR_PRESETS.includes(preset as TextAnimatorPreset)) return null
+  if (
+    ![start, duration, stagger].every((v) => typeof v === 'number' && Number.isFinite(v)) ||
+    (start as number) < 0 ||
+    (duration as number) <= 0 ||
+    (stagger as number) < 0
+  ) {
+    return null
+  }
+  const out: FrameTextAnimator = {
+    el,
+    split: split as TextSplit,
+    preset: preset as TextAnimatorPreset,
+    start: start as number,
+    duration: duration as number,
+    stagger: stagger as number,
+  }
+  if (order !== undefined) {
+    if (!TEXT_ORDERS.includes(order as TextOrder)) return null
+    out.order = order as TextOrder
+  }
+  if (ease !== undefined) {
+    const parsed = parseEasing(ease)
+    if (!parsed) return null
+    out.ease = parsed
+  }
+  if (seed !== undefined) {
+    if (typeof seed !== 'number' || !Number.isInteger(seed) || seed < 0) return null
+    out.seed = seed
+  }
+  return out
 }
 
 /* ---- render jobs ---- */
@@ -592,7 +734,34 @@ function parseClip(input: unknown, duration: number): ParseResult<MotionClip> {
     if (typeof input.muted !== 'boolean') return bad('clip.muted must be a boolean')
     clip.muted = input.muted
   }
+  if (input.transition !== undefined) {
+    const transition = parseTransition(input.transition)
+    if (!transition) return bad('clip.transition is not a valid transition')
+    clip.transition = transition
+  }
   return ok(clip)
+}
+
+function parseTransition(input: unknown): MotionTransition | null {
+  if (!isRecord(input)) return null
+  const { kind, duration, token, direction, easing } = input
+  if (!TRANSITION_KINDS.includes(kind as TransitionKind) || kind === 'cut') return null
+  if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0 || duration > 60) return null
+  const out: MotionTransition = { kind: kind as TransitionKind, duration }
+  if (token !== undefined) {
+    if (typeof token !== 'string' || !token.startsWith('--dur-') || token.length > 60) return null
+    out.token = token
+  }
+  if (direction !== undefined) {
+    if (!TRANSITION_DIRECTIONS.includes(direction as TransitionDirection)) return null
+    out.direction = direction as TransitionDirection
+  }
+  if (easing !== undefined) {
+    const parsed = parseEasing(easing)
+    if (!parsed) return null
+    out.easing = parsed
+  }
+  return out
 }
 
 export function parseTrack(input: unknown, duration: number): ParseResult<MotionTrack> {
@@ -890,6 +1059,15 @@ function parseOp(input: unknown, duration: number): ParseResult<CompositionOp> {
         if (!source.ok) return source
         op.source = source.value
       }
+      if (input.transition !== undefined) {
+        if (input.transition === null) {
+          op.transition = null
+        } else {
+          const transition = parseTransition(input.transition)
+          if (!transition) return bad('transition is not valid')
+          op.transition = transition
+        }
+      }
       return ok(op)
     }
     case 'remove_clip': {
@@ -1050,6 +1228,10 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
         const err = clipAllowed(track, { ...clip, source: op.source })
         if (err) return err
         clip.source = op.source
+      }
+      if (op.transition !== undefined) {
+        if (op.transition === null) delete clip.transition
+        else clip.transition = op.transition
       }
       if (clip.start + clip.duration > comp.duration + 1e-9) return 'clip ends past the composition duration'
       track.clips!.sort((a, b) => a.start - b.start)

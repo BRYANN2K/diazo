@@ -15,6 +15,8 @@ import {
   SCENE_ATTR,
   SEEK_EVENT,
   START_ATTR,
+  TEXT_SPLITS,
+  TEXT_SPLIT_ATTR,
   parseMotionBlock,
   type Composition,
   type MotionLintIssue,
@@ -33,6 +35,7 @@ export const MO_RULES = {
   SCENE_INCOMPLETE: 'MO-09',
   MOTION_BLOCK: 'MO-10',
   COMPOSITION: 'MO-11',
+  TEXT_SPLIT: 'MO-12',
 } as const
 
 const SCRIPT_RE = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi
@@ -91,6 +94,21 @@ export function lintMotionHtml(html: string, frameId?: string): MotionLintIssue[
           `${MOTION_BLOCK_ATTR} block does not parse as { v: 1, keyframes: [...] }`,
           snippet(body, 0, 80),
         )
+      } else {
+        /* a text animator's element must carry data-doop-split — the player
+           derives the units it animates */
+        for (const animator of block.animators ?? []) {
+          const elRe = new RegExp(`data-doop-id\\s*=\\s*["']${esc(animator.el)}["'][^>]*`)
+          const tag = html.match(elRe)?.[0] ?? ''
+          if (tag && !tag.includes(TEXT_SPLIT_ATTR)) {
+            push(
+              MO_RULES.TEXT_SPLIT,
+              'warning',
+              `animator on "${animator.el}" has no ${TEXT_SPLIT_ATTR} on the element — the player cannot derive its ${animator.split} units`,
+              tag.slice(0, 100),
+            )
+          }
+        }
       }
       continue
     }
@@ -217,6 +235,18 @@ export function lintMotionHtml(html: string, frameId?: string): MotionLintIssue[
     }
   }
 
+  /* split markers: the value must name a real split */
+  for (const m of html.matchAll(new RegExp(`${esc(TEXT_SPLIT_ATTR)}\\s*=\\s*["']([^"']*)["']`, 'g'))) {
+    if (!TEXT_SPLITS.includes(m[1] as (typeof TEXT_SPLITS)[number])) {
+      push(
+        MO_RULES.TEXT_SPLIT,
+        'warning',
+        `${TEXT_SPLIT_ATTR}="${m[1]}" is not one of ${TEXT_SPLITS.join(', ')} — the element will not split into units`,
+        snippet(html, m.index ?? 0),
+      )
+    }
+  }
+
   return issues
 }
 
@@ -264,6 +294,18 @@ export function lintComposition(comp: Composition, opts?: { frameIds?: ReadonlyS
               ? clip.source.type === 'caption'
               : false
       if (!allowed) push('error', `a ${clip.source.type} clip does not belong on a ${track.kind} track`)
+      if (clip.transition && clip.transition.duration > clip.duration) {
+        push(
+          'warning',
+          `clip ${clip.id}'s transition (${clip.transition.duration}s) outlives the clip (${clip.duration}s)`,
+        )
+      }
+      if (clip.transition && track.kind !== 'clip') {
+        push(
+          'warning',
+          `clip ${clip.id} has a transition but sits on a ${track.kind} track — transitions pair shots on clip tracks`,
+        )
+      }
     }
     if ((track.kind === 'camera' || track.kind === 'element') && (track.clips ?? []).length > 0) {
       push('error', `${track.kind} track ${track.id} carries clips`)
