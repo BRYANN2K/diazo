@@ -32,6 +32,7 @@ vi.mock('../src/components/ChatPanel', () => ({ ChatPanel: () => null }))
 vi.mock('../src/components/MemoryPanel', () => ({ MemoryPanel: () => null }))
 
 const { useStore } = await import('../src/lib/store')
+const { flushComposerDrafts } = await import('../src/lib/composerDrafts')
 const { ActivityPanel } = await import('../src/components/ActivityPanel')
 const { TooltipProvider } = await import('../src/components/ui/tooltip')
 
@@ -40,19 +41,27 @@ const { TooltipProvider } = await import('../src/components/ui/tooltip')
 const canvas = { id: 'c1', name: 'Canvas', frames: [], pages: [] } as unknown as Canvas
 
 let container: HTMLDivElement
-let root: Root
+let root: Root | null = null
 
-async function render() {
+async function render(canvasId = 'c1') {
   container = document.createElement('div')
   document.body.append(container)
-  root = createRoot(container)
+  const created = createRoot(container)
+  root = created
   await act(async () =>
-    root.render(
+    created.render(
       <TooltipProvider>
-        <ActivityPanel canvasId="c1" onClose={() => {}} />
+        <ActivityPanel canvasId={canvasId} onClose={() => {}} />
       </TooltipProvider>,
     ),
   )
+}
+
+async function unmount() {
+  const stale = root
+  root = null
+  if (stale) await act(async () => stale.unmount())
+  container.remove()
 }
 
 function composer(): HTMLTextAreaElement {
@@ -78,6 +87,10 @@ async function press(key: string, init: KeyboardEventInit = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  /* a write still inside its debounce window from the last test lands now,
+     then the wipe takes it with the parked drafts */
+  flushComposerDrafts()
+  localStorage.clear()
   useStore.setState({
     canvas,
     panelTab: 'tasks',
@@ -94,8 +107,12 @@ const switchTab = (tab: 'tasks' | 'activity') => act(async () => useStore.getSta
 const frameOn = (canvasId: string, id: string) =>
   ({ id, canvasId, name: id, x: 0, y: 0, width: 1, height: 1, html: '<p/>' }) as unknown as Canvas['frames'][number]
 afterEach(() => {
-  act(() => root.unmount())
-  container.remove()
+  if (root) {
+    const stale = root
+    root = null
+    act(() => stale.unmount())
+    container.remove()
+  }
 })
 
 describe('the Agents tab composer', () => {
@@ -209,5 +226,62 @@ describe('the Agents tab composer', () => {
     useStore.setState({ canvas: null }) // a reconnect, not a navigation
     useStore.setState({ canvas: { ...canvas, frames: [frameOn('c1', 'delivered')] } as Canvas })
     expect(useStore.getState().flyTo).toMatchObject({ frameId: 'delivered' })
+  })
+
+  it('parks the draft and restores it after a reload', async () => {
+    await render()
+    await type('half a thought')
+    flushComposerDrafts()
+    expect(localStorage.getItem('doop:composer-draft:c1')).toContain('half a thought')
+
+    /* a reload forgets memory but keeps storage; the next mount restores */
+    await act(async () => useStore.setState({ composerDrafts: {} }))
+    await switchTab('activity')
+    await switchTab('tasks')
+    expect(composer().value).toBe('half a thought')
+  })
+
+  it('drops the parked draft once the card is queued', async () => {
+    await render()
+    await type('a hero')
+    flushComposerDrafts()
+    await press('Enter')
+    expect(composer().value).toBe('')
+    expect(localStorage.getItem('doop:composer-draft:c1')).toBeNull()
+  })
+
+  it('keeps each canvas its own draft across reloads', async () => {
+    await render('c1')
+    await type('first canvas')
+    flushComposerDrafts()
+    await unmount()
+
+    /* canvas two after a reload: fresh memory, its own empty field */
+    useStore.setState({ composerDrafts: {} })
+    await render('c2')
+    expect(composer().value).toBe('')
+    await type('second canvas')
+    flushComposerDrafts()
+    await unmount()
+
+    /* back on canvas one after another reload: its draft is still there */
+    useStore.setState({ composerDrafts: {} })
+    await render('c1')
+    expect(composer().value).toBe('first canvas')
+    expect(localStorage.getItem('doop:composer-draft:c2')).toContain('second canvas')
+  })
+
+  it('prefers an in-memory draft over an older parked one', async () => {
+    localStorage.setItem('doop:composer-draft:c1', JSON.stringify({ text: 'parked earlier', at: Date.now() }))
+    useStore.setState({ composerDrafts: { c1: 'typed this session' } })
+    await render()
+    expect(composer().value).toBe('typed this session')
+  })
+
+  it('fills the composer from a draft handed off before mount', async () => {
+    /* Home's prompt flow: the brief rides to the fresh canvas as its draft */
+    useStore.getState().setComposerDraft('c1', 'a pricing page, three drafts')
+    await render()
+    expect(composer().value).toBe('a pricing page, three drafts')
   })
 })

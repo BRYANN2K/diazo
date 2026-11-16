@@ -22,6 +22,7 @@ import type {
   TaskFeedback,
 } from '../../shared/types'
 import { roleAllows, type CanvasRole } from '../../shared/canvasRole'
+import { clearComposerDraft, readComposerDraft, writeComposerDraft } from './composerDrafts'
 import type { SnapGuide } from './snap'
 import { isDrawingTool, type Tool } from './tools'
 import { setOutlines } from './frameBridge'
@@ -168,7 +169,9 @@ interface State {
    *  request does not grab the keyboard */
   composerFocusAt: number
   /** the composer's unsent text per canvas — collapsing the panel or
-   *  switching tabs unmounts the field and must not eat the draft */
+   *  switching tabs unmounts the field and must not eat the draft. The
+   *  live copy; composerDrafts.ts mirrors it into localStorage so a
+   *  reload or a desktop relaunch hands it back on the next mount */
   composerDrafts: Record<string, string>
   composerSend: ComposerSend | null
   /** clientId of the peer whose camera this one is tracking (Figma-style
@@ -246,6 +249,10 @@ interface State {
    *  on that tab first) */
   requestComposerFocus(): void
   setComposerDraft(canvasId: string, text: string): void
+  /** pull the canvas's parked draft out of storage into memory — the
+   *  composer calls it on mount so a reload brings the text back. A
+   *  draft already in memory always wins over a parked one */
+  hydrateComposerDraft(canvasId: string): void
   setComposerSend(send: ComposerSend | null): void
   select(id: string | null): void
   /** ⇧-click: add the frame to the selection, or drop it if already in */
@@ -668,14 +675,25 @@ export const useStore = create<State>((set, get) => ({
   requestOpenThread: (id) => set({ threadRequest: { id, at: Date.now() } }),
   clearThreadRequest: () => set({ threadRequest: null }),
   requestComposerFocus: () => set({ composerFocusAt: Date.now() }),
-  setComposerDraft: (canvasId, text) =>
+  setComposerDraft: (canvasId, text) => {
+    /* the parked copy follows the live one — debounced while typing,
+       dropped at once when the field empties (the card queued) */
+    if (text) writeComposerDraft(canvasId, text)
+    else clearComposerDraft(canvasId)
     set((s) => ({
       composerDrafts: { ...s.composerDrafts, [canvasId]: text },
       /* a failure stays up until the draft is touched again: it is not on a
          timer, so a send that failed while another tab was open is still
          there when this one comes back */
       composerSend: s.composerSend?.status === 'error' ? null : s.composerSend,
-    })),
+    }))
+  },
+  hydrateComposerDraft: (canvasId) =>
+    set((s) => {
+      if (canvasId in s.composerDrafts) return {}
+      const stored = readComposerDraft(canvasId)
+      return stored ? { composerDrafts: { ...s.composerDrafts, [canvasId]: stored } } : {}
+    }),
   setComposerSend: (composerSend) => set({ composerSend }),
   /* selecting a different frame (or deselecting) closes the Inspector — the
      panel must not follow surface clicks, paste, or undo onto another frame.

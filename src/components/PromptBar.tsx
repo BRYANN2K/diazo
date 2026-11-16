@@ -205,6 +205,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   const focusAt = useStore((s) => s.composerFocusAt)
   const text = useStore((s) => s.composerDrafts[canvasId] ?? '')
   const setDraft = useStore((s) => s.setComposerDraft)
+  const hydrateDraft = useStore((s) => s.hydrateComposerDraft)
   const [duelOpen, setDuelOpen] = useState(false)
   /* this canvas's send only: another canvas's outcome is not ours to show */
   const send = useStore((s) => (s.composerSend?.canvasId === canvasId ? s.composerSend : null))
@@ -246,6 +247,12 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const t = useT()
   const meter = meterText(allowance, t, pickedProvider, picked?.runner.name)
+
+  /* a draft parked before a reload (or an earlier visit) rejoins the field
+     before paint, so the composer never flashes empty first */
+  useLayoutEffect(() => {
+    hydrateDraft(canvasId)
+  }, [canvasId, hydrateDraft])
 
   useLayoutEffect(() => {
     if (inputRef.current) autosize(inputRef.current)
