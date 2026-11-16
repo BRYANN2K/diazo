@@ -10,6 +10,7 @@ declare global {
     canvasClipboardHarness: {
       seed: (frames: Frame[], role?: CanvasRole) => void
       pick: (...selectors: string[]) => void
+      repick: (...selectors: string[]) => void
       frames: () => Frame[]
       picked: () => string[]
       lockFrame: () => void
