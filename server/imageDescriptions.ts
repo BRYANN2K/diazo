@@ -16,7 +16,7 @@ import { isImageDescriptionMode, type DescriberStatus } from '../shared/imageDes
 import type { ServerMessage } from '../shared/types.ts'
 
 /**
- * Image descriptions (.context/specs/image-descriptions.md): every raster
+ * Image descriptions (.workflow/specs/image-descriptions.md): every raster
  * image stored for a canvas is described ONCE by a small vision model, and
  * the paragraph lands on its assets row, from where get_canvas, get_frame
  * and the resident kickoff read it. The upload never waits: `asset.stored`

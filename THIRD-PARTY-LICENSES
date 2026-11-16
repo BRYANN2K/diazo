@@ -1,0 +1,76 @@
+Diazo third-party licenses
+==========================
+
+What Diazo ships, bundles or follows that is not its own code, and under which
+license. Read by users, packagers and reviewers. NOTICE explains the licensing
+of the repository itself. Where a license text is in the repository, this file
+names the path.
+
+Diazo is licensed under the GNU Affero General Public License version 3
+(AGPL-3.0), see LICENSE.
+
+Upstream
+--------
+
+doop (kgoedecke/doop)
+  AGPL-3.0. Copyright Kevin Goedecke and the doop contributors.
+  The base of this repository. See NOTICE.
+
+Fonts
+-----
+
+Doop Keys (a subset of Inter 4.1, inlined in src/styles.css)
+  SIL Open Font License 1.1. Copyright The Inter Project Authors.
+  License: src/assets/fonts/inter-LICENSE.txt
+
+Inter, Hanken Grotesk, Geist Mono (UI faces, loaded from Google Fonts)
+  SIL Open Font License 1.1. Not stored in the repository today.
+  The frontend redesign (.workflow/changes/frontend-redesign) replaces them
+  with self-hosted Atkinson Hyperlegible Next and Mono and Familjen Grotesk,
+  also OFL 1.1, with their license files in src/assets/fonts (ADR 0012).
+  Their rows are added here when that change merges.
+
+Nunito Sans Bold Italic (test fixture, tests/fixtures/fonts)
+  SIL Open Font License 1.1. Copyright The Nunito Sans Project Authors.
+  Notice: tests/fixtures/fonts/README.md. Not shipped in the app.
+
+Icons and brand marks
+---------------------
+
+Lucide (UI icons, the lucide-react package)
+  ISC License. Copyright Lucide Contributors.
+
+Lobe Icons (DeepSeek, Kimi, OpenCode, Devin and Grok marks,
+src/components/ui/brand-mark.tsx)
+  MIT License. Copyright LobeHub.
+
+Iconify logos (the OpenRouter mark, src/components/ui/brand-mark.tsx)
+  MIT License.
+
+Simple Icons (Claude, OpenAI, Cursor and GitHub marks,
+src/components/ui/brand-mark.tsx)
+  CC0 1.0.
+
+A brand mark identifies a third-party service that Diazo connects to. The
+marks stay their owners' trademarks; the licenses above cover the drawings,
+not the trademarks.
+
+Libraries with a notable license
+--------------------------------
+
+MuPDF (the mupdf npm package, WebAssembly; PDF import in the browser)
+  AGPL-3.0. Copyright Artifex Software, Inc.
+  Loaded as a separate chunk by src/lib/pdfImport.ts.
+
+Every other dependency is installed from npm (package.json, bun.lock) or
+crates.io (desktop/src-tauri/Cargo.toml, Cargo.lock) and keeps the license its
+package declares. Each package's license text ships inside the package.
+
+Specifications followed
+-----------------------
+
+HyperFrames (HTML rendered to video)
+  Apache License 2.0. Motion Studio follows its timing contract: timing
+  attributes, [start, end) visibility windows, determinism rules, tracks and
+  safe zones (ADR 0010). No HyperFrames code is copied or bundled; Diazo's own
+  runtime implements the contract with WAAPI and CSS.

@@ -24,3 +24,10 @@ storybook-static/
 
 # Playwright MCP snapshots, logs and screenshots
 .playwright-mcp/
+
+# Stip runtime files (the workflow records themselves are committed)
+.workflow/.lock
+.workflow/.workflow-write-*
+.workflow/.runtime/
+.workflow/local.json
+.workflow/.native-agents.lock

@@ -5,7 +5,7 @@ import { canvasPages, pageFrames } from './pages.ts'
  * Clickable prototypes. Interactions live in the frame HTML as data
  * attributes on the element that triggers them, so they persist, sync and
  * version with the frame, and agents author them with the ordinary HTML
- * tools. Spec: .context/specs/prototyping.md.
+ * tools. Spec: .workflow/specs/prototyping.md.
  *
  * One interaction (the canonical form the editor writes for one):
  *   data-doop-on="click" data-doop-action="navigate:<frameId>"

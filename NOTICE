@@ -1,0 +1,28 @@
+Diazo licensing
+===============
+
+Diazo is a fork of doop (kgoedecke/doop on GitHub), the multiplayer design
+canvas created by Kevin Goedecke with the doop contributors. Most of the code
+in this repository comes from doop and keeps its authors' copyright.
+
+Diazo is its own project. It is not affiliated with or endorsed by doop or its
+maintainer. "doop" and the Disc-D logo are its owner's trademarks; Diazo does
+not use them in anything a user sees. Internal identifiers (data-doop-*
+attributes, DOOP_* variables, table, package and tool names) keep the old name
+so data and integrations do not break; they are not branding.
+
+The code, doop's and Diazo's, is licensed under the GNU Affero General Public
+License version 3 (AGPL-3.0), see LICENSE. Anyone who runs a modified Diazo as
+a network service must offer its users the corresponding source.
+
+doop asks its contributors to sign a contributor licence agreement that lets
+its maintainer relicense their work. Diazo has no such agreement: a
+contribution to Diazo is licensed AGPL-3.0, like the rest, and nothing else.
+
+Parts that are not ours keep their own licences: fonts under the SIL Open Font
+License 1.1, brand marks drawn from icon sets under MIT or CC0, the MuPDF
+WebAssembly build under AGPL-3.0. THIRD-PARTY-LICENSES lists them, with the
+path of each licence text kept in the repository.
+
+Copyright (C) Kevin Goedecke and the doop contributors.
+Copyright (C) 2026 the Diazo contributors (BRYANN2K/diazo).

@@ -59,7 +59,7 @@ import { store } from './store.ts'
  * ordinary frame write through actions.ts, so history, sign-off, the room and
  * propagation all behave as they do for any other edit. The MCP tools, the
  * resident agent and the REST routes share these, so they cannot drift apart.
- * Spec: .context/specs/components.md.
+ * Spec: .workflow/specs/components.md.
  */
 
 export class ComponentError extends Error {}

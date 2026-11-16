@@ -23,7 +23,7 @@ import { clientToWorld, frameAtPoint } from './commentMove'
 /**
  * The editor's side of components. The server owns rendering and merging; this
  * reads what a selected element is from the frame's saved HTML and asks for
- * changes. Spec: .context/specs/components.md.
+ * changes. Spec: .workflow/specs/components.md.
  */
 
 export type ComponentContext =
