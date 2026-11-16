@@ -17,6 +17,7 @@ vi.mock('../server/storage.ts', () => ({
 }))
 
 import * as thumbs from '../server/thumbs.ts'
+import { store } from '../server/store.ts'
 
 const frame = (id: string): Frame =>
   ({
@@ -98,10 +99,77 @@ describe('thumbs', () => {
     mocks.getObject.mockResolvedValue(Buffer.from('stale'))
     const f = frame('stale-frame')
     const [a, b] = await Promise.all([thumbs.getStored(f), thumbs.getStored(f)])
-    expect(a?.toString()).toBe('stale')
-    expect(b?.toString()).toBe('stale')
+    expect(a?.buf.toString()).toBe('stale')
+    expect(b?.buf.toString()).toBe('stale')
+    expect(a?.fresh).toBe(false)
     await tick()
     /* one background refresh, not one per request (dedupe + throttle) */
     expect(mocks.renderFrame).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders a stage image as the whole frame at its width step, persisted per width', async () => {
+    mocks.renderFrame.mockResolvedValue(Buffer.from('w256'))
+    const f = frame('stage-render')
+    const v: thumbs.ThumbVariant = { kind: 'stage', width: 256, ext: 'jpg' }
+    await thumbs.create(f, v)
+    expect(mocks.renderFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      0.2, // 256 / 1280
+      expect.objectContaining({ type: 'jpeg', priority: 'background' }),
+    )
+    /* the whole frame, not the card's top slice */
+    expect(mocks.renderFrame.mock.calls[0]![2]).not.toHaveProperty('maxHeight')
+    expect(mocks.putObject).toHaveBeenCalledWith('thumb/stage-render-w256.jpg', expect.anything(), 'image/jpeg')
+    mocks.getObject.mockResolvedValue(Buffer.from('w256'))
+    expect(await thumbs.getStored(f, v)).toMatchObject({ fresh: true })
+  })
+
+  it('keeps a stage image fresh across a move and stale after a design write, then refreshes it', async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.renderFrame.mockResolvedValue(Buffer.from('x'))
+      const f = frame('stage-fresh')
+      const v: thumbs.ThumbVariant = { kind: 'stage', width: 128, ext: 'png' }
+      const live = vi.spyOn(store, 'getFrame').mockImplementation((id) => (id === f.id ? f : undefined))
+      /* the write that made the frame */
+      thumbs.noteDesignWrite(f.id)
+      await thumbs.create(f, v)
+      mocks.getObject.mockResolvedValue(Buffer.from('x'))
+      /* moved: updatedAt goes up but the design did not change */
+      f.updatedAt = 5
+      expect((await thumbs.getStored(f, v))?.fresh).toBe(true)
+      /* written: stale until it re-renders, which waits for the frame to be quiet */
+      f.updatedAt = 6
+      thumbs.noteDesignWrite(f.id)
+      expect((await thumbs.getStored({ ...f }, v))?.fresh).toBe(false)
+      mocks.renderFrame.mockClear()
+      await vi.advanceTimersByTimeAsync(thumbs.REFRESH_AFTER_WRITE_MS + 10)
+      expect(mocks.renderFrame).toHaveBeenCalledTimes(1)
+      expect((await thumbs.getStored(f, v))?.fresh).toBe(true)
+      live.mockRestore()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not render anything after a write to a frame nobody looked at as an image', async () => {
+    vi.useFakeTimers()
+    try {
+      const f = frame('never-shown')
+      const live = vi.spyOn(store, 'getFrame').mockImplementation((id) => (id === f.id ? f : undefined))
+      thumbs.noteDesignWrite(f.id)
+      await vi.advanceTimersByTimeAsync(thumbs.REFRESH_AFTER_WRITE_MS + 10)
+      expect(mocks.renderFrame).not.toHaveBeenCalled()
+      live.mockRestore()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('purges every stage width with the card', () => {
+    thumbs.purge('purged-stage')
+    expect(mocks.deleteObject).toHaveBeenCalledWith('thumb/purged-stage.jpg')
+    expect(mocks.deleteObject).toHaveBeenCalledWith('thumb/purged-stage-w128.jpg')
+    expect(mocks.deleteObject).toHaveBeenCalledWith('thumb/purged-stage-w1024.png')
   })
 })

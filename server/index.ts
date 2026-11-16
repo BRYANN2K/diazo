@@ -81,6 +81,8 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { GuideLimitError, maxPages, PageLimitError, store } from './store.ts'
 import { parseGuide } from '../shared/guides.ts'
 import { getImage } from './previews.ts'
+import { followFrameWrites } from './thumbs.ts'
+import { parsePreviewWidth } from '../shared/framePreview.ts'
 import * as actions from './actions.ts'
 import { checkAndStore } from './frameChecks.ts'
 import { liveActivitiesRouter, logLiveActivityRequests, startLiveActivityDelivery } from './liveActivities.ts'
@@ -222,6 +224,9 @@ await libraries.hydrateLibraries() // canvas.library, before the first canvas is
 libraries.wireLibraries()
 void libraries.purgeDisabledLibraries().catch((error: unknown) => console.error('[libraries] purge failed', error))
 libraryIndex.wireIndexer()
+/* stored frame previews go stale on a design write, and the stage images
+   someone looked at re-render ahead of the next zoom-out (thumbs.ts) */
+followFrameWrites()
 wireLibraryDescribe() // AI descriptions, only on libraries that turned them on
 /* full index runs a restart cut off go on in the background */
 void Promise.all(libraryIndex.resumeIndexing(libraries.allLibraries()))
@@ -579,11 +584,15 @@ app.get('/i/:id.:ext', async (req, res) => {
   /* any multiplier the export picker offers; a missing or unreadable one
      is 1x, as before there was a picker */
   const scale = fitExportScale(frame, parseExportScale(req.query.scale) ?? 1)
+  /* ?lod=<width> — a stage image (shared/framePreview.ts), one of a few widths */
+  const lod = req.query.lod === undefined ? undefined : parsePreviewWidth(req.query.lod)
+  if (lod === null) return res.status(400).json({ error: 'unknown preview width' })
   let result: Awaited<ReturnType<typeof getImage>>
   try {
     result = await getImage(frame, {
       ext,
       scale,
+      lod,
       quality: Math.min(100, Math.max(1, Number(req.query.quality) || 90)),
       /* ?preview — the dashboard-card variant; see previews.ts */
       preview: req.query.preview !== undefined,
@@ -605,7 +614,14 @@ app.get('/i/:id.:ext', async (req, res) => {
   const { buf } = result
 
   res.set('Content-Type', ext === 'jpg' ? 'image/jpeg' : 'image/png')
-  res.set('Cache-Control', 'public, max-age=60')
+  if (result.fresh === false) {
+    /* an older design while the current one renders: the stage asks again */
+    res.set('Cache-Control', 'no-store')
+    res.set('X-Doop-Preview', 'stale')
+  } else if (lod && req.query.v === String(frame.updatedAt)) {
+    /* the URL names the version it shows, so it never changes */
+    res.set('Cache-Control', 'public, max-age=31536000, immutable')
+  } else res.set('Cache-Control', 'public, max-age=60')
   if (req.query.download !== undefined) {
     const safe = frame.name.replace(/[^\w\- ]+/g, '').trim() || 'frame'
     res.set('Content-Disposition', `attachment; filename="${safe}${exportScaleSuffix(scale)}.${ext}"`)

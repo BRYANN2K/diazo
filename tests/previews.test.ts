@@ -145,4 +145,32 @@ describe('getImage', () => {
     await Promise.all(all)
     expect(mocks.renderFrame).toHaveBeenCalledTimes(5)
   })
+
+  it('a stage image renders once at background priority and is then served from memory', async () => {
+    const f = frame()
+    const r = await getImage(f, req({ lod: 512 }))
+    expect(r).toMatchObject({ status: 'ok', fresh: true })
+    expect(mocks.renderFrame).toHaveBeenCalledWith(
+      expect.anything(),
+      0.4, // 512 / 1280
+      expect.objectContaining({ type: 'jpeg', priority: 'background' }),
+    )
+    await getImage(f, req({ lod: 512 }))
+    expect(mocks.renderFrame).toHaveBeenCalledTimes(1)
+    /* another width is its own render */
+    await getImage(f, req({ lod: 128 }))
+    expect(mocks.renderFrame).toHaveBeenCalledTimes(2)
+  })
+
+  it('serves a stored stage image at once, marked stale while it refreshes, and keeps it out of memory', async () => {
+    mocks.getObject.mockResolvedValue(Buffer.from('older design'))
+    mocks.renderFrame.mockImplementation(() => new Promise(() => {}))
+    const f = frame()
+    const first = await getImage(f, req({ lod: 256 }))
+    expect(first).toMatchObject({ status: 'ok', fresh: false })
+    expect(first.status === 'ok' && first.buf.toString()).toBe('older design')
+    /* the refresh is running; the next ask reads storage again rather than a cached stale copy */
+    await getImage(f, req({ lod: 256 }))
+    expect(mocks.getObject).toHaveBeenCalledTimes(2)
+  })
 })
