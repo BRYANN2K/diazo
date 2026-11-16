@@ -48,6 +48,8 @@ const MISSING = [
   'list_linear_issues', // integration tools, registered by their connections
   'get_linear_issue',
   'create_handoff', // the ready-for-dev pack lives behind the UI's write flow
+  'get_handoff', // a dev task's pack serves the Orca coding agent it was launched for
+  'update_dev_task', // only the Orca coding agent reports on its own task; a resident has none
   'export_frame_code', // frame → code is written through the UI's diff preview and the desktop dialog
   'suggest_code_links', // a resident run with a linked project searches it itself with repo_search
 ]
