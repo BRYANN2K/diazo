@@ -11,9 +11,11 @@ export function verdictTone(issues: number, errors: number): VerdictTone {
 }
 
 /** Hidden at rest, shown while the frame (the `group` wrapper) is hovered,
- *  holds focus or is selected. Nothing for a clean verdict. */
+ *  holds focus or is selected. Nothing for a clean verdict. At rest the badge
+ *  is `sr-only`: out of the title row's flow, so the frame's name keeps the
+ *  whole width, and its label still reaches assistive tech. */
 export function verdictReveal(issues: number): string {
   return issues === 0
     ? ''
-    : 'opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 group-data-[selected]:opacity-100'
+    : 'sr-only opacity-0 transition-opacity duration-fast group-hover:not-sr-only group-hover:opacity-100 group-focus-within:not-sr-only group-focus-within:opacity-100 group-data-[selected]:not-sr-only group-data-[selected]:opacity-100'
 }
