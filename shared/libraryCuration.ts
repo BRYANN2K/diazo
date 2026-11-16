@@ -9,7 +9,7 @@
  * This module is the vocabulary shared by the server (the job, the routes)
  * and the review screen, and the pure parts: reading the model's answers
  * strictly, editing a plan, and summarising it for review.
- * Spec: .context/specs/design-libraries.md, "AI curation".
+ * Spec: .workflow/specs/design-libraries.md, "AI curation".
  */
 import type { TokenUsage } from './usage.ts'
 import { tidyCategoryPart } from './libraryRules.ts'

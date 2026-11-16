@@ -55,6 +55,7 @@
     "allow-app-menu-set",
     "allow-app-menu-state",
     "allow-update-card-ready",
-    "allow-update-restart"
+    "allow-update-restart",
+    "allow-local-server-status"
   ]
 }

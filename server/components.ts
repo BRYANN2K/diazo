@@ -38,7 +38,7 @@ import type { Canvas } from '../shared/types.ts'
  * first: `<doop-use>` written out, a changed main folded into its component,
  * instances reconciled and brought up to the current revision, and exactly the
  * right stylesheets put in the head. Sync, so no write can slip between the
- * read and the commit. Spec: .context/specs/components.md.
+ * read and the commit. Spec: .workflow/specs/components.md.
  */
 
 const componentSuffix = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 9)

@@ -58,6 +58,7 @@ mod fonts;
 mod identity_migration;
 mod live;
 mod motion;
+mod local_server;
 mod repo;
 mod server;
 mod updates;
@@ -203,6 +204,9 @@ fn app_submenu(app: &AppHandle) -> tauri::Result<Submenu<ShellRuntime>> {
     if let Some(item) = &server_reset {
         app_items.push(item);
     }
+    // this Mac's Diazo server, as scripts/install.sh sets it up
+    let local_server = local_server::submenu(app)?;
+    app_items.push(&local_server);
     app_items.extend([
         &separator as &dyn IsMenuItem<ShellRuntime>,
         &services,
@@ -373,7 +377,8 @@ fn main() {
             app_menu::app_menu_set,
             app_menu::app_menu_state,
             updates::update_card_ready,
-            updates::update_restart
+            updates::update_restart,
+            local_server::local_server_status
         ])
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             focus_main_window(app)
@@ -389,6 +394,7 @@ fn main() {
             updates::menu::check(app);
         } else if event.id() == server::menu::MENU_ID {
             server::menu::reset(app);
+        } else if local_server::item_picked(app, event.id().as_ref()) {
         } else {
             view_menu::relay(app, event.id().as_ref());
             app_menu::relay(app, event.id().as_ref());
@@ -422,6 +428,8 @@ fn main() {
             let focus_handle = app.handle().clone();
             app.deep_link().on_open_url(move |_event| focus_main_window(&focus_handle));
             updates::start(app.handle());
+            #[cfg(target_os = "macos")]
+            local_server::start(app.handle());
             server::grant(app.handle())?;
 
             let handle = app.handle().clone();
@@ -457,14 +465,16 @@ fn main() {
             // (traffic-light inset arrived with the overlay title bar, 0.1.2)
             // and the platform tells it which window framing it lives under.
             let desktop_marker = format!(
-                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_CHOOSE__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true; window.__DOOP_APP_MENU__ = {}; window.__DOOP_LOCAL_FONTS__ = true; window.__DOOP_LOCAL_REPO__ = true; window.__DOOP_REPO_PATCH__ = true; window.__DOOP_LOCAL_DRIFT__ = true; window.__DOOP_LIVE_SNAPSHOT__ = true; window.__DOOP_UPDATE_CARD__ = true; window.__DOOP_SERVER_CHOOSE__ = true; window.__DOOP_MOTION_RENDER__ = true; window.__DOOP_BLENDER__ = {}; window.__DOOP_ACP_AGENTS__ = ['devin', 'grok'];",
+                "window.__DOOP_DESKTOP__ = '{}'; window.__DOOP_DESKTOP_PLATFORM__ = '{}'; window.__DOOP_CLAUDE_CLI__ = true; window.__DOOP_CLAUDE_INSTALL__ = true; window.__DOOP_CLAUDE_CHOOSE__ = true; window.__DOOP_CLAUDE_EXTENSION__ = {}; window.__DOOP_CODEX_SETUP__ = true; window.__DOOP_VIEW_MENU__ = true; window.__DOOP_APP_MENU__ = {}; window.__DOOP_LOCAL_FONTS__ = true; window.__DOOP_LOCAL_REPO__ = true; window.__DOOP_REPO_PATCH__ = true; window.__DOOP_LOCAL_DRIFT__ = true; window.__DOOP_LIVE_SNAPSHOT__ = true; window.__DOOP_UPDATE_CARD__ = true; window.__DOOP_SERVER_CHOOSE__ = true; window.__DOOP_MOTION_RENDER__ = true; window.__DOOP_BLENDER__ = {}; window.__DOOP_ACP_AGENTS__ = ['devin', 'grok']; window.__DIAZO_LOCAL_SERVER__ = {};",
                 app.package_info().version,
                 std::env::consts::OS,
                 cfg!(any(target_os = "macos", target_os = "windows")),
                 // only macOS has a menu bar for the page to build (app_menu.rs)
                 cfg!(target_os = "macos"),
                 // the Blender bridge advertises itself only when its env gate is on (blender.rs)
-                std::env::var_os("DOOP_BLENDER_BRIDGE").is_some_and(|v| !v.is_empty() && v != "0")
+                std::env::var_os("DOOP_BLENDER_BRIDGE").is_some_and(|v| !v.is_empty() && v != "0"),
+                // this Mac's server (local_server.rs), macOS only
+                cfg!(target_os = "macos")
             );
             // macOS never reports the saved path on `Finished`, so remember
             // the destinations chosen on `Requested`, keyed by URL. The same

@@ -2,7 +2,7 @@
  * Design libraries: a canvas whose frames are indexed as items with
  * variants, categories, tags and import rules. The vocabulary shared by the
  * server (indexer, routes, tools) and the client (⌘F, the gallery).
- * Spec: .context/specs/design-libraries.md.
+ * Spec: .workflow/specs/design-libraries.md.
  */
 
 import type { DuplicateMatch } from './libraryProvenance.ts'

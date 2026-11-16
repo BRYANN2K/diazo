@@ -7,102 +7,27 @@
 
 # Diazo
 
-A design canvas for people who design and ship code with AI agents, on one canvas linked to their repo.
-Status: alpha, updated 2026-11-15
+Diazo is a free, self-hosted design canvas for builders: people whose AI agents design the screens and then write the code. Frames are live HTML, humans and agents work on the same canvas in real time, and the design flows into your repo.
 
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-111110" alt="License: AGPL-3.0"></a>
-<a href="https://github.com/kgoedecke/doop"><img src="https://img.shields.io/badge/fork%20of-kgoedecke%2Fdoop-1F5FFF" alt="Fork of kgoedecke/doop"></a>
+Diazo started as a fork of doop, the open-source multiplayer design canvas by Kevin Goedecke, and is now its own project. The desktop app and the server are in this repository. The live instance runs on its owner's server, reachable over Tailscale only.
 
-Diazo is a fork of [doop](https://github.com/kgoedecke/doop) (kgoedecke/doop), built for builders:
-the people whose agents design the screens and then write the code. It is not affiliated with doop
-or doop.design; doop's name and logo are trademarks of their owner. Diazo is licensed under the
-AGPL-3.0, like doop.
-
-## What it does
-
-Diazo starts from [doop](https://github.com/kgoedecke/doop), the open-source multiplayer design
-canvas for humans and AI agents. doop gives you the canvas: frames that render real HTML, live
-cursors, and an MCP server so agents design next to you. Diazo adds what a builder needs when the
-same agents also write the code: the repo, a design library, checks, and a record of what each
-agent run did and cost.
-
-- **Design next to your repo.** Link a canvas to a project folder. The agent reads it while it
-  plans, and the Chat tab answers a brief with a plan you approve before anything is designed.
-- **Build from a library.** Turn a canvas into a design library: frames become items with
-  variants, categories and tags. ⌘F finds an item, previews it, and inserts a scoped copy into the
-  selected frame. Agents search the same index.
-- **Sort old kits with AI.** Pick several canvases. A model on your own account folds the
-  duplicates, proposes one category tree and files every item. You review the tree before a new
-  library is made. The source canvases are not changed.
-- **Teach the agent your rules.** Canvas skills are named notes such as "how we do a pricing page".
-  Agents see each skill's one-line description and load the one that fits.
-- **Check every frame.** The server lays each frame out at 375, 768 and 1440px and walks it with
-  the keyboard: overflow, small tap targets, text contrast, focus. An anti-slop lint runs too.
-- **See what each run did.** Every agent run records its tokens, time and cost. Open a run to see
-  each frame before and after, and roll the whole run back in one step.
-- **Compare models.** A duel sends one brief to two or three models, each into its own frame, and
-  shows cost, time and lint score side by side. You keep one.
-- **Use the agent CLIs you already pay for.** In the desktop app, Devin and Grok run on your own
-  login, next to the Claude Plan, through the Agent Client Protocol.
-- **Keep tokens and code in sync.** The Tokens panel diffs the canvas's tokens with the repo's CSS
-  variables. A frame exports as a React or Astro component, shown as a patch before it is written.
-- **Run it yourself.** One command on a Mac, or your own server. Canvases, uploads and keys stay
-  on your machine. When a newer build is out, admins see how many commits it adds and the
-  command that updates their install.
-
-<table>
-  <tr>
-    <td width="50%"><img src=".github/assets/redoop/canvas.png" alt="A canvas with four Fieldnote frames and the Chat tab, where the agent answers a brief with a three-screen plan"><br><sub>Chat: a brief, then a plan to approve.</sub></td>
-    <td width="50%"><img src=".github/assets/redoop/find.png" alt="The ⌘F find bar over a selected frame, searching the UI kit library for a button and pointing at one of its four variants"><br><sub>⌘F: find a library item and insert it.</sub></td>
-  </tr>
-  <tr>
-    <td><img src=".github/assets/redoop/gallery.png" alt="A design library gallery with item thumbnails, kind filters and categories"><br><sub>A library's gallery.</sub></td>
-    <td><img src=".github/assets/redoop/curate.png" alt="The Organise with AI review: a category tree on the left and the items filed under Heroes on the right"><br><sub>Organise with AI: review the tree.</sub></td>
-  </tr>
-  <tr>
-    <td><img src=".github/assets/redoop/skills.png" alt="The Memory panel with the linked project and two canvas skills, one of them open"><br><sub>Canvas skills in the Memory panel.</sub></td>
-    <td><img src=".github/assets/redoop/checks.png" alt="The Inspector's Quality section for a mobile frame: tap targets at 375 and 768px and a contrast error"><br><sub>Frame checks in the Inspector.</sub></td>
-  </tr>
-  <tr>
-    <td><img src=".github/assets/redoop/replay.png" alt="The Usage tab with four runs and their cost, and a run replay showing the pricing frame before and after"><br><sub>Usage and run replay.</sub></td>
-    <td><img src=".github/assets/redoop/duel.png" alt="A model duel: two onboarding frames from two models and the comparison card with cost, time and lint score"><br><sub>A model duel.</sub></td>
-  </tr>
-  <tr>
-    <td><img src=".github/assets/redoop/tokens.png" alt="The token sync dialog listing tokens that changed in the repo and one that is new there"><br><sub>Token sync with the repo.</sub></td>
-    <td><img src=".github/assets/redoop/code.png" alt="The frame to code dialog showing a React component as a patch against the linked repo"><br><sub>Frame to code.</sub></td>
-  </tr>
-</table>
-
-The screenshots use an invented product ("Fieldnote") seeded by `scripts/seed-demo.ts` and taken
-by `scripts/readme-shots.ts`; the agent in them is a local stand-in, not a real model. Every
-feature this fork adds, and the upstream pull requests it merged early, are listed in
-[docs/FEATURES.md](docs/FEATURES.md).
-
-## Requirements
-
-- **Local install:** a Mac with Apple silicon, macOS 26 and Apple's
-  [`container`](https://github.com/apple/container/releases/latest) 1.0 or later.
-- **Hosted install:** Docker, or a Kubernetes cluster. Postgres 16 is optional: without
-  `DATABASE_URL` the server uses an embedded Postgres (PGlite) in its data folder.
-- **From source:** Bun 1.3.10 (pinned in `package.json`) and Node.js.
-- **Model account:** the built-in agent runs on an account you connect (a Claude, OpenAI, Gemini
-  or OpenRouter key, or a ChatGPT subscription). Agents you bring over MCP need none.
-- **Desktop-only features** (reading a local project folder, live frames on `localhost`, writing
-  a patch into your repo) need the Diazo desktop app.
+**Status: alpha.** Expect missing features and breaking changes. Updated 2026-11-15.
 
 ## Install
 
-### Local (Mac)
+Diazo runs on your own machine or your own server. Your canvases, uploads and keys stay there.
+
+### All in one (Mac): the server and the app
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install-local.sh | sh
+curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install.sh | sh
 ```
 
-One container on `127.0.0.1:4400`, with the database and uploads in `~/.diazo/data` and secrets
-generated on your Mac. An install made before the rename keeps using `~/.doop`, where it is. Run it
-again to update. `~/.diazo/bin/diazo-local` (or `~/.doop/bin/…`; `doop-local` still works) starts,
-stops, updates or uninstalls it. The script, step by step:
-[.context/RELEASE.md](.context/RELEASE.md#local-install-on-a-mac-apple-container-this-fork).
+Sets up the server on `127.0.0.1:4400` (Apple `container`, data in `~/.diazo`), starts it at every login, installs `Diazo.app` pointed at it, and opens the app on the sign-up screen: the first account is the admin. Needs Apple silicon, macOS 26 and `container` 1.0 or later; the script says where to get `container` when it is missing.
+
+It also installs the `diazo` command: `diazo start|stop|restart|status|logs|update|open|uninstall [--purge]`. The app's menu has the same controls under Diazo → Local Server. Options: `--app-only`, `--server-only`, `--use-local` (point the app at this Mac's server even if another one is chosen), `--version X.Y.Z` (the app's release), `--dry-run`, `--uninstall [--purge]`. Run it again, or `diazo update`, to update both. Canvases, secrets and the app's server choice are kept.
+
+The two parts also install on their own, as below.
 
 ### Desktop app (Mac)
 
@@ -110,21 +35,21 @@ stops, updates or uninstalls it. The script, step by step:
 curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install-desktop.sh | sh
 ```
 
-Installs `Diazo.app` (Apple silicon and Intel) into `/Applications`, or `~/Applications` when
-`/Applications` is not writable. The app is not signed by Apple, and does not need to be: a file
-`curl` downloads carries no quarantine flag, so Gatekeeper lets it open. The script checks the
-release's SHA-256 (and its signature when `minisign` is installed) and keeps your data. The app then
-updates itself from this repository's releases. To use your own server, click the cog on the
-sign-in screen. `--version X.Y.Z` installs a given release, `--uninstall` removes the app. An app
-installed from doop.design does not switch by itself: run the command once. A `doop.app` installed
-by this fork's earlier script is replaced and its sign-in and server kept; the official doop app is
-never touched. Windows and Linux
-installers are attached to each `desktop-v*` release.
+Installs `Diazo.app` (Apple silicon and Intel) into `/Applications`. The app then updates itself from this repository's releases. To use your own server, click the cog on the sign-in screen. Windows and Linux installers are attached to each `desktop-v*` release.
 
-### Hosted
+### Why macOS doesn't ask
 
-The image is built from `main` for amd64 and arm64: `ghcr.io/bryann2k/diazo:main` (also
-`:latest` and `:sha-<commit>`).
+Diazo is free and not notarized by Apple, because notarization needs a paid Apple developer membership. The install script avoids the first-open warning because curl does not mark the download as quarantined. It checks the release's SHA-256, and its signature when `minisign` is installed.
+
+### Local server (Mac)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install-local.sh | sh
+```
+
+One container with Apple's `container` on `127.0.0.1:4400`, data in `~/.diazo`. Run it again to update; `diazo-local` starts, stops, updates or uninstalls it. It does not start at login (the all-in-one install adds that). Needs macOS 26 and `container` 1.0 or later.
+
+### Your own server
 
 ```sh
 docker run -d --name diazo -p 4400:4400 -v diazo-data:/app/data \
@@ -134,59 +59,43 @@ docker run -d --name diazo -p 4400:4400 -v diazo-data:/app/data \
   ghcr.io/bryann2k/diazo:latest
 ```
 
-Keep the two secrets: a new `SECRETS_ENCRYPTION_KEYS` cannot read the keys stored with the old
-one. With Postgres, `BETTER_AUTH_SECRET=$(openssl rand -hex 32) docker compose up -d` builds the
-image from source and starts both. This
-fork's own instance runs on k3s behind Tailscale: manifests in `deploy/k3s/`, steps in
-[FORK.md](FORK.md). Every environment variable: [docs/doop-reference.md](docs/doop-reference.md#deploy).
+Keep both secrets: a new `SECRETS_ENCRYPTION_KEYS` cannot read keys stored with the old one. Postgres is optional; without `DATABASE_URL` the server uses an embedded one. `docker compose up -d` builds from source with Postgres. Every variable is in [docs/doop-reference.md](docs/doop-reference.md#deploy).
 
-### From source
+## What it does today
 
-```sh
-git clone https://github.com/BRYANN2K/diazo && cd diazo
-bun install
-bun run dev   # web app on :4300, server on :4400, embedded Postgres
-```
+The canvas holds frames that render real HTML. People edit them in the browser or the desktop app; agents edit them through the built-in MCP server, and everyone sees cursors, presence and the activity feed live.
+
+- **Agents.** Connect Claude Code, Codex, Cursor or any MCP client. The built-in Diazo Agent runs on an account you connect (Claude, OpenAI, Gemini, OpenRouter, a ChatGPT subscription), and in the desktop app on the Claude, Devin and Grok CLIs you already pay for. The chat answers a brief with a plan you approve before anything is designed.
+- **Design libraries.** A canvas becomes a library of items and variants. ⌘F finds an item, previews it live, and inserts a scoped copy. Organise with AI merges old kits into one category tree on your own model account. Diazo tells you when something is already in your library.
+- **Checks.** Each frame is laid out at 375, 768 and 1440 px and walked with the keyboard: overflow, tap targets, contrast, focus, plus an anti-slop lint.
+- **Runs.** Every agent run records its tokens, time and cost, and can be replayed or rolled back. A duel sends one brief to two or three models side by side.
+- **Code.** Link a canvas to a project folder. Tokens sync with the repo's CSS variables, and a frame exports as a React or Astro component, shown as a patch before it is written.
+- **Updates.** Admins see when a newer build is out, and the command that updates their install.
+
+Coming next: Motion Studio, where a page gains a timeline and the Diazo Agent animates a storyboard into seek-safe HTML. See [.workflow/changes/motion-studio/proposal.md](.workflow/changes/motion-studio/proposal.md).
+
+The full list of what Diazo adds is in [docs/FEATURES.md](docs/FEATURES.md).
 
 ## Usage
 
-Open `http://localhost:4400` (`:4300` from source), create an account and a canvas. Then connect
-your coding agent:
+Open `http://localhost:4400`, create an account and a canvas, then connect your coding agent:
 
 ```sh
 claude mcp add --transport http diazo http://localhost:4400/mcp
-# a browser window asks you to approve; the agent then works as you
 ```
 
-Ask it to design on your canvas and watch the frames stream in. Codex, Cursor, OpenCode and any
-other MCP client connect the same way. Headless agents use an agent key from Settings → Agent keys.
+A browser window asks you to approve; the agent then works as you. Headless agents use an agent key from Settings → Agent keys. From a terminal, the `diazo` CLI links a project folder to a canvas and pulls or pushes frames as HTML: [docs/cli.md](docs/cli.md).
 
-From a terminal, the `diazo` CLI (also `doop`) links a project folder to a canvas, finds frames and pulls or
-pushes them as HTML files: [docs/cli.md](docs/cli.md).
+## Developer notes
 
-To try Diazo with demo content, `npx tsx scripts/seed-demo.ts` starts a local instance seeded
-with the Fieldnote canvases above.
+The web app is in `src/`, the server (Express, WebSocket room, MCP server) in `server/`, shared types in `shared/`, the Tauri desktop shell in `desktop/`, the CLI in `cli/`. `bun install && bun run dev` starts everything with an embedded Postgres. Work goes through pull requests into `dev`, then `staging`, then `main` ([CONTRIBUTING.md](CONTRIBUTING.md)); before a commit run `bun run typecheck && bun run lint && bun run test`. Details in [AGENTS.md](AGENTS.md), [docs/RELEASE.md](docs/RELEASE.md) and [docs/TECHSTACK.md](docs/TECHSTACK.md).
 
-## Documentation
+## Credits
 
-- [Features](docs/FEATURES.md): what this fork adds, and the upstream pull requests it merged.
-- [Fork notes](FORK.md): the upstream resync recipe and the k3s deploy.
-- [doop reference](docs/doop-reference.md): the editor, the MCP tools, accounts, deployment,
-  environment variables, the REST API and the architecture.
-- [Tech stack](.context/TECHSTACK.md), [specs](.context/specs/INDEX.md) and
-  [plans](.context/plans/INDEX.md).
-- [Changelog](CHANGELOG.md) (upstream releases).
-
-## Development
-
-Work happens on `main`, or on a `feat/*` branch merged into it. Build, test and the change
-workflow are in [CLAUDE.md](CLAUDE.md) (agents and humans) and [CONTRIBUTING.md](CONTRIBUTING.md).
-Before a commit: `bun run typecheck && bun run lint && bun run test`.
+Diazo started as a fork of doop, created by Kevin Goedecke with the doop contributors. Most of the code in this repository is theirs.
 
 ## License
 
-GNU Affero General Public License v3.0. See [LICENSE](LICENSE).
+Diazo is free software, licensed under the GNU Affero General Public License version 3 (AGPL-3.0), like doop. See LICENSE. Some parts carry the licenses of their original authors (fonts, icons and others).
 
-Diazo is a fork of [kgoedecke/doop](https://github.com/kgoedecke/doop), and most of it is doop's
-work. It is not affiliated with doop or doop.design; doop's name and logo are trademarks of their
-owner, which is why this fork has its own.
+Diazo is its own project. It is not affiliated with doop or doop.design. doop's name and logo are trademarks of their owner and are not used here; brand names and logos shown in the app belong to their owners and only identify the services they name.
