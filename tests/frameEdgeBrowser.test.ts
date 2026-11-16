@@ -111,6 +111,10 @@ describe.skipIf(!findBrowserPath())('frame edge', { timeout: 60_000 }, () => {
       if (at(0, 0) < 60) break
       await new Promise((r) => setTimeout(r, 100))
     }
+    /* and the plain one has its live document, holding its paragraph */
+    const plain = await (await page.waitForSelector(`iframe[title="${PLAIN.name}"]`))?.contentFrame()
+    if (!plain) throw new Error('The plain design has no document')
+    await plain.waitForFunction(() => document.querySelector('p')?.textContent === 'No background')
   }, 120_000)
 
   it('shows no line lighter than both the canvas and the design along the edge', async () => {
@@ -137,13 +141,38 @@ describe.skipIf(!findBrowserPath())('frame edge', { timeout: 60_000 }, () => {
 
   it('keeps a design without a background on white', async () => {
     await settle(0.2)
+    /* still live once the camera has settled: a frame without a live document
+       shows the hatched placeholder, which is not what is measured here */
+    await page.waitForFunction(
+      (name) => {
+        const surface = document.querySelector(`iframe[title="${name}"]`)?.closest('[data-frame-surface]')
+        return !!surface && !surface.querySelector('[data-frame-placeholder]')
+      },
+      {},
+      PLAIN.name,
+    )
     const box = await iframeBox(PLAIN.name)
-    const { at } = await grab({
-      x: Math.round(box.x + box.width * 0.7),
-      y: Math.round(box.y + box.height * 0.7),
-      width: 1,
-      height: 1,
-    })
-    expect(at(0, 0)).toBe(255)
+    const point = { x: Math.round(box.x + box.width * 0.7), y: Math.round(box.y + box.height * 0.7) }
+    const { at } = await grab({ ...point, width: 1, height: 1 })
+    const brightness = at(0, 0)
+    /* the cause of a 250 seen once on CI is not known: when it shows again,
+       say what paints at that pixel */
+    const painted =
+      brightness === 255
+        ? ''
+        : await page.evaluate(
+            ({ x, y }) =>
+              document
+                .elementsFromPoint(x, y)
+                .slice(0, 8)
+                .map((el) => {
+                  const style = getComputedStyle(el)
+                  const data = Object.keys((el as HTMLElement).dataset).join(',')
+                  return `${el.tagName.toLowerCase()}[${data}] bg=${style.backgroundColor} image=${style.backgroundImage.slice(0, 60)} opacity=${style.opacity}`
+                })
+                .join(' > '),
+            point,
+          )
+    expect(brightness, `what paints there: ${painted}`).toBe(255)
   })
 })

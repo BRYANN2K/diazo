@@ -1242,10 +1242,19 @@ export const FrameView = memo(function FrameView({
      resolved into a probe by asking the runtime for the element behind the
      selector */
   const previousProbe = useRef<string | null>(null)
+  /* the probe a `doop:select` answer resolved from the store's own pick, as
+     opposed to one a click found; set by that answer, consumed by the next
+     run of the effect below */
+  const resolvedProbe = useRef<string | null>(null)
   useEffect(() => {
     const previous = previousProbe.current
     previousProbe.current = probeSel
+    const resolved = probeSel !== null && probeSel === resolvedProbe.current
+    resolvedProbe.current = null
     const cur = useStore.getState().selectedElement
+    /* the pick moved on between that answer and this effect (a paste picked
+       its copies): handing the store the old element back would undo it */
+    if (resolved && (cur?.frameId !== frame.id || cur.selector !== probeSel)) return
     if (probeSel === FRAME_COMMENT_SELECTOR) {
       /* a comment on the whole frame is no element pick: `body` in the
          selection would hand Delete, Duplicate and the Design panel the
@@ -1382,6 +1391,7 @@ export const FrameView = memo(function FrameView({
         const hit = (ev.data.hit ?? null) as ProbeHit | null
         closePopovers()
         if (hit) {
+          resolvedProbe.current = hit.selector
           setProbe(hit)
           /* an element link names the element by id; from here on the
              selection speaks the positional path the Layers panel knows */
