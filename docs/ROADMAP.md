@@ -36,7 +36,6 @@ Orca phases, from [its proposal](../.workflow/changes/orca-integration/proposal.
 
 ## Later
 
-- Pad link: a frame or plan ↔ a Pad item. Needs Pad's API and authentication first (item 11 of `ai-dev-features`).
 - One brand pass over the shared components that still show doop's mark or name (`ShellTitle`, `Avatar kind=agent`, `StageBoard`).
 - Desktop 0.16.0 release, which ships the Local Server menu and the ACP and repo commands that need a shell release.
 - Acceptance criteria for the migrated prose specs in `.workflow/specs/`, written by the next change that targets each one.
