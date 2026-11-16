@@ -12,3 +12,9 @@ A page with a clock: an ordinary page gains a seekable timeline whose every pixe
 - AC-4: Phase 3. A narrated walkthrough with video, audio, transcript cuts and captions is cut inside Diazo.
 - AC-5: Phase 4. A 3D hero from Blender is also a shot in the film, through the desktop app only.
 - AC-6: Phase 5. Server renders respect the caps (60 s, 1080p, 30 fps, one render per account at a time); HyperFrames projects import and export.
+- AC-7: Phase 3. A person installs a transcription model in one click on their Mac (desktop app), and only an instance admin can install, uninstall or add one on the Diazo server; the files are checked against their SHA-256, and a 10-minute French clip comes back as timed words on either target (proposal 18.3, 18.10, 18.11).
+- AC-8: Phase 3. A voice-over is generated from a script by ElevenLabs on the person's own key (cost shown before the run) or by one of the three studio voices on the Mac or Pocket TTS on the server, lands as an audio layer with its words, and a local job sends nothing to a third party (proposal 18.5, 18.6, 18.14).
+- AC-9: Phase 3. The server's speech sidecar runs under its CPU and memory limits, and the canvas stays responsive while it transcribes (proposal 18.11).
+- AC-10: Phase 3. A clip transcribed by ElevenLabs Scribe or OpenAI on the person's own key shows its cost before the run, and a two-speaker clip comes back with two speakers from Scribe and from the local sherpa-onnx diarization (proposal 18.7, 18.8).
+- AC-11: Phase 3. A model added from a Hugging Face repository or a local file, for a runtime from the fixed set, is size-checked, hash-checked and licence-acknowledged, and stays disabled until its smoke test passes (proposal 18.9).
+- AC-12: Phase 3. Pocket TTS installs from the mirrored release with no Hugging Face account, its signature and hashes checked, and its attribution shown in Settings, About (proposal 18.15).
