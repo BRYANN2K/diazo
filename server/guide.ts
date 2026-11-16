@@ -131,8 +131,26 @@ function of time t, nothing else.
   expected_revision so a collaborator's edit is never silently overwritten.
 - animate_storyboard turns the frames already on a page into the first timeline: one shot per
   frame in reading order, a camera track of hard cuts. Plan the story from the brief FIRST, call
-  it once, then refine with ops — turn cuts into moves by changing hold easings, add captions,
-  clips and element animation.
+  it once. Every shot it returns lists the notes its frame carries — the elements labelled
+  mouvement, transition, son, voix off or notes (motion, transition, sound, voice-over, notes in
+  English) — and its animatable elements: headline and text blocks, images, key UI, each a
+  data-doop-id an element track can target.
+- Then animate EVERY shot the way its notes describe — that is the film, camera cuts alone are
+  not. Add element tracks (add_track kind element, then add_keyframe): text reveals by word or
+  line (drive the frame's own animator — its data-doop-motion block — when it carries one),
+  entrances and exits with stagger,
+  pulses and glows, parallax between layers. Drive the camera the way the notes describe — a
+  travelling avant is a slow push-in, a whip pan a fast one. Keep every move on the motion easing
+  tokens (--dur-*, --ease-*, --spring-*).
+- The transition into the next shot is part of the shot: match cut, push, crossfade, whip —
+  a clip on the timeline, or camera and element moves that land it. Voice-over text becomes
+  captions when a captions track exists. Music and SFX notes become a TODO marker clip when no
+  audio generation is available. Notes and caption bars stay out of the film: hide the notes
+  panel layer from the render (an element track that keeps it at opacity 0) when the frame
+  carries one.
+- Each set_composition writes back a storyboard field: every noted shot still without an
+  element track is named in it. Fix them before finishing — you get two passes; after that,
+  finish the composition and name the shots you left still.
 - Everything on screen at time t comes from the timeline and the frames' markup only. Never
   animate with Date.now, setInterval, requestAnimationFrame, unseeded Math.random, CSS animations
   or GSAP — a seek must redraw the same pixels. Bind motion to keyframes on tracks, or to the

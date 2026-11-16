@@ -267,19 +267,37 @@ error?, claimedBy? }` → `{ job }`. `rendering`/`encoding` claim the job
 Canvas tools take `canvas_id`; resident-agent tools are scoped to the run's
 canvas and take `page_id` only. All writes need the `edit` role.
 
-| Tool                 | Input                                                                              | Result                                                                                                                                                                                          |
-| -------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_composition`    | `page_id`                                                                          | `{ composition }` or `{ composition: null }`                                                                                                                                                    |
-| `set_composition`    | `page_id, duration, fps, width, height, poster_time?, tracks?, expected_revision?` | `{ composition }` — full create/replace                                                                                                                                                         |
-| `patch_composition`  | `page_id, ops: CompositionOp[], expected_revision?`                                | `{ composition }` or `{ error }` on a failed op / `409`-style message on revision mismatch                                                                                                      |
-| `animate_storyboard` | `page_id, brief?, shot_seconds?, margin?, replace?`                                | `{ composition, shots: [{frameId,t,duration}], note }` — builds camera-track shots from the page's frames in reading order; refuses to overwrite an existing composition unless `replace: true` |
-| `lint_motion`        | `page_id, frame_id?`                                                               | `{ issues, summary }` — frame HTML (all frames on the page, or one) + composition checks                                                                                                        |
-| `render_composition` | `page_id, format?, target?, range?`                                                | `{ job, note }` — queues a render job a browser/desktop client then claims                                                                                                                      |
+| Tool                 | Input                                                                              | Result                                                                                                                                                                                                                     |
+| -------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_composition`    | `page_id`                                                                          | `{ composition }` or `{ composition: null }`                                                                                                                                                                               |
+| `set_composition`    | `page_id, duration, fps, width, height, poster_time?, tracks?, expected_revision?` | `{ composition, storyboard? }` — full create/replace; `storyboard` is the notes check below, when the page's frames carry notes                                                                                            |
+| `patch_composition`  | `page_id, ops: CompositionOp[], expected_revision?`                                | `{ composition, storyboard? }` or `{ error }` on a failed op / `409`-style message on revision mismatch                                                                                                                    |
+| `animate_storyboard` | `page_id, brief?, shot_seconds?, margin?, replace?`                                | `{ composition, shots: [{frameId,t,duration,notes,targets}], storyboard?, note }` — builds camera-track shots from the page's frames in reading order; refuses to overwrite an existing composition unless `replace: true` |
+| `lint_motion`        | `page_id, frame_id?`                                                               | `{ issues, summary }` — frame HTML (all frames on the page, or one) + composition checks                                                                                                                                   |
+| `render_composition` | `page_id, format?, target?, range?`                                                | `{ job, note }` — queues a render job a browser/desktop client then claims                                                                                                                                                 |
 
 `animate_storyboard` semantics: deterministic builder — shots follow the
 frames' reading order (rows top→bottom, left→right inside a row), each shot
 fits the camera to its frame (`margin` ≈ 1.08). Easing is `hold` (cuts);
 the agent turns cuts into moves with `patch_composition` `set_camera` ops.
+
+Every shot in the result describes its frame (`server/storyboard.ts`):
+`notes` is the text of each notes block — elements labelled mouvement,
+transition, son, voix off or notes (or the English words: motion,
+transition, sound, voice-over, notes), by their text or by markup
+(`class`/`id`/`aria-label`, a bare `data-doop-notes`) — with the block's
+`data-doop-id` so the agent can keep the notes layer out of the film;
+`targets` is the frame's animatable elements (headlines, text blocks,
+images, named layers, key UI), each `{ id, tag, label }` with the id
+stamped into the frame the same way comments stamp theirs — an id is only
+reported once the frame carrying it is on disk.
+
+`storyboard` in a result is the notes check: `{ noted, animated, pending:
+[{frameId, notes}], pass, maxPasses, message }` — every noted shot with no
+element track on its frame yet, counted as fix passes (`maxPasses` 2); the
+message tells the agent to animate those shots before finishing, and after
+the last pass to finish and name what is left. Rebuilding the film or
+covering every noted shot resets the count.
 
 ## Seek-safe lint — MO-* rules
 

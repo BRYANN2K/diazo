@@ -251,7 +251,11 @@ compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per bu
   `render:progress`). REST under `/api/canvases/:id/pages/:pageId/composition` (+ `/renders`,
   `/api/renders/:id` upload into `/a/` assets) behind the view/edit gates; agents get
   `get_composition`, `set_composition` (whole body or ops), `animate_storyboard`, `lint_motion`
-  and `render_composition`, resident-agent included. Renders are queued jobs: the browser renders
+  and `render_composition`, resident-agent included. `animate_storyboard` reads each shot's
+  frame for its notes (mouvement / transition / son / voix off / notes labels, FR and EN) and
+  its animatable elements — `data-doop-id` targets stamped the way comments stamp theirs — and
+  every `set_composition` reports the noted shots still without an element track, so the film
+  gets animated elements, not just camera cuts. Renders are queued jobs: the browser renders
   them (MediaRecorder/WebCodecs) or the desktop shell does deterministically — a hidden webview
   seeks the page frame by frame and a local, allowlisted `ffmpeg` encodes, all behind
   `__DOOP_MOTION_RENDER__`. A disabled-by-default Blender bridge (`DOOP_BLENDER_BRIDGE`) can spawn

@@ -223,6 +223,54 @@ export function stampElementId(html: string, selector: string, opts: StampOption
   return hasElementId(next, id) ? { html: next, id } : undefined
 }
 
+/**
+ * The batch twin of `stampElementId`: several elements of one parse get a
+ * fresh `data-doop-id` each, every attribute written by source offset in a
+ * single string pass, so the rest of the document comes through byte for
+ * byte. Elements that already carry a valid id keep it; elements with no
+ * start-tag source (implied tags) are skipped. Same stamp the comments path
+ * writes — callers that need the ids in one shot (storyboard analysis) use
+ * this instead of resolving a selector per element.
+ */
+export function stampElements(
+  html: string,
+  elements: readonly Element[],
+): { html: string; ids: Map<Element, string>; freshIds: string[]; stamped: number } {
+  const edits: { start: number; end: number; text: string }[] = []
+  const ids = new Map<Element, string>()
+  const freshIds: string[] = []
+  for (const el of elements) {
+    const existing = attr(el, ELEMENT_ID_ATTR)
+    if (isElementId(existing)) {
+      ids.set(el, existing)
+      continue
+    }
+    const tag = el.sourceCodeLocation?.startTag
+    if (!tag) continue
+    const id = newElementId()
+    freshIds.push(id)
+    const attrs = Object.values(el.sourceCodeLocation?.attrs ?? {})
+    const stale = el.sourceCodeLocation?.attrs?.[ELEMENT_ID_ATTR]
+    const insertAt = attrs.length ? Math.max(...attrs.map((a) => a.endOffset)) : tag.startOffset + 1 + el.tagName.length
+    let open =
+      html.slice(tag.startOffset, insertAt) + ` ${ELEMENT_ID_ATTR}="${id}"` + html.slice(insertAt, tag.endOffset)
+    if (stale) {
+      const from = stale.startOffset - tag.startOffset
+      const to = stale.endOffset - tag.startOffset
+      open = open.slice(0, from).replace(/\s+$/, '') + open.slice(to)
+    }
+    edits.push({ start: tag.startOffset, end: tag.endOffset, text: open })
+    ids.set(el, id)
+  }
+  /* start tags never overlap, so applying edits from the end of the
+     document backwards keeps every other offset valid */
+  let out = html
+  for (const edit of edits.sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, edit.start) + edit.text + out.slice(edit.end)
+  }
+  return { html: out, ids, freshIds, stamped: edits.length }
+}
+
 /** Whether a stamped element is still in the HTML. */
 export function hasElementId(html: string, id: string): boolean {
   /* by the parsed attribute, whatever its quoting or case in the source */

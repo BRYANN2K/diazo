@@ -15,7 +15,7 @@ export const motion = {
   animateTitle: 'Pedir ao Agente Diazo que transforme os frames desta página em planos e movimentos de câmera',
   animateQueued: 'Na fila do Agente Diazo — os planos chegam à linha do tempo.',
   animatePrompt:
-    'Anime o storyboard da página “{page}” (id {pageId}) como um filme de {duration}s: chame animate_storyboard e depois transforme os cortes em movimentos de câmera com operações set_camera de patch_composition, nos tokens de easing. Mantenha-o seek-safe.',
+    'Anime o storyboard da página “{page}” (id {pageId}) como um filme de {duration}s. Chame animate_storyboard — cada plano do resultado lista as notas do frame e seus elementos animáveis (alvos data-doop-id). Depois anime CADA plano conforme suas notas com operações de set_composition: trilhas de elemento e keyframes para revelações de texto (por palavra ou linha), entradas e saídas em cascata, pulsos e paralaxe; a transição para o próximo plano; o movimento de câmera que as notas descrevem, nos tokens de easing. Texto de voz off vira legendas, notas de música/efeitos viram clipes marcadores TODO e os blocos de notas ficam fora do filme. Cada set_composition informa os planos com notas ainda sem animação de elemento — corrija-os antes de terminar. Mantenha-o seek-safe.',
   play: 'Reproduzir',
   pause: 'Pausar',
   toStart: 'Voltar ao início',
