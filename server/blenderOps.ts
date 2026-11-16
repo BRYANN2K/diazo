@@ -7,7 +7,13 @@ import { nanoid } from 'nanoid'
 import { and, eq, inArray } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { blenderOps } from './db/schema.ts'
-import { BLENDER_OP_CLASS, BLENDER_OP_TOOLS, type BlenderOp, type BlenderOpTool } from '../shared/blender.ts'
+import {
+  BLENDER_OP_ARGS,
+  BLENDER_OP_CLASS,
+  BLENDER_OP_TOOLS,
+  type BlenderOp,
+  type BlenderOpTool,
+} from '../shared/blender.ts'
 
 /** a claimed op whose heartbeat stopped is failed on next read */
 const CLAIM_TTL_MS = 10 * 60_000
@@ -67,16 +73,23 @@ export async function submitBlenderOp(
   if (!BLENDER_OP_TOOLS.includes(input.tool as BlenderOpTool)) {
     throw new BlenderError(`tool must be one of ${BLENDER_OP_TOOLS.join(', ')}`)
   }
-  let args: Record<string, unknown> | undefined
-  if (input.args !== undefined) {
-    if (typeof input.args !== 'object' || input.args === null || Array.isArray(input.args)) {
-      throw new BlenderError('args must be a JSON object')
-    }
-    if (JSON.stringify(input.args).length > MAX_ARGS_CHARS) {
-      throw new BlenderError(`args are over ${MAX_ARGS_CHARS / 1000}k of JSON`)
-    }
-    args = input.args as Record<string, unknown>
+  if (
+    input.args !== undefined &&
+    (typeof input.args !== 'object' || input.args === null || Array.isArray(input.args))
+  ) {
+    throw new BlenderError('args must be a JSON object')
   }
+  if (input.args !== undefined && JSON.stringify(input.args).length > MAX_ARGS_CHARS) {
+    throw new BlenderError(`args are over ${MAX_ARGS_CHARS / 1000}k of JSON`)
+  }
+  /* the same contract the shell re-checks before relaying: strict shapes,
+     defaults applied — a caller cannot pass a blender-mcp parameter the
+     tool does not take (a render's filepath most of all) */
+  const parsed = BLENDER_OP_ARGS[input.tool as BlenderOpTool].safeParse(input.args ?? {})
+  if (!parsed.success) {
+    throw new BlenderError(parsed.error.issues[0]?.message ?? 'invalid blender arguments')
+  }
+  const args = parsed.data as Record<string, unknown>
   const active = await db
     .select({ id: blenderOps.id })
     .from(blenderOps)

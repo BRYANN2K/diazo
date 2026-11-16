@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { getBlenderOp, submitBlenderOp, BlenderError } from './blenderOps.ts'
 import { canAccessCanvas, canEditCanvas } from './access.ts'
 import type { Canvas } from '../shared/types.ts'
-import type { BlenderOpTool } from '../shared/blender.ts'
+import { BLENDER_OP_ARGS, type BlenderOpTool } from '../shared/blender.ts'
 
 export const BLENDER_TOOLS = [
   {
@@ -46,13 +46,13 @@ export const BLENDER_TOOLS = [
   {
     name: 'blender_render_frame',
     description:
-      "Render one frame of the desktop Blender scene to a file. Needs the shell's render approval; poll get_blender_result.",
+      "Render one frame of the desktop Blender scene to a file. Needs the shell's render approval; the shell picks the output path, the result reports it. Poll get_blender_result.",
     readOnly: false,
     tool: 'render_frame',
-    shape: {
-      engine: z.enum(['eevee', 'cycles', 'octane']).default('eevee'),
-      filepath: z.string().min(1).max(500).optional(),
-    },
+    /* no filepath: a caller never chooses where a render lands —
+       shared/blender.ts's BLENDER_OP_ARGS is the same contract the
+       shell re-checks before relaying */
+    shape: (BLENDER_OP_ARGS.render_frame as z.ZodObject<z.ZodRawShape>).shape,
   },
   {
     name: 'get_blender_result',

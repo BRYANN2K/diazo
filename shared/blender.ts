@@ -4,7 +4,10 @@
  *  the desktop shell claims it, runs the allowlisted blender-mcp tool and
  *  posts the result back. `klass` is the approval class the shell must hold
  *  before it runs the tool: reads are open once the bridge is on, writes and
- *  renders each need a recorded grant in the app. */
+ *  renders each need a recorded grant in the app — granted natively, per
+ *  connected server (desktop/src-tauri/src/blender.rs). */
+
+import { z } from 'zod'
 
 /** the ops the server relays — a subset of the shell's blender-mcp allowlist */
 export const BLENDER_OP_TOOLS = [
@@ -24,6 +27,26 @@ export const BLENDER_OP_CLASS: Record<BlenderOpTool, 'read' | 'write' | 'render'
   add_light: 'write',
   render_frame: 'render',
 }
+
+/* The argument contract each op is validated against — by the server at
+ * submit (blenderOps.ts) and re-checked by the shell before it relays
+ * (blender.rs). Strict: a caller cannot smuggle a blender-mcp parameter
+ * the contract does not name. A render's destination is notably absent:
+ * the shell writes renders into its own app-owned directory and returns
+ * the path it picked — never a caller's. */
+export const BLENDER_OP_ARGS = {
+  get_scene_info: z.object({}).strict(),
+  get_object_info: z.object({ name: z.string().min(1).max(200) }).strict(),
+  set_material: z.object({ object: z.string().min(1).max(200), material: z.string().min(1).max(200) }).strict(),
+  add_light: z
+    .object({
+      light_type: z.enum(['POINT', 'SUN', 'SPOT', 'AREA']).default('POINT'),
+      name: z.string().max(200).optional(),
+      location: z.array(z.number().finite()).length(3).optional(),
+    })
+    .strict(),
+  render_frame: z.object({ engine: z.enum(['eevee', 'cycles', 'octane']).default('eevee') }).strict(),
+} satisfies Record<BlenderOpTool, z.ZodTypeAny>
 
 export const BLENDER_OP_STATES = ['queued', 'running', 'done', 'failed'] as const
 export type BlenderOpState = (typeof BLENDER_OP_STATES)[number]
