@@ -205,11 +205,20 @@ priority), not on a client. The caps, enforced at creation:
 - range ≤ 60 s, raster ≤ 1080p, rate ≤ 30 fps;
 - one open server render per account (429 otherwise).
 
-The worker mints a short-lived better-auth session row (deleted on every
-exit path), drives the same `/c/<id>/motion-render` harness page the
-desktop uses, and stores the result as the job's `/a/` asset. The whole
-target is off when the instance sets `SERVER_RENDER_DISABLED` (503 at
-creation).
+One server render runs at a time on the whole instance; the page sits
+behind the same public-network guard every other render uses and a
+renderer lease sized to the job's budget, so a long render is not cut at
+the renderer's default lease. The harness reads its canvas and
+composition through a dedicated render token — `doop_render_token` /
+`__Secure-doop_render_token` under HTTPS, httpOnly, bound to the job's
+canvas and page, honoured only for the two GETs it needs, expiring with
+the render budget and revoked when the render ends. Seeks are in
+seconds; `pngseq` frames are appended to a zip on disk as they arrive
+(size caps charged per frame), `webm` is encoded frame by frame through
+WebCodecs at explicit timestamps and muxed server-side — nothing is
+recorded in real time. The result lands as the job's `/a/` asset. The
+whole target is off when the instance sets `SERVER_RENDER_DISABLED` (503
+at creation).
 
 ## Seek-safe markup contract
 
@@ -457,16 +466,34 @@ done, total }` events; returns `{ path, bytes }`.
 Blender bridge: `__DOOP_BLENDER__` advertises it; the shell spawns an
 allowlisted `blender-mcp` process (env `DOOP_BLENDER_BRIDGE`, ADR 0011).
 Read tools relay once started; `write` and `render` classes each need a
-grant recorded through `blender_approve` (kept in
-`blender-approvals.json`, withdrawn by `blender_revoke`). The grant UX is a
-person's click in the app — no programmatic approve path. Python execution
-is never allowlisted.
+grant recorded through `blender_approve`, which confirms natively in the
+desktop shell and is kept per connected server origin in
+`blender-approvals.json` (withdrawn by `blender_revoke`). Tool arguments
+follow the shared strict schemas in `shared/blender.ts`, re-validated in
+the shell; a render's output path is not caller-controlled — renders land
+under `<appData>/blender-renders/`. Python execution is never
+allowlisted.
 
 ## Changes
 
 Contract changes after the first commit land here, dated.
 
 <!-- append new entries below -->
+
+- **2026-11 — server renders and review hardening.** Server render jobs run
+  one at a time behind the public-network guard with a budget-sized lease,
+  authenticate with a render-scoped token (no minted session), seek in
+  seconds, stream `pngseq` frames to a zip on disk and encode `webm` frame
+  by frame through WebCodecs muxed server-side. `generate_video` downloads
+  through the SSRF-pinned fetch under a 512 MB cap and stores only
+  sniffed mp4/webm; `first_frame`, `last_frame` and references are bounded
+  and the requester's own provider account is required. Blender grants
+  confirm natively per server origin, arguments follow shared strict
+  schemas and render paths are shell-owned. Speech model installs
+  validate the HF repo on every path, allowlist the bundled catalog and
+  confirm natively for anything else; `speech_stage_input` /
+  `speech_read_output` carry job audio in and results out. Migrations
+  renumbered 0074–0080 after the Orca branch.
 
 - **2025-02 — additive helpers + render defaults.** `shared/motion.ts` gains
   `elementKey(frameId, elementId)` (the `frameId/elementId` index key used by
