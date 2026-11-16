@@ -290,13 +290,7 @@ function DashContent({ className, ...props }: React.ComponentProps<'div'>) {
 }
 
 function DashTitle({ className, ...props }: React.ComponentProps<'h1'>) {
-  return (
-    <h1
-      data-slot="dash-title"
-      className={cn('font-sans text-title font-medium tracking-[-0.01em]', className)}
-      {...props}
-    />
-  )
+  return <h1 data-slot="dash-title" className={cn('font-display text-title font-semibold', className)} {...props} />
 }
 
 function DashSubtitle({ className, ...props }: React.ComponentProps<'p'>) {
