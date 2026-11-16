@@ -23,7 +23,7 @@ import {
 } from './modelAccounts.ts'
 import { customMenu } from './customProviders.ts'
 import { customProvidersEnabled } from './customProviderFetch.ts'
-import { CLAUDE_EFFORT_OPTIONS, CLAUDE_PLAN_MODELS } from '../shared/localAgent.ts'
+import { CLAUDE_EFFORT_OPTIONS, CLAUDE_PLAN_MODELS, isClaudeAlias } from '../shared/localAgent.ts'
 import { ACP_AGENTS, ACP_RUNNER, acpMenu } from '../shared/acpAgent.ts'
 import {
   ANTHROPIC_MODELS,
@@ -87,7 +87,9 @@ export async function listRunners(userId: string): Promise<AgentRunners> {
       online: localAgentRuns.online(userId),
       model: plan.model,
       ...(plan.effort ? { effort: plan.effort } : {}),
-      models: CLAUDE_PLAN_MODELS,
+      /* the aliases ("Latest Opus") are the recommended entries; the pinned
+         ids fold under the menu's Older section */
+      models: CLAUDE_PLAN_MODELS.map((model) => (isClaudeAlias(model.id) ? { ...model, recommended: true } : model)),
       efforts: CLAUDE_EFFORT_OPTIONS,
     })
   }
@@ -121,7 +123,14 @@ export async function listRunners(userId: string): Promise<AgentRunners> {
       ...(account.email ? { email: account.email } : {}),
       model: accountModelFor(account),
       ...(effort ? { effort } : {}),
-      models: (catalogs[i]?.models ?? menuFor(account)).map(({ id, name, blurb }) => ({ id, name, blurb })),
+      /* the catalog merge flags the curated entries it confirmed; the menu
+         folds everything else under Older */
+      models: (catalogs[i]?.models ?? menuFor(account)).map(({ id, name, blurb, recommended }) => ({
+        id,
+        name,
+        blurb,
+        ...(recommended ? { recommended: true } : {}),
+      })),
       ...(effort ? { efforts: reasoningEffortOptions(effort) } : {}),
     })
   }

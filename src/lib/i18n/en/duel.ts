@@ -13,6 +13,7 @@ export const duel = {
   slotAria: 'Model {n}: {label}',
   slotEmptyAria: 'Model {n}: pick a model',
   slotOptionalAria: 'Model {n} (optional): pick a model',
+  slotEffortAria: 'Model {n} effort: {label}',
   clear: 'Clear Model {n}',
   same: 'Model {n} is the same model and effort as Model {other}. Change its model or its effort.',
   start: { one: 'Start duel · {count} model', other: 'Start duel · {count} models' },

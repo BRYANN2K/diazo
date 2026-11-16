@@ -22,6 +22,21 @@ DOOP_FROM_KEY=dpk_… DOOP_TO_KEY=dpk_… npx tsx scripts/pull-library.ts \
   script stops, then rerun.
 - Tests: `tests/pullLibrary.test.ts` (two servers; asserts the source received only reads).
 
+## qa-model-picker.ts
+
+Shoots the composer's model and effort pills for visual review, on the seeded demo
+(`seed-demo.ts`: its own PGlite and a scripted model stand-in, so no provider is called):
+
+```bash
+npx tsx scripts/qa-model-picker.ts --out /tmp/visual-qa/model-picker --prefix after
+```
+
+- Connects a Claude Plan, Devin and Grok desktops and two keys, then shoots the foot, the model
+  menu (closed, an Older fold open, a query typed from the list, no match), the effort popover and
+  the duel slots (empty, filled, a repeated pick) in light and dark, plus a 300px Agents panel and
+  pt-BR.
+- Uses the demo's ports (4400, 4300); stop another demo first.
+
 ## library-thumb.ts
 
 Renders a library item's thumbnail from a frame's HTML file the way the server does, next to the

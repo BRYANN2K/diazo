@@ -274,6 +274,12 @@ export const panels = {
   modelOffline: 'Desktop app not running',
   modelEffortDefault: 'Default',
   modelEffortDefaultBlurb: 'Whatever the connection is set to',
+  modelEffortAria: 'Reasoning effort: {label}',
+  modelSearch: 'Search models',
+  modelNoMatch: 'No model matches “{query}”.',
+  modelOlder: 'Older ({count})',
+  effortFaster: 'Faster',
+  effortSmarter: 'Smarter',
 
   shareAccessNone: 'No access',
   shareAccessView: 'View',
