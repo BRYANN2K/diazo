@@ -5,12 +5,13 @@ name: docker
 # local install through Apple's `container`).
 # Each architecture builds on a native runner (no QEMU: bun and Chromium are
 # slow and flaky under emulation), pushes by digest, and a final job joins the
-# two digests into one multi-arch image tagged `main`, `latest` and
-# `sha-<short commit>`.
+# two digests into one multi-arch image. A push to `main` tags it `main`, `latest`
+# and `sha-<short commit>`; a push to `staging` tags it `staging` and
+# `sha-<short commit>` (the image the VPS runs for testing).
 
 on:
   push:
-    branches: [main]
+    branches: [main, staging]
   workflow_dispatch:
 
 jobs:
@@ -98,11 +99,15 @@ jobs:
       - name: Create the multi-arch tags
         working-directory: /tmp/digests
         run: |
+          if [ "$GITHUB_REF_NAME" = main ]; then
+            tags="-t $IMAGE:main -t $IMAGE:latest"
+          else
+            tags="-t $IMAGE:$GITHUB_REF_NAME"
+          fi
           docker buildx imagetools create \
-            -t "$IMAGE:main" \
-            -t "$IMAGE:latest" \
+            $tags \
             -t "$IMAGE:sha-${GITHUB_SHA::7}" \
             $(printf "$IMAGE@sha256:%s " *)
 
       - name: Inspect
-        run: docker buildx imagetools inspect "$IMAGE:main"
+        run: docker buildx imagetools inspect "$IMAGE:sha-${GITHUB_SHA::7}"
