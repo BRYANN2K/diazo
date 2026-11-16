@@ -75,6 +75,9 @@ ENV DOOP_BUILD_SHA=$DOOP_BUILD_SHA \
 RUN groupadd -r -g 10001 doop && useradd -r -u 10001 -g doop -d /app -s /usr/sbin/nologin doop \
   && mkdir -p /app/data && chown -R doop:doop /app
 USER doop
+# uploads, thumbnails and the embedded database live here: a container run
+# without its own volume still keeps them across restarts and image updates
+VOLUME ["/app/data"]
 
 EXPOSE 4400
 HEALTHCHECK --interval=30s --timeout=5s CMD node -e "fetch('http://localhost:'+process.env.PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
