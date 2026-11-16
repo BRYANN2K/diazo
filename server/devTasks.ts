@@ -82,6 +82,7 @@ function toTask(row: Row): DevTask {
     state: row.state,
     summary: row.summary,
     drift: row.drift,
+    devUrl: row.devUrl,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     finishedAt: row.finishedAt,
@@ -339,6 +340,11 @@ export async function applyDeviceReport(userId: string, taskId: string, report: 
     if (poll.linkedPR) set.prUrl = poll.linkedPR.slice(0, 500)
     if (poll.orcaSessionId) set.orcaSessionId = poll.orcaSessionId.slice(0, 200)
     if (poll.branch) set.branch = poll.branch.slice(0, 200)
+    if (poll.devUrl !== undefined) {
+      /* the dev server the worktree printed — http(s) only, like pr_url */
+      const url = typeof poll.devUrl === 'string' ? poll.devUrl.slice(0, 500) : ''
+      set.devUrl = url && /^https?:\/\//.test(url) ? url : null
+    }
     if (isTerminal(next) && !row.finishedAt) set.finishedAt = Date.now()
   }
 

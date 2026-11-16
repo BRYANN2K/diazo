@@ -791,6 +791,61 @@ pub async fn orca_poll(app: AppHandle, environment: Option<String>) -> Result<Va
     .map_err(|e| e.to_string())?
 }
 
+/// `orca_ports` — `orca ports --worktree identity:<key> --json`: the
+/// listening ports Orca tied to the worktree and the dev-server URL its
+/// terminal printed. The report's `devUrl` is what a live frame or the
+/// drift review points at. Only identities this shell launched may be
+/// asked about.
+#[tauri::command]
+pub async fn orca_ports(
+    app: AppHandle,
+    identity: String,
+    environment: Option<String>,
+) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if !valid_identity(&identity) {
+            return Err(bad("identity"));
+        }
+        let bin = orca_bin().ok_or_else(|| "Orca is not installed on this computer".to_string())?;
+        let environment = checked_environment(&bin, environment.as_deref())?;
+        let dir = tasks_dir(&app)?;
+        if !tracked(&dir, environment.as_deref()).contains_key(&identity) {
+            return Err("this shell did not launch that worktree".to_string());
+        }
+        let mut args = argv(&["ports", "--worktree"]);
+        args.push(format!("identity:{identity}"));
+        if let Some(env) = &environment {
+            args.push("--environment".to_string());
+            args.push(env.clone());
+        }
+        args.push("--json".to_string());
+        let out = run_orca(&bin, &args, None, QUICK_TIMEOUT)?;
+        Ok(json!({ "ports": trim_ports(&out) }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// `orca ports` output trimmed to port/url/process — the pid and the
+/// matched process's cwd stay here.
+fn trim_ports(out: &Value) -> Vec<Value> {
+    out.get("ports")
+        .and_then(Value::as_array)
+        .map(|ports| {
+            ports
+                .iter()
+                .map(|p| {
+                    json!({
+                        "port": p.get("port").and_then(Value::as_u64),
+                        "url": p.get("url").and_then(Value::as_str),
+                        "process": p.get("process").and_then(Value::as_str),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// `orca_activate` — bring the worktree forward in Orca (`worktree
 /// activate`), e.g. "Open in Orca" on a task card. Only identities this
 /// shell launched may be activated.
@@ -982,6 +1037,16 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
         assert!(!trimmed.to_string().contains("/secret"));
         let missing = poll_row("wt2:vps:inst-9", None);
         assert_eq!(missing["found"], false);
+        /* ports trim keeps port/url/process and drops pids and cwds */
+        let ports = trim_ports(&json!({
+            "ports": [
+                {"port": 5173, "url": "http://localhost:5173/", "process": "vite", "pid": 42, "cwd": "/secret"},
+                {"port": 3000}
+            ]
+        }));
+        assert_eq!(ports[0]["url"], "http://localhost:5173/");
+        assert_eq!(ports.len(), 2);
+        assert!(!ports[0].to_string().contains("/secret"));
         /* an unrecognised terminal label is not reported as an outcome */
         let odd = json!({"agents":[{"programStatus":{"state":"done"},"state":"done"}]});
         assert_eq!(poll_row("wt2:x:y", Some(&odd))["outcome"], Value::Null);

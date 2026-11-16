@@ -90,6 +90,9 @@ export interface DevTask {
   summary: string | null
   /** the latest drift review for this task's build (phase 2) */
   drift: DevTaskDrift | null
+  /** the dev-server URL `orca ports` reported for the worktree (phase 2;
+   *  `orca_ports` answers it, the shell posts it in its poll report) */
+  devUrl: string | null
   createdAt: number
   updatedAt: number
   finishedAt: number | null
@@ -169,6 +172,9 @@ export interface DevTaskPollReport {
   branch?: string
   /** the worktree's `workspaceStatus` board column */
   workspaceStatus?: string
+  /** the dev server `orca ports` tied to the worktree (its printed `url`) —
+   *  what a live frame or the drift review points at; null clears it */
+  devUrl?: string | null
 }
 
 /** Body of `POST /api/dev-tasks/:id/report`: a launch answer, a poll

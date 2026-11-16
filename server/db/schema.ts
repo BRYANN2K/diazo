@@ -1476,6 +1476,8 @@ export const frameDevTasks = pgTable(
     agentState: text('agent_state').$type<DevTaskState>(),
     summary: text('summary'),
     drift: jsonb('drift').$type<DevTaskDrift>(),
+    /** the dev-server URL `orca ports` reported (phase 2) */
+    devUrl: text('dev_url'),
     /** the pack built at launch — get_handoff's payload, never broadcast */
     handoff: jsonb('handoff').$type<HandoffPack>().notNull(),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),

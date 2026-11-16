@@ -58,9 +58,11 @@ The split of trust:
   `failed`; otherwise it stores the Orca identity and moves to `starting`.
 - `poll` carries a trimmed `worktree ps` row: `{ found, status?, agentState?,
 outcome?, lastAssistantMessage?, linkedPR?, orcaSessionId?, branch?,
-workspaceStatus? }`. `found:false` maps to `cancelled`; a `linkedPR` maps to
-  `pr_open`; `outcome` `failure`/`interruption` to `failed`, `cancellation`
-  to `cancelled`, `success` to `done`.
+workspaceStatus?, devUrl? }`. `found:false` maps to `cancelled`; a `linkedPR`
+  maps to `pr_open`; `outcome` `failure`/`interruption` to `failed`,
+  `cancellation` to `cancelled`, `success` to `done`. `devUrl` is the dev
+  server `orca ports` reported for the worktree — http(s) only, stored on the
+  task for a live frame or the drift review to use.
 
 ## The `dev_task` bridge op
 
@@ -112,6 +114,7 @@ No passthrough exists.
 | `orca_resolve_repo` | `orca repo list` matched to a repo-link grant (path, else git remote key)        | none         |
 | `orca_launch_task`  | `orca worktree create --name … --repo id:… --branch doop/… --agent … --prompt …` | native       |
 | `orca_poll`         | `orca worktree ps --limit 100`, filtered to identities this shell launched       | none         |
+| `orca_ports`        | `orca ports --worktree identity:<key>`, trimmed to `{ port, url, process }`      | none         |
 | `orca_activate`     | `orca worktree activate --worktree identity:<key>`                               | none         |
 
 The shell persists the identities it launched in `orca-tasks.json` (app data

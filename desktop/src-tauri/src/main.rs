@@ -374,6 +374,7 @@ fn main() {
             orca::orca_resolve_repo,
             orca::orca_launch_task,
             orca::orca_poll,
+            orca::orca_ports,
             orca::orca_activate,
             live::live_snapshot,
             live::live_snapshot_done,
