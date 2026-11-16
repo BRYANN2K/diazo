@@ -1,5 +1,7 @@
 import { registerSpeechRoutes } from './speechRoutes.ts'
+import { registerBlenderRoutes } from './blenderRoutes.ts'
 import { recoverSpeechJobs } from './speechJobs.ts'
+import { recoverBlenderOps } from './blenderOps.ts'
 import * as libraries from './libraries.ts'
 import * as libraryThumbQueue from './libraryThumbQueue.ts'
 import * as libraryIndex from './libraryIndex.ts'
@@ -261,6 +263,7 @@ resumeApplies()
 await hydrateInstanceSettings() // the sign-in policy, read on every signup
 await webhooks.hydrateWebhooks()
 await recoverSpeechJobs()
+await recoverBlenderOps()
 await hydrateFonts() // before the first request: frame writes add the faces they use
 billing.reportBillingConfig()
 actions.hydrateLogs(data)
@@ -3019,6 +3022,7 @@ app.post('/api/canvases/:id/pages/:pageId/duplicate', async (req, res) => {
 
 /* ------------------------------------------------------------------ */
 registerSpeechRoutes(app)
+registerBlenderRoutes(app)
 
 /* Motion Studio: a page's timeline (shared/motion.ts, docs/motion-api)  */
 /* ------------------------------------------------------------------ */
@@ -3099,6 +3103,7 @@ app.post('/api/canvases/:id/pages/:pageId/composition/renders', (req, res) => {
     composition: comp,
     format: req.body?.format,
     target: req.body?.target,
+    engine: req.body?.engine,
     width: req.body?.width,
     height: req.body?.height,
     fps: req.body?.fps,

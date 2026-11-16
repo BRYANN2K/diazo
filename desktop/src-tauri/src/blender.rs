@@ -1,19 +1,22 @@
-//! `blender_*` commands: the first plank of the Blender bridge (Motion
-//! Studio, phase 4). Diazo never renders through Blender itself — a local
-//! Blender MCP server does, spawned here like the ACP CLIs: an allowlisted
-//! binary name found on the login shell's PATH and the fixed prefixes,
-//! started only when the human asks (the UI calls `blender_start` after
-//! its own confirmation), and only read-only tools ever relayed.
+//! `blender_*` commands: the Blender bridge (Motion Studio, phase 4,
+//! ADR 0011). Diazo never renders through Blender itself — a local Blender
+//! MCP server does, spawned here like the ACP CLIs: an allowlisted binary
+//! name found on the login shell's PATH and the fixed prefixes, started
+//! only when the human asks (the UI calls `blender_start` after its own
+//! confirmation).
 //!
 //! Disabled by default: `blender_start` refuses unless the shell was
 //! launched with `DOOP_BLENDER_BRIDGE=1` — the read path exists so a page
 //! can probe (`blender_status` → available / disabled / missing) without
-//! the bridge being on. Write tools, Python execution and render
-//! submission land with the approval UX that does not exist yet.
+//! the bridge being on. Read tools relay once the bridge is up; write and
+//! render tools additionally need a recorded approval grant (`blender_approve`
+//! after the person's own confirmation — the grant lives in
+//! `blender-approvals.json` until `blender_revoke`). Python execution is
+//! never allowlisted.
 //!
 //! Wire: MCP over stdio, newline JSON-RPC — initialize, tools/list and a
-//! bounded tools/call for names in READ_ONLY_TOOLS. Anything else errors
-//! before it reaches the child.
+//! bounded tools/call for names in the classed allowlist. Anything else
+//! errors before it reaches the child.
 
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
@@ -22,7 +25,7 @@ use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 /// The env flag that turns the whole bridge on.
 const FLAG: &str = "DOOP_BLENDER_BRIDGE";
@@ -37,6 +40,13 @@ const READ_ONLY_TOOLS: &[&str] = &[
     "get_hyper3d_status",
     "get_sketchfab_status",
 ];
+/// Scene writes — relayed only with a recorded `write` grant.
+const WRITE_TOOLS: &[&str] = &["set_material", "add_light"];
+/// Renders — relayed only with a recorded `render` grant.
+const RENDER_TOOLS: &[&str] = &["render_frame", "render_animation"];
+/// The approval classes a grant can cover — mirrors
+/// shared/blender.ts's BLENDER_OP_CLASS.
+const GRANT_KINDS: &[&str] = &["write", "render"];
 /// One stdio exchange or process wait may take this long at most.
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
 /// A tool answer bigger than this is cut before it crosses IPC.
@@ -178,10 +188,90 @@ impl Server {
     }
 }
 
-/// Tool names the relay lets through — the comparison is exact and the
-/// allowlist is fixed here.
-fn read_only(tool: &str) -> bool {
-    READ_ONLY_TOOLS.contains(&tool)
+/// Tool names the relay lets through, by the approval class they need —
+/// the comparison is exact and the allowlist is fixed here. `None` means
+/// the tool never crosses (Python execution and anything unlisted).
+fn class_of(tool: &str) -> Option<&'static str> {
+    if READ_ONLY_TOOLS.contains(&tool) {
+        Some("read")
+    } else if WRITE_TOOLS.contains(&tool) {
+        Some("write")
+    } else if RENDER_TOOLS.contains(&tool) {
+        Some("render")
+    } else {
+        None
+    }
+}
+
+/* -- recorded approvals ------------------------------------------------ */
+
+/// The grants the person recorded: which classes of write the bridge may
+/// run. Persisted so the approval survives a restart of the same install —
+/// and revocable from the same place.
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct BlenderGrants {
+    pub write: bool,
+    pub render: bool,
+}
+
+fn grants_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("no app data dir: {e}"))?
+        .join("blender-approvals.json"))
+}
+
+fn grants_read(path: &PathBuf) -> BlenderGrants {
+    std::fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn grants_write(path: &PathBuf, grants: &BlenderGrants) -> Result<(), String> {
+    let bytes = serde_json::to_vec_pretty(grants).map_err(|e| e.to_string())?;
+    std::fs::write(path, bytes).map_err(|e| format!("could not write {}: {e}", path.display()))
+}
+
+/// The recorded grants — the page reads this to draw its approval UX.
+#[tauri::command]
+pub fn blender_approvals(app: AppHandle) -> Result<BlenderGrants, String> {
+    Ok(grants_read(&grants_path(&app)?))
+}
+
+/// Record a grant after the person's own confirmation (`kind` is `write`
+/// or `render`). The page calls this from its own approval dialog; there
+/// is no programmatic approve path.
+#[tauri::command]
+pub fn blender_approve(app: AppHandle, kind: String) -> Result<BlenderGrants, String> {
+    if !GRANT_KINDS.contains(&kind.as_str()) {
+        return Err(format!("kind must be one of {}", GRANT_KINDS.join(", ")));
+    }
+    let path = grants_path(&app)?;
+    let mut grants = grants_read(&path);
+    match kind.as_str() {
+        "write" => grants.write = true,
+        _ => grants.render = true,
+    }
+    grants_write(&path, &grants)?;
+    Ok(grants)
+}
+
+/// Withdraw a grant.
+#[tauri::command]
+pub fn blender_revoke(app: AppHandle, kind: String) -> Result<BlenderGrants, String> {
+    if !GRANT_KINDS.contains(&kind.as_str()) {
+        return Err(format!("kind must be one of {}", GRANT_KINDS.join(", ")));
+    }
+    let path = grants_path(&app)?;
+    let mut grants = grants_read(&path);
+    match kind.as_str() {
+        "write" => grants.write = false,
+        _ => grants.render = false,
+    }
+    grants_write(&path, &grants)?;
+    Ok(grants)
 }
 
 #[tauri::command]
@@ -223,11 +313,13 @@ pub fn blender_start(state: State<'_, BlenderState>) -> Result<BlenderStatus, St
     Ok(BlenderStatus { enabled: true, installed: true, running: true, tools })
 }
 
-/// Relay one read-only call. The tool name is allowlisted here, args pass
-/// through verbatim (the server validates them), and the answer is bounded
-/// before it crosses IPC back to the page.
+/// Relay one call. The tool name is allowlisted here, args pass through
+/// verbatim (the server validates them), and the answer is bounded before
+/// it crosses IPC back to the page. Write and render tools additionally
+/// need their grant — the same check the page made when it queued the op.
 #[tauri::command]
 pub fn blender_call(
+    app: AppHandle,
     state: State<'_, BlenderState>,
     tool: String,
     args: Option<serde_json::Value>,
@@ -235,8 +327,14 @@ pub fn blender_call(
     if !enabled() {
         return Err("the Blender bridge is off".to_string());
     }
-    if !read_only(&tool) {
-        return Err(format!("{tool} is not in the read-only set the bridge relays"));
+    let class = class_of(&tool)
+        .ok_or_else(|| format!("{tool} is not in the allowlist the bridge relays"))?;
+    if class != "read" {
+        let grants = grants_read(&grants_path(&app)?);
+        let held = (class == "write" && grants.write) || (class == "render" && grants.render);
+        if !held {
+            return Err(format!("{tool} needs the {class} approval first (blender_approve)"));
+        }
     }
     let mut guard = state.inner().0.lock().unwrap();
     let Some(server) = guard.as_mut() else {
@@ -279,9 +377,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn read_only_set_is_closed() {
+    fn classes_cover_the_relay_set() {
         for tool in READ_ONLY_TOOLS {
-            assert!(read_only(tool), "{tool}");
+            assert_eq!(class_of(tool), Some("read"), "{tool}");
+        }
+        for tool in WRITE_TOOLS {
+            assert_eq!(class_of(tool), Some("write"), "{tool}");
+        }
+        for tool in RENDER_TOOLS {
+            assert_eq!(class_of(tool), Some("render"), "{tool}");
         }
         for tool in [
             "",
@@ -292,7 +396,26 @@ mod tests {
             "render",
             "GET_SCENE_INFO",
         ] {
-            assert!(!read_only(tool), "{tool}");
+            assert_eq!(class_of(tool), None, "{tool}");
         }
+    }
+
+    #[test]
+    fn grants_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("blender-approvals.json");
+        assert_eq!(grants_read(&path).write, false);
+        let grants = BlenderGrants { write: true, render: false };
+        grants_write(&path, &grants).unwrap();
+        let read = grants_read(&path);
+        assert!(read.write && !read.render);
+    }
+
+    #[test]
+    fn grants_survive_garbage() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("blender-approvals.json");
+        std::fs::write(&path, b"not json").unwrap();
+        assert!(!grants_read(&path).write);
     }
 }

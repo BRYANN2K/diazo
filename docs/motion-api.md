@@ -110,7 +110,14 @@ type MotionClipSource =
   | { type: 'library'; itemId: string; variantId?: string }
   | { type: 'asset'; assetId: string }
   | { type: 'caption'; text: string; style?: string }
+  | { type: '3d'; assetId: string; fallbackAssetId?: string; driver?: 'time' | 'scroll' | 'pointer' }
 ```
+
+A `3d` clip's `assetId` is a glTF/GLB canvas asset the frame's three.js
+layer draws; `fallbackAssetId` is the still a non-3D surface (export,
+thumbnail, an old shell) draws instead. `driver` defaults to `time` —
+`scroll` or `pointer` scrubs the layer on page input even inside a timed
+composition (the same driver names `data-doop-driver` uses in markup).
 
 **Transitions** hang on the incoming clip — when a clip takes over from the
 previous clip on the same track, `transition` says how. Absent = a hard cut.
@@ -161,8 +168,9 @@ interface RenderJob {
   canvasId
   pageId
   compositionId: string
-  format: 'mp4' | 'webm'
-  target: 'browser' | 'desktop' // 'server','blender' reserved — rejected today
+  format: 'mp4' | 'webm' | 'gif' | 'pngseq'
+  target: 'browser' | 'desktop' | 'blender' // 'server' reserved — rejected today
+  engine?: 'eevee' | 'cycles' | 'octane' // blender target only (default 'eevee')
   width
   height
   fps: number // defaults: the composition's
@@ -429,10 +437,13 @@ done, total }` events; returns `{ path, bytes }`.
 - `invoke('motion_read_render', { path })` → base64 bytes — path must be
   inside `<appData>/renders/`; the page then PUTs it to `/api/renders/:id/upload`.
 
-Blender groundwork: `__DOOP_BLENDER__` advertises the bridge; the shell can
-spawn an allowlisted `blender-mcp` process (user-approved like ACP agents)
-and relay read-only tools. Disabled by default (env `DOOP_BLENDER_BRIDGE`);
-write/Python/render tools need an approval UX that does not exist yet.
+Blender bridge: `__DOOP_BLENDER__` advertises it; the shell spawns an
+allowlisted `blender-mcp` process (env `DOOP_BLENDER_BRIDGE`, ADR 0011).
+Read tools relay once started; `write` and `render` classes each need a
+grant recorded through `blender_approve` (kept in
+`blender-approvals.json`, withdrawn by `blender_revoke`). The grant UX is a
+person's click in the app — no programmatic approve path. Python execution
+is never allowlisted.
 
 ## Changes
 
@@ -487,3 +498,40 @@ shared types in `shared/speech.ts`. REST, MCP and resident tools share the
 same submission, estimate, ownership and completion logic. Desktop relay
 and persisted transcripts are implemented; the installer, local engine
 worker and speech sidecar remain pending. This does not complete phase 3.
+
+## Phase 4 — 3D and the Blender bridge
+
+**3D layers.** A `3d` clip source (above) points at a glTF/GLB canvas asset;
+the frame renders it with a three.js layer and any surface without WebGL
+draws `fallbackAssetId`. `driver` reuses `DRIVERS` (`time`/`scroll`/`pointer`)
+so the same keyframe data can scrub on page input — `data-doop-driver` in
+markup already carries the same names.
+
+**Blender ops.** An agent never reaches Blender: it queues an op, the
+desktop shell claims it through the poll, runs the allowlisted blender-mcp
+tool and finishes it (`shared/blender.ts`).
+
+- `POST /api/blender/ops` `{ canvasId, tool, args }` → `{ op }` (edit access;
+  tool ∈ `get_scene_info`, `get_object_info`, `set_material`, `add_light`,
+  `render_frame`; `klass` marks the approval class). ≤ 8 open ops per
+  requester; args ≤ 64 kB of JSON.
+- `POST /api/blender/poll` `{ deviceId }` → `{ ops }`: claims this person's
+  queued ops, oldest first.
+- `POST /api/blender/finish/:id` `{ deviceId, state: 'done'|'failed',
+result?|error? }` — only the claiming device, while `running`.
+- `GET /api/blender/ops[/:id|?canvasId=]` — the requester's own ops.
+  A claim without a heartbeat fails after 10 minutes; boot recovery fails
+  ops left `running`.
+
+**Agent tools** (MCP + resident, same runner `server/blenderTools.ts`):
+`blender_get_scene`, `blender_get_object` (read), `blender_set_material`,
+`blender_add_light` (write approval in the shell), `blender_render_frame`
+(render approval; `engine` ∈ `eevee`/`cycles`/`octane` — Octane is a name
+Blender interprets, not an integration), and `get_blender_result { op_id }`
+to poll.
+
+**Blender render target.** `POST …/renders` accepts `target: 'blender'`
+with optional `engine` (default `eevee`, validated against
+`BLENDER_ENGINES`); the desktop claims it through the same render-job
+lifecycle and renders frames through the bridge's `render_frame` tool —
+which still needs the render grant. `target: 'server'` stays rejected.

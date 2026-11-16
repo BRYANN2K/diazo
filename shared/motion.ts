@@ -280,6 +280,12 @@ export type MotionClipSource =
    *  `words` carries per-word timings so word-highlight styles can light the
    *  current word — written by build_captions from a transcript */
   | { type: 'caption'; text: string; style?: string; words?: TranscriptWord[] }
+  /** a 3D layer (phase 4): `assetId` is a glTF/GLB canvas asset rendered by a
+   *  three.js layer in the frame; `fallbackAssetId` is the still image a
+   *  non-3D surface (export, thumbnail, old shell) draws instead. `driver`
+   *  overrides the composition clock — `scroll`/`pointer` let the layer scrub
+   *  on page input even inside a timed composition (default 'time') */
+  | { type: '3d'; assetId: string; fallbackAssetId?: string; driver?: MotionDriver }
 
 /* ---- transitions (proposal 14.4) ----
  * A transition is the overlap of two visibility windows plus one paired
@@ -578,14 +584,19 @@ export const RENDER_FORMATS = ['mp4', 'webm', 'gif', 'pngseq'] as const
 export type RenderFormat = (typeof RENDER_FORMATS)[number]
 
 /**
- * Who produces the file. MVP: `browser` (MediaRecorder/WebCodecs in the
- * page) and `desktop` (the Tauri shell — deterministic seeks plus an
- * allowlisted local ffmpeg). `server` and `blender` are reserved for later
- * phases; the API rejects them until then.
+ * Who produces the file. `browser` (MediaRecorder/WebCodecs in the page),
+ * `desktop` (the Tauri shell — deterministic seeks plus an allowlisted local
+ * ffmpeg) and `blender` (the desktop shell driving Blender per frame, phase
+ * 4). `server` is reserved for a later phase; the API rejects it until then.
  */
 export const RENDER_TARGETS = ['browser', 'desktop', 'server', 'blender'] as const
 export type RenderTarget = (typeof RENDER_TARGETS)[number]
-export const RENDER_TARGETS_MVP: readonly RenderTarget[] = ['browser', 'desktop']
+export const RENDER_TARGETS_MVP: readonly RenderTarget[] = ['browser', 'desktop', 'blender']
+
+/** The render engine a `blender`-target job asks Blender to use. `octane`
+ *  stays a name Blender interprets — there is no Octane integration. */
+export const BLENDER_ENGINES = ['eevee', 'cycles', 'octane'] as const
+export type BlenderEngine = (typeof BLENDER_ENGINES)[number]
 
 export const RENDER_STATUSES = ['queued', 'rendering', 'encoding', 'done', 'failed', 'canceled'] as const
 export type RenderStatus = (typeof RENDER_STATUSES)[number]
@@ -603,6 +614,8 @@ export interface RenderJob {
   compositionId: string
   format: RenderFormat
   target: RenderTarget
+  /** blender-target jobs only: which engine Blender renders with */
+  engine?: BlenderEngine
   width: number
   height: number
   fps: number
@@ -733,6 +746,23 @@ function parseClipSource(input: unknown): ParseResult<MotionClipSource> {
         words.push(parsed)
       }
       out.words = words
+    }
+    return ok(out)
+  }
+  if (input.type === '3d') {
+    const assetId = parseId(input.assetId, 'clip.source.assetId')
+    if (!assetId.ok) return assetId
+    const out: MotionClipSource = { type: '3d', assetId: assetId.value }
+    if (input.fallbackAssetId !== undefined) {
+      const fallback = parseId(input.fallbackAssetId, 'clip.source.fallbackAssetId')
+      if (!fallback.ok) return fallback
+      out.fallbackAssetId = fallback.value
+    }
+    if (input.driver !== undefined) {
+      if (!DRIVERS.includes(input.driver as MotionDriver)) {
+        return bad(`clip.source.driver must be one of ${DRIVERS.join(', ')}`)
+      }
+      out.driver = input.driver as MotionDriver
     }
     return ok(out)
   }

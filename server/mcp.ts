@@ -1,4 +1,5 @@
 import { SPEECH_TOOLS, runSpeechTool } from './speechTools.ts'
+import { BLENDER_TOOLS, runBlenderTool } from './blenderTools.ts'
 import { findInCanvas } from './canvasFind.ts'
 import { findInLibrary } from './libraryQueries.ts'
 import { env } from './env.ts'
@@ -2206,6 +2207,33 @@ export function buildMcpServer(
           return text(await runSpeechTool(tool.name, canvas, ownerId, input))
         } catch (error) {
           return err(error instanceof Error ? error.message : 'speech tool failed')
+        }
+      },
+    )
+  }
+
+  for (const tool of BLENDER_TOOLS) {
+    server.registerTool(
+      tool.name,
+      {
+        description: tool.description,
+        annotations: {
+          readOnlyHint: tool.readOnly,
+          destructiveHint: false,
+          idempotentHint: tool.readOnly,
+          openWorldHint: !tool.readOnly,
+        },
+        inputSchema: { ...tool.shape, canvas_id: z.string(), agent_name: agentName },
+      },
+      async ({ canvas_id, agent_name, ...input }: Record<string, unknown>) => {
+        const canvas = canvasFor(String(canvas_id), tool.readOnly ? 'view' : 'edit')
+        if (!canvas) return noCanvas(String(canvas_id))
+        arrive(canvas.id, String(agent_name))
+        if (!ownerId) return err('sign in to use blender')
+        try {
+          return text(await runBlenderTool(tool.name, canvas, ownerId, input))
+        } catch (error) {
+          return err(error instanceof Error ? error.message : 'blender tool failed')
         }
       },
     )

@@ -13,9 +13,11 @@ import { nanoid } from 'nanoid'
 import * as persist from './db/persist.ts'
 import type { ServerMessage } from '../shared/types.ts'
 import {
+  BLENDER_ENGINES,
   MOTION_LIMITS,
   RENDER_FORMATS,
   RENDER_TARGETS_MVP,
+  type BlenderEngine,
   type Composition,
   type RenderJob,
 } from '../shared/motion.ts'
@@ -80,6 +82,7 @@ export type CreateRenderJobInput = {
   composition: Composition
   format: string
   target: string
+  engine?: string
   width?: number
   height?: number
   fps?: number
@@ -99,8 +102,17 @@ export function createRenderJob(
     return {
       ok: false,
       status: 400,
-      error: `target must be one of ${RENDER_TARGETS_MVP.join(', ')} (server and blender renders land in a later phase)`,
+      error: `target must be one of ${RENDER_TARGETS_MVP.join(', ')} (server renders land in a later phase)`,
     }
+  }
+  let engine: BlenderEngine | undefined
+  if (target === 'blender') {
+    engine = (input.engine ?? 'eevee') as BlenderEngine
+    if (!BLENDER_ENGINES.includes(engine)) {
+      return { ok: false, status: 400, error: `engine must be one of ${BLENDER_ENGINES.join(', ')}` }
+    }
+  } else if (input.engine !== undefined) {
+    return { ok: false, status: 400, error: 'engine only applies to target blender' }
   }
   const num = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback)
   const width = Math.round(num(input.width, comp.width))
@@ -144,6 +156,7 @@ export function createRenderJob(
     compositionId: comp.id,
     format: input.format as RenderJob['format'],
     target: target as RenderJob['target'],
+    engine,
     width,
     height,
     fps,

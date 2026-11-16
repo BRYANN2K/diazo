@@ -1,4 +1,5 @@
 import { SPEECH_TOOLS, runSpeechTool } from './speechTools.ts'
+import { BLENDER_TOOLS, runBlenderTool } from './blenderTools.ts'
 import { env } from './env.ts'
 import { skillSlug } from '../shared/skills.ts'
 import { DRIFT_SEVERITIES, isDriftSeverity } from '../shared/drift.ts'
@@ -2726,6 +2727,14 @@ for (const tool of SPEECH_TOOLS) {
   })
 }
 
+for (const tool of BLENDER_TOOLS) {
+  TOOLS.push({
+    name: tool.name,
+    description: tool.description,
+    input_schema: zodToJsonSchema(z.object(tool.shape)) as Anthropic.Tool['input_schema'],
+  })
+}
+
 /* the same tools as MCP, minus the arguments a resident run already has */
 for (const tool of COMPONENT_TOOLS) {
   TOOLS.push({
@@ -3921,6 +3930,21 @@ export async function execTool(
           return ok(JSON.stringify(await runSpeechTool(block.name, canvas, runState.payerId, block.input)))
         } catch (error) {
           return fail(error instanceof Error ? error.message : 'speech tool failed')
+        }
+      }
+      case 'blender_get_scene':
+      case 'blender_get_object':
+      case 'blender_set_material':
+      case 'blender_add_light':
+      case 'blender_render_frame':
+      case 'get_blender_result': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        if (!runState.payerId) return fail('sign in to use blender')
+        try {
+          return ok(JSON.stringify(await runBlenderTool(block.name, canvas, runState.payerId, block.input)))
+        } catch (error) {
+          return fail(error instanceof Error ? error.message : 'blender tool failed')
         }
       }
       case 'list_video_models': {

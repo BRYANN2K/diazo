@@ -38,7 +38,14 @@ import type {
   ComponentSlot,
   ComponentSnapshot,
 } from '../../shared/components.ts'
-import type { Composition, MotionTrack, RenderFormat, RenderStatus, RenderTarget } from '../../shared/motion.ts'
+import type {
+  BlenderEngine,
+  Composition,
+  MotionTrack,
+  RenderFormat,
+  RenderStatus,
+  RenderTarget,
+} from '../../shared/motion.ts'
 import type { DevTaskDrift, DevTaskState } from '../../shared/devTasks.ts'
 import type { HandoffPack } from '../../shared/handoff.ts'
 import type { GenerationRecipe, Transcript } from '../../shared/motionMedia.ts'
@@ -1427,6 +1434,7 @@ export const renderJobs = pgTable(
     compositionId: text('composition_id').notNull(),
     format: text('format').$type<RenderFormat>().notNull(),
     target: text('target').$type<RenderTarget>().notNull(),
+    engine: text('engine').$type<BlenderEngine>(),
     width: integer('width').notNull(),
     height: integer('height').notNull(),
     fps: integer('fps').notNull(),
@@ -1447,6 +1455,7 @@ export const renderJobs = pgTable(
   (t) => [index('render_jobs_canvas_idx').on(t.canvasId), index('render_jobs_composition_idx').on(t.compositionId)],
 )
 
+<<<<<<< HEAD
 /** Dev tasks (shared/devTasks.ts, server/devTasks.ts): a coding agent sent
  *  to an Orca worktree from a ready-for-dev frame. The worktree's absolute
  *  path is never stored — `orca_identity` is the opaque `wt2:` key — and
@@ -1498,6 +1507,28 @@ export const frameDevTasks = pgTable(
     finishedAt: bigint('finished_at', { mode: 'number' }),
   },
   (t) => [index('frame_dev_tasks_canvas_idx').on(t.canvasId)],
+)
+
+/** One Blender tool call an agent asked for and the desktop shell executes
+ *  through its allowlisted blender-mcp bridge (phase 4, ADR 0011). `klass`
+ *  mirrors the approval the shell must hold before running it. */
+export const blenderOps = pgTable(
+  'blender_ops',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    tool: text('tool').notNull(),
+    klass: text('klass').notNull(),
+    args: jsonb('args'),
+    state: text('state').notNull(),
+    result: jsonb('result'),
+    error: text('error'),
+    deviceId: text('device_id'),
+    requestedBy: text('requested_by').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('blender_ops_state_idx').on(t.state, t.requestedBy)],
 )
 
 /** Per-page state of one media asset on the timeline (shared/motionMedia.ts):

@@ -22,8 +22,8 @@ Built on `feat/motion-backend-next` (from `dev`), worktree `doop-wt/motion-next`
 
 ## Phase 4 — 3D and Blender
 
-- [ ] 13. Contract: `3d` clips, glTF→three.js layer, scroll/pointer drivers, fallback image.
-- [ ] 14. Blender bridge: approvals, write/render tools, `blender_*` agent tools, blender render target.
+- [x] 13. Contract: `3d` clips (glTF asset + fallback + driver), `blender` render target with `engine`.
+- [x] 14. Blender bridge: approvals, write/render tools, `blender_*` agent tools, blender render target.
 
 ## Phase 5 — server renders and interchange
 
