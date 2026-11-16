@@ -209,6 +209,27 @@ function textWithNudge(data: unknown, nudge: string) {
 const REVIEW_NUDGE =
   'You have not seen this design yet. Call get_frame_screenshot on it now, judge it against the review checkpoints (fit, spacing, hierarchy, contrast, alignment, realism), and fix any issues before moving on.'
 
+/** What an edit returns about the frame it touched — a pointer back, not a
+ *  summary the caller just paid to send (agent-cost AC-4). */
+function frameRef(f: { id: string; pageId?: string; name: string }) {
+  return { id: f.id, pageId: f.pageId, name: f.name }
+}
+
+/* the screenshot reminder is said once per frame per agent — an agent that
+   heard it knows to look; repeating it on every write is billed context */
+const reviewNudges = new WeakMap<Frame, Set<string>>()
+
+/** Append REVIEW_NUDGE the first time this agent writes this frame. */
+function withReviewNudge<T extends ToolContent>(result: T, frame: Frame, actor?: Actor): T {
+  if (!actor) return result
+  const heard = reviewNudges.get(frame) ?? new Set<string>()
+  if (heard.has(actor.name)) return result
+  heard.add(actor.name)
+  reviewNudges.set(frame, heard)
+  result.content.push({ type: 'text' as const, text: REVIEW_NUDGE })
+  return result
+}
+
 import type { Actor, Frame } from '../shared/types.ts'
 import { loadToolTargets } from './toolLoads.ts'
 
@@ -1700,15 +1721,9 @@ export function buildMcpServer(
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
       const frame = actions.createFrame(canvas_id, { name, pageId, html, x, y, width, height }, actorFrom(agent_name))
       if (!frame) return noCanvas(canvas_id)
-      const result = withComponentNotes(
-        withEscapeNote(
-          frame.html.length > 0
-            ? textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE)
-            : text({ ok: true, frame: frameSummary(frame) }),
-          html,
-        ),
-        frame,
-      )
+      const created = text({ ok: true, frame: frameSummary(frame) })
+      if (frame.html.length > 0) withReviewNudge(created, frame, actorFrom(agent_name))
+      const result = withComponentNotes(withEscapeNote(created, html), frame)
       return withGuidelinesNudge(
         withStatusNudge(withFeedback(result, canvas_id, actorFrom(agent_name)), canvas_id, actorFrom(agent_name)),
         canvas_id,
@@ -1830,7 +1845,10 @@ export function buildMcpServer(
           withStatusNudge(
             withFeedback(
               withComponentNotes(
-                withEscapeNote(textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE), html),
+                withEscapeNote(
+                  withReviewNudge(text({ ok: true, frame: frameRef(frame) }), frame, actorFrom(agent_name)),
+                  html,
+                ),
                 frame,
               ),
               frame.canvasId,
@@ -3820,9 +3838,10 @@ export function buildMcpServer(
       if (!frame) return noFrame(frame_id)
       const result = done
         ? withComponentNotes(
-            textWithNudge(
-              { ok: true, streaming: false, htmlBytes: frame.html.length },
-              `Stream complete. ${REVIEW_NUDGE}`,
+            withReviewNudge(
+              text({ ok: true, streaming: false, htmlBytes: frame.html.length }),
+              frame,
+              actorFrom(agent_name),
             ),
             frame,
           )
@@ -3864,7 +3883,10 @@ export function buildMcpServer(
       return withPreview(
         withStatusNudge(
           withFeedback(
-            withComponentNotes(textWithNudge({ ok: true, frame: frameSummary(frame) }, REVIEW_NUDGE), frame),
+            withComponentNotes(
+              withReviewNudge(text({ ok: true, frame: frameRef(frame) }), frame, actorFrom(agent_name)),
+              frame,
+            ),
             frame.canvasId,
             actorFrom(agent_name),
           ),
@@ -3906,7 +3928,7 @@ export function buildMcpServer(
       if (!updated.ok) return err(updated.error)
       const frame = updated.value
       return withPreview(
-        withFeedback(text({ ok: true, frame: frameSummary(frame) }), frame.canvasId, actorFrom(agent_name)),
+        withFeedback(text({ ok: true, frame: frameRef(frame) }), frame.canvasId, actorFrom(agent_name)),
         frame.canvasId,
         [frame],
       )
@@ -3957,7 +3979,7 @@ export function buildMcpServer(
       if (restored === null) return err(`no version ${version_id} on frame ${frame_id} — call list_frame_versions`)
       if (!restored) return noFrame(frame_id)
       return withFeedback(
-        textWithNudge({ ok: true, frame: frameSummary(restored.frame) }, REVIEW_NUDGE),
+        withReviewNudge(text({ ok: true, frame: frameRef(restored.frame) }), restored.frame, actorFrom(agent_name)),
         restored.frame.canvasId,
         actorFrom(agent_name),
       )

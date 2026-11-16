@@ -173,7 +173,9 @@ export async function setCompositionData(
     if (!ops.ok) return fail(ops.error)
     const applied = actions.patchComposition(canvas.id, pageId, ops.value, actor)
     if (!applied.ok) return fail(applied.error ?? 'ops rejected')
-    return ok(await withCoverage(canvas, pageId, applied.composition))
+    const { storyboard } = await withCoverage(canvas, pageId, applied.composition)
+    /* only the revision matters — the caller wrote the rest (agent-cost AC-4) */
+    return ok({ revision: applied.composition.revision, ...(storyboard ? { storyboard } : {}) })
   }
   if (input.composition === undefined) return fail('send composition (a full timeline) or ops (a patch)')
   const body = parseCompositionBody(input.composition)
@@ -181,7 +183,10 @@ export async function setCompositionData(
   /* a rewritten timeline is a new film: the pass count and the remembered
      shots die with the body it replaces, even though the id is kept */
   fixPasses.delete(passKey(canvas.id, pageId))
-  return ok(await withCoverage(canvas, pageId, actions.setComposition(canvas.id, body.value, pageId, actor)))
+  const composition = actions.setComposition(canvas.id, body.value, pageId, actor)
+  const { storyboard } = await withCoverage(canvas, pageId, composition)
+  /* only the revision matters — the caller wrote the rest (agent-cost AC-4) */
+  return ok({ revision: composition.revision, ...(storyboard ? { storyboard } : {}) })
 }
 
 /**
@@ -291,7 +296,7 @@ export async function animateStoryboard(
   /* the first report only names the work — the passes count on writes */
   const coverage = noted.size ? storyboardCoverage(composition.tracks, noted, 0, STORYBOARD_MAX_PASSES) : undefined
   return ok({
-    composition,
+    revision: composition.revision,
     shots: described,
     ...(coverage ? { storyboard: coverage } : {}),
     note:
