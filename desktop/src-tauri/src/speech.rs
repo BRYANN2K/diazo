@@ -25,13 +25,34 @@ use {
 
 /// A single model file may be up to 4 GiB (large ASR weights).
 const MAX_FILE_BYTES: u64 = 4 << 30;
+/// ...one model in total is bounded too (weights + configs + tokens).
+const MAX_MODEL_BYTES: u64 = 8 << 30;
+/// A catalog row lists files, not a whole repo.
+const MAX_FILES: usize = 64;
 /// The signed manifest is small; a larger one is rejected outright.
 const MAX_MANIFEST_BYTES: u64 = 1 << 20;
 /// A model id / engine / file name is a short slug, never a path.
 const MAX_NAME: usize = 128;
+/// A job's input or output file riding the audio-in/audio-out commands.
+const MAX_JOB_FILE_BYTES: usize = 256 << 20;
 /// Download + engine timeouts, in seconds.
 const HTTP_TIMEOUT_SECS: u64 = 300;
-const ENGINE_TIMEOUT_SECS: u64 = 600;
+const HTTP_CONNECT_SECS: u64 = 30;
+const ENGINE_TIMEOUT_SECS: u64 = 3600;
+
+/// The Hugging Face repos the bundled catalog (shared/speech.ts) may
+/// install from without asking — every other repo is a custom model and
+/// gets the native confirmation before a byte downloads.
+const HF_CATALOG_REPOS: &[&str] = &[
+    "sherpa-onnx/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
+    "ggerganov/whisper.cpp",
+    "mlx-community/VoxCPM2-8bit",
+    "mlx-community/Qwen3-TTS-1.7B-8bit",
+    "mlx-community/Ming-3.0-TTS-8bit",
+    "Qwen/Qwen3-TTS-0.6B-GGUF",
+    "sherpa-onnx/kokoro-en-v0_19",
+    "sherpa-onnx/sherpa-onnx-pyannote-segmentation-3-0",
+];
 
 /// The release signature public key — the updater's minisign key
 /// (B1375F7E88B8FC72), so speech mirrors are signed by the same release key
@@ -325,6 +346,7 @@ fn valid_runtime(s: &str) -> bool {
 fn http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .connect_timeout(std::time::Duration::from_secs(HTTP_CONNECT_SECS))
         .build()
         .map_err(|e| format!("could not build http client: {e}"))
 }
@@ -476,9 +498,47 @@ pub async fn speech_install(
     if entry.files.is_empty() {
         return Err("a catalog entry must list at least one file".to_string());
     }
+    if entry.files.len() > MAX_FILES {
+        return Err(format!("a catalog entry lists at most {MAX_FILES} files"));
+    }
+    let total: u64 = entry.files.iter().map(|f| f.bytes).sum();
+    if total > MAX_MODEL_BYTES {
+        return Err(format!("{} bytes of files, above the 8 GiB model cap", total));
+    }
     for f in &entry.files {
         if !valid_file_name(&f.path) {
             return Err(format!("unsafe file name in catalog: {:?}", f.path));
+        }
+    }
+    /* the HF repo name is validated on every hf install — not only when a
+       file lacks a sha256 — and a repo outside the pinned catalog list is
+       a custom model: it asks natively before a byte downloads, naming
+       the repo, the pinned commit and the total size */
+    if let SpeechSource::Hf { repo, commit } = &entry.source {
+        let repo_ok = repo
+            .split('/')
+            .all(|part| valid_name(part) && !part.starts_with('.'))
+            && repo.split('/').count() == 2;
+        if !repo_ok {
+            return Err(format!("hf repo {repo:?} must be owner/name"));
+        }
+        if commit.len() != 40 || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err("hf source commit must be 40 hex".to_string());
+        }
+        if !HF_CATALOG_REPOS.contains(&repo.as_str()) {
+            let accepted = rfd::MessageDialog::new()
+                .set_title(format!("Install speech model {}?", entry.id))
+                .set_description(format!(
+                    "This downloads {} files ({:.1} GiB) from huggingface.co/{repo} at commit {commit}. Only install if you added this model yourself.",
+                    entry.files.len(),
+                    total as f64 / (1u64 << 30) as f64,
+                ))
+                .set_level(rfd::MessageLevel::Warning)
+                .set_buttons(rfd::MessageButtons::OkCancel)
+                .show();
+            if accepted != rfd::MessageDialogResult::Ok {
+                return Err("the install was declined".to_string());
+            }
         }
     }
     {
@@ -543,13 +603,6 @@ async fn do_install(
             }
             let need_metadata = entry.files.iter().any(|f| f.sha256.is_empty());
             let tree = if need_metadata {
-                let repo_ok = repo
-                    .split('/')
-                    .all(|part| valid_name(part) && !part.starts_with('.'))
-                    && repo.split('/').count() == 2;
-                if !repo_ok {
-                    return Err(format!("hf repo {repo:?} must be owner/name"));
-                }
                 let body = http_get(
                     &client,
                     &format!("https://huggingface.co/api/models/{repo}/tree/{commit}"),
@@ -752,6 +805,63 @@ pub async fn speech_run(
         return Err(format!("diazo-speech produced no {}", output_name));
     }
     Ok(json!({ "jobId": job_id, "output": output.display().to_string() }))
+}
+
+/* -- job audio in / results out --------------------------------------- */
+
+fn work_dir(app: &AppHandle, job_id: &str) -> Result<PathBuf, String> {
+    if !valid_name(job_id) {
+        return Err("job_id must be [a-zA-Z0-9._-], <=128 chars".to_string());
+    }
+    let dir = speech_root(app)?.join("work").join(job_id);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    Ok(dir)
+}
+
+/// Bring a claimed job's audio into the desktop path: the bytes ride the
+/// call base64-encoded and land as `name` inside the job's work dir,
+/// where `speech_run --in` then finds them. `name` is a plain file name —
+/// never a path.
+#[tauri::command]
+pub async fn speech_stage_input(
+    app: AppHandle,
+    job_id: String,
+    name: String,
+    data_base64: String,
+) -> Result<Value, String> {
+    use base64::Engine;
+    if !valid_file_name(&name) {
+        return Err("input must be a plain file name".to_string());
+    }
+    if data_base64.len() > MAX_JOB_FILE_BYTES * 4 / 3 + 8 {
+        return Err("the audio input is over the 256 MiB job cap".to_string());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data_base64)
+        .map_err(|e| format!("input is not base64: {e}"))?;
+    if bytes.len() > MAX_JOB_FILE_BYTES {
+        return Err("the audio input is over the 256 MiB job cap".to_string());
+    }
+    let path = work_dir(&app, &job_id)?.join(&name);
+    std::fs::write(&path, &bytes).map_err(|e| format!("could not write {}: {e}", path.display()))?;
+    Ok(json!({ "path": path.display().to_string(), "bytes": bytes.len() }))
+}
+
+/// The counterpart of speech_stage_input: read one file out of the job's
+/// work dir — a transcript, a voice-over, a speaker map — for the page to
+/// hand back to the server. `name` is a plain file name — never a path.
+#[tauri::command]
+pub async fn speech_read_output(app: AppHandle, job_id: String, name: String) -> Result<String, String> {
+    use base64::Engine;
+    if !valid_file_name(&name) {
+        return Err("output must be a plain file name".to_string());
+    }
+    let path = work_dir(&app, &job_id)?.join(&name);
+    let bytes = std::fs::read(&path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    if bytes.len() > MAX_JOB_FILE_BYTES {
+        return Err("the output file is over the 256 MiB job cap".to_string());
+    }
+    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
 }
 
 /* ------------------------------------------------------------------ */

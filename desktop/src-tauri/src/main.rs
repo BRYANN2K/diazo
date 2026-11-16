@@ -397,6 +397,8 @@ fn main() {
             speech::speech_install,
             speech::speech_uninstall,
             speech::speech_run,
+            speech::speech_stage_input,
+            speech::speech_read_output,
             server::server_status,
             server::server_choose,
             view_menu::view_menu_state,
