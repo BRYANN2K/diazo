@@ -100,6 +100,7 @@ import {
   MoreHorizontalIcon,
   PlayIcon,
   PlugIcon,
+  ClapperboardIcon,
   PlusIcon,
   PrototypeModeIcon,
   ShareIcon,
@@ -117,6 +118,7 @@ import { SelectionBar, SelectionBarAction } from '../components/ui/selection-bar
 import { Input } from '../components/ui/input'
 import { Field } from '../components/ui/field'
 import { PeerAvatars, PresenceFace } from '../components/PeerAvatars'
+import { MotionTimeline } from '../components/motion/MotionTimeline'
 import { Checkbox, CheckboxCard } from '../components/ui/checkbox'
 import { Toast, ToastAction, ToastSpinner } from '../components/ui/toast'
 import { Tooltip } from '../components/ui/tooltip'
@@ -345,6 +347,7 @@ export function CanvasPage({
   /* ⌘. acts only over the canvas view, outside PresentMode */
   const hideUiActive = canHideUi({ view: 'canvas', presenting: !!presenting })
   const activePageId = useStore((s) => s.activePageId)
+  const [motionOpen, setMotionOpen] = useState(false)
   const activePageName = useStore((s) => s.canvas?.pages?.find((page) => page.id === s.activePageId)?.name ?? '')
   /* Play starts on the selected frame, or on the page's flow start */
   const playFrom = useMemo(
@@ -970,6 +973,19 @@ export function CanvasPage({
                 {t('canvas.export')}
               </Button>
             )}
+            {/* Motion Studio: the page's timeline, an editor's tool */}
+            {!guest && !readOnly && (
+              <Button
+                variant="bare"
+                className={cn(barPillBtn, motionOpen && 'bg-well')}
+                aria-pressed={motionOpen}
+                onClick={() => setMotionOpen((open) => !open)}
+                title={t('motion.openTitle')}
+              >
+                <ClapperboardIcon className="size-3.5" />
+                {t('motion.open')}
+              </Button>
+            )}
             {!guest && <BarDivider className="mx-0.5" />}
             <Tooltip
               label={
@@ -1105,7 +1121,18 @@ export function CanvasPage({
           </div>
           {/* the presence pill in the bar already carries each agent's status
               line; this per-agent stack is only for windows too narrow for it */}
-          <WorkingNow style={{ left: chrome.left }} className="min-[1180px]:hidden" />
+          <WorkingNow style={{ left: chrome.left }} />
+          {motionOpen && activePageId && !readOnly && !isMobile && (
+            <MotionTimeline
+              canvasId={canvasId}
+              pageId={activePageId}
+              pageName={activePageName}
+              onClose={() => setMotionOpen(false)}
+              onToast={showToast}
+              className="bottom-3"
+              style={{ left: chrome.left, right: chrome.right }}
+            />
+          )}
           {!readOnly && <Onboarding canvasId={canvasId} />}
           <AccessBanner guest={guest} onSignUp={onSignUp} onSignIn={onSignIn} />
           {!isMobile &&

@@ -11,6 +11,7 @@ import { Community } from './pages/Community'
 import { Settings } from './pages/Settings'
 import { CanvasPage } from './pages/CanvasPage'
 import { PrototypePage } from './pages/PrototypePage'
+import { MotionRenderHarness } from './pages/MotionRenderHarness'
 import { AuthPage } from './pages/AuthPage'
 import { DesktopHandoff } from './pages/DesktopHandoff'
 import { DesktopSignIn } from './pages/DesktopSignIn'
@@ -216,8 +217,12 @@ export function App() {
 
   /* /c/<id>/proto: the prototype player, full page */
   const prototypeOf = path.match(/^\/c\/([^/]+)\/proto\/?$/)?.[1]
+  /* /c/<id>/motion-render: the film render harness the desktop shell drives */
+  const motionRenderOf = path.match(/^\/c\/([^/]+)\/motion-render\/?$/)?.[1]
   const page = prototypeOf ? (
     <PrototypePage canvasId={prototypeOf} key={prototypeOf} />
+  ) : motionRenderOf ? (
+    <MotionRenderHarness canvasId={motionRenderOf} key={motionRenderOf} />
   ) : canvasId ? (
     <CanvasPage canvasId={canvasId} key={canvasId} />
   ) : path === CODEX_SETUP_PATH ? (

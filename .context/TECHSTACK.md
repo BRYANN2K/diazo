@@ -983,6 +983,24 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   Prototype tab and `PrototypeOverlay.tsx` edit and draw them; MCP has `get_prototype` and
   `set_prototype_start`. `tests/prototypeBrowser.test.ts` drives the player in Chromium.
 
+- Motion Studio UI (`src/components/motion/`, `src/lib/motion/`, contract `docs/motion-api.md` of
+  `feat/motion-backend`): the bar's Motion button mounts `MotionTimeline` over the stage for the
+  active page (transport, ruler, camera lane, shots, element lanes, one playhead). The player owns
+  the clock and moves the editor's view through `cameraAt(comp, t)` (`stageCamera.ts` maps a
+  composition camera to the stage `Viewport` and back; reduced motion cuts key to key). "Key the
+  camera here" sends a `set_camera` op with the playhead and the current view; "Animate storyboard"
+  queues a board card asking the resident agent for `animate_storyboard` + `set_camera` moves.
+  Writes are `PATCH …/composition` ops with `expectedRevision` (409 reloads). Export
+  (`MotionExportDialog.tsx`): `POST …/renders`, then `renderInBrowser` (the compositor draws each
+  frame from `t` onto a canvas — page frames rasterised once by `rasterizeFrame` — recorded by
+  MediaRecorder, uploaded to `PUT /api/renders/:id/upload`) or, behind `__DOOP_MOTION_RENDER__`,
+  `renderOnDesktop` (`motion_render` drives `/c/<id>/motion-render`, `MotionRenderHarness.tsx`,
+  through `__doopMotionSeek` / `__doopMotionCapture`). `src/lib/motion/contract.ts` mirrors the
+  backend types and is an adapter until that branch merges; the room's `composition` message is not
+  handled yet (the timeline refetches on focus). MVP limits: frames are still pictures in the
+  render, element tracks are drawn but not applied, camera rotation shows only in the render.
+  Tests: `motionStudio.test.ts`, `motion.test.ts`.
+
 ## 5. Security and Secrets
 
 - better-auth 1.6.26 - authentication: email/password, generic OIDC/SSO, and Google / Microsoft /

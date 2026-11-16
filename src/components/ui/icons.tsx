@@ -99,6 +99,9 @@ import {
   PencilRuler,
   PenTool,
   Play,
+  Pause,
+  SkipBack,
+  Clapperboard,
   Plus,
   Puzzle,
   RadioTower,
@@ -272,6 +275,9 @@ export const TextIcon = icon(Type)
 export const ImageIcon = icon(Image)
 export const VectorIcon = icon(PenTool)
 export const PlayIcon = icon(Play)
+export const PauseIcon = icon(Pause)
+export const SkipBackIcon = icon(SkipBack)
+export const ClapperboardIcon = icon(Clapperboard)
 export const ArrowUpIcon = icon(ArrowUp)
 export const ArrowLeftIcon = icon(ArrowLeft)
 export const ArrowRightIcon = icon(ArrowRight)
