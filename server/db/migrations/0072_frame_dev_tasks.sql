@@ -1,0 +1,31 @@
+CREATE TABLE "frame_dev_tasks" (
+	"id" text PRIMARY KEY NOT NULL,
+	"canvas_id" text NOT NULL,
+	"frame_ids" jsonb NOT NULL,
+	"handoff_change_id" text NOT NULL,
+	"frame_revision" bigint,
+	"duel_id" text,
+	"requested_by" text NOT NULL,
+	"requested_by_name" text NOT NULL,
+	"device_id" text,
+	"runner" text DEFAULT 'orca' NOT NULL,
+	"agent" text NOT NULL,
+	"model" text,
+	"effort" text,
+	"host_label" text NOT NULL,
+	"environment" text,
+	"orca_identity" text,
+	"orca_session_id" text,
+	"branch" text,
+	"pr_url" text,
+	"state" text NOT NULL,
+	"agent_state" text,
+	"summary" text,
+	"drift" jsonb,
+	"handoff" jsonb NOT NULL,
+	"created_at" bigint NOT NULL,
+	"updated_at" bigint NOT NULL,
+	"finished_at" bigint
+);
+--> statement-breakpoint
+CREATE INDEX "frame_dev_tasks_canvas_idx" ON "frame_dev_tasks" USING btree ("canvas_id");
