@@ -57,33 +57,44 @@ export function AcpAgentRow({ agent, isDefault = false, onMakeDefault, onChange 
   const userId = session?.user.id
   const state = useAcpAgents((s) => s[agent])
   const { preference, native, running, progress, error: runnerError } = state
-  const [busy, setBusy] = useState(false)
+  /* which button is waiting, so only that one changes its label */
+  const [pending, setPending] = useState<'connect' | 'signIn' | 'other' | null>(null)
+  const busy = pending !== null
   const [error, setError] = useState('')
+  /* the mount and focus refresh keep their failure apart from a button's,
+     so a later refresh that succeeds clears it without hiding a Connect
+     error (the consent dialog closing hands focus back) */
+  const [refreshError, setRefreshError] = useState('')
   const name = ACP_AGENT_NAMES[agent]
   const supported = hasAcpAgent(agent)
 
   useEffect(() => {
     if (!userId) return
     const refresh = () => {
-      refreshAcpAgent(userId, agent).catch((e: unknown) => setError(String(e)))
+      refreshAcpAgent(userId, agent).then(
+        () => setRefreshError(''),
+        (e: unknown) => setRefreshError(e instanceof Error ? e.message : String(e)),
+      )
     }
     refresh()
     window.addEventListener('focus', refresh)
     return () => window.removeEventListener('focus', refresh)
   }, [userId, agent])
 
-  const act = async (fn: () => Promise<unknown>) => {
-    setBusy(true)
+  const act = async (fn: () => Promise<unknown>, action: 'connect' | 'signIn' | 'other' = 'other') => {
+    setPending(action)
     setError('')
+    setRefreshError('')
     try {
       await fn()
       onChange?.()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setBusy(false)
+      setPending(null)
     }
   }
+  const shownError = error || refreshError
 
   const active = preference?.enabled ?? false
   const connected = acpAgentConnected(agent, state)
@@ -92,7 +103,10 @@ export function AcpAgentRow({ agent, isDefault = false, onMakeDefault, onChange 
   /* the CLI's own list widens the curated menu, as the composer's does */
   const menu = acpMenu(agent, native?.models ?? [])
 
-  const choose = (next: { model?: string; effort?: AcpEffort | undefined; enabled?: boolean } = {}) =>
+  const choose = (
+    next: { model?: string; effort?: AcpEffort | undefined; enabled?: boolean } = {},
+    action: 'connect' | 'other' = 'other',
+  ) =>
     act(async () => {
       if (!userId) return
       const enabled = next.enabled ?? (connected ? active : true)
@@ -107,7 +121,7 @@ export function AcpAgentRow({ agent, isDefault = false, onMakeDefault, onChange 
         model: next.model ?? model,
         ...(nextEffort ? { effort: nextEffort } : {}),
       })
-    })
+    }, action)
 
   if (!acpAgentListed(agent, state)) return null
 
@@ -161,10 +175,10 @@ export function AcpAgentRow({ agent, isDefault = false, onMakeDefault, onChange 
               act(async () => {
                 await invokeAcp('acp_login', { agent })
                 await refreshAcpAgent(userId!, agent, true)
-              })
+              }, 'signIn')
             }
           >
-            {busy ? t('models.signingIn') : t('models.signIn')}
+            {pending === 'signIn' ? t('models.signingIn') : t('models.signIn')}
           </Button>
         )}
         {(!connected || (native && !native.connected)) && (
@@ -189,9 +203,9 @@ export function AcpAgentRow({ agent, isDefault = false, onMakeDefault, onChange 
           </pre>
         </Disclosure>
       )}
-      {error && (
+      {shownError && (
         <p role="alert" className="text-accent-ink">
-          {error}
+          {shownError}
         </p>
       )}
     </div>
@@ -204,13 +218,13 @@ export function AcpAgentRow({ agent, isDefault = false, onMakeDefault, onChange 
         name={name}
         sub={short}
         action={
-          <Button size="sm" disabled={busy} onClick={() => void choose({ enabled: true })}>
-            {busy ? t('models.connecting') : t('models.connect')}
+          <Button size="sm" disabled={busy} onClick={() => void choose({ enabled: true }, 'connect')}>
+            {pending === 'connect' ? t('models.connecting') : t('models.connect')}
           </Button>
         }
         panel={panel}
         /* the error must show even when the shell answered nothing (native null) */
-        open={!!error || !!(native && (!native.installed || !native.connected))}
+        open={!!shownError || !!(native && (!native.installed || !native.connected))}
       />
     )
   }
@@ -219,7 +233,7 @@ export function AcpAgentRow({ agent, isDefault = false, onMakeDefault, onChange 
     { id: 'default', name: t('models.effortDefault'), blurb: t('models.acpEffortDefaultBlurb', { name }) },
     ...effortOptions(RUNNER[agent], menu.efforts, t),
   ]
-  const showPanel = running || !!runnerError || !!error || !native?.connected
+  const showPanel = running || !!runnerError || !!shownError || !native?.connected
   return (
     <ConnectionRow
       mark={mark}

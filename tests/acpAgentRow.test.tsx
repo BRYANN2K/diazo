@@ -76,6 +76,26 @@ describe('a desktop agent over ACP in Settings', () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('acp_status is not allowed')
     expect(button('Refresh')).toBeTruthy()
   })
+  it('keeps Connect and Sign in as they are while Refresh waits', async () => {
+    mocks.state = { ...mocks.state, native: { installed: true, connected: false, enabled: false } }
+    await mount('devin')
+    let answer!: (value: unknown) => void
+    mocks.refresh.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)))
+    act(() => button('Refresh')!.click())
+    expect(button('Connect')).toBeTruthy()
+    expect(button('Sign in')).toBeTruthy()
+    expect(button('Connecting…')).toBeUndefined()
+    await act(async () => answer({ native: { installed: true, connected: false } }))
+  })
+  it('clears a failed refresh once a later one succeeds', async () => {
+    mocks.state = { ...idle, preference: null, native: null }
+    mocks.refresh.mockRejectedValueOnce(new Error('shell asleep'))
+    await mount('grok')
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe('shell asleep')
+    mocks.refresh.mockResolvedValueOnce({ native: { installed: true, connected: true } })
+    await act(async () => window.dispatchEvent(new Event('focus')))
+    expect(container.querySelector('[role="alert"]')).toBeNull()
+  })
   it('opens the row with the error when connecting fails', async () => {
     mocks.select.mockRejectedValueOnce(new Error('Server unreachable'))
     await mount('grok')
