@@ -69,9 +69,21 @@ The ElevenLabs key connects through `POST /api/model-account/elevenlabs-key` wit
 
 Invalid input, unavailable models and active-job conflicts return 400 with an error. Foreign jobs return 404; denied canvas access and non-admin install requests return 403. Provider failures become a failed job with a generic error, never a raw provider body or secret.
 
+## Desktop shell commands
+
+`desktop/src-tauri/src/speech.rs` implements the install and engine half of the desktop target. Five Tauri commands, all re-validated natively:
+
+- `speech_models` returns `{ models: [{ id, engine, state }] }` — the list a poll heartbeat reports.
+- `speech_engine_status` resolves the `diazo-speech` sidecar binary (the app's engines dir, then PATH) and returns its path.
+- `speech_install` takes a `CatalogEntry` JSON plus an optional HF token. `mirror` sources download `SHA256SUMS` and `SHA256SUMS.minisig` from the release, verify the signature against the updater's release key (Ed25519 over the Blake2b-512 prehash), then verify each file's SHA-256. `hf` sources require a 40-hex commit and take each file's `sha256` from the catalog, or from HF's `lfs.oid` metadata at that commit when the catalog leaves it empty. Downloads land under `<appData>/speech/models/<id>/`, resume a `.part` with a Range request, and only rename into place after the hash passes. One install per model at a time; a token never reaches a mirror URL.
+- `speech_uninstall` removes the manifest row and the model directory.
+- `speech_run` runs one claimed job: `diazo-speech --kind <asr|tts|speakers> --engine <runtime> --model <model_dir> --in <in> --out <out>` inside `<appData>/speech/work/<jobId>/`, killed past 10 minutes, output path returned. The input file is the media the poll downloaded; the engine log stays in the work dir.
+
+The sidecar binary itself ships in a `speech-engines-v*` release (not built yet); `speech_run` fails cleanly until then.
+
 ## Desktop relay
 
-The backend relay is implemented. The shell installer and engine worker are pending; a browser must not treat this relay as evidence that speech runs on the Mac.
+The backend relay is implemented. The shell's install and run commands are wired above, but no `diazo-speech` sidecar binary exists yet, so jobs cannot execute on a Mac end to end.
 
 1. `POST /api/speech/desktop/poll` with `{ deviceId, models: string[], smoke? }` reports this user's ready models and atomically claims matching jobs. Only this person's jobs with current canvas edit access are returned. The response is `{ jobs }`, each claimed job running with deviceId set. Availability expires after 30 seconds. `smoke` carries the shell's custom-model smoke reports `[{ modelId, ok, log, tookMs }]`; only the reporting user's own desktop rows take them, and a pass flips `enabled` to true.
 2. A transcription worker reads the job's canvas asset using the authenticated session and runs its local engine. It posts `POST /api/speech/desktop/finish/:id` with `{ deviceId, state: 'done', transcript }`. The server validates the words and stores them on the original media row in the same transaction as the terminal job update.
