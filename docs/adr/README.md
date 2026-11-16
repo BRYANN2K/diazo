@@ -35,3 +35,4 @@ ADRs 0001 to 0012 record decisions Bryan made before this index existed; their d
 | [0012](0012-self-host-the-ui-fonts.md)                                | Self-host the UI fonts (Direction B Hyperlegible)                                  | Accepted, 2026-11-15         |
 | [0013](0013-plan-work-with-stip.md)                                   | Plan and track work with Stip                                                      | Accepted, updated 2026-11-16 |
 | [0014](0014-run-speech-engines-on-the-desktop-or-the-server.md)       | Run speech engines on the desktop or the server, voice-over on ElevenLabs too      | Accepted, 2026-11-16         |
+| [0015](0015-run-agent-scripts-in-a-quickjs-wasm-sandbox.md)           | Run agent scripts as TypeScript in a QuickJS WebAssembly sandbox                   | Accepted, 2026-11-16         |

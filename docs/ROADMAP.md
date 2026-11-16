@@ -16,10 +16,11 @@ Each row is a Stip change in `.workflow/changes/<id>/`. Status is its Stip phase
 
 ## Next
 
-| Change             | Outcome                                                                          | Serves | Depends on                                   | Status    |
-| ------------------ | -------------------------------------------------------------------------------- | ------ | -------------------------------------------- | --------- |
-| `orca-integration` | Ready for dev → an Orca worktree and coding agent, with live status on the frame | G4     | `frontend-redesign` (Inspector)              | exploring |
-| `motion-studio`    | Phases 2 to 5: keyframes and code export, media and captions, 3D, server renders | G7     | `motion-studio-backend`, `frontend-redesign` | exploring |
+| Change             | Outcome                                                                                                                                   | Serves | Depends on                                   | Status    |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- | ------ | -------------------------------------------- | --------- |
+| `orca-integration` | Ready for dev → an Orca worktree and coding agent, with live status on the frame                                                          | G4     | `frontend-redesign` (Inspector)              | exploring |
+| `motion-studio`    | Phases 2 to 5: keyframes and code export, media and captions, 3D, server renders                                                          | G7     | `motion-studio-backend`, `frontend-redesign` | exploring |
+| `agent-cost`       | Script tools and server-side checks: a canvas job in about 9 model turns instead of 24 to 52, with renders equal or better (quality gate) | G3, G5 | –                                            | draft     |
 
 Motion Studio phases, from [its proposal](../.workflow/changes/motion-studio/proposal.md):
 
