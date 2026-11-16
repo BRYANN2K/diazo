@@ -223,10 +223,11 @@ const PanelTab = React.forwardRef<
   )
 })
 
-/** A tab with an icon and its label (the redesign retires icon-only strips:
- *  tabs are icon + label), on the strip's gliding surface. `compact` folds
- *  the label away when the strip runs out of room (useFitLevel): the icon
- *  stays, the label is kept for screen readers and the title for a hover. */
+/** A tab with an icon and its label, on the strip's gliding surface. `compact`
+ *  folds the label away when the strip runs out of room (useFitLevel): the
+ *  icon stays, the label is kept as the accessible name, and the design
+ *  system's Tooltip shows it on hover and keyboard focus. `title` is that
+ *  tooltip's text when it should say more than the label. */
 const PanelIconTab = React.forwardRef<
   HTMLButtonElement,
   React.ComponentProps<typeof TabsPrimitive.Trigger> & {
@@ -235,11 +236,12 @@ const PanelIconTab = React.forwardRef<
     badge?: React.ReactNode
     compact?: boolean
   }
->(function PanelIconTab({ className, icon, badge, compact = false, children, ...props }, ref) {
-  return (
+>(function PanelIconTab({ className, icon, badge, compact = false, title, children, ...props }, ref) {
+  const tab = (
     <TabsPrimitive.Trigger
       ref={ref}
       data-slot="panel-icon-tab"
+      data-compact={compact ? '' : undefined}
       className={cn(
         'group relative z-[1] inline-flex h-[26px] shrink-0 items-center rounded-[7px] px-2.25 font-sans text-label font-normal normal-case text-ink-2 transition-colors duration-fast hover:text-ink hover:duration-instant focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal data-[state=active]:font-medium data-[state=active]:text-ink',
         className,
@@ -250,6 +252,13 @@ const PanelIconTab = React.forwardRef<
       <span className={compact ? 'sr-only' : 'block whitespace-nowrap pl-1.25'}>{children}</span>
       {badge}
     </TabsPrimitive.Trigger>
+  )
+  return compact ? (
+    <Tooltip label={title ?? children} side="bottom">
+      {tab}
+    </Tooltip>
+  ) : (
+    tab
   )
 })
 

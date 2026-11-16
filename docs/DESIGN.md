@@ -70,7 +70,9 @@ Role tokens in `src/styles.css`, light then dark (`.dark`); Tailwind classes `bg
 
 - **Weights**: 400 for text, 500 for labels, buttons and emphasis, 600 for headings and badges.
 - Icons: Lucide via `src/components/ui/icons.tsx`, stroke 1.5 (`ICON_STROKE`), 14 / 16 / 20px, and
-  nowhere else. Tabs are icon + label. One glyph per destination: Community is `WebIcon`,
+  nowhere else. Tabs are icon + label; when a strip runs out of room (`useFitLevel`), the tabs not
+  in view fold to their icon first (`PanelIconTab compact`), then the open one, each keeping its
+  label as the accessible name and in a `Tooltip`. One glyph per destination: Community is `WebIcon`,
   Automations `WorkflowIcon`, Integrations `BlocksIcon`.
 
 ## Shape and depth

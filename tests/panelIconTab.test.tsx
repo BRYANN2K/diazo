@@ -3,10 +3,12 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { PanelIconTab, PanelTabPanel, PanelTabs, PanelTabsRoot } from '../src/components/ui/panel'
+import { TooltipProvider } from '../src/components/ui/tooltip'
 
 /**
- * The side panel's tab strip: every tab is an icon and its label (the
- * redesign retires icon-only strips), over a gliding surface indicator.
+ * The side panel's tab strip: every tab is an icon and its label over a
+ * gliding surface indicator; a `compact` tab folds its label away when the
+ * strip runs out of room, keeping it as the accessible name and a tooltip.
  */
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -85,5 +87,60 @@ describe('PanelIconTab', () => {
     expect(current).toBe('comments')
     expect(container.textContent).toContain('comments here')
     expect(container.textContent).not.toContain('agents here')
+  })
+})
+
+describe('PanelIconTab compact', () => {
+  function renderCompact() {
+    act(() =>
+      root.render(
+        <TooltipProvider delayDuration={0}>
+          <PanelTabsRoot value="layers">
+            <PanelTabs>
+              <PanelIconTab value="layers" icon={<svg data-testid="layers" />}>
+                Layers
+              </PanelIconTab>
+              <PanelIconTab
+                value="assets"
+                compact
+                title="Assets"
+                icon={<svg data-testid="assets" />}
+                badge={<span data-testid="count">2</span>}
+              >
+                Assets
+              </PanelIconTab>
+            </PanelTabs>
+          </PanelTabsRoot>
+        </TooltipProvider>,
+      ),
+    )
+  }
+
+  it('keeps the label as the accessible name and the icon in view', () => {
+    renderCompact()
+    const folded = tab('Assets')
+    const label = [...folded.querySelectorAll('span')].find((el) => el.textContent === 'Assets')
+    expect(label?.className).toContain('sr-only')
+    expect(folded.querySelector('[data-testid="assets"]')).not.toBeNull()
+    expect(folded.hasAttribute('data-compact')).toBe(true)
+    /* the open tab is untouched */
+    expect(tab('Layers').hasAttribute('data-compact')).toBe(false)
+  })
+
+  it('keeps the badge on a folded tab', () => {
+    renderCompact()
+    expect(tab('Assets').querySelector('[data-testid="count"]')?.textContent).toBe('2')
+  })
+
+  it('names the folded tab in a design system tooltip, not a native title', async () => {
+    renderCompact()
+    const folded = tab('Assets')
+    expect(folded.getAttribute('title')).toBeNull()
+    await act(async () => {
+      folded.focus()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    })
+    const tip = document.querySelector('[data-slot="tooltip"]')
+    expect(tip?.textContent).toContain('Assets')
   })
 })

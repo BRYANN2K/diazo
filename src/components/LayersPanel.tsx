@@ -567,7 +567,7 @@ export function LayersPanel({
               value="components"
               compact={fold('components')}
               icon={<ComponentIcon />}
-              title={t('components.title')}
+              title={t('panels.layersTabAssets')}
             >
               {t('panels.layersTabAssets')}
             </PanelIconTab>
