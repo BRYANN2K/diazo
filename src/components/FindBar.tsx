@@ -533,14 +533,17 @@ export function FindBar({
     <div
       role="search"
       aria-label={t('actions.findLabel')}
+      /* ⌘F 1: a palette centred over the stage, a paper sheet at elevation 4
+         that opens on the soft spring; it widens into list + live preview
+         once there is something to show */
       className={cn(
-        'absolute z-40 flex max-h-[calc(100vh-var(--chrome-top,0px)-24px)] flex-col overflow-hidden rounded-panel bg-surface shadow-float',
-        'animate-in fade-in-0 slide-in-from-top-1 duration-150 motion-reduce:animate-none',
-        wide ? 'w-[min(820px,calc(100vw-24px))]' : 'w-[min(460px,calc(100vw-24px))]',
+        'absolute left-1/2 z-40 flex max-h-[calc(100vh-var(--chrome-top,0px)-64px)] -translate-x-1/2 flex-col overflow-hidden rounded-sheet bg-paper shadow-modal',
+        'animate-[modal-in_400ms_var(--spring-soft)] transition-[width] duration-slow ease-in-out',
+        wide ? 'w-[min(900px,calc(100vw-24px))]' : 'w-[min(600px,calc(100vw-24px))]',
       )}
-      style={{ top: 'calc(var(--chrome-top, 0px) + 10px)', right: 'calc(var(--chrome-right, 0px) + 10px)' }}
+      style={{ top: 'calc(var(--chrome-top, 0px) + 40px)' }}
     >
-      <div className="flex flex-none flex-col gap-2 p-2">
+      <div className="flex flex-none flex-col gap-2 px-3 pt-3 pb-2.5">
         <div className="flex items-center gap-1">
           {canEdit && (
             <IconButton
