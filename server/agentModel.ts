@@ -140,7 +140,7 @@ export async function runAnthropicTurn(
           ...(block.cache ? { cache_control: { type: 'ephemeral' as const } } : {}),
         })),
         tools: req.tools,
-        messages: req.messages,
+        messages: cacheConversation(req.system, req.messages),
       },
       { signal: req.signal },
     )
@@ -158,6 +158,49 @@ export async function runAnthropicTurn(
     stop_reason: stop,
     ...(res.usage ? { usage: fromAnthropicUsage(res.model || model, res.usage) } : {}),
   }
+}
+
+/* ---------------------------------------------------------------- */
+/* conversation caching (change agent-cost, AC-3)                    */
+/* ---------------------------------------------------------------- */
+
+/** Anthropic allows at most four cache breakpoints per request. */
+const BREAKPOINT_LIMIT = 4
+
+/**
+ * Mark the conversation's last message with an ephemeral breakpoint so every
+ * subsequent turn reads the grown transcript from cache instead of re-billing
+ * it as fresh input. Breakpoints already set — on system blocks or on earlier
+ * messages by a caller managing its own window — count toward the four the
+ * API accepts; when they are spent, the request goes out unchanged.
+ */
+export function cacheConversation(
+  system: readonly { cache?: boolean }[],
+  messages: Anthropic.MessageParam[],
+): Anthropic.MessageParam[] {
+  let used = system.filter((block) => block.cache).length
+  for (const message of messages) {
+    if (typeof message.content === 'string') continue
+    for (const block of message.content) used += 'cache_control' in block && block.cache_control ? 1 : 0
+  }
+  const last = messages.at(-1)
+  if (used >= BREAKPOINT_LIMIT || !last) return messages
+  const blocks = typeof last.content === 'string' ? [{ type: 'text' as const, text: last.content }] : [...last.content]
+  const tail = blocks.at(-1)
+  /* only the block kinds the API lets carry a breakpoint */
+  if (
+    !tail ||
+    (tail.type !== 'text' &&
+      tail.type !== 'image' &&
+      tail.type !== 'document' &&
+      tail.type !== 'tool_use' &&
+      tail.type !== 'tool_result')
+  ) {
+    return messages
+  }
+  if (tail.cache_control) return messages
+  blocks[blocks.length - 1] = { ...tail, cache_control: { type: 'ephemeral' as const } }
+  return [...messages.slice(0, -1), { ...last, content: blocks }]
 }
 
 function azureTier(): AgentModel | null {

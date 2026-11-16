@@ -70,7 +70,7 @@ describe('toolCallTotals', () => {
     expect(totals.imagePixels).toBe(108)
     expect(totals.failed).toBe(1)
     expect(totals.byTool.create_frame).toEqual({ calls: 2, resultBytes: 150, imagePixels: 8 })
-    expect(totals.byTool.get_frame_screenshot.calls).toBe(1)
+    expect(totals.byTool.get_frame_screenshot?.calls).toBe(1)
   })
 })
 

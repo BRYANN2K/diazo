@@ -58,7 +58,7 @@ function serveStream(res: http.ServerResponse) {
 
 let server: http.Server
 let client: Anthropic
-const requests: { stream?: boolean; max_tokens?: number; system?: unknown }[] = []
+const requests: { stream?: boolean; max_tokens?: number; system?: unknown; messages?: unknown }[] = []
 
 beforeAll(async () => {
   server = http.createServer((req, res) => {
@@ -107,6 +107,71 @@ describe('runAnthropicTurn', () => {
     expect(requests.at(-1)?.system).toEqual([
       { type: 'text', text: 'cached', cache_control: { type: 'ephemeral' } },
       { type: 'text', text: 'fresh' },
+    ])
+  })
+
+  /* AC-3: every turn ends with a breakpoint on the last message, so the next
+     turn reads the grown transcript from cache; never more than four total */
+  it('marks the last message with an ephemeral breakpoint', async () => {
+    const original = [
+      { role: 'user' as const, content: 'first' },
+      {
+        role: 'user' as const,
+        content: [
+          { type: 'text' as const, text: 'context' },
+          { type: 'tool_result' as const, tool_use_id: 'toolu_1', content: 'done' },
+        ],
+      },
+    ]
+    await runAnthropicTurn(client, 'fake', {
+      system: [{ text: 'sys', cache: true }],
+      tools: [],
+      messages: original,
+      maxTokens: 1000,
+    })
+    expect(requests.at(-1)?.messages).toEqual([
+      { role: 'user', content: 'first' },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'context' },
+          { type: 'tool_result', tool_use_id: 'toolu_1', content: 'done', cache_control: { type: 'ephemeral' } },
+        ],
+      },
+    ])
+    /* the caller's array and blocks stay untouched */
+    expect(original[0]!.content).toBe('first')
+    expect(original[1]!.content[1]).not.toHaveProperty('cache_control')
+  })
+
+  it('spends no breakpoint when the request already carries four', async () => {
+    await runAnthropicTurn(client, 'fake', {
+      system: [
+        { text: 'a', cache: true },
+        { text: 'b', cache: true },
+      ],
+      tools: [],
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'x', cache_control: { type: 'ephemeral' } },
+            { type: 'text', text: 'y', cache_control: { type: 'ephemeral' } },
+          ],
+        },
+        { role: 'user', content: 'unmarked' },
+      ],
+      maxTokens: 1000,
+    })
+    expect(requests.at(-1)?.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'x', cache_control: { type: 'ephemeral' } },
+          { type: 'text', text: 'y', cache_control: { type: 'ephemeral' } },
+        ],
+      },
+      { role: 'user', content: 'unmarked' },
     ])
   })
 })
