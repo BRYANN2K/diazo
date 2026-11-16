@@ -21,7 +21,6 @@ import { PanelBody } from './ui/panel'
 import { ListHint, ListItem, ListMeta, ListRow, ListSection, ListSummary, ListTitle } from './ui/list'
 import { MarkdownBlock, Modal, ModalActions, ModalLede, ModalSpacer, ModalTitle } from './ui/modal'
 import { ConfirmDialog } from './ui/alert-dialog'
-import { DiazoMark } from './Logo'
 import { SkillModal } from './SkillModal'
 import { getLocale, t as translate, useT } from '@/lib/i18n'
 
@@ -97,21 +96,27 @@ export function MemoryPanel() {
         </div>
       )}
 
+      {/* a rule the distiller proposes from repeated feedback: an agent's
+          suggestion, so it wears the agent tone, on an ordinary card */}
       {pending.map((p) => (
-        <div key={p.id} className="mx-4 mt-3 rounded-[12px] border border-brand bg-surface px-3.5 py-3 shadow-card">
-          <div className="text-[10.5px] font-extrabold uppercase tracking-[0.08em] text-accent-ink">
-            <DiazoMark size={11} /> {t('panels.memorySuggestion')}
-          </div>
-          <div className="mt-1.5 text-[13px] font-semibold leading-[1.45] text-ink">{p.rule.replace(/^-\s*/, '')}</div>
-          <div className="mt-1.5 text-[11.5px] leading-[1.45] text-ink-faint">
-            {p.rationale} · {t('panels.memoryFromDecisions', { count: p.basedOn.length })} → “
-            {p.guideTitle ?? guideTitle({ name: p.guideName })}”
-          </div>
-          <div className="mt-2.5 flex justify-end gap-2">
+        <section
+          key={p.id}
+          aria-label={t('panels.memorySuggestion')}
+          className="mx-3 mt-2 mb-1 flex flex-col gap-2 rounded-card bg-surface p-3 shadow-ring"
+        >
+          <Badge tone="agent" className="self-start">
+            {t('panels.memorySuggestion')}
+          </Badge>
+          <p className="text-copy font-medium text-ink">{p.rule.replace(/^-\s*/, '')}</p>
+          <p className="text-caption text-ink-2">{p.rationale}</p>
+          <p className="truncate text-caption text-ink-3">
+            {t('panels.memoryFromDecisions', { count: p.basedOn.length })} →{' '}
+            <span className="font-medium text-ink-2">{p.guideTitle ?? guideTitle({ name: p.guideName })}</span>
+          </p>
+          <div className="flex justify-end gap-1.5">
             <Button
               variant="ghost"
               size="sm"
-              className="text-[11.5px]"
               onClick={() => api.resolveProposal(canvasId, p.id, false).catch(console.error)}
             >
               {t('panels.memoryDismiss')}
@@ -119,13 +124,12 @@ export function MemoryPanel() {
             <Button
               variant="primary"
               size="sm"
-              className="text-[11.5px]"
               onClick={() => api.resolveProposal(canvasId, p.id, true).catch(console.error)}
             >
               {t('panels.memoryAddToRules')}
             </Button>
           </div>
-        </div>
+        </section>
       ))}
 
       <LocalProjectRow canvasId={canvasId} />
@@ -150,12 +154,7 @@ export function MemoryPanel() {
       <ListSection>
         <span>{t('panels.memoryRules')}</span>
         {!readOnly && (
-          <Button
-            variant="solid"
-            size="sm"
-            className="flex-none text-[11.5px] font-bold"
-            onClick={() => setOpenGuide('')}
-          >
+          <Button variant="ghost" size="sm" className="-my-1 flex-none" onClick={() => setOpenGuide('')}>
             {t('panels.memoryNew')}
           </Button>
         )}
@@ -174,12 +173,7 @@ export function MemoryPanel() {
       <ListSection>
         <span>{t('panels.skills')}</span>
         {!readOnly && (
-          <Button
-            variant="solid"
-            size="sm"
-            className="flex-none text-[11.5px] font-bold"
-            onClick={() => setOpenSkill('')}
-          >
+          <Button variant="ghost" size="sm" className="-my-1 flex-none" onClick={() => setOpenSkill('')}>
             {t('panels.memoryNew')}
           </Button>
         )}

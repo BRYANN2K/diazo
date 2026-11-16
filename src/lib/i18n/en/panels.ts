@@ -69,7 +69,7 @@ export const panels = {
   memoryAddToRules: 'Add to rules',
   memoryNoReferences:
     'No references yet. Pin a frame you like (Pin as reference in its inspector) and agents will copy its colors, type and layout in new designs.',
-  memoryNew: '+ New',
+  memoryNew: 'New',
   memoryRulesHint: 'Style guides every agent reads before designing here.',
   memoryDistilled: 'distilled',
   memoryReference: 'Reference',

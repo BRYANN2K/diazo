@@ -70,7 +70,7 @@ export const panels: Catalog['panels'] = {
   memoryAddToRules: 'Adicionar às regras',
   memoryNoReferences:
     'Nenhuma referência ainda. Fixe um frame de que você gosta (Fixar como referência, no inspetor dele) e os agentes copiarão as cores, a tipografia e o layout dele em novos designs.',
-  memoryNew: '+ Nova',
+  memoryNew: 'Nova',
   memoryRulesHint: 'Guias de estilo que todo agente lê antes de criar aqui.',
   memoryDistilled: 'consolidada',
   memoryReference: 'Referência',
