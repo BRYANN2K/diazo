@@ -172,6 +172,14 @@ upstream pull requests it merged ahead of upstream. Resync notes are in
 - **Run replay** — every frame version and activity line a resident run writes carries its run
   id: open a run from the Usage tab to see its timeline and each frame before and after, then roll
   the whole run back in one undo step (frames edited since need a confirmation).
+- **Agent scripts (opt-in)** — `query_script` and `run_script` let an agent send one TypeScript
+  program instead of many tool calls: it runs in a QuickJS WebAssembly sandbox (no network, file
+  system or timers; 30 s, 64 MB, 200 SDK calls, 40 frame writes, 8 KB result) against a typed
+  `diazo` SDK with the same role gates as the tools. Every run is audited (`script_runs`), can be
+  dry-run or made idempotent, and undoes in one step; a failed run rolls itself back. Deletions,
+  sharing, imports and image generation stay out of scripts. Off instance-wide with
+  `DOOP_AGENT_SCRIPTS=false`; the `code` MCP profile lists just five tools. Script mode stays
+  opt-in until a quality benchmark proves its renders equal or better ([details](agent-scripts-api.md)).
 - **Component ↔ file mapping** — map a component or a frame to its file and export in the linked
   repo (`code_links`). The Inspector's Code row suggests the file from `repo_search` /
   `repo_list`; `get_component`, `get_frame` and a dev task's brief carry the

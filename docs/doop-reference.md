@@ -856,9 +856,12 @@ tools; `tests/agentToolParity.test.ts` lists the MCP tools it does not have yet.
 
 ### MCP tools
 
-42 tools: 40 built in ([`server/mcp.ts`](../server/mcp.ts)) plus the two Linear tools its extension
-registers ([`server/linear/extension.ts`](../server/linear/extension.ts)). Every tool carries
+Diazo lists about ninety tools ([`server/mcp.ts`](../server/mcp.ts)), the two Linear tools its
+extension registers ([`server/linear/extension.ts`](../server/linear/extension.ts)) and the four
+script tools below; this table keeps the core set. Every tool carries
 read-only / destructive / idempotent annotations; the server registers no MCP prompts.
+`/mcp?profile=code` trims the list to `get_guide`, `get_sdk_docs`, `query_script`, `run_script`
+and `get_frame_screenshot` for clients that drive the canvas through scripts.
 
 | Tool                     | What it does                                                                                                                                   |
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -914,6 +917,18 @@ read-only / destructive / idempotent annotations; the server registers no MCP pr
 | **Linear**               |                                                                                                                                                |
 | `list_linear_issues`     | List tickets through the user's Linear connection (open, most recently updated first)                                                          |
 | `get_linear_issue`       | Read a Linear ticket and its description by UUID or identifier                                                                                 |
+| **Scripts**              |                                                                                                                                                |
+| `query_script`           | Run a read-only TypeScript script against the typed `diazo` SDK — canvas, frames, tokens, components, libraries, checks, compositions, search  |
+| `run_script`             | Same, with writes: one bounded run replaces many tool calls (dry-run, idempotency key, per-run audit, one-step undo)                           |
+| `get_sdk_docs`           | One SDK namespace's typings and examples — read before writing a script                                                                        |
+| `revert_script_run`      | Undo everything one `run_script` run changed, as a single action                                                                               |
+
+Scripts run in a QuickJS WebAssembly sandbox with no network, file system or timers — 30 s,
+64 MB, 200 SDK calls, 40 frame writes and an 8 KB result cap. Deletions, sharing, imports and
+image generation are not in the SDK. A screenshot is still asked for once per delivered frame, at
+full resolution, after the numeric checks pass. The contract is
+[`docs/agent-scripts-api.md`](agent-scripts-api.md); script mode is opt-in while the quality
+benchmark gates it. `DOOP_AGENT_SCRIPTS=false` removes both script tools.
 
 Mutating tools accept `agent_name`; the agent then appears in the presence stack (pulsing square avatar),
 gets an "editing" ring + chip on the frame it touched, and its actions land in the activity feed. Agents

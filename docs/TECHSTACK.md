@@ -416,6 +416,39 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   fallback. Tests: `exportScale.test.ts`, the scale and SVG cases in `frameExport.test.ts`,
   `frameRasterBrowser.test.ts` (the SVG opened as a page in a wide window), `exportOptions.test.tsx`
   and `mcpPdfExport.test.ts`.
+- Agent scripts (`agent-cost` change phases 0–1, ADR 0015, contract in
+  `docs/agent-scripts-api.md`): `query_script` (read) and `run_script` (write) run one TypeScript
+  program against a typed `diazo` SDK instead of many tool calls; `get_sdk_docs` serves one
+  namespace's typings and `revert_script_run` undoes a whole run. MCP and the resident agent share
+  `server/scriptRunner.ts` and stay in parity (`agentToolParity.test.ts`). The program runs in
+  QuickJS compiled to WebAssembly inside a worker thread (`server/scriptSandbox.ts`,
+  `server/scriptWorker.ts`, dependency `quickjs-emscripten`): a fresh context per run — no fetch,
+  file system, process, module loader or timers — whose only capability is the `diazo` proxy, its
+  calls host-resolved promises; esbuild strips the types. A limit ends a run with a named error:
+  30 s wall clock, 64 MB, 200 SDK calls, 40 frame writes, 256 KB source, 8 KB of result (raisable
+  to 32 KB with `result_cap`). Every SDK path in `server/scriptSdk.ts` calls the same action as the
+  tool it mirrors behind the same `canvasRole` gate, bound to the one canvas the call names;
+  `shared/scriptToolCoverage.ts` lists each MCP tool as mirrored or excluded (deletes, sharing,
+  approvals, web imports, image generation, repo access stay out) and `AGENT_GUIDELINE_WRITES` /
+  `AGENT_LIBRARY_WRITES` apply unchanged. Edits go through `server/scriptDom.ts` by source offset so
+  untouched markup stays byte-identical; `frames.stream` appends top-level sections through the room
+  so viewers still watch the build. Each run writes one `script_runs` row (migration 0073): source
+  and hash, actor, SDK calls, writes, outcome, plus the before/after slices `restoreScriptState`
+  (`server/actions.ts`) restores as one undo — automatic on a failed or limited run — and the
+  recorded response a repeated `idempotency_key` replays; `dry_run` executes against a cloned draft
+  and returns planned writes and check results. Runs on a canvas serialize (`serializeScript`), and
+  `DOOP_AGENT_SCRIPTS=false` removes both tools. `/mcp?profile=code` trims the surface to five tools
+  (`get_guide`, `get_sdk_docs`, `query_script`, `run_script`, `get_frame_screenshot`); `get_guide`
+  answers per topic (`guideTopic` in `server/guide.ts`) and the `scripts` topic teaches the three
+  refinement rounds on `checks.review` (lint, responsive, measure, contrast, images, fonts, token
+  coverage, redrawn components) then one full-resolution screenshot per delivered frame — the same
+  loop the resident agent runs in script mode. A duel slot can run in script mode; its card shows
+  the check score and the cost resolved through the script run's agent run. The script-mode default
+  stays off until the benchmark passes: `bench/briefs.json` (12 briefs), `bench/qualityRunner.ts`
+  (`bun run bench:agent-quality`) stores renders, scores, blind pairs and a 24-pair human ballot,
+  and `bench/rubric.ts` `gateVerdict` applies the medians-plus-blind-pairs rule. Tests:
+  `scriptSandbox.test.ts`, `scriptSdk.test.ts`, `scriptRunner.test.ts`, `scriptChecks.test.ts`,
+  `scriptTools.test.ts`, `scriptRunsMigration.test.ts`, `qualityRunner.test.ts`.
 - Server-side renderer (`server/renderBrowser.ts`, used by `server/screenshot.ts`): every headless
   Chromium page (frame images, MCP screenshots, the resident's checks, PDF
   exports, website imports) goes through one gate of `RENDER_CONCURRENCY` pages (default 4;

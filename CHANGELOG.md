@@ -48,6 +48,7 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 - Build identity at `/api/version` and in Settings → About, and an "Update available" card for admins when a newer image of `main` is built.
 - One-command install on a Mac: the local server in Apple's `container`, and the desktop app through a curl script.
 - The installers detect the system: the desktop app installs on Linux (.deb, .rpm or AppImage) and Windows (a PowerShell script), and the all-in-one install offers a local server (Docker or Podman on Linux, with a systemd user unit) or a remote one (`--remote <url>`, checked like the app's own server choice).
+- Agent script tools (opt-in): `query_script` and `run_script` run one TypeScript program against a typed `diazo` SDK in a QuickJS WebAssembly sandbox — audited per run, undoable in one step, off with `DOOP_AGENT_SCRIPTS=false`, and kept opt-in until a quality benchmark gates it (`docs/agent-scripts-api.md`).
 
 ### Changed
 
