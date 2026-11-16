@@ -100,6 +100,30 @@ clears the flag anyway. It quits a running Diazo first and reopens it after.
 `--uninstall` removes the app; `~/Library/Application Support/dev.bryann2k.diazo`
 (sign-in, `server.json`, the Chromium profile) is kept by both.
 
+`scripts/install.sh` (the all-in-one install, in the root README) runs this
+script after setting up the local server, and first writes `server.json` as
+`{"url":"http://127.0.0.1:4400"}` unless another server is already chosen
+(`--use-local` replaces it). Before the first launch the identity migration
+(`src/identity_migration.rs`) treats a folder holding only that file as empty,
+so the doop-era sign-in still comes over, and keeps the installer's choice.
+
+### Local Server menu (macOS, 0.16)
+
+`src/local_server.rs` adds Diazo → Local Server for the server
+`scripts/install.sh` runs on this Mac (the `diazo` container, `127.0.0.1:4400`,
+LaunchAgent `dev.bryann2k.diazo.server`): its status (running, starting,
+stopped, not installed; polled every 15 s), Start, Stop… and Restart… (each
+confirmed in a native dialog), Open Logs (the container's last 500 lines into
+`~/Library/Logs/Diazo/container.log`, opened in Console), How to Install It…
+when it is missing, Use This Mac's Server… (through `server_choose`: checked,
+confirmed, restart) and Use Another Server… (opens Settings with
+`?server=choose`, which opens the server settings). Only fixed argument lists
+run (`Action::args`), with the `container` binary found in `/usr/local/bin`,
+`/opt/homebrew/bin` or the login shell's PATH; nothing from the page reaches a
+command. The page reads the status through `local_server_status` and the
+`local-server` event (`src/lib/localServer.ts`, a row in Settings → General →
+About), advertised as `__DIAZO_LOCAL_SERVER__`.
+
 ### Cut a release
 
 Bump the version in `package.json`, both `tauri.conf.json`, both `Cargo.toml`

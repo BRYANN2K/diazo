@@ -325,6 +325,42 @@ curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install
 - Testé sans conteneur par `tests/installLocal.test.ts` (stubs de `container`,
   `uname`, `curl`).
 
+### Tout-en-un (serveur + app)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install.sh | sh
+```
+
+- `scripts/install.sh` ne recopie pas les deux autres : il lance
+  `install-local.sh install` puis `install-desktop.sh` (copies voisines dans un
+  checkout, sinon téléchargées depuis `main`). Prérequis serveur : Apple silicon,
+  macOS 26+, `container` ≥ 1.0 ; sinon lien de téléchargement, proposition
+  `--app-only` (si terminal) et sortie sans rien installer.
+- LaunchAgent `~/Library/LaunchAgents/dev.bryann2k.diazo.server.plist`
+  (`launchctl bootout` puis `bootstrap gui/<uid>`, idempotent) : au login,
+  `diazo autostart` démarre les services `container` et le conteneur si
+  `/healthz` ne répond pas ; logs dans `~/Library/Logs/Diazo/server.log`.
+- `server.json` de l'app (`~/Library/Application Support/dev.bryann2k.diazo`) =
+  `http://127.0.0.1:4400`, sauf si un autre serveur est déjà choisi (y compris
+  celui de l'ancien `design.doop.desktop` pas encore migré) ; `--use-local`
+  l'écrase. Le conteneur reçoit `TRUSTED_ORIGINS=http://127.0.0.1:4400`
+  (better-auth ne fait confiance qu'à `BETTER_AUTH_URL`, `localhost`). La
+  migration d'identité du shell ignore un dossier qui ne contient que ce
+  `server.json` et le garde.
+- Commande `diazo` (le script lui-même, copié dans `~/.diazo/bin/diazo`, les
+  deux installeurs dans `~/.diazo/lib`, lien dans `/usr/local/bin` ou
+  `~/.local/bin`) : `start|stop|restart|status|logs|update|open|uninstall
+[--purge]`. `update` retélécharge les trois scripts et met à jour ce que
+  `~/.diazo/install.conf` indique (serveur, app ou les deux). `diazo-local` /
+  `doop-local` restent (helpers de `install-local.sh`).
+- `--dry-run` imprime les étapes sans rien changer. `--uninstall` garde
+  données, secrets et session de l'app ; `--purge` efface tout.
+- App : menu Diazo → Local Server (`local_server.rs`, desktop 0.16.0) et ligne
+  de statut dans Réglages → Général → À propos. Il faut couper
+  `desktop-v0.16.0` pour que le menu arrive.
+- Tests : `tests/install.test.ts` (stubs `container`, `launchctl`, `curl`,
+  `uname`, `sw_vers`, `open`, `osascript`), tests Rust de `local_server.rs`.
+
 ## Live instance (2026-11-12)
 
 - URL (tailnet only): https://bryann2k-infra-prod.tail35c61f.ts.net:8850

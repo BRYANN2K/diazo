@@ -33,4 +33,11 @@ export const updates: Catalog['updates'] = {
     'Na pasta do seu arquivo compose. Compilado a partir deste repositório? git pull && docker compose up -d --build',
   hintKubernetes: 'O deployment baixa a imagem :main de novo (imagePullPolicy Always).',
   hintSource: 'Na sua cópia do repositório, depois reinicie o servidor.',
+  localServerRow: 'Servidor deste Mac',
+  localRunning: 'Em execução em {url}',
+  localStarting: 'Iniciando em {url}…',
+  localStopped: 'Parado',
+  localNotInstalled: 'Não instalado neste Mac',
+  localInUse: 'Este app o usa',
+  changeServer: 'Trocar de servidor…',
 }

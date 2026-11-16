@@ -21,6 +21,10 @@
 # apply): DOOP_HOME (~/.diazo, or ~/.doop when only that one exists), DOOP_PORT
 # (4400), DOOP_IMAGE, DOOP_NAME (diazo), DOOP_REF (branch built by --build),
 # DOOP_HEALTH_TIMEOUT (s).
+#
+# scripts/install.sh (the all-in-one install of the server and the app) runs
+# this one for the server part and sets DIAZO_COMMAND to its `diazo` command,
+# which the messages then name, since a LaunchAgent starts the server at login.
 
 set -eu
 
@@ -62,6 +66,7 @@ BIN_DIR="$DOOP_HOME/bin"
 ACTION=install
 BUILD=0
 ASSUME_YES=0
+KEEP_DATA=0
 # set by pick_image: the image to run and the extra `container run` flags it needs
 RUN_IMAGE=
 RUN_PLATFORM=
@@ -88,6 +93,7 @@ Commands:
 Options:
   --build           build the image on this Mac from source instead of pulling it
   --yes, -y         uninstall: delete the data folder without asking
+  --keep-data       uninstall: keep the data folder without asking
   --stop, --uninstall, --start, --status, --logs, --update
                     same as the commands above
   -h, --help        this help
@@ -107,6 +113,7 @@ parse_args() {
       uninstall | --uninstall) ACTION=uninstall ;;
       --build) BUILD=1 ;;
       -y | --yes) ASSUME_YES=1 ;;
+      --keep-data) KEEP_DATA=1 ;;
       -h | --help | help) ACTION=help ;;
       *) die "unknown argument: $1 (try --help)" ;;
     esac
@@ -265,6 +272,7 @@ run_args() {
     --volume "$DATA_DIR:/app/data" \
     --env-file "$ENV_FILE" \
     --env "BETTER_AUTH_URL=http://localhost:$DOOP_PORT" \
+    --env "TRUSTED_ORIGINS=http://127.0.0.1:$DOOP_PORT" \
     --env PORT=4400 \
     --env DOOP_INSTALL=local
   if [ "$RUN_PLATFORM" = amd64 ]; then
@@ -301,14 +309,20 @@ wait_healthy() {
 }
 
 ready() {
+  manage="$BIN_DIR/diazo-local [start|stop|restart|status|logs|update|uninstall]"
+  reboot="After a reboot, run: $BIN_DIR/diazo-local start"
+  if [ -n "${DIAZO_COMMAND:-}" ]; then
+    manage="$DIAZO_COMMAND [start|stop|restart|status|logs|update|open|uninstall]"
+    reboot="It starts again at login (LaunchAgent dev.bryann2k.diazo.server)."
+  fi
   cat <<EOF
 
 Diazo is running: http://localhost:$DOOP_PORT
   MCP endpoint:  http://localhost:$DOOP_PORT/mcp
   data:          $DATA_DIR
   secrets:       $ENV_FILE
-  manage it:     $BIN_DIR/diazo-local [start|stop|restart|status|logs|update|uninstall]
-After a reboot, run: $BIN_DIR/diazo-local start
+  manage it:     $manage
+$reboot
 EOF
 }
 
@@ -380,7 +394,9 @@ do_uninstall() {
   done
   say "container and image removed"
   if [ -d "$DOOP_HOME" ]; then
-    if confirm "Delete $DOOP_HOME (every canvas, upload and secret)?"; then
+    if [ "$KEEP_DATA" = 1 ]; then
+      say "kept $DOOP_HOME"
+    elif confirm "Delete $DOOP_HOME (every canvas, upload and secret)?"; then
       rm -rf "$DOOP_HOME"
       say "deleted $DOOP_HOME"
     else

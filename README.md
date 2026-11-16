@@ -17,6 +17,18 @@ Diazo started as a fork of doop, the open-source multiplayer design canvas by Ke
 
 Diazo runs on your own machine or your own server. Your canvases, uploads and keys stay there.
 
+### All in one (Mac): the server and the app
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install.sh | sh
+```
+
+Sets up the server on `127.0.0.1:4400` (Apple `container`, data in `~/.diazo`), starts it at every login, installs `Diazo.app` pointed at it, and opens the app on the sign-up screen: the first account is the admin. Needs Apple silicon, macOS 26 and `container` 1.0 or later; the script says where to get `container` when it is missing.
+
+It also installs the `diazo` command: `diazo start|stop|restart|status|logs|update|open|uninstall [--purge]`. The app's menu has the same controls under Diazo → Local Server. Options: `--app-only`, `--server-only`, `--use-local` (point the app at this Mac's server even if another one is chosen), `--version X.Y.Z` (the app's release), `--dry-run`, `--uninstall [--purge]`. Run it again, or `diazo update`, to update both. Canvases, secrets and the app's server choice are kept.
+
+The two parts also install on their own, as below.
+
 ### Desktop app (Mac)
 
 ```sh
@@ -35,7 +47,7 @@ Diazo is free and not notarized by Apple, because notarization needs a paid Appl
 curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install-local.sh | sh
 ```
 
-One container with Apple's `container` on `127.0.0.1:4400`, data in `~/.diazo`. Run it again to update; `diazo-local` starts, stops, updates or uninstalls it. Needs macOS 26 and `container` 1.0 or later.
+One container with Apple's `container` on `127.0.0.1:4400`, data in `~/.diazo`. Run it again to update; `diazo-local` starts, stops, updates or uninstalls it. It does not start at login (the all-in-one install adds that). Needs macOS 26 and `container` 1.0 or later.
 
 ### Your own server
 
