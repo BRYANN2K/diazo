@@ -4,7 +4,6 @@
  * touches the store, the room or the clock. The dispatcher (scriptSdk.ts)
  * owns the writes these helpers prepare.
  */
-import { serialize } from 'parse5'
 import {
   attr,
   bodyOf,
@@ -220,120 +219,66 @@ function setAttr(el: Element, name: string, value: string | null): void {
   else el.attrs.push({ name, value })
 }
 
-const NO_TEXT = new Set(['script', 'style'])
-
-function applyOpsOnDoc(doc: Document, html: string, ops: EditOp[]): EditOutcome {
-  const failed: { index: number; reason: string }[] = []
+/** Apply source splices in order. Untouched markup stays byte-identical. */
+export function applyEditOps(source: string, ops: EditOp[]): EditOutcome {
+  let html = source
   let applied = 0
-  let dirty = false
-  ops.forEach((op, index) => {
+  const failed: { index: number; reason: string }[] = []
+  const escape = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;')
+  for (const [index, op] of ops.entries()) {
     try {
+      let start: number, end: number, replacement: string
       if (op.op === 'replace') {
-        const first = html.indexOf(op.find)
-        if (first < 0 || html.indexOf(op.find, first + 1) >= 0) {
-          failed.push({ index, reason: 'find must occur exactly once' })
-          return
-        }
-        html = html.slice(0, first) + op.replace + html.slice(first + op.find.length)
-        applied++
-        return
-      }
-      /* an empty element id targets <body> — insert's append shortcut */
-      const el = op.element === '' && op.op === 'insert' ? bodyOf(doc) : byDoopId(doc, op.element)
-      if (!el) {
-        failed.push({ index, reason: `no element with data-doop-id “${op.element}”` })
-        return
-      }
-      switch (op.op) {
-        case 'style':
-          styleSet(el, op.property, op.value)
-          break
-        case 'attr':
-          if (op.name.startsWith('data-doop-')) {
-            failed.push({ index, reason: 'data-doop-* attributes are managed by the canvas' })
-            return
-          }
-          setAttr(el, op.name, op.value)
-          break
-        case 'text':
-          if (NO_TEXT.has(el.tagName)) {
-            failed.push({ index, reason: `<${el.tagName}> does not take text` })
-            return
-          }
-          el.childNodes = [{ nodeName: '#text', value: op.text, parentNode: el } as never]
-          break
-        case 'insert': {
-          const frag = parseHtml(`<body>${op.html}</body>`)
-          const pieces = elementChildren(bodyOf(frag)!)
-          if (!pieces.length) {
-            failed.push({ index, reason: 'the markup holds no element' })
-            return
-          }
-          let at = el.childNodes.length
-          if (op.before !== undefined) {
-            const idx = el.childNodes.findIndex((n) => isElement(n) && attr(n, 'data-doop-id') === op.before)
-            if (idx < 0) {
-              failed.push({ index, reason: `no child with data-doop-id “${op.before}”` })
-              return
-            }
-            at = idx
-          }
-          for (const piece of pieces) (piece as unknown as { parentNode: Element }).parentNode = el
-          el.childNodes.splice(at, 0, ...pieces)
-          break
-        }
-        case 'remove': {
-          const parent = el.parentNode
-          if (!parent || !('childNodes' in parent)) {
-            failed.push({ index, reason: 'the element has no parent' })
-            return
-          }
-          const i = parent.childNodes.indexOf(el)
-          if (i >= 0) parent.childNodes.splice(i, 1)
-          break
+        if (!op.find || html.indexOf(op.find) < 0 || html.indexOf(op.find, html.indexOf(op.find) + 1) >= 0)
+          throw new Error('find must occur exactly once')
+        start = html.indexOf(op.find)
+        end = start + op.find.length
+        replacement = op.replace
+      } else {
+        const doc = parseHtml(html)
+        const el = op.element === '' && op.op === 'insert' ? bodyOf(doc) : byDoopId(doc, op.element)
+        const loc = el?.sourceCodeLocation
+        if (!el || !loc?.startTag) throw new Error(`no source element with data-doop-id “${op.element}”`)
+        if (op.op === 'style' || op.op === 'attr') {
+          const name = op.op === 'style' ? 'style' : op.name.toLowerCase()
+          if (!/^[a-z_:][-a-z0-9_:.]*$/.test(name) || name.startsWith('data-doop-'))
+            throw new Error('invalid or managed attribute')
+          if (op.op === 'style') styleSet(el, op.property, op.value)
+          else setAttr(el, name, op.value)
+          const value = attr(el, name)
+          const old = loc.attrs?.[name]
+          start = old?.startOffset ?? loc.startTag.endOffset - 1
+          end = old?.endOffset ?? start
+          replacement = value === undefined || value === null ? '' : `${old ? '' : ' '}${name}="${escape(value)}"`
+        } else if (op.op === 'text') {
+          if (['script', 'style'].includes(el.tagName) || !loc.endTag) throw new Error('element does not take text')
+          start = loc.startTag.endOffset
+          end = loc.endTag.startOffset
+          replacement = escape(op.text)
+        } else if (op.op === 'remove') {
+          start = loc.startOffset
+          end = loc.endOffset
+          replacement = ''
+        } else {
+          const before =
+            op.before === undefined
+              ? undefined
+              : elementChildren(el).find((child) => attr(child, 'data-doop-id') === op.before)
+          if (op.before !== undefined && !before) throw new Error('no matching child before insertion')
+          const at = before?.sourceCodeLocation?.startOffset ?? loc.endTag?.startOffset
+          if (at === undefined) throw new Error('element cannot contain markup')
+          start = at
+          end = at
+          replacement = op.html
         }
       }
-      dirty = true
+      html = html.slice(0, start) + replacement + html.slice(end)
       applied++
     } catch (error) {
       failed.push({ index, reason: error instanceof Error ? error.message : String(error) })
     }
-  })
-  return { html: dirty ? serialize(doc) : html, applied, failed }
-}
-
-/** A batched frame edit. A `replace` op re-parses the document for the
- *  element ops that follow it. */
-export function applyEditOps(source: string, ops: EditOp[]): EditOutcome {
-  let html = source
-  let doc = parseHtml(source)
-  let applied = 0
-  const failed: { index: number; reason: string }[] = []
-  /* run the batch in order; a string replace invalidates the parsed tree */
-  for (let i = 0; i < ops.length; i++) {
-    const op = ops[i]!
-    if (op.op === 'replace') {
-      const one = applyOpsOnDoc(doc, html, [op])
-      html = one.html
-      applied += one.applied
-      failed.push(...one.failed.map((f) => ({ index: i, reason: f.reason })))
-      if (one.applied) doc = parseHtml(html)
-      continue
-    }
-    /* run the longest run of element ops on the same parse */
-    const batch: EditOp[] = []
-    while (i < ops.length && ops[i]!.op !== 'replace') {
-      batch.push(ops[i]!)
-      i++
-    }
-    i--
-    const result = applyOpsOnDoc(doc, html, batch)
-    html = result.html
-    applied += result.applied
-    failed.push(...result.failed.map((f) => ({ index: ops.indexOf(batch[f.index]!), reason: f.reason })))
-    if (result.applied) doc = parseHtml(html)
   }
-  return { html, applied, failed: failed.sort((a, b) => a.index - b.index) }
+  return { html, applied, failed }
 }
 
 /* ------------------------------------------------------------------ */
@@ -438,25 +383,34 @@ export function replaceValues(
     count++
     return `var(--${name.replace(/^--/, '')})`
   }
-  let out = html
-  if (input.kinds.includes('color')) {
-    out = out.replace(
-      /((?:color|background|border|fill|stroke|outline|box-shadow|text-shadow)\s*:\s*)([^;}]+)/g,
-      (_m, decl: string, value: string) => decl + value.replace(COLOR_RE, (lit) => swap(lit.trim(), 'color')),
+  const swapCss = (css: string) => {
+    let out = css
+    if (input.kinds.includes('color')) {
+      out = out.replace(
+        /((?:color|background|border|fill|stroke|outline|box-shadow|text-shadow)\s*:\s*)([^;}]+)/g,
+        (_m, decl: string, value: string) => decl + value.replace(COLOR_RE, (lit) => swap(lit.trim(), 'color')),
+      )
+    }
+    if (input.kinds.includes('radius')) {
+      out = out.replace(RADIUS_RE, (m, value: string) => m.replace(value, swap(value, 'radius')))
+    }
+    if (input.kinds.includes('spacing')) {
+      out = out.replace(SPACING_RE, (m, value: string) => m.replace(value, swap(value, 'spacing')))
+    }
+    if (input.kinds.includes('font')) {
+      out = out.replace(FAMILY_RE, (m, value: string) => m.replace(value, swap(value, 'font')))
+    }
+    if (input.kinds.includes('fontSize')) {
+      out = out.replace(SIZE_RE, (m, value: string) => m.replace(value, swap(value, 'fontSize')))
+    }
+    return out
+  }
+  const out = html
+    .replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (_m, a: string, css: string, b: string) => a + swapCss(css) + b)
+    .replace(
+      /(\bstyle\s*=\s*)(["'])([\s\S]*?)\2/gi,
+      (_m, prefix: string, quote: string, css: string) => prefix + quote + swapCss(css) + quote,
     )
-  }
-  if (input.kinds.includes('radius')) {
-    out = out.replace(RADIUS_RE, (m, value: string) => m.replace(value, swap(value, 'radius')))
-  }
-  if (input.kinds.includes('spacing')) {
-    out = out.replace(SPACING_RE, (m, value: string) => m.replace(value, swap(value, 'spacing')))
-  }
-  if (input.kinds.includes('font')) {
-    out = out.replace(FAMILY_RE, (m, value: string) => m.replace(value, swap(value, 'font')))
-  }
-  if (input.kinds.includes('fontSize')) {
-    out = out.replace(SIZE_RE, (m, value: string) => m.replace(value, swap(value, 'fontSize')))
-  }
   return { html: out, count, unmapped: [...unmapped.entries()].map(([value, kind]) => ({ value, kind })) }
 }
 

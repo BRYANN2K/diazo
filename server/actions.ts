@@ -72,6 +72,7 @@ import {
 } from '../shared/chat.ts'
 import type {
   Actor,
+  Canvas,
   CanvasGuide,
   ActorKind,
   ActivityItem,
@@ -193,7 +194,10 @@ export function getActivity(canvasId: string): ActivityItem[] {
   return activityLog.get(canvasId) ?? []
 }
 
-function logActivity(canvasId: string, actor: Actor, message: string, frameId?: string) {
+export const scriptActivityRuns = new Set<string>()
+
+export function logActivity(canvasId: string, actor: Actor, message: string, frameId?: string) {
+  if (actor.runId && scriptActivityRuns.has(actor.runId)) return
   const item: ActivityItem = {
     id: nanoid(8),
     actorName: actor.name,
@@ -3540,4 +3544,92 @@ export function mediaTranscribed(
   transcript: import('../shared/motionMedia.ts').Transcript,
 ) {
   broadcast(canvasId, { type: 'media:transcribed', mediaId, transcript })
+}
+
+/** Restore only script-touched entities; refuse the whole undo before changing
+ * anything if a collaborator has since modified one of them. */
+export function restoreScriptState(before: Canvas, after: Canvas, actor: Actor): void {
+  const canvas = store.getCanvas(before.id)
+  if (!canvas) throw new Error('the canvas is gone')
+  const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+  const changed = <T>(a: T[], b: T[], key: (v: T) => string) => {
+    const ids = new Set([...a, ...b].map(key))
+    return [...ids].filter(
+      (id) =>
+        !equal(
+          a.find((v) => key(v) === id),
+          b.find((v) => key(v) === id),
+        ),
+    )
+  }
+  const frames = changed(before.frames, after.frames, (v) => v.id)
+  const tokens = changed(before.tokens ?? [], after.tokens ?? [], (v) => v.name)
+  const components = changed(before.components ?? [], after.components ?? [], (v) => v.id)
+  const compositions = changed(before.compositions ?? [], after.compositions ?? [], (v) => v.pageId)
+  const assertSame = (a: unknown, b: unknown) => {
+    if (!equal(a, b)) throw new Error('script undo conflict: target changed since the run')
+  }
+  for (const id of frames)
+    assertSame(
+      store.getFrame(id),
+      after.frames.find((f) => f.id === id),
+    )
+  for (const name of tokens)
+    assertSame(
+      canvas.tokens?.find((t) => t.name === name),
+      after.tokens?.find((t) => t.name === name),
+    )
+  for (const id of components)
+    assertSame(
+      canvas.components?.find((c) => c.id === id),
+      after.components?.find((c) => c.id === id),
+    )
+  for (const id of compositions)
+    assertSame(
+      canvas.compositions?.find((c) => c.pageId === id),
+      after.compositions?.find((c) => c.pageId === id),
+    )
+  if (!equal(before.tokenThemes, after.tokenThemes)) assertSame(canvas.tokenThemes, after.tokenThemes)
+  for (const id of frames) {
+    const prev = before.frames.find((f) => f.id === id)
+    if (!prev) {
+      store.deleteFrame(id)
+      broadcast(canvas.id, { type: 'frame:deleted', frameId: id, actor })
+    } else {
+      const frame = store.getFrame(id)!
+      for (const key of Object.keys(frame))
+        if (!(key in prev)) delete (frame as unknown as Record<string, unknown>)[key]
+      Object.assign(frame, structuredClone(prev))
+      persist.saveFrame(frame)
+      broadcast(canvas.id, { type: 'frame:updated', frame, actor })
+    }
+  }
+  for (const name of tokens) {
+    const prev = before.tokens?.find((t) => t.name === name)
+    canvas.tokens = (canvas.tokens ?? []).filter((t) => t.name !== name)
+    if (prev) {
+      canvas.tokens.push(structuredClone(prev))
+      persist.saveToken(canvas.id, prev)
+    } else persist.deleteToken(canvas.id, name)
+  }
+  if (!equal(before.tokenThemes, after.tokenThemes)) canvas.tokenThemes = structuredClone(before.tokenThemes)
+  if (tokens.length || !equal(before.tokenThemes, after.tokenThemes))
+    broadcast(canvas.id, { type: 'tokens', tokens: canvas.tokens ?? [], themes: canvas.tokenThemes ?? [], actor })
+  for (const id of components) {
+    const prev = before.components?.find((c) => c.id === id)
+    if (prev) {
+      store.saveComponent(canvas.id, structuredClone(prev))
+      broadcastComponent(canvas.id, prev, actor)
+    } else {
+      store.deleteComponent(canvas.id, id)
+      broadcastComponentDeleted(canvas.id, id, actor)
+    }
+  }
+  for (const id of compositions) {
+    const prev = before.compositions?.find((c) => c.pageId === id)
+    if (prev) store.setComposition(canvas.id, structuredClone(prev), actor)
+    else store.deleteComposition(canvas.id, id)
+    broadcast(canvas.id, { type: 'composition', pageId: id, composition: prev ?? null, actor })
+  }
+  persist.saveCanvas(canvas)
 }

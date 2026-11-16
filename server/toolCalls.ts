@@ -51,7 +51,7 @@ export function imagePixelsOf(result: unknown): number {
 /** JSON.stringify size with a floor of 0 — undefined and throws count as nothing. */
 export function byteSize(value: unknown): number {
   try {
-    return JSON.stringify(value)?.length ?? 0
+    return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8')
   } catch {
     return 0
   }

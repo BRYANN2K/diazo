@@ -15,6 +15,7 @@ vi.mock('../server/db/persist.ts', () => ({
 import { dispatchScriptCall, sdkPaths, SdkError, type ScriptRunContext } from '../server/scriptSdk.ts'
 import { store } from '../server/store.ts'
 import { createFrame } from '../server/actions.ts'
+import { reloadEnv } from '../server/env.ts'
 
 const OWNER = 'owner-1'
 const ACTOR = { kind: 'agent' as const, name: 'Script', color: '#000', runId: 'run-1' }
@@ -193,6 +194,21 @@ describe('diazo sdk dispatch', () => {
     }
     store.getCanvas(canvasId)!.linkAccess = undefined
     expect(JSON.stringify(store.getCanvas(canvasId))).toBe(before)
+  })
+
+  it('honours AGENT_LIBRARY_WRITES on a library canvas', async () => {
+    /* AGENT_GUIDELINE_WRITES has no SDK write to refuse: guideline edits are
+       excluded from the SDK entirely (shared/scriptToolCoverage.ts). */
+    store.getCanvas(canvasId)!.library = { enabled: true } as never
+    vi.stubEnv('AGENT_LIBRARY_WRITES', 'false')
+    reloadEnv()
+    try {
+      await expect(call(runCtx(), 'frames.update', frameId, { name: 'x' })).rejects.toThrow(/AGENT_LIBRARY_WRITES/)
+      expect(await call(runCtx(), 'frames.list')).toHaveLength(1)
+    } finally {
+      vi.unstubAllEnvs()
+      reloadEnv()
+    }
   })
 
   it('dry-run edits compose and reads observe them', async () => {

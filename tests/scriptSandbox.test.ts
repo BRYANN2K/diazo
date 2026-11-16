@@ -140,3 +140,30 @@ describe('script sandbox', () => {
     expect(js).not.toContain('as const')
   })
 })
+
+it('refuses module loading and host-constructor escapes without host network calls', async () => {
+  const requests = [] as string[]
+  const fetchSpy = (await import('vitest')).vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    requests.push(String(url))
+    throw new Error('unexpected network')
+  })
+  try {
+    const out = ok(
+      await runInSandbox({
+        source: `
+      const results = [];
+      for (const code of ["fetch('http://127.0.0.1:1')", "require('node:fs')", "process.cwd()", "globalThis.constructor.constructor('return process')()", "setTimeout(()=>{},0)"]) {
+        try { results.push(await eval(code)) } catch { results.push('refused') }
+      }
+      try { await import('node:fs'); results.push('loaded') } catch { results.push('refused') }
+      return results;
+    `,
+        call: noop,
+      }),
+    )
+    expect(out.value).toEqual(Array(6).fill('refused'))
+    expect(requests).toEqual([])
+  } finally {
+    fetchSpy.mockRestore()
+  }
+})

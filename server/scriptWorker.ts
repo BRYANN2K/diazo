@@ -29,6 +29,8 @@ interface RunRequest {
   deadline: number
   memoryBytes: number
   callLimit: number
+  paths?: string[]
+  runInfo?: unknown
 }
 
 interface SdkResult {
@@ -58,12 +60,27 @@ Object.defineProperty(globalThis, 'diazo', {
         __diazo_call(String(ns) + '.' + String(fn), JSON.stringify(args))
           .then((json) => {
             const out = JSON.parse(json)
-            if (out && out.__error) { const e = new Error(out.__error); e.name = 'DiazoError'; throw e }
+            if (out && out.__error) { const e = new Error(out.__error); e.name = 'DiazoError'; e.code = out.code || 'failed'; throw e }
             return out ? out.value : undefined
           }),
     }),
   }),
 })`
+
+function preludeFor(req: RunRequest): string {
+  if (!req.paths) return PRELUDE
+  return (
+    `const diazo = Object.create(null);
+` +
+    req.paths
+      .map((path) => {
+        const [ns, fn] = path.split('.')
+        return `diazo[${JSON.stringify(ns)}] ??= Object.create(null); diazo[${JSON.stringify(ns)}][${JSON.stringify(fn)}] = (...args) => __diazo_call(${JSON.stringify(path)}, JSON.stringify(args)).then(json => { const out = JSON.parse(json); if(out.__error) { const e = new Error(out.__error); e.name = 'DiazoError'; e.code = out.code; throw e } return out.value });`
+      })
+      .join('\n') +
+    `\ndiazo.run = ${JSON.stringify(req.runInfo ?? {})}; Object.values(diazo).forEach(Object.freeze); Object.freeze(diazo);`
+  )
+}
 
 function installDiazoCall(ctx: QuickJSContext): void {
   const fn = ctx.newFunction('__diazo_call', (pathH, argsH) => {
@@ -74,6 +91,8 @@ function installDiazoCall(ctx: QuickJSContext): void {
     if (!callsOpen) {
       deferredJson(ctx, deferred, { __error: 'the run already ended' })
     } else if (callCount > callLimit) {
+      callsOpen = false
+      port.postMessage({ type: 'error', message: 'sdk_calls limit reached', limit: 'sdk_calls' })
       deferredJson(ctx, deferred, { __error: 'sdk_calls limit reached' })
     } else {
       pending.set(seq, deferred)
@@ -117,7 +136,7 @@ async function run(req: RunRequest): Promise<void> {
     /* the guest serializes its own return value: a plain string crosses the
        boundary without dump()'s deep traversal */
     const evalRes = ctx.evalCode(
-      `${PRELUDE}\n;(async () => {\nconst __v = await (async () => {\n${req.source}\n})()\nreturn JSON.stringify(__v === undefined ? null : __v)\n})()`,
+      `${preludeFor(req)}\n;(async () => {\nconst __v = await (async () => {\n${req.source}\n})()\nreturn JSON.stringify(__v === undefined ? null : __v)\n})()`,
       'script.ts',
     )
     const handle = ctx.unwrapResult(evalRes)

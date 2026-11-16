@@ -21,7 +21,8 @@ import { webFontFamilies } from '../shared/webFonts.ts'
 import type { Actor, Canvas, Frame } from '../shared/types.ts'
 import type { ComponentDef, ComponentProp } from '../shared/components.ts'
 import type { DesignToken } from '../shared/designTokens.ts'
-import type { Composition, MotionTrack } from '../shared/motion.ts'
+import { applyCompositionOps, parseOps, buildStoryboard, newComposition, type Composition } from '../shared/motion.ts'
+import { frameStateAt } from '../shared/motionRuntime.ts'
 import { lintFrame } from './lint.ts'
 import { checkFrame } from './frameChecks.ts'
 import { textContrast } from '../shared/frameChecks.ts'
@@ -83,6 +84,51 @@ export interface ScriptRunContext {
   snapshots: Map<string, { frameId: string; png: Buffer; width: number; height: number }>
   /** audit: the writes this run made (path + frame target) */
   writes: { path: string; frameId?: string }[]
+  checks?: Record<string, unknown>
+  undoBefore?: Canvas
+  undoAfter?: Canvas
+  undoTouched?: Set<string>
+}
+
+/** Capture only synchronous mutations performed by this run. Awaiting a
+ * renderer or library lookup never claims a collaborator's unrelated edits. */
+function mutate<T>(ctx: ScriptRunContext, fn: () => T): T {
+  if (ctx.active === false) throw new SdkError('limit', 'wall limit reached', 'wall')
+  const before = structuredClone(store.getCanvas(ctx.canvasId)!)
+  const value = fn()
+  const after = structuredClone(store.getCanvas(ctx.canvasId)!)
+  ctx.undoBefore ??= structuredClone(before)
+  ctx.undoAfter ??= structuredClone(before)
+  const touched = (ctx.undoTouched ??= new Set())
+  const update = (key: 'frames' | 'tokens' | 'components' | 'compositions', idKey: string) => {
+    type Entity = Record<string, unknown>
+    const a = (before[key] ?? []) as unknown as Entity[]
+    const b = (after[key] ?? []) as unknown as Entity[]
+    for (const id of new Set([...a, ...b].map((v) => String(v[idKey])))) {
+      const prev = a.find((v) => v[idKey] === id)
+      const next = b.find((v) => v[idKey] === id)
+      if (JSON.stringify(prev) === JSON.stringify(next)) continue
+      const set = (canvas: Canvas, v: Entity | undefined) => {
+        const list = ((canvas[key] ?? []) as unknown as Entity[]).filter((e) => e[idKey] !== id)
+        if (v) list.push(structuredClone(v))
+        Object.assign(canvas, { [key]: list })
+      }
+      const target = key + ':' + id
+      if (!touched.has(target)) set(ctx.undoBefore!, prev)
+      set(ctx.undoAfter!, next)
+      touched.add(target)
+    }
+  }
+  update('frames', 'id')
+  update('tokens', 'name')
+  update('components', 'id')
+  update('compositions', 'pageId')
+  if (JSON.stringify(before.tokenThemes) !== JSON.stringify(after.tokenThemes)) {
+    if (!touched.has('tokenThemes')) ctx.undoBefore.tokenThemes = before.tokenThemes
+    ctx.undoAfter.tokenThemes = after.tokenThemes
+    touched.add('tokenThemes')
+  }
+  return value
 }
 
 function roleOf(ctx: ScriptRunContext): CanvasRole | null {
@@ -209,7 +255,12 @@ function responsiveResult(c: import('../shared/frameChecks.ts').FrameChecks): Re
       ...(i.elementId ? { elementId: i.elementId } : {}),
       ...(i.selector ? { selector: i.selector } : {}),
     })),
-    viewports: c.viewports.map((v) => ({ width: v.width, overflowPx: v.overflowPx, clippedText: 0, tapTargets: 0 })),
+    viewports: c.viewports.map((v) => ({
+      width: v.width,
+      overflowPx: v.overflowPx,
+      clippedText: c.issues.filter((i) => i.ruleId === 'FC-CLIP' && i.widths.includes(v.width)).length,
+      tapTargets: c.issues.filter((i) => i.ruleId === 'FC-TAP' && i.widths.includes(v.width)).length,
+    })),
     focus: c.focus,
   }
 }
@@ -245,11 +296,11 @@ async function measureOf(frame: Frame): Promise<Record<string, unknown>> {
           }
           if (el.children.length === 0 && (el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1)) clippedText++
         }
-        const sibs = [...document.body.children].flatMap(p => [...p.children])
+        const sibs = [...document.querySelectorAll('body *')].slice(0, 300)
         for (let i = 0; i < Math.min(sibs.length, 60); i++) {
           const a = sibs[i].getBoundingClientRect()
           for (let j = i + 1; j < Math.min(sibs.length, 60); j++) {
-            const b = sibs[j].getBoundingClientRect()
+            if (sibs[i].parentElement !== sibs[j].parentElement) continue; const b = sibs[j].getBoundingClientRect()
             const ox = Math.min(a.right, b.right) - Math.max(a.left, b.left)
             const oy = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)
             if (ox > 4 && oy > 4 && overlaps.length < 20) overlaps.push({ a: sibs[i].tagName.toLowerCase(), b: sibs[j].tagName.toLowerCase(), px: Math.round(Math.min(ox, oy)) })
@@ -327,65 +378,14 @@ async function diffRegions(
 /* compositions.stateAt — a computed sample, not a render              */
 /* ------------------------------------------------------------------ */
 
-function propAt(
-  keys: { t: number; value: number | string; easing: { type: string } }[],
-  t: number,
-): number | string | undefined {
-  if (!keys.length) return undefined
-  const sorted = [...keys].sort((a, b) => a.t - b.t)
-  if (t <= sorted[0]!.t) return sorted[0]!.value
-  if (t >= sorted[sorted.length - 1]!.t) return sorted[sorted.length - 1]!.value
-  for (let i = 0; i < sorted.length - 1; i++) {
-    const a = sorted[i]!
-    const b = sorted[i + 1]!
-    if (t < a.t || t >= b.t) continue
-    if (a.easing.type === 'hold') return a.value
-    if (typeof a.value === 'number' && typeof b.value === 'number') {
-      /* every easing is read as linear here — the numbers are for layout
-         checks, and a wrong arc never lies about a collision */
-      const f = (t - a.t) / (b.t - a.t)
-      return a.value + (b.value - a.value) * f
-    }
-    return t - a.t < (b.t - a.t) / 2 ? a.value : b.value
-  }
-  return undefined
-}
-
 function stateAt(comp: Composition, canvas: Canvas, t: number): Record<string, unknown> {
-  const elements: Record<string, unknown>[] = []
-  const camera: Record<string, unknown> = {}
-  const activeClips: { trackId: string; kind: string }[] = []
-  for (const track of comp.tracks as MotionTrack[]) {
-    if (track.kind === 'camera') {
-      for (const prop of ['x', 'y', 'zoom', 'rotation']) {
-        const keys = (track.keyframes ?? []).filter((k) => k.property === prop)
-        const v = propAt(keys, t)
-        if (v !== undefined) camera[prop] = v
-      }
-      continue
-    }
-    if (track.kind === 'element' && track.frameId && track.elementId) {
-      if (track.muted) continue
-      const state: Record<string, unknown> = { key: `${track.frameId}/${track.elementId}` }
-      const byProp = new Map<string, { t: number; value: number | string; easing: { type: string } }[]>()
-      for (const k of track.keyframes ?? []) {
-        const list = byProp.get(k.property) ?? []
-        list.push(k)
-        byProp.set(k.property, list)
-      }
-      for (const [prop, keys] of byProp) {
-        const v = propAt(keys, t)
-        if (v !== undefined) state[prop] = v
-      }
-      elements.push(state)
-      continue
-    }
-    if ((track.kind === 'clip' || track.kind === 'audio' || track.kind === 'caption') && !track.muted) {
-      for (const clip of track.clips ?? []) {
-        if (t >= clip.start && t < clip.start + clip.duration) activeClips.push({ trackId: track.id, kind: track.kind })
-      }
-    }
-  }
+  const sampled = frameStateAt(comp, t)
+  const elements = Object.entries(sampled.elements).map(([key, properties]) => ({ key, ...properties })) as Record<
+    string,
+    unknown
+  >[]
+  const camera = sampled.camera
+  const activeClips = sampled.activeClips
   /* title-safe: element boxes crossing 10% of the output frame */
   const mx = comp.width * 0.1
   const my = comp.height * 0.1
@@ -422,7 +422,7 @@ function stateAt(comp: Composition, canvas: Canvas, t: number): Record<string, u
   void canvas
   return {
     t,
-    camera: Object.keys(camera).length ? camera : null,
+    camera,
     elements,
     activeClips,
     titleUnsafe,
@@ -542,18 +542,20 @@ const HANDLERS: Record<string, Entry> = {
           htmlChars: String(input.html ?? '').length,
         }
       }
-      const frame = actions.createFrame(
-        ctx.canvasId,
-        {
-          name: str(input.name, 'name'),
-          html: str(input.html, 'html'),
-          width: num(input.width, 'width'),
-          height: num(input.height, 'height'),
-          ...(input.x !== undefined ? { x: num(input.x, 'x') } : {}),
-          ...(input.y !== undefined ? { y: num(input.y, 'y') } : {}),
-          ...(input.pageId !== undefined ? { pageId: str(input.pageId, 'pageId') } : {}),
-        },
-        ctx.actor,
+      const frame = mutate(ctx, () =>
+        actions.createFrame(
+          ctx.canvasId,
+          {
+            name: str(input.name, 'name'),
+            html: str(input.html, 'html'),
+            width: num(input.width, 'width'),
+            height: num(input.height, 'height'),
+            ...(input.x !== undefined ? { x: num(input.x, 'x') } : {}),
+            ...(input.y !== undefined ? { y: num(input.y, 'y') } : {}),
+            ...(input.pageId !== undefined ? { pageId: str(input.pageId, 'pageId') } : {}),
+          },
+          ctx.actor,
+        ),
       )
       if (!frame) throw new SdkError('failed', 'the frame could not be created')
       return refOf(frame)
@@ -571,10 +573,12 @@ const HANDLERS: Record<string, Entry> = {
         return { ok: true, sections: chunks.length, review: await reviewOf(frame, ctx.actor, {}) }
       }
       for (let i = 0; i < chunks.length; i++) {
-        const out = actions.appendFrameHtml(frame.id, chunks[i]!, ctx.actor, {
-          start: i === 0,
-          done: i === chunks.length - 1,
-        })
+        const out = mutate(ctx, () =>
+          actions.appendFrameHtml(frame.id, chunks[i]!, ctx.actor, {
+            start: i === 0,
+            done: i === chunks.length - 1,
+          }),
+        )
         if (!out) throw notFound(`no frame ${frame.id}`)
       }
       const written = store.getFrame(frame.id)!
@@ -607,7 +611,7 @@ const HANDLERS: Record<string, Entry> = {
           htmlChars: frame.html.length,
           review: await reviewOf(frame, ctx.actor, {}),
         }
-      const written = actions.updateFrame(frame.id, { html: result.html }, ctx.actor)
+      const written = mutate(ctx, () => actions.updateFrame(frame.id, { html: result.html }, ctx.actor))
       if (!written) throw new SdkError('failed', 'the frame write did not apply')
       return {
         ok: true,
@@ -641,7 +645,7 @@ const HANDLERS: Record<string, Entry> = {
           review: await reviewOf({ ...frame, html: result.html }, ctx.actor, {}),
         }
       }
-      const written = actions.updateFrame(frame.id, { html: result.html }, ctx.actor)!
+      const written = mutate(ctx, () => actions.updateFrame(frame.id, { html: result.html }, ctx.actor))!
       return {
         count: result.count,
         unmapped: result.unmapped,
@@ -664,10 +668,11 @@ const HANDLERS: Record<string, Entry> = {
       }
       const meta: Record<string, unknown> = {}
       for (const key of ['name', 'hidden', 'locked', 'pageId']) if (key in patch) meta[key] = patch[key]
-      if (Object.keys(meta).length) updateFrameMeta(canvasOf(ctx), frame.id, meta as never, ctx.actor)
+      if (Object.keys(meta).length)
+        mutate(ctx, () => updateFrameMeta(canvasOf(ctx), frame.id, meta as never, ctx.actor))
       const box: Record<string, number> = {}
       for (const key of ['x', 'y', 'width', 'height']) if (key in patch) box[key] = num(patch[key], key)
-      if (Object.keys(box).length) actions.updateFrame(frame.id, box, ctx.actor)
+      if (Object.keys(box).length) mutate(ctx, () => actions.updateFrame(frame.id, box, ctx.actor))
       return refOf(store.getFrame(frame.id)!)
     },
   },
@@ -708,7 +713,7 @@ const HANDLERS: Record<string, Entry> = {
         }
         return { ok: true, created, failed: [] }
       }
-      const results = actions.createTokens(ctx.canvasId, inputs, ctx.actor)
+      const results = mutate(ctx, () => actions.createTokens(ctx.canvasId, inputs, ctx.actor))
       if (!results) throw notFound('the canvas is gone')
       return {
         ok: true,
@@ -733,7 +738,7 @@ const HANDLERS: Record<string, Entry> = {
         return { ok: true }
       }
       const edit = { name, value, ...(opts.theme !== undefined ? { theme: opts.theme } : {}) }
-      const results = actions.setTokens(ctx.canvasId, [edit as never], ctx.actor)
+      const results = mutate(ctx, () => actions.setTokens(ctx.canvasId, [edit as never], ctx.actor))
       if (!results) throw notFound('the canvas is gone')
       const first = results[0]!
       if (first.result === 'error') throw invalid(`${first.name}: ${first.message}`)
@@ -749,7 +754,7 @@ const HANDLERS: Record<string, Entry> = {
         canvasOf(ctx).tokenThemes = themes
         return { ok: true, themes }
       }
-      const out = actions.setTokenThemes(ctx.canvasId, themes, ctx.actor)
+      const out = mutate(ctx, () => actions.setTokenThemes(ctx.canvasId, themes, ctx.actor))
       if (!out) throw notFound('the canvas is gone')
       return { ok: true, themes: out }
     },
@@ -761,7 +766,9 @@ const HANDLERS: Record<string, Entry> = {
   },
   'components.get': {
     fn: async (ctx, args) => {
-      const def = findComponent(ctx.canvasId, str(args[0], 'componentId'))
+      const def = ctx.draft
+        ? ctx.draft.components?.find((c) => c.id === args[0] || c.name === args[0])
+        : findComponent(ctx.canvasId, str(args[0], 'componentId'))
       if (!def) throw notFound(`no component ${String(args[0])}`)
       return componentDetail(canvasOf(ctx), def)
     },
@@ -770,16 +777,29 @@ const HANDLERS: Record<string, Entry> = {
     write: true,
     fn: async (ctx, args) => {
       const input = obj(args[0], 'input')
-      if (ctx.dryRun) return { ok: true, id: 'dry-run', name: input.name, usage: '' }
+      if (ctx.dryRun) {
+        const def = {
+          ...input,
+          id: randomUUID(),
+          template: str(input.template, 'template'),
+          name: str(input.name, 'name'),
+          css: input.css ?? '',
+          props: input.props ?? [],
+          slots: input.slots ?? [],
+          rev: 1,
+        } as ComponentDef
+        ;(canvasOf(ctx).components ??= []).push(def)
+        return componentSummary(def)
+      }
       const out = await componentTool(ctx, 'create_component', {
         name: input.name,
         description: input.description ?? '',
-        template: input.template,
+        html: input.template,
         css: input.css,
         props: input.props,
         slots: input.slots,
       })
-      return out.data
+      return (out.data as { component: unknown }).component
     },
   },
   'components.update': {
@@ -787,16 +807,21 @@ const HANDLERS: Record<string, Entry> = {
     fn: async (ctx, args) => {
       const component = str(args[0], 'componentId')
       const patch = obj(args[1], 'patch')
-      if (ctx.dryRun) return { ok: true }
+      if (ctx.dryRun) {
+        const def = canvasOf(ctx).components?.find((c) => c.id === component || c.name === component)
+        if (!def) throw notFound('no component')
+        for (const key of ['name', 'description', 'template', 'css', 'props', 'slots'])
+          if (key in patch) Object.assign(def, { [key]: patch[key] })
+        return componentSummary(def)
+      }
       const out = await componentTool(ctx, 'update_component', {
         ...Object.fromEntries(
-          Object.entries(patch).filter(([k]) =>
-            ['name', 'description', 'template', 'css', 'props', 'slots'].includes(k),
-          ),
+          Object.entries(patch).filter(([k]) => ['name', 'description', 'css', 'props'].includes(k)),
         ),
+        ...(typeof patch.template === 'string' ? { html: patch.template } : {}),
         component,
       })
-      return out.data
+      return (out.data as { component: unknown }).component
     },
   },
   'components.insert': {
@@ -806,6 +831,15 @@ const HANDLERS: Record<string, Entry> = {
       const frame = frameOf(ctx, str(args[0], 'frameId'))
       const componentId = str(args[1], 'componentId')
       const opts = args[2] === undefined ? {} : obj(args[2], 'opts')
+      if (ctx.dryRun) {
+        const def = canvasOf(ctx).components?.find((c) => c.id === componentId || c.name === componentId)
+        if (!def) throw notFound('no component on this canvas')
+        const edit = dom.applyEditOps(frame.html, [
+          { op: 'insert', element: '', html: `<doop-use component="${def.id}"></doop-use>` },
+        ])
+        frame.html = edit.html
+        return { ok: true, applied: edit.applied }
+      }
       const out = await componentTool(ctx, 'insert_instance', {
         frame_id: frame.id,
         component: componentId,
@@ -907,7 +941,8 @@ const HANDLERS: Record<string, Entry> = {
             ...(opts.before !== undefined ? { before: String(opts.before) } : {}),
           },
         ])
-        if (ctx.dryRun)
+        if (ctx.dryRun) {
+          frame.html = result.html
           return {
             ok: true,
             applied: result.applied,
@@ -915,12 +950,13 @@ const HANDLERS: Record<string, Entry> = {
             htmlChars: result.html.length,
             review: await reviewOf({ ...frame, html: result.html }, ctx.actor, {}),
           }
+        }
         if (!result.applied)
           throw new SdkError(
             'failed',
             `the item could not be inserted: ${result.failed[0]?.reason ?? 'no insertion point'}`,
           )
-        const written = actions.updateFrame(frame.id, { html: result.html }, ctx.actor)!
+        const written = mutate(ctx, () => actions.updateFrame(frame.id, { html: result.html }, ctx.actor))!
         return {
           ok: true,
           applied: result.applied,
@@ -936,14 +972,20 @@ const HANDLERS: Record<string, Entry> = {
   /* ---- diazo.compositions ---- */
   'compositions.get': {
     fn: async (ctx, args) => {
-      const out = motion.getCompositionData(canvasOf(ctx), str(args[0], 'pageId'))
+      const draft = ctx.draft?.compositions?.find((c) => c.pageId === args[0])
+      const out = draft
+        ? { ok: true as const, data: draft }
+        : motion.getCompositionData(canvasOf(ctx), str(args[0], 'pageId'))
       if (!out.ok) return null
       return out.data
     },
   },
   'compositions.stateAt': {
     fn: async (ctx, args) => {
-      const out = motion.getCompositionData(canvasOf(ctx), str(args[0], 'pageId'))
+      const draft = ctx.draft?.compositions?.find((c) => c.pageId === args[0])
+      const out = draft
+        ? { ok: true as const, data: draft }
+        : motion.getCompositionData(canvasOf(ctx), str(args[0], 'pageId'))
       if (!out.ok) throw notFound('the page has no composition')
       const times = args[1]
       if (!Array.isArray(times) || !times.every((t) => typeof t === 'number'))
@@ -976,19 +1018,43 @@ const HANDLERS: Record<string, Entry> = {
     fn: async (ctx, args) => {
       const pageId = str(args[0], 'pageId')
       const opts = args[1] === undefined ? {} : obj(args[1], 'opts')
-      if (ctx.dryRun) return { ok: true, revision: 0, shots: 0 }
-      const out = motion.animateStoryboard(
-        canvasOf(ctx),
-        pageId,
-        {
-          shot_seconds: typeof opts.shotSeconds === 'number' ? opts.shotSeconds : undefined,
-          margin: typeof opts.margin === 'number' ? opts.margin : undefined,
-          fps: typeof opts.fps === 'number' ? opts.fps : undefined,
-          width: typeof opts.width === 'number' ? opts.width : undefined,
-          height: typeof opts.height === 'number' ? opts.height : undefined,
-          frame_ids: Array.isArray(opts.frameIds) ? (opts.frameIds as string[]) : undefined,
-        } as never,
-        ctx.actor,
+      if (ctx.dryRun) {
+        if (!canvasPages(canvasOf(ctx)).some((p) => p.id === pageId)) throw notFound('page is not on this canvas')
+        const { body, shots } = buildStoryboard({
+          frames: canvasOf(ctx).frames.filter(
+            (f) =>
+              (!f.pageId || f.pageId === pageId) && (!Array.isArray(opts.frameIds) || opts.frameIds.includes(f.id)),
+          ),
+          shotSeconds: Number(opts.shotSeconds ?? 3),
+          width: Number(opts.width ?? 1920),
+          height: Number(opts.height ?? 1080),
+          fps: Number(opts.fps ?? 30),
+        })
+        const comp = newComposition({
+          body,
+          canvasId: ctx.canvasId,
+          pageId,
+          updatedBy: ctx.actor.name,
+          now: Date.now(),
+        })
+        const canvas = canvasOf(ctx)
+        canvas.compositions = [...(canvas.compositions ?? []).filter((c) => c.pageId !== pageId), comp]
+        return { ok: true, revision: comp.revision, shots: shots.length }
+      }
+      const out = mutate(ctx, () =>
+        motion.animateStoryboard(
+          canvasOf(ctx),
+          pageId,
+          {
+            shot_seconds: typeof opts.shotSeconds === 'number' ? opts.shotSeconds : undefined,
+            margin: typeof opts.margin === 'number' ? opts.margin : undefined,
+            fps: typeof opts.fps === 'number' ? opts.fps : undefined,
+            width: typeof opts.width === 'number' ? opts.width : undefined,
+            height: typeof opts.height === 'number' ? opts.height : undefined,
+            frame_ids: Array.isArray(opts.frameIds) ? (opts.frameIds as string[]) : undefined,
+          } as never,
+          ctx.actor,
+        ),
       )
       if (!out.ok) throw invalid(String(out.error))
       const v = out.data as { revision?: number; shots?: number }
@@ -1002,12 +1068,25 @@ const HANDLERS: Record<string, Entry> = {
       const ops = args[1]
       if (!Array.isArray(ops)) throw invalid('ops must be an array')
       const opts = args[2] === undefined ? {} : obj(args[2], 'opts')
-      if (ctx.dryRun) return { ok: true, revision: 0 }
-      const out = motion.setCompositionData(
-        canvasOf(ctx),
-        pageId,
-        { ops, ...(opts.expectedRevision !== undefined ? { expected_revision: opts.expectedRevision } : {}) },
-        ctx.actor,
+      if (ctx.dryRun) {
+        const comp = canvasOf(ctx).compositions?.find((c) => c.pageId === pageId)
+        if (!comp) throw notFound('page has no composition')
+        if (opts.expectedRevision !== undefined && opts.expectedRevision !== comp.revision)
+          throw new SdkError('conflict', 'composition revision changed')
+        const parsed = parseOps(ops, comp.duration)
+        if (!parsed.ok) throw invalid(parsed.error)
+        const applied = applyCompositionOps(comp, parsed.value)
+        if (!applied.ok) throw invalid(applied.error)
+        Object.assign(comp, applied.value, { revision: comp.revision + 1 })
+        return { ok: true, revision: comp.revision }
+      }
+      const out = mutate(ctx, () =>
+        motion.setCompositionData(
+          canvasOf(ctx),
+          pageId,
+          { ops, ...(opts.expectedRevision !== undefined ? { expected_revision: opts.expectedRevision } : {}) },
+          ctx.actor,
+        ),
       )
       if (!out.ok) throw invalid(String(out.error))
       return { ok: true, revision: (out.data as { revision: number }).revision }
@@ -1163,9 +1242,11 @@ const HANDLERS: Record<string, Entry> = {
         }
       }
       if (ctx.dryRun || !changes.length) {
+        if (ctx.dryRun) frame.html = html
         return { ok: true, changes, review: await reviewOf({ ...frame, html }, ctx.actor, {}) }
       }
-      const written = actions.updateFrame(frame.id, { html }, ctx.actor)!
+      if (ctx.active === false) throw new SdkError('limit', 'wall limit reached', 'wall')
+      const written = mutate(ctx, () => actions.updateFrame(frame.id, { html }, ctx.actor))!
       return { ok: true, changes, review: await reviewOf(written, ctx.actor, {}) }
     },
   },
@@ -1237,17 +1318,19 @@ function componentTool(
   const canvas = canvasOf(ctx)
   const reader = ctx.userId
   return new Promise((resolve, reject) => {
-    const out = runComponentTool(name, input, {
-      canvas,
-      actor: ctx.actor,
-      canRead: (id) => {
-        if (id === ctx.canvasId) return true
-        const other = store.getCanvas(id)
-        return !!reader && !!other && canAccessCanvas(reader, other)
-      },
-      readableCanvases: () =>
-        reader ? canvasesFor(reader).flatMap((meta) => store.getCanvas(meta.id) ?? []) : [canvas],
-    })
+    const out = mutate(ctx, () =>
+      runComponentTool(name, input, {
+        canvas,
+        actor: ctx.actor,
+        canRead: (id) => {
+          if (id === ctx.canvasId) return true
+          const other = store.getCanvas(id)
+          return !!reader && !!other && canAccessCanvas(reader, other)
+        },
+        readableCanvases: () =>
+          reader ? canvasesFor(reader).flatMap((meta) => store.getCanvas(meta.id) ?? []) : [canvas],
+      }),
+    )
     if (!out.ok) return reject(invalid(out.error ?? 'the component tool refused'))
     resolve({ data: out.result.data })
   })
@@ -1322,7 +1405,17 @@ export async function dispatchScriptCall(ctx: ScriptRunContext, path: string, ar
     if (ctx.budgets.frameWrites <= 0) throw new SdkError('limit', 'frame_writes limit reached', 'frame_writes')
     ctx.budgets.frameWrites--
   }
+  const beforeHtml = entry.write ? new Map(canvasOf(ctx).frames.map((f) => [f.id, f.html])) : new Map<string, string>()
   const out = await entry.fn(ctx, args)
+  if (entry.write) {
+    for (const frame of canvasOf(ctx).frames) {
+      if (beforeHtml.get(frame.id) !== frame.html) {
+        const review = await reviewOf(frame, ctx.actor, { render: rendererAvailable() })
+        ;(ctx.checks ??= {})[frame.id] = review
+        if (out && typeof out === 'object') Object.assign(out, { review })
+      }
+    }
+  }
   if (entry.write) {
     ctx.writes.push({
       path,

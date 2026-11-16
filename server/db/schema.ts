@@ -1668,3 +1668,19 @@ export const voices = pgTable(
   },
   (t) => [index('voices_owner_idx').on(t.ownerId)],
 )
+
+/** Durable script audit, idempotency response and undo state. */
+export const scriptRuns = pgTable(
+  'script_runs',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    idempotencyKey: text('idempotency_key'),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    data: jsonb('data').$type<import('../scriptRuns.ts').StoredScriptRun>().notNull(),
+  },
+  (t) => [
+    index('script_runs_canvas_idx').on(t.canvasId),
+    uniqueIndex('script_runs_key_idx').on(t.canvasId, t.idempotencyKey),
+  ],
+)

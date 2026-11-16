@@ -9,6 +9,8 @@
  * only capability is the `diazo` calls this file serves.
  */
 import { Worker } from 'node:worker_threads'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { transformSync } from 'esbuild'
 
 export const SCRIPT_LIMITS = {
@@ -40,6 +42,9 @@ export interface SandboxRequest {
   timeoutMs?: number
   memoryBytes?: number
   callLimit?: number
+  paths?: string[]
+  runInfo?: { runId: string; canvasId: string; dryRun: boolean }
+  onClose?: () => void
 }
 
 export type SandboxOutcome =
@@ -66,7 +71,10 @@ export async function runInSandbox(req: SandboxRequest): Promise<SandboxOutcome>
   const deadline = startedAt + timeout
   const calls: SdkCallRecord[] = []
 
-  const worker = new Worker(new URL('./scriptWorker.ts', import.meta.url), { stderr: false })
+  const loader = pathToFileURL(createRequire(import.meta.url).resolve('tsx/esm/api')).href
+  const entry = new URL('./scriptWorker.ts', import.meta.url).href
+  const bootstrap = `import { register } from ${JSON.stringify(loader)}; register(); await import(${JSON.stringify(entry)});`
+  const worker = new Worker(new URL('data:text/javascript,' + encodeURIComponent(bootstrap)), { stderr: false })
 
   return new Promise<SandboxOutcome>((resolve) => {
     let settled = false
@@ -79,6 +87,7 @@ export async function runInSandbox(req: SandboxRequest): Promise<SandboxOutcome>
     const finish = (outcome: SandboxOutcome) => {
       if (settled) return
       settled = true
+      req.onClose?.()
       clearTimeout(kill)
       void worker.terminate()
       resolve(outcome)
@@ -86,6 +95,15 @@ export async function runInSandbox(req: SandboxRequest): Promise<SandboxOutcome>
 
     worker.on('message', (msg: { type: string; [k: string]: unknown }) => {
       if (msg.type === 'sdk-call') {
+        if (settled) return
+        if (Date.now() >= deadline) {
+          finish({ ok: false, error: 'wall limit reached', limit: 'wall', ms: Date.now() - startedAt, calls })
+          return
+        }
+        if (calls.length >= (req.callLimit ?? SCRIPT_LIMITS.sdkCalls)) {
+          finish({ ok: false, error: 'sdk_calls limit reached', limit: 'sdk_calls', ms: Date.now() - startedAt, calls })
+          return
+        }
         const seq = msg.seq as number
         const path = msg.path as string
         const args = (msg.args as unknown[]) ?? []
@@ -107,13 +125,30 @@ export async function runInSandbox(req: SandboxRequest): Promise<SandboxOutcome>
             })
           })
           .catch((error: unknown) => {
+            if (error && typeof error === 'object' && 'limit' in error && error.limit) {
+              finish({
+                ok: false,
+                error: String(error.limit) + ' limit reached',
+                limit: error.limit as LimitName,
+                ms: Date.now() - startedAt,
+                calls,
+              })
+            }
             calls.push({
               path,
               target: typeof args[0] === 'string' ? args[0] : undefined,
               ms: Date.now() - at,
               ok: false,
             })
-            safePost({ type: 'sdk-result', seq, ok: false, json: JSON.stringify({ __error: errorMessage(error) }) })
+            safePost({
+              type: 'sdk-result',
+              seq,
+              ok: false,
+              json: JSON.stringify({
+                __error: errorMessage(error),
+                code: error && typeof error === 'object' && 'code' in error ? error.code : 'failed',
+              }),
+            })
           })
         return
       }
@@ -161,6 +196,8 @@ export async function runInSandbox(req: SandboxRequest): Promise<SandboxOutcome>
     }
     worker.postMessage({
       source: req.source,
+      paths: req.paths,
+      runInfo: req.runInfo,
       deadline,
       memoryBytes: req.memoryBytes ?? SCRIPT_LIMITS.memoryBytes,
       callLimit: req.callLimit ?? SCRIPT_LIMITS.sdkCalls,
