@@ -1297,3 +1297,22 @@ The shared font library serves public font assets with CORS so sandboxed frames 
 Migrations 0040 (agent feedback) and 0041 (custom fonts) retain their shared timestamps; their OSS
 snapshots omit the deferred Figma `integrations.refresh_token` column, as does the credential
 encryption backfill. Desktop downloads use the platform-neutral `https://doop.design/download` page.
+
+## Speech backend (phase 3, partial)
+
+`shared/speech.ts` defines the catalog, preferences, routing and validated job
+request. `server/speech.ts` persists jobs and preferences, claims desktop work
+atomically and adapts cloud providers and the internal sidecar protocol.
+`server/speechJobs.ts` validates canvas assets, requires cloud estimate
+acknowledgement, normalizes results and writes transcripts/audio media.
+`server/speechRoutes.ts` exposes the authenticated REST relay;
+`server/speechTools.ts` supplies the same tools to MCP and the resident agent.
+Migrations 0074–0076 add speech tables, durable request parameters and a partial
+unique index allowing one active job per person. Restarted jobs fail without
+automatic retries. Voice accounts are excluded from runner selection.
+
+Contract and limitations: [speech-api.md](speech-api.md). Tests:
+`tests/speech.test.ts`, `tests/speechHttp.test.ts`, `tests/agentToolParity.test.ts`
+and `tests/agentRunners.test.ts`. The desktop engine worker, installer, model
+release manifests and actual sidecar remain pending. No speech engine is
+bundled or downloaded by this change.

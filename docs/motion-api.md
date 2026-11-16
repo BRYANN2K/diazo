@@ -1,5 +1,7 @@
 # Motion API — Motion Studio ("Rostrum")
 
+Status: current, updated 2026-11-16
+
 A film is a page with a clock. This is the contract the timeline editor, the
 player, the renderers and the agents code against. The types live in
 `shared/motion.ts` (data + validation + ops), `shared/motionRuntime.ts`
@@ -477,3 +479,11 @@ cost}`). Routes: `GET …/pages/:pageId/media`,
   estimate shown first): the file lands as an /a/ asset, `scene_media`
   keeps `{provider, model, prompt, seed, cost}` and a clip is placed on the
   clip track.
+
+## Phase 3 speech jobs
+
+The additive speech job contract is in [speech-api.md](speech-api.md), with
+shared types in `shared/speech.ts`. REST, MCP and resident tools share the
+same submission, estimate, ownership and completion logic. Desktop relay
+and persisted transcripts are implemented; the installer, local engine
+worker and speech sidecar remain pending. This does not complete phase 3.

@@ -3505,3 +3505,15 @@ export function resolveProposal(
   if (accept) logActivity(canvasId, actor, `accepted a Memory rule into “${proposal.guideName}”`)
   return proposal
 }
+
+/** Speech room updates contain no credentials or engine diagnostics. */
+export function speechProgress(canvasId: string, job: import('../shared/speech.ts').SpeechJob) {
+  broadcast(canvasId, { type: 'speech:progress', job })
+}
+export function mediaTranscribed(
+  canvasId: string,
+  mediaId: string,
+  transcript: import('../shared/motionMedia.ts').Transcript,
+) {
+  broadcast(canvasId, { type: 'media:transcribed', mediaId, transcript })
+}

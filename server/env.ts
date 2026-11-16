@@ -246,6 +246,12 @@ const schema = {
   OPENROUTER_VIDEOS_URL: str({ default: 'https://openrouter.ai/api/v1/videos' }),
   GEMINI_VIDEOS_URL: str({ default: 'https://generativelanguage.googleapis.com/v1beta/models' }),
 
+  /* ------------------------------------------------------------- speech */
+  DOOP_SPEECH: bool({ default: true }),
+  DOOP_ELEVENLABS: bool({ default: true }),
+  DOOP_SPEECH_URL: origin({ default: undefined }),
+  DOOP_SPEECH_TOKEN: str({ default: undefined }),
+
   /* ------------------------------------------------------ integrations */
   META_APP_ID: str({ default: undefined }),
   META_APP_SECRET: str({ default: undefined }),

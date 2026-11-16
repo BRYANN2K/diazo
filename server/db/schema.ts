@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import {
   pgTable,
   text,
@@ -41,6 +42,7 @@ import type { Composition, MotionTrack, RenderFormat, RenderStatus, RenderTarget
 import type { DevTaskDrift, DevTaskState } from '../../shared/devTasks.ts'
 import type { HandoffPack } from '../../shared/handoff.ts'
 import type { GenerationRecipe, Transcript } from '../../shared/motionMedia.ts'
+import type { CustomModel, SpeechInstall, SpeechJob, SpeechPreferences, Voice } from '../../shared/speech.ts'
 
 /** A credential kept on a user's behalf: sealed on write and opened on read
  *  (server/secretBox.ts), so call sites see plaintext and the row does not.
@@ -1524,4 +1526,84 @@ export const sceneMedia = pgTable(
     index('scene_media_page_idx').on(t.canvasId, t.pageId),
     uniqueIndex('scene_media_asset_idx').on(t.pageId, t.assetId),
   ],
+)
+
+/* ---- speech (proposal 18): engines install in one click on the person's
+   Mac or on the server sidecar; jobs route per the person's preferences;
+   the cloud only ever runs on their own key ---- */
+
+/** Server-target installs only — desktop installs live in the shell's
+ *  speech.json and are reported with each poll. */
+export const speechInstalls = pgTable('speech_installs', {
+  id: text('id').primaryKey(),
+  modelId: text('model_id').notNull(),
+  engine: text('engine').notNull(),
+  revision: text('revision').notNull(),
+  state: text('state').$type<SpeechInstall['state']>().notNull(),
+  bytes: bigint('bytes', { mode: 'number' }).notNull(),
+  error: text('error'),
+  installedBy: text('installed_by').notNull(),
+  installedAt: bigint('installed_at', { mode: 'number' }).notNull(),
+  lastUsedAt: bigint('last_used_at', { mode: 'number' }),
+})
+
+/** A transcribe or speak job, wherever it runs (desktop, server, cloud).
+ *  The desktop claims its own through the poll relay. */
+export const speechJobs = pgTable(
+  'speech_jobs',
+  {
+    id: text('id').primaryKey(),
+    kind: text('kind').$type<SpeechJob['kind']>().notNull(),
+    target: text('target').$type<SpeechJob['target']>().notNull(),
+    deviceId: text('device_id'),
+    modelId: text('model_id').notNull(),
+    inputAssetId: text('input_asset_id'),
+    inputText: text('input_text'),
+    state: text('state').$type<SpeechJob['state']>().notNull(),
+    progress: real('progress').notNull().default(0),
+    output: jsonb('output'),
+    request: jsonb('request').$type<import('../../shared/speech.ts').SpeechRequest>(),
+    outputAssetId: text('output_asset_id'),
+    requestedBy: text('requested_by').notNull(),
+    error: text('error'),
+    canvasId: text('canvas_id'),
+    mediaId: text('media_id'),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    index('speech_jobs_state_idx').on(t.state, t.target),
+    uniqueIndex('speech_jobs_active_user_idx')
+      .on(t.requestedBy)
+      .where(sql`${t.state} in ('queued', 'running')`),
+  ],
+)
+
+/** One row per person (18.12): which target each kind routes to. */
+export const speechPreferences = pgTable('speech_preferences', {
+  userId: text('user_id').primaryKey(),
+  prefs: jsonb('prefs').$type<SpeechPreferences>().notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+})
+
+/** A model a person (or an instance admin, for the server) added (18.9):
+ *  pinned commit, per-file size + SHA-256, licence acknowledgement, sealed
+ *  HF token, disabled until its smoke test passes. */
+export const speechCustomModels = pgTable('speech_custom_models', {
+  id: text('id').primaryKey(),
+  model: jsonb('model').$type<CustomModel>().notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+})
+
+/** A cloned voice (18.14): consent is a checkbox at upload; the sample is a
+ *  private asset that never leaves the instance. */
+export const voices = pgTable(
+  'voices',
+  {
+    id: text('id').primaryKey(),
+    ownerId: text('owner_id').notNull(),
+    voice: jsonb('voice').$type<Voice>().notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('voices_owner_idx').on(t.ownerId)],
 )

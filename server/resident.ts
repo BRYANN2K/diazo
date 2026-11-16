@@ -1,3 +1,4 @@
+import { SPEECH_TOOLS, runSpeechTool } from './speechTools.ts'
 import { env } from './env.ts'
 import { skillSlug } from '../shared/skills.ts'
 import { DRIFT_SEVERITIES, isDriftSeverity } from '../shared/drift.ts'
@@ -2717,6 +2718,14 @@ const TOOLS: Anthropic.Tool[] = [
   },
 ]
 
+for (const tool of SPEECH_TOOLS) {
+  TOOLS.push({
+    name: tool.name,
+    description: tool.description,
+    input_schema: zodToJsonSchema(z.object(tool.shape)) as Anthropic.Tool['input_schema'],
+  })
+}
+
 /* the same tools as MCP, minus the arguments a resident run already has */
 for (const tool of COMPONENT_TOOLS) {
   TOOLS.push({
@@ -3898,6 +3907,21 @@ export async function execTool(
         })
         if (!out.ok) return fail(out.error)
         return ok(JSON.stringify(out.data))
+      }
+      case 'list_speech_engines':
+      case 'estimate_speech':
+      case 'transcribe_clip':
+      case 'generate_voiceover':
+      case 'get_transcript':
+      case 'list_voices': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        if (!runState.payerId) return fail('sign in to use speech')
+        try {
+          return ok(JSON.stringify(await runSpeechTool(block.name, canvas, runState.payerId, block.input)))
+        } catch (error) {
+          return fail(error instanceof Error ? error.message : 'speech tool failed')
+        }
       }
       case 'list_video_models': {
         const raw = block.input as Record<string, unknown>

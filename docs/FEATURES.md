@@ -1,5 +1,7 @@
 # Diazo features
 
+Status: current, updated 2026-11-16
+
 What this fork adds on top of [kgoedecke/doop](https://github.com/kgoedecke/doop), and the
 upstream pull requests it merged ahead of upstream. Resync notes are in
 [runbooks/upstream-resync.md](runbooks/upstream-resync.md) and the deploy recipe in
@@ -263,6 +265,12 @@ compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per bu
   `__DOOP_MOTION_RENDER__`. A disabled-by-default Blender bridge (`DOOP_BLENDER_BRIDGE`) can spawn
   an allowlisted `blender-mcp` and relay a read-only tool set. Server-side and Blender renders
   land in later phases.
+
+- **Speech job backend (phase 3, partial)** — persisted jobs and preferences,
+  explicit cloud estimates on connected user keys, owner-scoped desktop relay,
+  word-timed media transcripts and voice-over audio clips with their recipes.
+  REST, MCP and resident tools share one service. Installers and real local engines
+  are pending; unpinned catalog downloads are blocked. Contract: [speech-api.md](speech-api.md).
 
 ## Merged upstream PRs
 

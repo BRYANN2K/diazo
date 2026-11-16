@@ -9,6 +9,11 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 
 ## [Unreleased]
 
+- Add the partial speech job backend: estimates, persisted transcripts, voice-over
+  audio clips, secure desktop relay, and matching canvas tools. Local engine
+  installers and the speech sidecar remain pending.
+
+
 ### Added
 
 - Design libraries: turn a canvas into a library with rules, then browse it in a gallery (`/libraries`, `/l/<id>`), search it from ⌘F and the Layers panel's Library tab, and insert an item into a frame as a linked block that offers updates.

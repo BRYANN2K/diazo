@@ -807,6 +807,8 @@ export type ServerMessage =
   | { type: 'render:progress'; job: RenderJob }
   /** a dev task (a coding agent launched in an Orca worktree) changed state */
   | { type: 'dev-task'; task: DevTask }
+  | { type: 'speech:progress'; job: import('./speech.ts').SpeechJob }
+  | { type: 'media:transcribed'; mediaId: string; transcript: import('./motionMedia.ts').Transcript }
 
 export const CURSOR_PALETTE = [
   '#2743EE', // cursor blue — the brand accent leads

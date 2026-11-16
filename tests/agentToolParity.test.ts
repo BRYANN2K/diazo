@@ -87,3 +87,16 @@ it('keeps the exception lists honest', async () => {
 it('gives resident agents the prototype tools', () => {
   expect(RESIDENT_TOOL_NAMES).toEqual(expect.arrayContaining(['get_prototype', 'set_prototype_start']))
 })
+
+it('gives resident agents every speech tool', () => {
+  expect(RESIDENT_TOOL_NAMES).toEqual(
+    expect.arrayContaining([
+      'list_speech_engines',
+      'estimate_speech',
+      'transcribe_clip',
+      'generate_voiceover',
+      'get_transcript',
+      'list_voices',
+    ]),
+  )
+})

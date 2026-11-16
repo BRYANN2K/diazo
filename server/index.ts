@@ -1,3 +1,5 @@
+import { registerSpeechRoutes } from './speechRoutes.ts'
+import { recoverSpeechJobs } from './speechJobs.ts'
 import * as libraries from './libraries.ts'
 import * as libraryThumbQueue from './libraryThumbQueue.ts'
 import * as libraryIndex from './libraryIndex.ts'
@@ -258,6 +260,7 @@ resumeCurations()
 resumeApplies()
 await hydrateInstanceSettings() // the sign-in policy, read on every signup
 await webhooks.hydrateWebhooks()
+await recoverSpeechJobs()
 await hydrateFonts() // before the first request: frame writes add the faces they use
 billing.reportBillingConfig()
 actions.hydrateLogs(data)
@@ -1889,6 +1892,7 @@ const KEY_CONNECTS = {
   'deepseek-key': modelAccounts.connectDeepSeekKey,
   'kimi-key': modelAccounts.connectKimiKey,
   'kimi-code': modelAccounts.connectKimiCodeKey,
+  'elevenlabs-key': modelAccounts.connectElevenLabsKey,
 } as const
 for (const [kind, connect] of Object.entries(KEY_CONNECTS)) {
   app.post(`/api/model-account/${kind}`, async (req, res) => {
@@ -3014,6 +3018,8 @@ app.post('/api/canvases/:id/pages/:pageId/duplicate', async (req, res) => {
 })
 
 /* ------------------------------------------------------------------ */
+registerSpeechRoutes(app)
+
 /* Motion Studio: a page's timeline (shared/motion.ts, docs/motion-api)  */
 /* ------------------------------------------------------------------ */
 

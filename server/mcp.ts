@@ -1,3 +1,4 @@
+import { SPEECH_TOOLS, runSpeechTool } from './speechTools.ts'
 import { findInCanvas } from './canvasFind.ts'
 import { findInLibrary } from './libraryQueries.ts'
 import { env } from './env.ts'
@@ -2182,6 +2183,33 @@ export function buildMcpServer(
       return text({ ok: true, ...(out.data as object) })
     },
   )
+
+  for (const tool of SPEECH_TOOLS) {
+    server.registerTool(
+      tool.name,
+      {
+        description: tool.description,
+        annotations: {
+          readOnlyHint: tool.readOnly,
+          destructiveHint: false,
+          idempotentHint: tool.readOnly,
+          openWorldHint: !tool.readOnly,
+        },
+        inputSchema: { ...tool.shape, canvas_id: z.string(), agent_name: agentName },
+      },
+      async ({ canvas_id, agent_name, ...input }: Record<string, unknown>) => {
+        const canvas = canvasFor(String(canvas_id), tool.readOnly ? 'view' : 'edit')
+        if (!canvas) return noCanvas(String(canvas_id))
+        arrive(canvas.id, String(agent_name))
+        if (!ownerId) return err('sign in to use speech')
+        try {
+          return text(await runSpeechTool(tool.name, canvas, ownerId, input))
+        } catch (error) {
+          return err(error instanceof Error ? error.message : 'speech tool failed')
+        }
+      },
+    )
+  }
 
   server.registerTool(
     'list_video_models',
