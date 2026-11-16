@@ -570,6 +570,58 @@ pub async fn orca_resolve_repo(
     .map_err(|e| e.to_string())?
 }
 
+/// Everything `worktree create` argv needs, already validated — held apart
+/// from the launch's side effects so a test can pin the exact vector the
+/// native confirmation gates.
+struct LaunchSpec {
+    worktree_name: String,
+    repo_id: String,
+    branch: String,
+    agent: String,
+    model: Option<String>,
+    effort: Option<String>,
+    prompt: String,
+    comment: String,
+    environment: Option<String>,
+}
+
+/// One `worktree create` argv: typed values as separate elements — never
+/// a shell string — and never `--surface`, because Orca's own Chat | CLI
+/// setting decides how the agent opens.
+fn launch_args(spec: &LaunchSpec) -> Vec<String> {
+    let mut args = argv(&[
+        "worktree",
+        "create",
+        "--name",
+        &spec.worktree_name,
+        "--repo",
+        format!("id:{}", spec.repo_id).as_str(),
+        "--branch",
+        &spec.branch,
+        "--agent",
+        &spec.agent,
+        "--prompt",
+        &spec.prompt,
+        "--comment",
+        &spec.comment,
+        "--no-parent",
+    ]);
+    if let Some(model) = &spec.model {
+        args.push("--model".to_string());
+        args.push(model.clone());
+    }
+    if let Some(effort) = &spec.effort {
+        args.push("--effort".to_string());
+        args.push(effort.clone());
+    }
+    if let Some(env) = &spec.environment {
+        args.push("--environment".to_string());
+        args.push(env.clone());
+    }
+    args.push("--json".to_string());
+    args
+}
+
 /// `orca_launch_task` — `orca worktree create` for a dev task. Everything
 /// argv needs arrives typed from the server (DevTaskLaunchArgs); the repo
 /// selector is resolved from the grant, never taken from the page; the
@@ -651,38 +703,18 @@ pub async fn orca_launch_task(
             return Ok(json!({ "ok": false, "cancelled": true }));
         }
 
-        let mut args = argv(&[
-            "worktree",
-            "create",
-            "--name",
-            worktree_name.as_str(),
-            "--repo",
-            format!("id:{repo_id}").as_str(),
-            "--branch",
-            branch.as_str(),
-            "--agent",
-            agent.as_str(),
-            "--prompt",
-            prompt.as_str(),
-            "--comment",
-            comment.as_str(),
-            "--no-parent",
-        ]);
-        if let Some(model) = &model {
-            args.push("--model".to_string());
-            args.push(model.clone());
-        }
-        if let Some(effort) = &effort {
-            args.push("--effort".to_string());
-            args.push(effort.clone());
-        }
-        if let Some(env) = &environment {
-            args.push("--environment".to_string());
-            args.push(env.clone());
-        }
-        args.push("--json".to_string());
-
-        let out = match run_orca(&bin, &args, Some(&root), CREATE_TIMEOUT) {
+        let spec = LaunchSpec {
+            worktree_name,
+            repo_id,
+            branch,
+            agent,
+            model,
+            effort,
+            prompt,
+            comment,
+            environment,
+        };
+        let out = match run_orca(&bin, &launch_args(&spec), Some(&root), CREATE_TIMEOUT) {
             Ok(out) => out,
             Err(error) => return Ok(json!({ "ok": false, "error": error })),
         };
@@ -701,7 +733,7 @@ pub async fn orca_launch_task(
         let final_branch = out
             .get("branch")
             .and_then(Value::as_str)
-            .unwrap_or(&branch)
+            .unwrap_or(&spec.branch)
             .trim_start_matches("refs/heads/")
             .to_string();
         let Some(identity) = identity.filter(|i| valid_identity(i)) else {
@@ -721,9 +753,9 @@ pub async fn orca_launch_task(
             TrackedTask {
                 task_id: task_id.clone(),
                 worktree_id: worktree_id.clone(),
-                environment: environment.clone(),
+                environment: spec.environment.clone(),
                 branch: final_branch.clone(),
-                agent: agent.clone(),
+                agent: spec.agent.clone(),
                 at: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .map(|d| d.as_millis() as u64)
@@ -922,15 +954,19 @@ pub async fn orca_activate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
     use std::sync::Mutex;
 
     /// Env vars are process-wide — serialise every test that sets them.
+    #[cfg(unix)]
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     /// Write a fake `orca` that records each invocation's argv to
     /// $ORCA_ARGV_LOG and answers from $ORCA_FAKE_DIR/<cmd>_<sub>.json (or
-    /// a canned ok envelope otherwise).
+    /// a canned ok envelope otherwise). A shebang script is unix-only.
+    #[cfg(unix)]
     fn fake_orca(dir: &Path) -> PathBuf {
         let bin = dir.join("orca-fake");
         fs::write(
@@ -949,12 +985,14 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
         bin
     }
 
+    #[cfg(unix)]
     struct Fake {
         dir: tempfile::TempDir,
         bin: PathBuf,
         argv_log: PathBuf,
     }
 
+    #[cfg(unix)]
     impl Fake {
         fn new() -> Self {
             let dir = tempfile::tempdir().unwrap();
@@ -977,6 +1015,7 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
         }
     }
 
+    #[cfg(unix)]
     impl Drop for Fake {
         fn drop(&mut self) {
             std::env::remove_var("DOOP_ORCA_CLI");
@@ -985,14 +1024,76 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
         }
     }
 
+    fn launch_spec() -> LaunchSpec {
+        LaunchSpec {
+            worktree_name: "doop-new-screen-a1b2".to_string(),
+            repo_id: "r-1".to_string(),
+            branch: "doop/new-screen-a1b2".to_string(),
+            agent: "claude".to_string(),
+            model: None,
+            effort: None,
+            prompt: "implement the spec".to_string(),
+            comment: "doop: https://diazo.test/c/c1?frame=f1 · task t1".to_string(),
+            environment: None,
+        }
+    }
+
     #[test]
     fn argv_never_uses_a_shell() {
-        /* run_orca builds a Command argv vector — assert the surface stays
-        free of `--surface` and `sh` by construction */
-        let args = argv(&["worktree", "ps", "--limit", PS_LIMIT, "--json"]);
+        /* the launch argv is a literal vector — no shell, and the surface
+           stays the person's own Orca setting: --surface is never emitted */
+        let args = launch_args(&LaunchSpec {
+            model: Some("opus".to_string()),
+            effort: Some("high".to_string()),
+            environment: Some("vps".to_string()),
+            ..launch_spec()
+        });
         assert!(!args
             .iter()
-            .any(|a| a == "--surface" || a == "sh" || a == "-c"));
+            .any(|a| matches!(a.as_str(), "--surface" | "sh" | "bash" | "-c")));
+        assert_eq!(&args[..2], ["worktree", "create"]);
+    }
+
+    #[test]
+    fn launch_args_builds_the_worktree_create_argv() {
+        assert_eq!(
+            launch_args(&launch_spec()),
+            argv(&[
+                "worktree", "create",
+                "--name", "doop-new-screen-a1b2",
+                "--repo", "id:r-1",
+                "--branch", "doop/new-screen-a1b2",
+                "--agent", "claude",
+                "--prompt", "implement the spec",
+                "--comment", "doop: https://diazo.test/c/c1?frame=f1 · task t1",
+                "--no-parent",
+                "--json",
+            ])
+        );
+        /* --model, --effort and --environment slot in before --json */
+        let full = LaunchSpec {
+            model: Some("opus".to_string()),
+            effort: Some("high".to_string()),
+            environment: Some("vps".to_string()),
+            ..launch_spec()
+        };
+        assert_eq!(
+            launch_args(&full),
+            argv(&[
+                "worktree", "create",
+                "--name", "doop-new-screen-a1b2",
+                "--repo", "id:r-1",
+                "--branch", "doop/new-screen-a1b2",
+                "--agent", "claude",
+                "--prompt", "implement the spec",
+                "--comment", "doop: https://diazo.test/c/c1?frame=f1 · task t1",
+                "--no-parent",
+                "--model", "opus",
+                "--effort", "high",
+                "--environment", "vps",
+                "--json",
+            ])
+        );
     }
 
     #[test]
@@ -1093,6 +1194,7 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
         assert_eq!(poll_row("wt2:x:y", Some(&odd))["agentState"], "done");
     }
 
+    #[cfg(unix)]
     #[test]
     fn run_orca_parses_and_reports() {
         let _lock = ENV_LOCK.lock().unwrap();
@@ -1123,6 +1225,7 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
         assert!(fake.argv_lines().iter().any(|l| l.contains("host list")));
     }
 
+    #[cfg(unix)]
     #[test]
     fn environments_come_from_host_list() {
         let _lock = ENV_LOCK.lock().unwrap();
