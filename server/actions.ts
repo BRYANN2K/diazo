@@ -606,7 +606,7 @@ type CommentAnchor =
       point?: { x: number; y: number }
       elementOrigin?: { x: number; y: number }
     }
-  | { pageId: string; x: number; y: number }
+  | { pageId: string; x: number; y: number; timeStart?: number; timeEnd?: number }
 
 /** What a client knows about the element it is pointing at: the positional
  *  path the live document answered with, the id the element already wears if
@@ -761,7 +761,10 @@ export async function addElementComment(
  *  carry is absent, so a moved comment sheds its old frame, element or page. */
 function anchorFields(
   anchor: CommentAnchor,
-): Pick<ElementComment, 'frameId' | 'elementId' | 'snippet' | 'pageId' | 'x' | 'y' | 'elementOrigin'> {
+): Pick<
+  ElementComment,
+  'frameId' | 'elementId' | 'snippet' | 'pageId' | 'x' | 'y' | 'elementOrigin' | 'timeStart' | 'timeEnd'
+> {
   if ('frame' in anchor) {
     return {
       frameId: anchor.frame.id,
@@ -771,7 +774,14 @@ function anchorFields(
       ...(anchor.elementOrigin ? { elementOrigin: anchor.elementOrigin } : {}),
     }
   }
-  return { snippet: '', pageId: anchor.pageId, x: anchor.x, y: anchor.y }
+  return {
+    snippet: '',
+    pageId: anchor.pageId,
+    x: anchor.x,
+    y: anchor.y,
+    ...(anchor.timeStart !== undefined ? { timeStart: anchor.timeStart } : {}),
+    ...(anchor.timeEnd !== undefined ? { timeEnd: anchor.timeEnd } : {}),
+  }
 }
 
 /** Comments anchored by a positional CSS path before element ids existed:
@@ -914,14 +924,42 @@ export async function moveComment(
  *  between frames, or a spot where something should go. */
 export function addCanvasComment(
   canvasId: string,
-  input: { pageId: string; x: number; y: number; text: string },
+  input: { pageId: string; x: number; y: number; text: string; timeStart?: number; timeEnd?: number },
   from: string,
   fromUserId?: string,
 ): ElementComment | undefined {
   const canvas = store.getCanvas(canvasId)
   if (!canvas || !canvasPages(canvas).some((page) => page.id === input.pageId)) return undefined
   if (!Number.isFinite(input.x) || !Number.isFinite(input.y)) return undefined
-  return postComment(canvasId, { pageId: input.pageId, x: input.x, y: input.y }, input.text, from, fromUserId)
+  /* a scene-time anchor is sane only as a range inside the composition */
+  const comp = store.getComposition(canvasId, input.pageId)
+  if (input.timeStart !== undefined || input.timeEnd !== undefined) {
+    const { timeStart: s, timeEnd: e } = input
+    if (
+      typeof s !== 'number' ||
+      typeof e !== 'number' ||
+      !Number.isFinite(s) ||
+      !Number.isFinite(e) ||
+      !(s >= 0) ||
+      !(e > s) ||
+      !comp ||
+      e > comp.duration
+    )
+      return undefined
+  }
+  return postComment(
+    canvasId,
+    {
+      pageId: input.pageId,
+      x: input.x,
+      y: input.y,
+      ...(input.timeStart !== undefined ? { timeStart: input.timeStart } : {}),
+      ...(input.timeEnd !== undefined ? { timeEnd: input.timeEnd } : {}),
+    },
+    input.text,
+    from,
+    fromUserId,
+  )
 }
 
 /** Reply inside a thread: the reply inherits the root comment's anchor (its

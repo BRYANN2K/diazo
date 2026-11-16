@@ -18,6 +18,10 @@ export interface RenderProgress {
 const MIME: Record<RenderFormat, string[]> = {
   mp4: ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1', 'video/mp4'],
   webm: ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'],
+  /* MediaRecorder cannot write a gif or a stills zip — the desktop target
+     claims those formats (ffmpeg palette pass / zip_store) */
+  gif: [],
+  pngseq: [],
 }
 
 /** the recorder type this browser can write for a format, if any */

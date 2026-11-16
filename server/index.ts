@@ -160,6 +160,7 @@ import {
   wireRenderJobs,
 } from './motionJobs.ts'
 import { MOTION_LIMITS, parseCompositionBody, parseOps } from '../shared/motion.ts'
+import { exportComposition } from './motionTools.ts'
 import { placeImage, placedImageResult } from './placeImage.ts'
 import * as ingest from './ingest.ts'
 import * as agentKeys from './agentKeys.ts'
@@ -3100,6 +3101,51 @@ app.post('/api/canvases/:id/pages/:pageId/composition/renders', (req, res) => {
   res.status(201).json({ job: created.job })
 })
 
+/* the undo history: every write files the replaced state; restoring one
+   re-saves it as the live composition (which files the state it replaced —
+   so a restore is itself undoable) */
+app.get('/api/canvases/:id/pages/:pageId/composition/versions', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  const comp = store.getComposition(canvas.id, req.params.pageId)
+  if (!comp) return res.status(404).json({ error: 'the page has no composition' })
+  const versions = (await persist.listCompositionVersions(canvas.id, comp.id)).map((v) => ({
+    id: v.id,
+    savedAt: v.savedAt,
+    savedBy: v.savedBy,
+    savedByKind: v.savedByKind,
+    duration: v.state.duration,
+    trackCount: v.state.tracks.length,
+    revision: v.state.revision,
+  }))
+  res.json({ versions })
+})
+
+app.post('/api/canvases/:id/pages/:pageId/composition/versions/:versionId/restore', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const pageId = req.params.pageId
+  const comp = store.getComposition(canvas.id, pageId)
+  if (!comp) return res.status(404).json({ error: 'the page has no composition' })
+  const version = await persist.getCompositionVersion(canvas.id, req.params.versionId)
+  if (!version || version.compositionId !== comp.id) {
+    return res.status(404).json({ error: 'no such version on this composition' })
+  }
+  const parsed = parseCompositionBody(version.state)
+  if (!parsed.ok) return res.status(409).json({ error: `the stored version no longer validates: ${parsed.error}` })
+  res.json({ composition: actions.setComposition(canvas.id, parsed.value, pageId, userActor(req)) })
+})
+
+/* "copy as code": the composition compiled to CSS + WAAPI with motion
+   token names kept (docs/motion-api.md § code export) */
+app.get('/api/canvases/:id/pages/:pageId/composition/export', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  const out = await exportComposition(canvas, req.params.pageId)
+  if (!out.ok) return res.status(404).json({ error: out.error })
+  res.json(out.data)
+})
+
 app.get('/api/renders/:id', (req, res) => {
   const job = getRenderJob(req.params.id)
   if (!job) return res.status(404).json({ error: 'no such render job' })
@@ -3148,12 +3194,23 @@ app.put(
     }
     const isMp4 = buf.length > 11 && buf.subarray(4, 8).toString('latin1') === 'ftyp'
     const isWebm = buf.length > 3 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3
-    const mime = isMp4 ? 'video/mp4' : isWebm ? 'video/webm' : null
-    if (!mime) return res.status(400).json({ error: 'not an mp4 or webm file' })
-    if ((job.format === 'mp4') !== isMp4) {
-      return res.status(400).json({ error: `the job wants ${job.format}, the file is ${isMp4 ? 'mp4' : 'webm'}` })
+    /* GIF89a/GIF87a magic, or a PK zip for a pngseq */
+    const isGif = buf.length > 5 && buf.subarray(0, 4).toString('latin1') === 'GIF8'
+    const isZip = buf.length > 3 && buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04
+    const sniffed = isMp4
+      ? { format: 'mp4', mime: 'video/mp4', ext: 'mp4' }
+      : isWebm
+        ? { format: 'webm', mime: 'video/webm', ext: 'webm' }
+        : isGif
+          ? { format: 'gif', mime: 'image/gif', ext: 'gif' }
+          : isZip
+            ? { format: 'pngseq', mime: 'application/zip', ext: 'zip' }
+            : null
+    if (!sniffed) return res.status(400).json({ error: 'not an mp4, webm, gif or zip file' })
+    if (job.format !== sniffed.format) {
+      return res.status(400).json({ error: `the job wants ${job.format}, the file is ${sniffed.format}` })
     }
-    const ext = isMp4 ? 'mp4' : 'webm'
+    const { mime, ext } = sniffed
     const asset = await storeAsset(
       buf,
       { mime, ext },
@@ -3671,11 +3728,17 @@ app.post('/api/frames/:id/drift/:driftId/analyze', async (req, res) => {
 app.post('/api/canvases/:id/comments', async (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'comment')
   if (!canvas) return
-  const { pageId, x, y, text } = req.body ?? {}
+  const { pageId, x, y, text, timeStart, timeEnd } = req.body ?? {}
   if (typeof pageId !== 'string' || !canvasPages(canvas).some((page) => page.id === pageId)) {
     return res.status(400).json({ error: 'page not found' })
   }
   if (!Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'x and y must be numbers' })
+  if (
+    (timeStart !== undefined || timeEnd !== undefined) &&
+    (!Number.isFinite(timeStart) || !Number.isFinite(timeEnd))
+  ) {
+    return res.status(400).json({ error: 'timeStart/timeEnd must both be seconds on the page composition' })
+  }
   const body = String(text ?? '')
   if (!body.trim()) return res.status(400).json({ error: 'empty text' })
   if (refuseAgentMention(req, res, canvas.id, body)) return
@@ -3688,7 +3751,14 @@ app.post('/api/canvases/:id/comments', async (req, res) => {
   }
   const comment = actions.addCanvasComment(
     canvas.id,
-    { pageId, x: Number(x), y: Number(y), text: body },
+    {
+      pageId,
+      x: Number(x),
+      y: Number(y),
+      text: body,
+      ...(Number.isFinite(timeStart) ? { timeStart: Number(timeStart) } : {}),
+      ...(Number.isFinite(timeEnd) ? { timeEnd: Number(timeEnd) } : {}),
+    },
     req.user!.name,
     req.user!.id,
   )

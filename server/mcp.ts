@@ -35,7 +35,10 @@ import { webFontFamilies, webFontsBrief } from '../shared/webFonts.ts'
 import * as actions from './actions.ts'
 import {
   animateStoryboard,
+  checkLibraryItemMotion,
+  exportComposition,
   getCompositionData,
+  insertClip,
   lintMotion,
   renderComposition,
   setCompositionData,
@@ -1961,14 +1964,80 @@ export function buildMcpServer(
         canvas_id: z.string(),
         page_id: z.string().optional().describe('The page to lint (or give frame_id to lint its page)'),
         frame_id: z.string().optional(),
+        library_id: z.string().optional().describe('With item_id: check a library Motion item instead'),
+        item_id: z.string().optional().describe('The library item to seek-safety check'),
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, page_id, frame_id, agent_name }) => {
+    async ({ canvas_id, page_id, frame_id, library_id, item_id, agent_name }) => {
       const c = canvasFor(canvas_id, 'view')
       if (!c) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
+      /* a library item check: the verdict stores on the item's curation
+         row, which insert_clip trusts */
+      if (library_id !== undefined || item_id !== undefined) {
+        if (!library_id || !item_id) return err('send library_id and item_id together')
+        const out = await checkLibraryItemMotion(library_id, item_id)
+        if (!out.ok) return err(out.error)
+        return text({ ok: true, library_id, item_id, ...(out.data as object) })
+      }
       const out = await lintMotion(c, { page_id, frame_id })
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, ...(out.data as object) })
+    },
+  )
+
+  server.registerTool(
+    'insert_clip',
+    {
+      title: 'Insert a library Motion item as a clip',
+      description:
+        "Place a design library's Motion item onto a page's clip track at `start` seconds. The item must be seek-safe: the stored verdict is checked (computed on first use via lint_motion with library_id + item_id) and an unsafe item is refused with its lint reasons — fix the item's HTML per those findings, re-lint, retry. A safe item lands as a clip whose source is the item (a variant_id picks one variant).",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        library_id: z.string().describe('The library canvas the item lives in'),
+        item_id: z.string().describe('The library item to insert'),
+        variant_id: z.string().optional().describe('A variant of the item, when the family has several'),
+        start: z.number().describe('Seconds on the composition clock the clip opens'),
+        duration: z.number().optional().describe('Clip length in seconds, default the item’s own motion length'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, library_id, item_id, variant_id, start, duration, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await insertClip(
+        c,
+        page_id,
+        { library_id, item_id, variant_id, start, duration },
+        actorFrom(agent_name),
+      )
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'export_composition',
+    {
+      title: 'Export the timeline as code',
+      description:
+        "Compile a page's Motion Studio composition to pasteable code: composition.css with @keyframes per animated element (transform/filter lanes composed per stop, token easings kept as var(--*)), and composition.js with the same motion as WAAPI Element.animate calls, the camera as the world wrapper's transform, and clip transitions as pairing notes. Springs compile to linear() sampled from the same spring curve the runtime evaluates.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await exportComposition(c, page_id)
       if (!out.ok) return err(out.error)
       return text({ ok: true, ...(out.data as object) })
     },
@@ -1979,12 +2048,12 @@ export function buildMcpServer(
     {
       title: 'Queue a video render',
       description:
-        "Queue a render job for a page's Motion Studio composition — mp4 or webm, the composition's size/rate or an override, the whole timeline or a range. The job waits for a renderer: a browser tab (MediaRecorder/WebCodecs) or the desktop app (target desktop, deterministic frames + local ffmpeg). It appears in the room as render:progress and the finished file lands as an /a/ asset. Server-side rendering lands in a later phase — this queues, it does not block.",
+        "Queue a render job for a page's Motion Studio composition — mp4, webm, gif or pngseq (a zip of stills), the composition's size/rate or an override, the whole timeline or a range. The job waits for a renderer: a browser tab (MediaRecorder/WebCodecs) or the desktop app (target desktop, deterministic frames + local ffmpeg; GIF uses its palette pass). It appears in the room as render:progress and the finished file lands as an /a/ asset. Server-side rendering lands in a later phase — this queues, it does not block.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
         page_id: z.string(),
-        format: z.enum(['mp4', 'webm']).optional().describe('Container, default mp4'),
+        format: z.enum(['mp4', 'webm', 'gif', 'pngseq']).optional().describe('Container, default mp4'),
         target: z.enum(['browser', 'desktop']).optional().describe('Who renders it, default browser'),
         width: z.number().int().optional(),
         height: z.number().int().optional(),

@@ -558,6 +558,10 @@ export interface ElementComment {
   y?: number
   /** Element top-left at placement time; a moved element uses its current top-left. */
   elementOrigin?: { x: number; y: number }
+  /** Scene anchor (Motion Studio): the range on the page's composition
+   *  clock the thread is about, in seconds. Set on page comments. */
+  timeStart?: number
+  timeEnd?: number
   from: string
   /** account id of the human who left it — decides which model credential runs it */
   fromUserId?: string

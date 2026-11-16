@@ -9,20 +9,27 @@
 import * as actions from './actions.ts'
 import { store } from './store.ts'
 import { createRenderJob } from './motionJobs.ts'
-import { lintComposition, lintMotionHtml, motionLintSummary } from '../shared/motionLint.ts'
+import { elementHtml, lintComposition, lintMotionHtml, motionLintSummary } from '../shared/motionLint.ts'
+import { exportCompositionCode, type CompositionCodeExport } from '../shared/motionExport.ts'
+import { itemMeta, libraryItems, saveMeta } from './libraryIndex.ts'
+import { getLibrary } from './libraries.ts'
 import { canvasPages, pageFrames } from '../shared/pages.ts'
 import {
   buildStoryboard,
+  MOTION_BLOCK_ATTR,
   parseCompositionBody,
+  parseMotionBlock,
   parseOps,
   type Composition,
+  type FrameMotionBlock,
   type MotionLintIssue,
 } from '../shared/motion.ts'
 import type { Actor, Canvas } from '../shared/types.ts'
+import type { LibraryItem, LibraryItemMeta } from '../shared/library.ts'
 
 type Outcome = { ok: true; data: unknown } | { ok: false; error: string }
-const ok = (data: unknown): Outcome => ({ ok: true, data })
-const fail = (error: string): Outcome => ({ ok: false, error })
+const ok = <T>(data: T) => ({ ok: true as const, data })
+const fail = <T = unknown>(error: string): { ok: false; error: string; data?: T } => ({ ok: false, error })
 
 function pageOn(canvas: Canvas, pageId: string): boolean {
   return canvasPages(canvas).some((p) => p.id === pageId)
@@ -176,6 +183,220 @@ export function renderComposition(
   return ok({
     job: created.job,
     note: 'The job is queued: a browser tab or the desktop app (target "desktop") claims it, renders and uploads the file. Watch render:progress in the room, or GET /api/renders/{id}.',
+  })
+}
+
+/* ---- phase 2: code export, library clips ---- */
+
+const MOTION_SCRIPT_RE = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi
+
+/** A frame's parsed `data-doop-motion` block, or undefined when absent. */
+function frameBlockOf(html: string): FrameMotionBlock | undefined {
+  for (const m of html.matchAll(MOTION_SCRIPT_RE)) {
+    if ((m[1] ?? '').includes(MOTION_BLOCK_ATTR)) {
+      const block = parseMotionBlock(m[2] ?? '')
+      if (block) return block
+    }
+  }
+  return undefined
+}
+
+/** The visible text of an element, for expanding text animators server-side. */
+function textOf(html: string, elementId: string): string | undefined {
+  const subtree = elementHtml(html, elementId)
+  if (!subtree) return undefined
+  const text = subtree
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text || undefined
+}
+
+/**
+ * The "copy as code" contract (proposal 14.2): CSS + WAAPI for the page's
+ * composition — layer keyframes, camera, transitions and expanded text
+ * animators, token names kept. Read-only; needs the canvas loaded for the
+ * frame-authored blocks.
+ */
+export async function exportComposition(
+  canvas: Canvas,
+  pageId: string,
+): Promise<{ ok: true; data: CompositionCodeExport } | { ok: false; error: string }> {
+  if (!pageOn(canvas, pageId)) return fail(`no page ${pageId} on this canvas`)
+  const comp = store.getComposition(canvas.id, pageId)
+  if (!comp) return fail(`page ${pageId} has no composition — nothing to export`)
+  const loaded = (await store.load(canvas.id)) ?? canvas
+  const frameBlocks = new Map<string, FrameMotionBlock>()
+  const frameTexts = new Map<string, Map<string, string>>()
+  for (const frame of pageFrames(loaded, pageId)) {
+    const block = frameBlockOf(frame.html)
+    if (block) {
+      frameBlocks.set(frame.id, block)
+      const texts = new Map<string, string>()
+      for (const animator of block.animators ?? []) {
+        const text = textOf(frame.html, animator.el)
+        if (text !== undefined) texts.set(animator.el, text)
+      }
+      if (texts.size) frameTexts.set(frame.id, texts)
+    }
+  }
+  return ok(exportCompositionCode(comp, { frameBlocks, frameTexts }))
+}
+
+/** The library canvas a clip source names; the caller's role is checked by
+ *  the tool layer (any canvas the caller may view may donate a clip). */
+async function findLibraryItem(
+  libraryCanvasId: string,
+  itemId: string,
+): Promise<{ item: LibraryItem; meta: LibraryItemMeta | undefined } | { error: string }> {
+  if (!getLibrary(libraryCanvasId)) return { error: `canvas ${libraryCanvasId} is not a library` }
+  const item = (await libraryItems(libraryCanvasId)).find((i) => i.itemId === itemId)
+  if (!item) return { error: `no item ${itemId} in library ${libraryCanvasId}` }
+  return { item, meta: await itemMeta(libraryCanvasId, itemId) }
+}
+
+/** The HTML a library item's seek-safety check runs on: its locator's
+ *  element subtree when it has one, the whole frame otherwise. */
+async function itemHtml(item: LibraryItem): Promise<string | { error: string }> {
+  const canvas = await store.load(item.canvasId)
+  if (!canvas) return { error: `library canvas ${item.canvasId} could not be loaded` }
+  const frame = store.getFrame(item.frameId)
+  if (!frame) return { error: `the item's frame ${item.frameId} is gone — reindex the library` }
+  if ('elementId' in item.locator) {
+    const subtree = elementHtml(frame.html, item.locator.elementId)
+    return subtree ?? { error: `locator element ${item.locator.elementId} is gone — reindex the library` }
+  }
+  return frame.html
+}
+
+/**
+ * The per-item seek-safety check (proposal 14.6): lint the item's HTML and
+ * store the verdict on its curation row so insert_clip can trust it without
+ * relinting. `safe` = no issues at all — warnings block a clip too, since a
+ * warning means "renders differently on seek".
+ */
+export async function checkLibraryItemMotion(
+  libraryCanvasId: string,
+  itemId: string,
+): Promise<
+  | { ok: true; data: { seekSafe: 'safe' | 'issues'; findings: { rule: string; message: string }[] } }
+  | { ok: false; error: string }
+> {
+  const found = await findLibraryItem(libraryCanvasId, itemId)
+  if ('error' in found) return fail(found.error)
+  const html = await itemHtml(found.item)
+  if (typeof html !== 'string') return fail(html.error)
+  const findings = lintMotionHtml(html, found.item.frameId).map((i) => ({ rule: i.rule, message: i.message }))
+  const seekSafe = findings.length === 0 ? ('safe' as const) : ('issues' as const)
+  const now = Date.now()
+  const prev = found.meta
+  await saveMeta({
+    canvasId: libraryCanvasId,
+    itemId,
+    label: prev?.label ?? null,
+    description: prev?.description ?? null,
+    category: prev?.category ?? null,
+    tags: prev?.tags ?? null,
+    status: prev?.status ?? null,
+    useCount: prev?.useCount ?? 0,
+    lastUsedAt: prev?.lastUsedAt ?? null,
+    suggested: prev?.suggested ?? null,
+    seekSafe,
+    seekSafeFindings: findings,
+    seekSafeAt: now,
+    updatedAt: prev?.updatedAt ?? now,
+    updatedBy: prev?.updatedBy ?? null,
+  })
+  return ok({ seekSafe, findings })
+}
+
+/**
+ * Insert a library Motion item as a clip on the page's clip track. Refuses
+ * a non-seek-safe item (the stored or freshly-computed verdict plus its
+ * lint reasons); the fix path is the rewrite helpers lint_motion names.
+ */
+export async function insertClip(
+  canvas: Canvas,
+  pageId: string,
+  input: { library_id: string; item_id: string; variant_id?: string; start: number; duration?: number },
+  actor: Actor,
+): Promise<Outcome> {
+  if (!pageOn(canvas, pageId)) return fail(`no page ${pageId} on this canvas`)
+  const comp = store.getComposition(canvas.id, pageId)
+  if (!comp) return fail(`page ${pageId} has no composition — make the timeline first`)
+  const found = await findLibraryItem(input.library_id, input.item_id)
+  if ('error' in found) return fail(found.error)
+  const { item } = found
+
+  let verdict = found.meta?.seekSafe
+  let findings = found.meta?.seekSafeFindings ?? []
+  if (!verdict) {
+    const check = await checkLibraryItemMotion(input.library_id, input.item_id)
+    if (!check.ok) return fail(check.error)
+    verdict = check.data.seekSafe
+    findings = check.data.findings
+  }
+  if (verdict !== 'safe') {
+    return fail(
+      `item ${item.itemId} is not seek-safe — fix it first (${findings
+        .slice(0, 3)
+        .map((f) => `${f.rule}: ${f.message}`)
+        .join('; ')}${findings.length > 3 ? `, +${findings.length - 3} more` : ''}). ` +
+        'Rewrite helpers: bind animation to --t keyframes or WAAPI, seed randomness, remove wall clocks and free-running timers.',
+    )
+  }
+  const start = input.start
+  /* default length: the item's own motion block's last keyframe, else 3 s */
+  let duration = input.duration ?? 0
+  if (!duration) {
+    const html = await itemHtml(item)
+    if (typeof html === 'string') {
+      const block = frameBlockOf(html)
+      const last = Math.max(
+        0,
+        ...(block?.keyframes ?? []).map((k) => k.t),
+        ...(block?.animators ?? []).map((a) => a.start + a.duration),
+      )
+      duration = last > 0 ? Math.min(last + 0.5, 60) : 3
+    } else duration = 3
+  }
+  if (!Number.isFinite(start) || start < 0) return fail('start must be a number ≥ 0')
+  if (!Number.isFinite(duration) || !(duration > 0)) return fail('duration must be a positive number of seconds')
+
+  /* the clip track to take it: the page's first, else a new one */
+  const clipTrack = comp.tracks.find((t) => t.kind === 'clip' && !t.muted)
+  const clip = {
+    id: `clip-${item.itemId.replace(/[^a-zA-Z0-9_-]/g, '')}-${Math.round(start * 100)}`,
+    start,
+    duration,
+    name: item.label,
+    source: {
+      type: 'library' as const,
+      itemId: item.itemId,
+      ...(input.variant_id ? { variantId: input.variant_id } : {}),
+    },
+  }
+  const ops = clipTrack
+    ? [{ op: 'add_clip' as const, trackId: clipTrack.id, clip }]
+    : [
+        {
+          op: 'add_track' as const,
+          track: {
+            id: 'library-clips',
+            kind: 'clip' as const,
+            name: 'Library clips',
+            clips: [clip],
+          },
+        },
+      ]
+  const applied = actions.patchComposition(canvas.id, pageId, ops, actor)
+  if (!applied.ok) return fail(applied.error ?? 'insert rejected')
+  return ok({
+    composition: applied.composition,
+    clip: { ...clip, trackId: clipTrack?.id ?? 'library-clips' },
+    seekSafe: verdict,
   })
 }
 

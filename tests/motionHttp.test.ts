@@ -19,6 +19,8 @@ let ownerKey: string
 
 const MP4 = Buffer.concat([Buffer.alloc(4), Buffer.from('ftypisom'), Buffer.alloc(64)])
 const WEBM = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(64)])
+const GIF = Buffer.concat([Buffer.from('GIF89a'), Buffer.alloc(64)])
+const ZIP = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(64)])
 
 const COMP_BODY = {
   duration: 6,
@@ -138,6 +140,131 @@ describe('composition REST + access gates', () => {
     const comp = (await (await again.get(compUrl())).json()).composition as Composition
     expect(comp).toMatchObject({ canvasId, pageId, duration: 6 })
   }, 30_000)
+})
+
+describe('phase 2: versions, export, gif/pngseq, scene-time comments', () => {
+  it('lists versions and a restore makes the restore itself undoable', async () => {
+    /* writes file the state they replace — a patch here makes the first
+       version. The write is fire-and-forget, so poll. */
+    expect(
+      (
+        await owner.patch(compUrl(), {
+          ops: [{ op: 'set_meta', duration: 7 }],
+        })
+      ).status,
+    ).toBe(200)
+    let versions: { id: string; revision: number; duration: number; savedBy: string }[] = []
+    for (let i = 0; i < 40 && versions.length === 0; i++) {
+      versions = (await (await owner.get(`${compUrl()}/versions`)).json()).versions
+      if (versions.length === 0) await new Promise((r) => setTimeout(r, 150))
+    }
+    expect(versions.length).toBeGreaterThan(0)
+    expect(versions[0]?.savedBy).toBe('Owner')
+
+    const before = (await (await owner.get(compUrl())).json()).composition as Composition
+    const restore = await owner.post(`${compUrl()}/versions/${versions[0]!.id}/restore`, {})
+    expect(restore.status).toBe(200)
+    const restored = (await restore.json()).composition as Composition
+    /* restore keeps the composition id, takes the version's state */
+    expect(restored.id).toBe(before.id)
+    expect(restored.duration).toBe(versions[0]!.duration)
+    expect(restored.revision).toBe(before.revision + 1)
+
+    /* the state the restore replaced is now a version itself (async write: poll) */
+    let after: { id: string }[] = []
+    for (let i = 0; i < 40 && after.length < versions.length + 1; i++) {
+      after = (await (await owner.get(`${compUrl()}/versions`)).json()).versions
+      if (after.length < versions.length + 1) await new Promise((r) => setTimeout(r, 150))
+    }
+    expect(after.length).toBe(versions.length + 1)
+    expect((await outsider.get(`${compUrl()}/versions`)).status).toBe(403)
+  }, 15_000)
+
+  it('exports the timeline as css + waapi code', async () => {
+    /* an element track so the export has @keyframes to emit */
+    await owner.patch(compUrl(), {
+      ops: [
+        {
+          op: 'add_track',
+          track: {
+            id: 'hero',
+            kind: 'element',
+            frameId: 'f1',
+            elementId: 'hero',
+            keyframes: [
+              { id: 'o1', property: 'opacity', t: 0, value: 0 },
+              { id: 'o2', property: 'opacity', t: 2, value: 1 },
+            ],
+          },
+        },
+      ],
+    })
+    const res = await owner.get(`${compUrl()}/export`)
+    expect(res.status).toBe(200)
+    const out = (await res.json()) as { files: { name: string; content: string }[]; tokens: string[] }
+    const css = out.files.find((f) => f.name === 'composition.css')!.content
+    const js = out.files.find((f) => f.name === 'composition.js')!.content
+    expect(css).toContain('@keyframes')
+    expect(js).toContain('animate(keyframes')
+    expect(js).toContain("document.querySelector('[data-doop-world]')")
+    expect((await outsider.get(`${compUrl()}/export`)).status).toBe(403)
+  }, 15_000)
+
+  it('queues a gif and a pngseq and sniffs their uploads', async () => {
+    const gif = await owner.post(`${compUrl()}/renders`, { format: 'gif' })
+    expect(gif.status).toBe(201)
+    const gifJob = (await gif.json()).job
+    const wrongSniff = await owner.req(`/api/renders/${gifJob.id}/upload`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: MP4,
+    })
+    expect(wrongSniff.status).toBe(400)
+    const up = await owner.req(`/api/renders/${gifJob.id}/upload`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: GIF,
+    })
+    expect(up.status).toBe(200)
+    expect(((await up.json()).asset as { url: string }).url).toMatch(/^\/a\/[\w-]+\.gif$/)
+
+    const seq = await owner.post(`${compUrl()}/renders`, { format: 'pngseq' })
+    expect(seq.status).toBe(201)
+    const seqJob = (await seq.json()).job
+    const upZip = await owner.req(`/api/renders/${seqJob.id}/upload`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: ZIP,
+    })
+    expect(upZip.status).toBe(200)
+    expect(((await upZip.json()).asset as { url: string }).url).toMatch(/^\/a\/[\w-]+\.zip$/)
+  }, 15_000)
+
+  it('anchors a canvas comment to a scene time range', async () => {
+    const comp = (await (await owner.get(compUrl())).json()).composition as Composition
+    const posted = await owner.post(`/api/canvases/${canvasId}/comments`, {
+      pageId,
+      x: 10,
+      y: 20,
+      text: 'this beat feels rushed',
+      timeStart: 1.5,
+      timeEnd: Math.min(3, comp.duration),
+    })
+    expect(posted.status).toBe(200)
+    const comment = await posted.json()
+    expect(comment).toMatchObject({ pageId, timeStart: 1.5, timeEnd: Math.min(3, comp.duration) })
+
+    const outOfRange = await owner.post(`/api/canvases/${canvasId}/comments`, {
+      pageId,
+      x: 0,
+      y: 0,
+      text: 'beyond the film',
+      timeStart: 1,
+      timeEnd: comp.duration + 5,
+    })
+    /* the anchor is rejected (409: the action refuses it), never silently kept */
+    expect([400, 409]).toContain(outOfRange.status)
+  }, 15_000)
 })
 
 describe('the room relays timelines and playheads', () => {

@@ -550,7 +550,9 @@ function parseTextAnimator(input: unknown): FrameTextAnimator | null {
 
 /* ---- render jobs ---- */
 
-export const RENDER_FORMATS = ['mp4', 'webm'] as const
+/* `gif`/`pngseq` join the containers: a GIF needs the ffmpeg palette pass
+ * and a pngseq uploads a zip of the stills (sniffed on upload) */
+export const RENDER_FORMATS = ['mp4', 'webm', 'gif', 'pngseq'] as const
 export type RenderFormat = (typeof RENDER_FORMATS)[number]
 
 /**

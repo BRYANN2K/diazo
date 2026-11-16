@@ -56,7 +56,10 @@ import { searchIndex } from '../shared/librarySearch.ts'
 import { CodeLinkError, SET_CODE_LINK_DESCRIPTION, componentCodeLink, setCodeLinkTool } from './codeLinks.ts'
 import {
   animateStoryboard,
+  checkLibraryItemMotion,
+  exportComposition,
   getCompositionData,
+  insertClip,
   lintMotion,
   renderComposition,
   setCompositionData,
@@ -2539,24 +2542,53 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'lint_motion',
     description:
-      "Check a page is seek-safe before rendering: wall clocks, free-running loops, unseeded Math.random, CSS animations not bound to the timeline, GSAP, network calls at seek time, autoplaying media, malformed motion blocks and bad track references (MO-* rules), over the composition and every frame's HTML.",
+      "Check a page is seek-safe before rendering: wall clocks, free-running loops, unseeded Math.random, CSS animations not bound to the timeline, GSAP, network calls at seek time, autoplaying media, malformed motion blocks and bad track references (MO-* rules), over the composition and every frame's HTML. With library_id + item_id it seek-safety checks a library Motion item and stores the verdict insert_clip trusts.",
     input_schema: {
       type: 'object',
       properties: {
         page_id: { type: 'string', description: 'The page to lint (or give frame_id to lint its page)' },
         frame_id: { type: 'string' },
+        library_id: { type: 'string', description: 'With item_id: check a library Motion item instead' },
+        item_id: { type: 'string', description: 'The library item to seek-safety check' },
       },
+    },
+  },
+  {
+    name: 'insert_clip',
+    description:
+      "Insert a design library's Motion item onto a page's clip track at start seconds. The item must be seek-safe — its stored verdict is checked (computed on first use via lint_motion) and an unsafe item is refused with the lint reasons to fix. variant_id picks one variant of a family.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        library_id: { type: 'string', description: 'The library canvas the item lives in' },
+        item_id: { type: 'string' },
+        variant_id: { type: 'string' },
+        start: { type: 'number', description: 'Seconds the clip opens' },
+        duration: { type: 'number', description: 'Clip length, default the item’s own motion length' },
+      },
+      required: ['page_id', 'library_id', 'item_id', 'start'],
+    },
+  },
+  {
+    name: 'export_composition',
+    description:
+      "Compile a page's timeline to pasteable code: composition.css (@keyframes per element, token easings kept as var(--*)) and composition.js (WAAPI animate calls, the camera on the world wrapper, transitions as pairing notes).",
+    input_schema: {
+      type: 'object',
+      properties: { page_id: { type: 'string', description: 'The page whose timeline to export' } },
+      required: ['page_id'],
     },
   },
   {
     name: 'render_composition',
     description:
-      "Queue a video render of a page's timeline — mp4 or webm, the whole composition or a range. A browser tab or the desktop app claims the job and the file lands as an /a/ asset; progress shows in the room as render:progress.",
+      "Queue a render of a page's timeline — mp4, webm, gif or pngseq, the whole composition or a range. A browser tab or the desktop app claims the job and the file lands as an /a/ asset; progress shows in the room as render:progress.",
     input_schema: {
       type: 'object',
       properties: {
         page_id: { type: 'string' },
-        format: { type: 'string', enum: ['mp4', 'webm'], description: 'Container, default mp4' },
+        format: { type: 'string', enum: ['mp4', 'webm', 'gif', 'pngseq'], description: 'Container, default mp4' },
         target: { type: 'string', enum: ['browser', 'desktop'], description: 'Who renders it, default browser' },
         width: { type: 'number' },
         height: { type: 'number' },
@@ -3647,10 +3679,44 @@ export async function execTool(
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
         const raw = block.input as Record<string, unknown>
+        if (typeof raw.library_id === 'string' || typeof raw.item_id === 'string') {
+          if (typeof raw.library_id !== 'string' || typeof raw.item_id !== 'string') {
+            return fail('send library_id and item_id together')
+          }
+          const out = await checkLibraryItemMotion(raw.library_id, raw.item_id)
+          if (!out.ok) return fail(out.error)
+          return ok(JSON.stringify({ library_id: raw.library_id, item_id: raw.item_id, ...(out.data as object) }))
+        }
         const out = await lintMotion(canvas, {
           page_id: typeof raw.page_id === 'string' ? raw.page_id : undefined,
           frame_id: typeof raw.frame_id === 'string' ? raw.frame_id : undefined,
         })
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'insert_clip': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as Record<string, unknown>
+        const out = await insertClip(
+          canvas,
+          String(raw.page_id ?? ''),
+          {
+            library_id: String(raw.library_id ?? ''),
+            item_id: String(raw.item_id ?? ''),
+            variant_id: typeof raw.variant_id === 'string' ? raw.variant_id : undefined,
+            start: Number(raw.start),
+            duration: typeof raw.duration === 'number' ? raw.duration : undefined,
+          },
+          actor,
+        )
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'export_composition': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const out = await exportComposition(canvas, String(input.page_id ?? ''))
         if (!out.ok) return fail(out.error)
         return ok(JSON.stringify(out.data))
       }

@@ -4,12 +4,12 @@ Built on `feat/motion-backend-next` (from `dev`), worktree `doop-wt/motion-next`
 
 ## Phase 2 — timeline depth and code export
 
-- [ ] 1. Contract: transitions on clips, camera presets (seeded), text animators (`data-doop-split`, `animators` in `data-doop-motion`), mask/path properties.
-- [ ] 2. CSS and WAAPI code export (`export_composition`, token names kept).
-- [ ] 3. GIF and PNG-sequence render formats (contract, upload sniffing, desktop ffmpeg).
-- [ ] 4. Library clip seek-safe verdict and `insert_clip`.
-- [ ] 5. Scene version list/restore and time-range comments.
-- [ ] 6. Resident tools, parity, motion-api.md.
+- [x] 1. Contract: transitions on clips, camera presets (seeded), text animators (`data-doop-split`, `animators` in `data-doop-motion`), mask/path properties.
+- [x] 2. CSS and WAAPI code export (`export_composition`, token names kept).
+- [x] 3. GIF and PNG-sequence render formats (contract, upload sniffing, desktop ffmpeg).
+- [x] 4. Library clip seek-safe verdict and `insert_clip`.
+- [x] 5. Scene version list/restore and time-range comments.
+- [x] 6. Resident tools, parity, motion-api.md.
 
 ## Phase 3 — media, speech and generation
 

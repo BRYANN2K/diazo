@@ -451,6 +451,10 @@ export const comments = pgTable(
     resolvedBy: text('resolved_by'),
     resolvedAt: bigint('resolved_at', { mode: 'number' }),
     parentId: text('parent_id'),
+    /* a page comment may anchor to the page composition's clock: the scene
+       time range the thread is about (seconds) */
+    timeStart: doublePrecision('time_start'),
+    timeEnd: doublePrecision('time_end'),
   },
   (t) => [index('comments_canvas_idx').on(t.canvasId)],
 )
@@ -1330,6 +1334,12 @@ export const libraryItemMeta = pgTable(
     lastUsedAt: bigint('last_used_at', { mode: 'number' }),
     /** a model's description and tags, until a person accepts them */
     suggested: jsonb('suggested').$type<ItemSuggestion>(),
+    /* Motion Studio: the stored verdict of the last seek-safety check
+       (shared/motionLint rules over the item's HTML) — insert_clip trusts
+       it only when 'safe' */
+    seekSafe: text('seek_safe').$type<'safe' | 'issues'>(),
+    seekSafeFindings: jsonb('seek_safe_findings').$type<{ rule: string; message: string }[]>(),
+    seekSafeAt: bigint('seek_safe_at', { mode: 'number' }),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
     updatedBy: text('updated_by'),
   },

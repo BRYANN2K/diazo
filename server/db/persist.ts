@@ -378,6 +378,43 @@ export function saveCompositionVersion(v: {
   )
 }
 
+/** The stored states of a composition, newest first (the undo history the
+ *  scene versions list shows; state included so a restore needs no second
+ *  read). */
+export async function listCompositionVersions(
+  canvasId: string,
+  compositionId: string,
+): Promise<{ id: string; state: Composition; savedAt: number; savedBy: string; savedByKind: string | null }[]> {
+  return db
+    .select({
+      id: t.compositionVersions.id,
+      state: t.compositionVersions.state,
+      savedAt: t.compositionVersions.savedAt,
+      savedBy: t.compositionVersions.savedBy,
+      savedByKind: t.compositionVersions.savedByKind,
+    })
+    .from(t.compositionVersions)
+    .where(and(eq(t.compositionVersions.canvasId, canvasId), eq(t.compositionVersions.compositionId, compositionId)))
+    .orderBy(desc(t.compositionVersions.savedAt))
+    .limit(MAX_COMPOSITION_VERSIONS)
+}
+
+export async function getCompositionVersion(
+  canvasId: string,
+  versionId: string,
+): Promise<{ id: string; compositionId: string; state: Composition } | undefined> {
+  const rows = await db
+    .select({
+      id: t.compositionVersions.id,
+      compositionId: t.compositionVersions.compositionId,
+      state: t.compositionVersions.state,
+    })
+    .from(t.compositionVersions)
+    .where(and(eq(t.compositionVersions.canvasId, canvasId), eq(t.compositionVersions.id, versionId)))
+    .limit(1)
+  return rows[0]
+}
+
 /** the render-job row the public RenderJob maps to and back */
 function jobRow(j: RenderJob) {
   return {
@@ -1187,6 +1224,8 @@ async function writeComment(c: ElementComment): Promise<void> {
     failedAt: c.failedAt ?? null,
     failureReason: c.failureReason ?? null,
     resolvedBy: c.resolvedBy ?? null,
+    timeStart: c.timeStart ?? null,
+    timeEnd: c.timeEnd ?? null,
     resolvedAt: c.resolvedAt ?? null,
     parentId: c.parentId ?? null,
   }
@@ -1213,6 +1252,8 @@ async function writeComment(c: ElementComment): Promise<void> {
         failureReason: row.failureReason,
         resolvedBy: row.resolvedBy,
         resolvedAt: row.resolvedAt,
+        timeStart: row.timeStart,
+        timeEnd: row.timeEnd,
       },
     })
 }
@@ -1577,6 +1618,8 @@ export async function hydrate(): Promise<Hydrated> {
       ...(row.resolvedBy != null ? { resolvedBy: row.resolvedBy } : {}),
       ...(row.resolvedAt != null ? { resolvedAt: row.resolvedAt } : {}),
       ...(row.parentId != null ? { parentId: row.parentId } : {}),
+      ...(row.timeStart != null ? { timeStart: row.timeStart } : {}),
+      ...(row.timeEnd != null ? { timeEnd: row.timeEnd } : {}),
     })
     comments.set(row.canvasId, list)
   }

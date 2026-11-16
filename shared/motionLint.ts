@@ -54,6 +54,39 @@ const GSAP_RE = /\b(?:gsap|TweenMax|TimelineMax|TweenLite|TimelineLite)\b/
 const GSAP_SRC_RE = /gsap|TweenMax/i
 const ANIMATION_DECL_RE = /(?:^|[;{])\s*animation(?:-[a-z-]+)?\s*:[^;}]+/gi
 
+/** The subtree of the element carrying `data-doop-id` — a tag-balance walk
+ *  from its opening tag (HTML in this codebase is template-authored, never
+ *  arbitrary). Void elements return the tag alone; no match returns null. */
+const VOID_TAGS = new Set([
+  'area',
+  'base',
+  'br',
+  'col',
+  'embed',
+  'hr',
+  'img',
+  'input',
+  'link',
+  'meta',
+  'source',
+  'track',
+  'wbr',
+])
+export function elementHtml(html: string, elementId: string): string | null {
+  const open = new RegExp(`<([a-zA-Z][a-zA-Z0-9]*)[^>]*data-doop-id\\s*=\\s*["']${esc(elementId)}["'][^>]*>`).exec(html)
+  if (!open) return null
+  const tag = open[1]!.toLowerCase()
+  if (open[0].endsWith('/>') || VOID_TAGS.has(tag)) return open[0]
+  const tagRe = new RegExp(`<\\/?${tag}\\b[^>]*>`, 'gi')
+  tagRe.lastIndex = open.index + open[0].length
+  let depth = 1
+  for (let m = tagRe.exec(html); m; m = tagRe.exec(html)) {
+    depth += m[0].startsWith('</') ? -1 : m[0].endsWith('/>') ? 0 : 1
+    if (depth === 0) return html.slice(open.index, m.index + m[0].length)
+  }
+  return html.slice(open.index)
+}
+
 function snippet(text: string, index: number, span = 60): string {
   const start = Math.max(0, index - 10)
   return text
