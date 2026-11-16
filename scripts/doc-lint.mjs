@@ -68,7 +68,7 @@ const REQUIRED_ROOT_FILES = ['CLAUDE.md', 'README.md']
 // Standing docs under .context/ that must exist. Add CODESTYLE.md, DESIGN.md,
 // RELEASE.md, ARCHITECTURE.md etc. only if this repo actually has them -- the
 // convention says never require a doc the repo cannot fill with real content.
-const REQUIRED_CONTEXT_DOCS = ['INDEX.md', 'TECHSTACK.md', 'DESIGN.md', 'CODESTYLE.md', 'RELEASE.md']
+const REQUIRED_CONTEXT_DOCS = ['INDEX.md', 'TECHSTACK.md', 'DESIGN.md', 'CODESTYLE.md']
 
 // Subfolders of .context/ that own their own complete INDEX.md. These grow one
 // file per unit of work forever, so their index is a link (never @-imported)

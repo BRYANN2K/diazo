@@ -1,8 +1,10 @@
 # Diazo features
 
 What this fork adds on top of [kgoedecke/doop](https://github.com/kgoedecke/doop), and the
-upstream pull requests it merged ahead of upstream. Resync notes and the deploy recipe are in
-[FORK.md](../FORK.md). Screenshots of most of these are in the [README](../README.md#what-it-does).
+upstream pull requests it merged ahead of upstream. Resync notes are in
+[runbooks/upstream-resync.md](runbooks/upstream-resync.md) and the deploy recipe in
+[runbooks/k3s-deploy.md](runbooks/k3s-deploy.md). The README sums them up in
+[What it does today](../README.md#what-it-does-today).
 
 ## Features added in this fork
 
@@ -54,7 +56,8 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   one). ⌘F everywhere answers libraries from their index, without loading them. Search knows common
   UI synonyms ("login" finds "sign in") and ranks what is used most first. A library can let a
   model describe and tag its thin items (off by default, 200 a day, suggestions wait in the inbox).
-  `scripts/pull-library.ts` copies a library from another doop or Diazo instance (see FORK.md).
+  `scripts/pull-library.ts` copies a library from another doop or Diazo instance
+  ([runbooks/design-library-migration.md](runbooks/design-library-migration.md)).
   The category tree the convert wizard proposes drops page numbers ("16 "), alphabetical splits
   ("· A–L") and continuations, and folds the categories that then collide.
 - **Organise a library with AI** — Libraries → Organise with AI (also offered by the convert

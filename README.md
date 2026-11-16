@@ -88,7 +88,7 @@ A browser window asks you to approve; the agent then works as you. Headless agen
 
 ## Developer notes
 
-The web app is in `src/`, the server (Express, WebSocket room, MCP server) in `server/`, shared types in `shared/`, the Tauri desktop shell in `desktop/`, the CLI in `cli/`. `bun install && bun run dev` starts everything with an embedded Postgres. Work happens on `main`; before a commit run `bun run typecheck && bun run lint && bun run test`. Details in [CLAUDE.md](CLAUDE.md), [FORK.md](FORK.md) and [.context/TECHSTACK.md](.context/TECHSTACK.md).
+The web app is in `src/`, the server (Express, WebSocket room, MCP server) in `server/`, shared types in `shared/`, the Tauri desktop shell in `desktop/`, the CLI in `cli/`. `bun install && bun run dev` starts everything with an embedded Postgres. Work happens on `main`; before a commit run `bun run typecheck && bun run lint && bun run test`. Details in [CLAUDE.md](CLAUDE.md), [docs/RELEASE.md](docs/RELEASE.md) and [.context/TECHSTACK.md](.context/TECHSTACK.md).
 
 ## Credits
 

@@ -1,34 +1,62 @@
-# RELEASE - doop
+# Releasing Diazo
 
-## Versioning (release-please)
+How a Diazo release is versioned, built, published and verified: the server image, the local and desktop installers, and the desktop app. Read by Bryan and by agents that cut a release or change the pipeline.
+Status: last desktop release `desktop-v0.15.0` (2026-11-15), unverified under Stip; updated 2026-11-16
 
-`.github/workflows/release-please.yml` runs on every push to `main` and keeps a release PR open
-per package, driven by conventional commits (`release-please-config.json`,
-`.release-please-manifest.json`):
+## At a glance
 
-- `.` (the web app) -> "chore(main): release x.y.z" bumps `package.json` + `CHANGELOG.md`;
-  merging it creates the `vX.Y.Z` tag and a GitHub Release. Tag + notes only - nothing is built
-  or deployed from it.
-- `desktop/` -> "chore(desktop): release x.y.z" bumps `desktop/package.json`,
-  `src-tauri/tauri.conf.json`, `Cargo.toml` + `desktop/CHANGELOG.md`. It cannot bump
-  `Cargo.lock`, so `desktop.yml` copies the shell's version line from `Cargo.toml` into the
-  lock ahead of `cargo test --locked`; the lock catches up in the next commit that builds the shell. It does NOT
-  tag: the `desktop-v*` tag is pushed by hand after merging (next section). Since no GitHub
-  Release is cut, the workflow's last step flips the merged desktop PR's label from
-  `autorelease: pending` to `autorelease: tagged` itself; a merged PR left `pending` makes every
-  later run abort with "untagged, merged release PRs outstanding".
+| Item             | Value                                                                                                                                                                                                                   |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Artefacts        | image `ghcr.io/bryann2k/diazo` (`:staging`, `:main`, `:latest`, `:sha-<short>`); `Diazo_<v>_universal.dmg`, `Diazo_<v>_universal.app.tar.gz`, Windows setup, Linux AppImage, .deb and .rpm, `SHA256SUMS`, `latest.json` |
+| Published to     | GHCR; GitHub Releases of `BRYANN2K/diazo` (`desktop-v*` and the fixed `desktop-updates` prerelease); the curl installers on `main`                                                                                      |
+| Pipeline         | `.github/workflows/docker.yml` on pushes to `staging` and `main`; `desktop-release.yml` on `desktop-v*` tags                                                                                                            |
+| Version lives in | the server: `package.json`; the desktop: `desktop/package.json`, both `tauri.conf.json`, both `Cargo.toml` and their `Cargo.lock` lines                                                                                 |
+| Secrets          | `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` in the repository secrets (names only)                                                                                                                |
 
-Both packages are 0.x, so breaking changes bump the minor, not the major. With the default
-`GITHUB_TOKEN` the release PR gets no CI run; a `RELEASE_PLEASE_TOKEN` PAT secret fixes that.
+## Versions and tags
+
+- [SemVer](https://semver.org/): `fix` = patch, `feat` = minor; both packages are `0.y.z`, so a breaking change bumps the minor.
+- The server has no release tag: every merge into `main` is a release, and its image carries its commit (`DOOP_BUILD_SHA`).
+- The desktop app is tagged `desktop-vX.Y.Z` on `main`. `desktop/scripts/updater-config.sh` refuses a tag whose version differs from both `tauri.conf.json`.
+- Never push `ios-v*` tags: `ios-release.yml` needs upstream's signing secrets.
+- Commits follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/); [CHANGELOG.md](../CHANGELOG.md) and `desktop/CHANGELOG.md` are written by hand.
+
+## Before you merge into `main` or tag
+
+- [ ] The change went `dev` → `staging` by pull request and CI is green on `staging` ([ADR 0006](adr/0006-merge-through-dev-staging-and-main.md)).
+- [ ] The VPS ran the `:staging` image and the flows it touches work ([runbooks/k3s-deploy.md](runbooks/k3s-deploy.md)).
+- [ ] `## [Unreleased]` in `CHANGELOG.md` lists the user-visible changes; a desktop release also has its `desktop/CHANGELOG.md` section.
+- [ ] Desktop only: the version is bumped in `desktop/package.json`, both `tauri.conf.json`, both `Cargo.toml` and the package line of each `Cargo.lock`.
+
+## Cut a desktop release
+
+1. Merge `staging` into `main` by pull request. Expect: `docker.yml` and CI pass on `main`.
+2. `git tag desktop-vX.Y.Z origin/main && git push origin desktop-vX.Y.Z`. Expect: `desktop-release.yml` starts.
+3. Wait for the universal DMG (Chromium/CEF, about an hour), the Windows setup and the Linux packages. Expect: release `desktop-vX.Y.Z` with every artefact, `SHA256SUMS` and `latest.json`, and `latest.json` copied onto `desktop-updates`.
+
+## Verify after publish
+
+- `shasum -a 256 -c SHA256SUMS` in a folder with the downloaded artefacts. Expect: `OK` for each.
+- `curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install-desktop.sh | sh` on a Mac with the previous version. Expect: the new version in Diazo → About.
+- An installed app offers the update within 24 hours, or at once with Diazo → Check for Updates…
+- `curl -s <instance>/api/version` after a server release. Expect: the merged commit.
+
+## Roll back
+
+- Fix forward: ship `X.Y.Z+1`. The desktop job refuses to put an older version back on `desktop-updates`.
+- Server: revert on `staging`, then `main`, by pull request; or pin `:sha-<short>` on the instance ([runbooks/k3s-deploy.md](runbooks/k3s-deploy.md#rollback)).
+- Lost updater key: generate a new minisign pair, set the two secrets, put the public half in both `tauri.conf.json` (`plugins.updater.pubkey`) and `PUBKEY` in `scripts/install-desktop.sh`; every user reinstalls once with the curl script. No data is lost.
+
+Taking changes from upstream doop is a separate procedure: [runbooks/upstream-resync.md](runbooks/upstream-resync.md).
 
 ## Self-hosted server (Docker)
 
-No container release pipeline for the server app. Self-hosting is
-`docker compose up` (`docker-compose.yml` + `Dockerfile`) - builds the app image locally, runs it
-on port 4400 alongside a `postgres:16-alpine` container, and applies DB migrations at boot
-(`server/db/index.ts`). CI (`ci.yml`) validates every push/PR to `main` (typecheck, lint,
-format:check, build, test) but does not build or push a container image.
-The CI build uses `bun run --bun build` to match the `oven/bun` Docker build stage,
+`docker.yml` builds `ghcr.io/bryann2k/diazo` for `linux/amd64` and `linux/arm64` on native runners on every push to
+`staging` (tag `staging`) and `main` (tags `main`, `latest`, `sha-<short>`), and merges the digests into one
+multi-arch tag. `docker compose up` (`docker-compose.yml` + `Dockerfile`) builds the image locally instead and runs it
+on port 4400 beside a `postgres:16-alpine` container; migrations apply at boot (`server/db/index.ts`). CI (`ci.yml`)
+validates every push to `dev`, `staging` and `main` and every pull request (typecheck, lint, format:check, doc-lint,
+build, tests). The CI build uses `bun run --bun build` to match the `oven/bun` Docker build stage,
 where `node` commands run with Bun. Extension tests also build with both runtimes
 and run the Bun-built archive under Node, including its nested runtime dependencies.
 
@@ -67,6 +95,33 @@ scripts again and updates what `<home>/install.conf` records. Flags: `--app-only
 `--server-only`, `--use-local`, `--version`, `--dry-run`, `--uninstall [--purge]`. The app's
 Diazo → Local Server menu (`local_server.rs`) needs desktop 0.16.0. Tests: `install.test.ts`
 (stub `container`, `launchctl`, `curl`, `uname`, `sw_vers`, `open`, `osascript`).
+
+## All-in-one Mac install (server + app, this fork)
+
+`scripts/install.sh` (`curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install.sh | sh`)
+does not copy the two other installers: it runs `install-local.sh install`, then `install-desktop.sh` (the
+neighbouring copies in a checkout, else downloaded from `main`). The server needs Apple silicon, macOS 26+ and
+`container` 1.0+; otherwise the script prints the download link, offers `--app-only` on a terminal and exits
+with code 1 without installing anything.
+
+- A LaunchAgent, `~/Library/LaunchAgents/dev.bryann2k.diazo.server.plist` (`launchctl bootout`, then
+  `bootstrap gui/<uid>`, idempotent), runs `diazo autostart` at login: it starts the `container` services and
+  the container when `/healthz` does not answer. Logs go to `~/Library/Logs/Diazo/server.log`.
+- The app's `server.json` (`~/Library/Application Support/dev.bryann2k.diazo`) is set to
+  `http://127.0.0.1:4400` unless another server is already chosen (including one in a not-yet-migrated
+  `design.doop.desktop`); `--use-local` overrides it. The container gets
+  `TRUSTED_ORIGINS=http://127.0.0.1:4400`, since better-auth only trusts `BETTER_AUTH_URL` (`localhost`). The
+  shell's identity migration treats a folder holding only that `server.json` as empty and keeps the file.
+- The `diazo` command (the script itself, copied to `~/.diazo/bin/diazo`, with both installers in
+  `~/.diazo/lib` and a link in `/usr/local/bin` or `~/.local/bin`): `start`, `stop`, `restart`, `status`,
+  `logs`, `update`, `open`, `uninstall [--purge]`. `update` downloads the three scripts again and updates what
+  `~/.diazo/install.conf` lists (server, app or both). `diazo-local` / `doop-local` stay.
+- `--dry-run` prints the steps and changes nothing. `--uninstall` keeps data, secrets and the app's session;
+  `--purge` removes everything.
+- In the app: Diazo menu → Local Server (`local_server.rs`, desktop 0.16.0) and a status row in Settings →
+  General → About. It reaches users with the `desktop-v0.16.0` tag.
+- Tests: `tests/install.test.ts` (stubbed `container`, `launchctl`, `curl`, `uname`, `sw_vers`, `open`,
+  `osascript`) and the Rust tests in `local_server.rs`.
 
 ## Build identity and the update check (this fork)
 
@@ -133,11 +188,12 @@ in `.github/actions/setup-desktop`:
   `minisign`).
 - `workflow_dispatch` or a PR touching the workflow file itself -> same builds, uploaded as
   workflow artifacts instead (keeps the pipeline validated without cutting a release).
-- macOS signing/notarization: automatic once the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+- macOS signing/notarization: none in this repository, which has no `APPLE_*` secrets ([ADR 0007](adr/0007-ship-the-desktop-app-from-our-own-releases.md)). The workflow signs and notarizes automatically once the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
   `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` repo secrets exist (see
   `desktop/README.md`). Without them the DMG is unsigned - it still works, but downloaders must
   approve it via System Settings -> Privacy & Security.
-- Windows signing: Azure Artifact Signing (account `Doop`, East US, profile `doop-public`). The
+- Windows signing: none in this repository, which has no `AZURE_*` variables, so the installer is unsigned. The
+  mechanism, as upstream set it up: Azure Artifact Signing (account `Doop`, East US, profile `doop-public`). The
   `nsis-windows` job runs in the `desktop-release` environment, logs in through OIDC (app
   registration `doop-desktop-signing`, federated on that environment; `AZURE_CLIENT_ID` /
   `AZURE_TENANT_ID` repo variables, no secret) and passes a CI-only `signCommand` to Tauri
@@ -168,8 +224,8 @@ in `.github/actions/setup-desktop`:
   `server.rs`, `serverSettings.test.tsx`.
 - The shell tells the page its platform via `window.__DOOP_DESKTOP_PLATFORM__` (read in
   `src/lib/shell.ts`); only macOS gets the overlay title bar / traffic-light inset.
-- Desktop app version is tracked separately from the root `package.json` and bumped by
-  release-please (see above); after the release PR merges, tag as `desktop-vX.Y.Z`.
+- Desktop app version is tracked separately from the root `package.json` and bumped by hand (see
+  "Before you merge"); tag `desktop-vX.Y.Z` after the merge into `main`.
 - The macOS app is the Chromium (CEF) build in `desktop/src-tauri-chromium`; Windows and Linux
   stay on the WebKit build. It ships as `Diazo` / `dev.bryann2k.diazo` (from 0.15.0; `doop` /
   `design.doop.desktop` before) with the executable `doop-desktop`, as the WebKit app did, so the
@@ -190,7 +246,7 @@ in `.github/actions/setup-desktop`:
   people signed in. Each Chromium security release needs a CEF bump (`tauri-runtime-cef`) and a
   desktop release. Rolling back means publishing a WebKit macOS build with a higher version to
   the feed; it starts from its old WebKit store, as it was before the switch.
-  release-please bumps the Chromium `tauri.conf.json` and `Cargo.toml` with the WebKit shell's.
+  Bump the Chromium `tauri.conf.json` and `Cargo.toml` with the WebKit shell's.
 
 ## Claude Desktop extension
 
@@ -233,17 +289,12 @@ metadata, logo, and license. It needs no build artifact or release download. The
 **Connect AI → Cursor → Add to Cursor** uses Cursor's MCP install link for the current Diazo
 instance and is available independently of marketplace publication.
 
-After local Cursor smoke testing, sync the plugin commit to public `kgoedecke/doop` through the
-existing cherry-pick workflow. Confirm the root marketplace manifest and `cursor-plugin/` are
-present at the same paths. The OSS export script was removed; do not recreate a wipe-and-export
-step. This development repository is private and cannot serve as a public listing source. A maintainer submits the public repository
-at `https://cursor.com/marketplace/publish`. Cursor must approve the plugin before it appears in
-the public marketplace. No workflow submits or publishes it automatically. Bump the version
-in `cursor-plugin/.cursor-plugin/plugin.json` for plugin updates; full setup and reviewer steps
-live in `cursor-plugin/README.md`.
+Diazo does not publish this plugin to Cursor's marketplace. Publishing would need a public listing source and
+Cursor's review; nothing in this repository submits it. Bump the version in
+`cursor-plugin/.cursor-plugin/plugin.json` for plugin updates; setup and reviewer steps are in
+`cursor-plugin/README.md`.
 
 ## Other workflows
 
-- `.github/workflows/desktop.yml` - desktop app CI (build/check) outside of the release path.
-- `.github/workflows/cla.yml` - CLA sign-off check on PRs (AGPL-3.0 project, CLA-based
-  contribution per `CLA.md` / `CONTRIBUTING.md`).
+- `.github/workflows/desktop.yml` - desktop app CI (build/check) outside of the release path, when `desktop/` changes.
+- `.github/workflows/ios.yml` - iOS build check when `ios/` changes; nothing is published.
