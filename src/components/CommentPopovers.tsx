@@ -124,7 +124,7 @@ export function CommentPin({
   return (
     <div
       className={cn(
-        'pointer-events-auto absolute z-[4] grid h-[26px] w-[26px] cursor-pointer place-items-center rounded-[50%_50%_50%_4px] border-2 border-white text-[13px] text-white origin-bottom-left animate-[pin-pop_450ms_var(--spring-pop)_both]',
+        'pointer-events-auto absolute z-[4] grid h-[26px] w-[26px] cursor-pointer place-items-center rounded-[50%_50%_50%_4px] border-2 border-white text-[13px] text-white animate-[pin-pop_450ms_var(--spring-pop)_both]',
         PIN_SCALE,
         dragged && 'opacity-0',
         agentItem?.failedAt
