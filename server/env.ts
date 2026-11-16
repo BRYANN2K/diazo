@@ -306,6 +306,9 @@ const schema = {
      provider such as Cloudflare): it may fetch public URLs itself instead of
      through the DNS-pinned proxy. Never set it for a self-hosted renderer */
   REMOTE_BROWSER_ISOLATED: bool({ default: false }),
+  /* refuse `target: 'server'` motion renders outright: an instance without
+     headless Chromium to spare keeps renders on browser and desktop */
+  SERVER_RENDER_DISABLED: bool({ default: false }),
 
   /* ------------------------------------------------------ analytics */
   POSTHOG_KEY: str({ default: undefined }),

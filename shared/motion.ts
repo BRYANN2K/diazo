@@ -586,12 +586,14 @@ export type RenderFormat = (typeof RENDER_FORMATS)[number]
 /**
  * Who produces the file. `browser` (MediaRecorder/WebCodecs in the page),
  * `desktop` (the Tauri shell — deterministic seeks plus an allowlisted local
- * ffmpeg) and `blender` (the desktop shell driving Blender per frame, phase
- * 4). `server` is reserved for a later phase; the API rejects it until then.
+ * ffmpeg), `blender` (the desktop shell driving Blender per frame, phase
+ * 4) and `server` (the instance's own headless renderer through the
+ * renderer gate at background priority — capped at 60 s, 1080p and 30 fps,
+ * one open render per account, phase 5).
  */
 export const RENDER_TARGETS = ['browser', 'desktop', 'server', 'blender'] as const
 export type RenderTarget = (typeof RENDER_TARGETS)[number]
-export const RENDER_TARGETS_MVP: readonly RenderTarget[] = ['browser', 'desktop', 'blender']
+export const RENDER_TARGETS_MVP: readonly RenderTarget[] = ['browser', 'desktop', 'blender', 'server']
 
 /** The render engine a `blender`-target job asks Blender to use. `octane`
  *  stays a name Blender interprets — there is no Octane integration. */

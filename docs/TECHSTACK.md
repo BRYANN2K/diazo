@@ -1058,11 +1058,24 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   MediaRecorder/WebCodecs, or the desktop shell renders deterministically —
   `desktop/src-tauri/src/motion.rs` drives a hidden webview through the page's seek/capture hooks
   and encodes with an allowlisted local `ffmpeg` (`__DOOP_MOTION_RENDER__`, capability
-  `motion-render.json`); `src/blender.rs` is the disabled-by-default (`DOOP_BLENDER_BRIDGE`)
-  Blender-MCP spawn + read-only relay groundwork. MCP tools (`server/motionTools.ts`, parity in
+  `motion-render.json`); `src/blender.rs` spawns the disabled-by-default (`DOOP_BLENDER_BRIDGE`)
+  allowlisted blender-mcp process and relays server-queued ops behind read/write/render grants.
+  MCP tools (`server/motionTools.ts`, parity in
   `server/resident.ts`): `get_composition`, `set_composition`, `animate_storyboard`, `lint_motion`,
-  `render_composition`. Tests: `motion.test.ts`, `motionHttp.test.ts`, `motion::tests`,
-  `blender::tests`.
+  `render_composition`. Phases 2 to 5 (`feat/motion-backend-next`): transitions, camera presets,
+  text animators, `3d` clip sources with a scroll/pointer driver, `scene_media` (speed, cuts,
+  beats, transcript, recipe, ducking, captions), `generate_video`, the speech engine
+  (`server/speech*.ts`, `desktop/src-tauri/src/speech.rs` — the `diazo-speech` sidecar and the
+  Pocket TTS weight mirror are designed, not yet shipped; `docs/speech-mirror.md`), the Blender
+  op relay (`server/blender*.ts`, approvals in `desktop/src-tauri/src/blender.rs`), `blender` and
+  `server` render targets — the server target renders on the instance's own headless Chromium at
+  background priority under 60 s / 1080p / 30 fps / one-per-account caps, off with
+  `SERVER_RENDER_DISABLED` (`server/motionRender.ts`) — Lottie and HyperFrames interchange
+  (`shared/motionInterchange.ts`, `GET …/composition/export?format=`, `POST …/composition/import`),
+  and the motion duel (`POST …/motion-duels`: one storyboard page copied per pick,
+  `model_duels.kind = 'motion'`). Tests: `motion.test.ts`, `motionPhase2.test.ts`,
+  `motionMedia.test.ts`, `motionHttp.test.ts`, `motionPhase5.test.ts`, `blender.test.ts`,
+  `motion::tests`, `blender::tests`, `speech::tests`.
 
 - Motion Studio UI (`src/components/motion/`, `src/lib/motion/`, contract `docs/motion-api.md`):
   the bar's Motion button mounts `MotionTimeline` over the stage for the active page (transport,

@@ -27,11 +27,11 @@ Built on `feat/motion-backend-next` (from `dev`), worktree `doop-wt/motion-next`
 
 ## Phase 5 — server renders and interchange
 
-- [ ] 15. Server renders through the renderer gate (60 s / 1080p / 30 fps / one per account).
-- [ ] 16. Lottie import and export (vector subset).
-- [ ] 17. HyperFrames project import and export.
-- [ ] 18. The motion duel.
+- [x] 15. Server renders through the renderer gate (60 s / 1080p / 30 fps / one per account; `SERVER_RENDER_DISABLED` for instances without headless Chromium).
+- [x] 16. Lottie import and export (transform subset: position, scale, rotate, opacity on element tracks).
+- [x] 17. HyperFrames project import and export (`hyperframes-project` v1).
+- [x] 18. The motion duel (`kind: 'motion'` on `model_duels`, page copy per pick, pick archives the losing pages).
 
 ## Close
 
-- [ ] 19. TECHSTACK.md, FEATURES.md, CHANGELOG; evidence.md; final report.
+- [x] 19. TECHSTACK.md, FEATURES.md, CHANGELOG; evidence.md; final report.

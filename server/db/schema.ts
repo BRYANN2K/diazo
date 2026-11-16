@@ -1245,6 +1245,7 @@ export const modelDuels = pgTable(
     id: text('id').primaryKey(),
     canvasId: text('canvas_id').notNull(),
     brief: text('brief').notNull(),
+    kind: text('kind'),
     createdBy: text('created_by').notNull(),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     entries: jsonb('entries').notNull(),

@@ -262,9 +262,15 @@ compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per bu
   and `render_composition`, resident-agent included. Renders are queued jobs: the browser renders
   them (MediaRecorder/WebCodecs) or the desktop shell does deterministically — a hidden webview
   seeks the page frame by frame and a local, allowlisted `ffmpeg` encodes, all behind
-  `__DOOP_MOTION_RENDER__`. A disabled-by-default Blender bridge (`DOOP_BLENDER_BRIDGE`) can spawn
-  an allowlisted `blender-mcp` and relay a read-only tool set. Server-side and Blender renders
-  land in later phases.
+  `__DOOP_MOTION_RENDER__`. Phases 2 to 5 add transitions, camera presets and text animators,
+  `3d` clips (a glTF asset with a fallback image, driven by time, scroll or pointer), media rows
+  (speed, cuts, beats, transcript, recipe, ducking, captions), `generate_video` on OpenRouter and
+  Gemini keys, a speech engine (installed models in the desktop shell, cloud providers on the
+  user's own key, custom models and cloned voices), a Blender op relay whose write and render
+  tools need a grant in the shell, `blender` and `server` render targets — the server one under
+  60 s / 1080p / 30 fps / one-per-account caps on the instance's headless Chromium — Lottie and
+  HyperFrames import/export of the transform subset, and the motion duel (each pick animates its
+  own copy of the storyboard page).
 
 - **Speech job backend (phase 3, partial)** — persisted jobs and preferences,
   explicit cloud estimates on connected user keys, owner-scoped desktop relay,

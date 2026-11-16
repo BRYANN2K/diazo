@@ -490,3 +490,99 @@ describe('the MCP tools', () => {
     expect(denied.isError).toBe(true)
   }, 30_000)
 })
+
+describe('phase 5: interchange and the motion duel', () => {
+  it('exports and imports lottie and hyperframes documents', async () => {
+    /* a fresh canvas with an element track — lottie carries those only */
+    const c2 = await (await owner.post('/api/canvases', { name: 'Interchange' })).json()
+    const p2 = c2.pages[0].id
+    const put = await owner.put(`/api/canvases/${c2.id}/pages/${p2}/composition`, {
+      duration: 4,
+      fps: 30,
+      width: 1280,
+      height: 720,
+      tracks: [
+        {
+          id: 't1',
+          kind: 'element',
+          frameId: 'f1',
+          elementId: 'el-1',
+          keyframes: [
+            { id: 'k1', property: 'x', t: 0, value: 0 },
+            { id: 'k2', property: 'x', t: 2, value: 300 },
+            { id: 'k3', property: 'opacity', t: 0, value: 1 },
+            { id: 'k4', property: 'opacity', t: 2, value: 0 },
+          ],
+        },
+      ],
+    })
+    expect(put.status).toBe(200)
+    const url = `/api/canvases/${c2.id}/pages/${p2}/composition`
+
+    const lottie = await (await owner.get(`${url}/export?format=lottie`)).json()
+    expect(lottie.fr).toBe(30)
+    expect(lottie.layers).toHaveLength(1)
+    expect(lottie.layers[0].nm).toBe('f1/el-1')
+
+    const bad = await owner.post(`${url}/import`, { format: 'lottie', data: {} })
+    expect(bad.status).toBe(400)
+    const badFormat = await owner.post(`${url}/import`, { format: 'swf', data: {} })
+    expect(badFormat.status).toBe(400)
+
+    const hf = await (await owner.get(`${url}/export?format=hyperframes`)).json()
+    const imported = await owner.post(`${url}/import`, {
+      format: 'hyperframes',
+      data: hf,
+      duration: 4,
+      fps: 30,
+      width: 1280,
+      height: 720,
+    })
+    expect(imported.status).toBe(200)
+    const comp = (await imported.json()).composition
+    expect(comp.tracks[0].kind).toBe('element')
+    expect(comp.tracks[0].elementId).toBe('el-1')
+    expect((await owner.get(`${url}/export?format=swf`)).status).toBe(400)
+  })
+
+  it('starts a motion duel that copies the storyboard per pick', async () => {
+    /* its own server: a duel consumes one resident task per entry and the
+       shared suite runs at the default limit of zero */
+    const s2 = await startServer({ RESIDENT_TASK_LIMIT: '25' })
+    try {
+      const u2 = await new Client(s2).signUp('duel-owner@test.dev', 'Duel Owner')
+      const canvas = await (await u2.post('/api/canvases', { name: 'Motion Duel' })).json()
+      const p1 = canvas.pages[0].id
+      const duel = await (
+        await u2.post(`/api/canvases/${canvas.id}/motion-duels`, {
+          pageId: p1,
+          brief: 'Make the shots move',
+          picks: [
+            { provider: 'openai-key', model: 'gpt-5' },
+            { provider: 'claude-local', model: 'opus' },
+          ],
+        })
+      ).json()
+      expect(duel.kind).toBe('motion')
+      expect(duel.entries).toHaveLength(2)
+      const after = (await (await u2.get(`/api/canvases/${canvas.id}`)).json()).pages
+      expect(after.length).toBe(3)
+      for (const entry of duel.entries) {
+        expect(entry.pageId).not.toBe(p1)
+        expect(after.some((p: { id: string }) => p.id === entry.pageId)).toBe(true)
+      }
+      /* a missing storyboard page is a clean 400 */
+      const gone = await u2.post(`/api/canvases/${canvas.id}/motion-duels`, {
+        pageId: 'nope',
+        brief: 'x',
+        picks: [{ provider: 'openai-key' }, { provider: 'claude-local' }],
+      })
+      expect(gone.status).toBe(400)
+      /* and the duel lists with the canvas's others */
+      const duels = (await (await u2.get(`/api/canvases/${canvas.id}/duels`)).json()) as { kind?: string }[]
+      expect(duels.some((d) => d.kind === 'motion')).toBe(true)
+    } finally {
+      s2.stop()
+    }
+  }, 30_000)
+})

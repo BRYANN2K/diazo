@@ -169,7 +169,7 @@ interface RenderJob {
   pageId
   compositionId: string
   format: 'mp4' | 'webm' | 'gif' | 'pngseq'
-  target: 'browser' | 'desktop' | 'blender' // 'server' reserved — rejected today
+  target: 'browser' | 'desktop' | 'blender' | 'server'
   engine?: 'eevee' | 'cycles' | 'octane' // blender target only (default 'eevee')
   width
   height
@@ -193,6 +193,23 @@ Lifecycle: `POST …/renders` creates `queued` → the browser/desktop client
 PATCHes `rendering` (claiming), PATCHes `progress` → PUTs the file to
 `…/upload` → server stores the `/a/` asset and marks it `done`. `failed`
 and `canceled` end it. Max `MAX_ACTIVE_JOBS` (3) non-finished jobs per canvas.
+
+### Server renders (phase 5)
+
+`target: 'server'` renders on the instance's own headless Chromium
+(`server/motionRender.ts` through the renderer gate at background
+priority), not on a client. The caps, enforced at creation:
+
+- formats: `webm` and `pngseq` only — mp4/gif need ffmpeg, which stays on
+  the desktop;
+- range ≤ 60 s, raster ≤ 1080p, rate ≤ 30 fps;
+- one open server render per account (429 otherwise).
+
+The worker mints a short-lived better-auth session row (deleted on every
+exit path), drives the same `/c/<id>/motion-render` harness page the
+desktop uses, and stores the result as the job's `/a/` asset. The whole
+target is off when the instance sets `SERVER_RENDER_DISABLED` (503 at
+creation).
 
 ## Seek-safe markup contract
 
@@ -534,4 +551,47 @@ to poll.
 with optional `engine` (default `eevee`, validated against
 `BLENDER_ENGINES`); the desktop claims it through the same render-job
 lifecycle and renders frames through the bridge's `render_frame` tool —
-which still needs the render grant. `target: 'server'` stays rejected.
+which still needs the render grant.
+
+## Interchange (phase 5)
+
+`shared/motionInterchange.ts` converts a composition to and from Lottie
+and HyperFrames documents. Both directions cover the same **vector
+subset**: transform keyframes on element tracks — `x`/`y` → position,
+`scale`/`scaleX`/`scaleY` → scale, `rotate` → rotation, `opacity` →
+opacity. Anything a Lottie file carries beyond that (shapes, masks,
+mattes, expressions) is skipped on import, never invented.
+
+- `GET …/composition/export?format=lottie|hyperframes` → the document
+  (JSON). `format` absent or `code` keeps the existing code export.
+- `POST …/composition/import` `{ format, data, duration?, fps?, width?,
+height? }` → replaces the page's composition with the converted tracks,
+  validated by the same `parseCompositionBody` a PUT takes. `400` on a
+  malformed document or an out-of-subset body.
+
+Lottie specifics: `fr`/`w`/`h` from the composition, one transform-only
+null layer per element track named `frameId/elementId` (the name rides
+back on import so a round trip rebinds the same element; foreign files
+land on `lottie-<ind>`). Times are frames, scale and opacity percent.
+
+HyperFrames specifics: `{ format: 'hyperframes-project', version: 1,
+scene: { fps, width, height, duration, layers } }` — each layer keeps the
+track's id, kind, name and keyframes (`{ t, prop, v, ease }` with easing
+names) plus its clips verbatim.
+
+## The motion duel
+
+`POST /api/canvases/:id/motion-duels` `{ pageId, brief, picks }` starts a
+duel where the entries are **copies of one storyboard page**, not empty
+frames: the page is duplicated once per pick (`store.duplicatePage` —
+frames, guides and composition remap to the copy), and each pick gets a
+queued card scoped to the first frame of its own copy, telling it to
+animate that page with the motion tools and queue a render for
+comparison. One resident task is metered per entry, like a model duel.
+
+The row is a normal `model_duels` row with `kind: 'motion'` and
+`pageId` on each entry — `GET /api/canvases/:id/duels` lists it with the
+others. `POST …/duels/:duelId/pick` works as for model duels (the picked
+entry's `frameId` is its anchor frame); on a motion duel the losing
+**pages** are archived — every frame they hold is hidden and renamed —
+while the winner's page stays as the take to keep.

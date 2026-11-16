@@ -1,5 +1,6 @@
 import { registerSpeechRoutes } from './speechRoutes.ts'
 import { registerBlenderRoutes } from './blenderRoutes.ts'
+import { runServerRender } from './motionRender.ts'
 import { recoverSpeechJobs } from './speechJobs.ts'
 import { recoverBlenderOps } from './blenderOps.ts'
 import * as libraries from './libraries.ts'
@@ -80,7 +81,7 @@ import { compareFrameWithUrl, driftErrorMessage, getComparison, listComparisons 
 import { classifyDriftUrl } from '../shared/drift.ts'
 import { usageReport } from './agentRuns.ts'
 import { RollbackConflictError, rollbackRun, runTimeline } from './runReplay.ts'
-import { DuelInputError, listDuels, pickDuel, startDuel } from './duels.ts'
+import { DuelInputError, listDuels, pickDuel, startDuel, startMotionDuel } from './duels.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
@@ -165,6 +166,12 @@ import {
 } from './motionJobs.ts'
 import { nanoid } from 'nanoid'
 import { MOTION_LIMITS, parseCompositionBody, parseOps } from '../shared/motion.ts'
+import {
+  compositionToHyperframes,
+  compositionToLottie,
+  hyperframesToTracks,
+  lottieToTracks,
+} from '../shared/motionInterchange.ts'
 import { parseMediaBody } from '../shared/motionMedia.ts'
 import { exportComposition } from './motionTools.ts'
 import { placeImage, placedImageResult } from './placeImage.ts'
@@ -3078,6 +3085,34 @@ app.patch('/api/canvases/:id/pages/:pageId/composition', (req, res) => {
   res.json({ composition: applied.composition })
 })
 
+/* interchange (phase 5): import a Lottie or HyperFrames document as this
+   page's composition — restricted to the shared vector subset; the export
+   side rides the ?format switch on the code-export route below */
+app.post('/api/canvases/:id/pages/:pageId/composition/import', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const pageId = req.params.pageId
+  if (!canvasPages(canvas).some((p) => p.id === pageId)) return res.status(404).json({ error: 'page not found' })
+  const format = String(req.body?.format ?? '')
+  const converted =
+    format === 'lottie'
+      ? lottieToTracks(req.body?.data, Number(req.body?.fps) || 30)
+      : format === 'hyperframes'
+        ? hyperframesToTracks(req.body?.data)
+        : { ok: false as const, error: 'format must be lottie or hyperframes' }
+  if (!converted.ok) return res.status(400).json({ error: converted.error })
+  /* the imported tracks ride through the same validator a PUT takes */
+  const parsed = parseCompositionBody({
+    duration: req.body?.duration ?? 5,
+    fps: req.body?.fps ?? 30,
+    width: req.body?.width ?? 1920,
+    height: req.body?.height ?? 1080,
+    tracks: converted.tracks,
+  })
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error })
+  res.json({ composition: actions.setComposition(canvas.id, parsed.value, pageId, userActor(req)) })
+})
+
 app.delete('/api/canvases/:id/pages/:pageId/composition', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'edit')
   if (!canvas) return
@@ -3099,6 +3134,9 @@ app.post('/api/canvases/:id/pages/:pageId/composition/renders', (req, res) => {
   const pageId = req.params.pageId
   const comp = store.getComposition(canvas.id, pageId)
   if (!comp) return res.status(404).json({ error: 'the page has no composition — make the timeline first' })
+  if (req.body?.target === 'server' && env.SERVER_RENDER_DISABLED) {
+    return res.status(503).json({ error: 'server renders are off on this instance' })
+  }
   const created = createRenderJob({
     composition: comp,
     format: req.body?.format,
@@ -3111,6 +3149,8 @@ app.post('/api/canvases/:id/pages/:pageId/composition/renders', (req, res) => {
     by: { id: req.user!.id, name: req.user!.name },
   })
   if (!created.ok) return res.status(created.status).json({ error: created.error })
+  /* a server-target job renders on the instance itself, in the background */
+  if (created.job.target === 'server') void runServerRender(created.job)
   res.status(201).json({ job: created.job })
 })
 
@@ -3150,10 +3190,20 @@ app.post('/api/canvases/:id/pages/:pageId/composition/versions/:versionId/restor
 })
 
 /* "copy as code": the composition compiled to CSS + WAAPI with motion
-   token names kept (docs/motion-api.md § code export) */
+   token names kept (docs/motion-api.md § code export). ?format=lottie or
+   hyperframes instead ships the interchange document (phase 5). */
 app.get('/api/canvases/:id/pages/:pageId/composition/export', async (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'view')
   if (!canvas) return
+  const format = typeof req.query.format === 'string' ? req.query.format : ''
+  if (format === 'lottie' || format === 'hyperframes') {
+    const comp = store.getComposition(canvas.id, req.params.pageId)
+    if (!comp) return res.status(404).json({ error: 'the page has no composition' })
+    return res.json(format === 'lottie' ? compositionToLottie(comp) : compositionToHyperframes(comp))
+  }
+  if (format && format !== 'code') {
+    return res.status(400).json({ error: 'format must be code, lottie or hyperframes' })
+  }
   const out = await exportComposition(canvas, req.params.pageId)
   if (!out.ok) return res.status(404).json({ error: out.error })
   res.json(out.data)
@@ -4304,6 +4354,34 @@ app.post('/api/canvases/:id/duels/:duelId/pick', async (req, res) => {
 app.get('/api/canvases/:id/duels', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   res.json(await listDuels(req.params.id))
+})
+
+/* motion duels: one storyboard page, one copy per pick, each pick animates
+   its own copy and queues a render for comparison */
+app.post('/api/canvases/:id/motion-duels', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  const picks: unknown[] = Array.isArray(req.body?.picks) ? req.body.picks : []
+  const brief = String(req.body?.brief ?? '')
+  const pageId = String(req.body?.pageId ?? '')
+  for (let i = 0; i < Math.min(picks.length, 3); i++) {
+    const gate = await allowance.consumeResidentTask(req.user!.id)
+    if (!gate.ok) return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
+  }
+  try {
+    const duel = await startMotionDuel({
+      canvasId: req.params.id,
+      pageId,
+      brief,
+      picks,
+      actor: userActor(req),
+      userId: req.user!.id,
+    })
+    res.json(duel)
+  } catch (err) {
+    if (err instanceof DuelInputError) return res.status(400).json({ error: err.message })
+    console.error('[duel] could not start the motion duel', err)
+    res.status(500).json({ error: 'The motion duel could not start' })
+  }
 })
 
 app.post('/api/canvases/:id/cards', async (req, res) => {
