@@ -32,7 +32,8 @@ export function ServerSettings() {
   )
 }
 
-function ServerModal({ onClose }: { onClose: () => void }) {
+/** Also opened from Settings → General → About (LocalServerRow.tsx). */
+export function ServerModal({ onClose }: { onClose: () => void }) {
   const t = useT()
   const [status, setStatus] = useState<ServerStatus | null>(null)
   const [address, setAddress] = useState('')

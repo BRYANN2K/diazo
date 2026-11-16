@@ -30,4 +30,12 @@ export const updates = {
     'In the folder of your compose file. Built from this repository instead? git pull && docker compose up -d --build',
   hintKubernetes: 'The deployment pulls the :main image again (imagePullPolicy Always).',
   hintSource: 'In your checkout, then restart the server.',
+  /* the desktop app's Local Server menu (macOS), read in About */
+  localServerRow: 'This Mac’s server',
+  localRunning: 'Running at {url}',
+  localStarting: 'Starting at {url}…',
+  localStopped: 'Stopped',
+  localNotInstalled: 'Not installed on this Mac',
+  localInUse: 'This app uses it',
+  changeServer: 'Change server…',
 } as const

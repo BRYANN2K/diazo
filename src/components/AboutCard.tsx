@@ -5,6 +5,7 @@ import { authClient } from '../lib/auth'
 import { useBuildInfo } from '../lib/buildInfo'
 import { type Translate, useLocale, useT } from '../lib/i18n'
 import { useUpdateStatus } from '../lib/updateStatus'
+import { LocalServerRow } from './LocalServerRow'
 import { Button } from './ui/button'
 import { CardDescription, CardHeader, CardRow, CardTitle, SettingsCard } from './ui/card'
 import { StatusLabel } from './ui/status-label'
@@ -69,6 +70,7 @@ export function AboutCardView({ info, status }: { info: BuildInfo; status?: Upda
           )}
         </CardRow>
       )}
+      <LocalServerRow />
     </SettingsCard>
   )
 }
