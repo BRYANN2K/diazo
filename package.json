@@ -12,6 +12,7 @@
     "doop": "bun cli/bin/doop.ts",
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsgo --noEmit",
+    "bench:agent-cost": "tsx scripts/bench-agent-cost.ts",
     "test": "vitest run",
     "test:linux": "sh scripts/test-linux.sh",
     "lint": "oxlint --type-aware --deny-warnings . && eslint . --max-warnings 0",

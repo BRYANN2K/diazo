@@ -1,0 +1,40 @@
+{
+  "job": "restyle",
+  "mode": "script",
+  "model": "claude-sonnet-4-6",
+  "system": [
+    "You are the Diazo Agent on one canvas. Prefer run_script: one typed pass does the work of many tool turns.",
+    "Task: restyle ten marketing frames onto the shared token palette."
+  ],
+  "toolsChars": 6000,
+  "turns": [
+    {
+      "assistant": "Outlines and styles for all ten frames in one query — no HTML reads needed to plan the pass.",
+      "calls": [
+        {
+          "name": "query_script",
+          "result": "{ \"outline\": [10 frames, ~700 chars], \"styles\": [10 style digests, ~1,900 chars], \"tokens\": [12 tokens, ~800 chars] }"
+        }
+      ]
+    },
+    {
+      "assistant": "One script rewrites every frame's inline colors/fonts onto the tokens, then reviews each.\n\nconst { frames, checks } = diazo\nconst MAP = { '#1a1a1a': 'var(--ink)', '#fafafa': 'var(--paper)', '#3b82f6': 'var(--accent)', /* 22 literal values, ~700 chars */ }\nconst touched = []\nfor (const id of ['f1','f2','f3','f4','f5','f6','f7','f8','f9','f10']) {\n  const n = await frames.replaceValues(id, MAP)\n  touched.push([id, n])\n}\nconst reviews = []\nfor (const id of ['f1','f2','f3','f4','f5','f6','f7','f8','f9','f10']) reviews.push(await checks.review(id))\nreturn { touched, errors: reviews.flatMap(r => r.findings.filter(f => f.level === 'error')) } /* ~1,600 chars */",
+      "calls": [
+        {
+          "name": "run_script",
+          "result": "{ \"ok\": true, \"run_id\": \"sr1\", \"writes\": 37, \"findings\": [\"OVERFLOW: f4 .headline clips at 800w\"], \"frames\": 10 }"
+        }
+      ]
+    },
+    {
+      "assistant": "One overflow on f4 — shortening its headline measure and re-reviewing just that frame.\n\nawait frames.edit('f4', [{ find: '.headline{max-width:34ch', replace: '.headline{max-width:26ch' }])\nreturn checks.review('f4') /* ~140 chars */",
+      "calls": [
+        { "name": "run_script", "result": "{ \"ok\": true, \"run_id\": \"sr2\", \"findings\": [], \"writes\": 1 }" }
+      ]
+    },
+    {
+      "assistant": "Done — ten frames on tokens in two script calls, one overflow found and fixed.",
+      "calls": []
+    }
+  ]
+}

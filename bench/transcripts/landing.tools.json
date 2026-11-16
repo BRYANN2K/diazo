@@ -1,0 +1,83 @@
+{
+  "job": "landing",
+  "mode": "tools",
+  "model": "claude-sonnet-4-6",
+  "system": [
+    "You are the Diazo Agent on one canvas. Build what the kickoff asks, review visually, iterate until it looks right.",
+    "Guidelines: editorial dark theme, generous whitespace, display type for heroes, one accent."
+  ],
+  "toolsChars": 22000,
+  "turns": [
+    {
+      "assistant": "I'll read the workflow guide and look at the canvas first.",
+      "calls": [
+        { "name": "get_guide", "result": "# Diazo guide\n... 4,100 chars of workflow sections ..." },
+        {
+          "name": "get_canvas",
+          "result": "{ \"id\": \"c\", \"frames\": [ { \"id\": \"ref\", \"name\": \"Reference\" } ] }"
+        }
+      ]
+    },
+    {
+      "assistant": "The reference frame sets the tone — reading it and checking for tokens.",
+      "calls": [
+        {
+          "name": "get_frame",
+          "result": "{ \"html\": \"<!DOCTYPE html>... 6,400 chars of reference markup ...\", \"width\": 1440, \"height\": 900 }"
+        },
+        { "name": "get_tokens", "result": "{ \"tokens\": [] }" }
+      ]
+    },
+    {
+      "assistant": "No tokens yet — creating a small set, then the frame.",
+      "calls": [
+        { "name": "create_tokens", "result": "{ \"ok\": true, \"tokens\": [\"ink\",\"paper\",\"accent\",\"muted\"] }" },
+        {
+          "name": "create_frame",
+          "result": "{ \"ok\": true, \"frame\": { \"id\": \"f1\", \"name\": \"Landing\", \"x\": 0, \"y\": 0, \"width\": 1440, \"height\": 900 } }"
+        }
+      ]
+    },
+    {
+      "assistant": "<!DOCTYPE html><html><head><style>/* 2,900 chars: fonts, tokens, base layout */</style></head><body><header class=\"nav\">…",
+      "calls": [{ "name": "append_frame_html", "result": "{ \"ok\": true, \"streaming\": true, \"htmlBytes\": 3200 }" }]
+    },
+    {
+      "assistant": "<section class=\"hero\"><h1>Design, together.</h1><p class=\"lede\">…</p><div class=\"cta\">…</div></section> /* ~3,100 chars */",
+      "calls": [{ "name": "append_frame_html", "result": "{ \"ok\": true, \"streaming\": true, \"htmlBytes\": 6300 }" }]
+    },
+    {
+      "assistant": "<section class=\"proof\"><ul class=\"logos\">…</ul></section><section class=\"features\">…</section> /* ~3,400 chars */",
+      "calls": [{ "name": "append_frame_html", "result": "{ \"ok\": true, \"streaming\": true, \"htmlBytes\": 9700 }" }]
+    },
+    {
+      "assistant": "<section class=\"pricing\">…</section><footer>…</footer></body></html> /* ~2,800 chars, done=true */",
+      "calls": [
+        { "name": "append_frame_html", "result": "{ \"ok\": true, \"streaming\": false, \"htmlBytes\": 12500 }" }
+      ]
+    },
+    {
+      "assistant": "Streaming done — reviewing the render.",
+      "calls": [{ "name": "get_frame_screenshot", "result": "[image 1440x900] Screenshot of “Landing”" }]
+    },
+    {
+      "assistant": "The hero's left column overflows the nav measure and the pricing cards sit too tight. Fixing both.",
+      "calls": [
+        {
+          "name": "edit_frame_html",
+          "old": ".hero{max-width:72ch",
+          "result": "{ \"ok\": true, \"frame\": { \"id\": \"f1\" } }"
+        },
+        { "name": "edit_frame_html", "result": "{ \"ok\": true, \"frame\": { \"id\": \"f1\" } }" }
+      ]
+    },
+    {
+      "assistant": "Re-checking the fixed layout.",
+      "calls": [{ "name": "get_frame_screenshot", "result": "[image 1440x900] Screenshot of “Landing”" }]
+    },
+    {
+      "assistant": "Looks right: hierarchy reads, no overflow, contrast holds. Done — a dark editorial landing with hero, proof strip, three features, pricing and footer.",
+      "calls": []
+    }
+  ]
+}

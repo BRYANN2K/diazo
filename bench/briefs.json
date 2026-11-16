@@ -1,0 +1,68 @@
+{
+  "benchmark": "agent-cost quality gate (AC-22..AC-30)",
+  "note": "four landing pages, four app screens, two token restyles, two storyboards — each runs in tools mode and script mode; the gate compares the pairs",
+  "briefs": [
+    {
+      "id": "landing-1",
+      "kind": "landing",
+      "prompt": "A landing page for a self-hosted multiplayer design canvas: hero, proof strip, three features, pricing, footer — dark editorial style."
+    },
+    {
+      "id": "landing-2",
+      "kind": "landing",
+      "prompt": "A landing page for a note-taking app for researchers: calm light theme, serif display type, feature grid, download CTA."
+    },
+    {
+      "id": "landing-3",
+      "kind": "landing",
+      "prompt": "A landing page for a CI observability product: dense technical style, mono accents, status metrics, changelog strip."
+    },
+    {
+      "id": "landing-4",
+      "kind": "landing",
+      "prompt": "A landing page for a ceramics studio: warm neutrals, big imagery blocks, class schedule, newsletter form."
+    },
+    {
+      "id": "app-1",
+      "kind": "app_screen",
+      "prompt": "An analytics dashboard screen: KPI cards, one large chart region, a recent-events table, left rail navigation."
+    },
+    {
+      "id": "app-2",
+      "kind": "app_screen",
+      "prompt": "A project settings screen: sidebar sections, form fields with help text, a danger zone card."
+    },
+    {
+      "id": "app-3",
+      "kind": "app_screen",
+      "prompt": "A chat inbox screen: conversation list, open thread with composer, presence indicators."
+    },
+    {
+      "id": "app-4",
+      "kind": "app_screen",
+      "prompt": "A billing screen: current plan card, usage meters, invoice table with statuses."
+    },
+    {
+      "id": "restyle-1",
+      "kind": "token_restyle",
+      "prompt": "Restyle the four frames on this canvas onto the canvas token palette — replace literal colors, keep layout.",
+      "fixture": "four varied marketing frames with literal colors"
+    },
+    {
+      "id": "restyle-2",
+      "kind": "token_restyle",
+      "prompt": "Restyle the six frames on this canvas onto tokens and fix any contrast the new palette breaks.",
+      "fixture": "six app screens mixing light and dark surfaces"
+    },
+    {
+      "id": "storyboard-1",
+      "kind": "storyboard",
+      "prompt": "Animate the three storyboard frames into a 9-second film: one shot per beat, camera moves instead of cuts, a caption per beat."
+    },
+    {
+      "id": "storyboard-2",
+      "kind": "storyboard",
+      "prompt": "Animate the three storyboard frames into a 12-second film with a slow push on the last shot and no captions."
+    }
+  ]
+}

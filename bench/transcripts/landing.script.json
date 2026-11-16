@@ -1,0 +1,45 @@
+{
+  "job": "landing",
+  "mode": "script",
+  "model": "claude-sonnet-4-6",
+  "system": [
+    "You are the Diazo Agent on one canvas. Prefer run_script: one typed pass does the work of many tool turns.",
+    "Guidelines: editorial dark theme, generous whitespace, display type for heroes, one accent."
+  ],
+  "toolsChars": 6000,
+  "turns": [
+    {
+      "assistant": "Reading the SDK surface and the canvas in one shot.",
+      "calls": [
+        { "name": "get_sdk_docs", "result": "# diazo SDK\ncanvas, frames, tokens, checks … 1,800 chars …" },
+        {
+          "name": "query_script",
+          "result": "{ \"frames\": [{ \"id\": \"ref\", \"name\": \"Reference\" }], \"tokens\": [] }"
+        }
+      ]
+    },
+    {
+      "assistant": "One script builds tokens, the frame, and self-checks it.\n\nconst { canvas, frames, tokens, checks } = diazo\nawait tokens.create([{name:'ink',value:'#0e0e10'},{name:'paper',value:'#f6f4ef'},{name:'accent',value:'#c8f04a'}])\nconst f = await frames.create({ name: 'Landing', width: 1440, height: 900 })\nawait frames.stream(f.id, [\n  '<!DOCTYPE html><html><head><style>/* hero, proof, features, pricing, footer — ~11,900 chars */</style></head><body>…',\n  '</body></html>'\n])\nconst review = await checks.review(f.id)\nreturn { frame: f.id, findings: review.findings.length } /* ~7,200 chars of script */",
+      "calls": [
+        {
+          "name": "run_script",
+          "result": "{ \"ok\": true, \"run_id\": \"sr1\", \"frame_ids\": [\"f1\"], \"findings\": [\"CONTRAST: .lede on --paper 3.9:1\"], \"writes\": 14 }"
+        }
+      ]
+    },
+    {
+      "assistant": "One contrast finding on the lede — a second script fixes it and re-reviews.\n\nawait frames.replaceValues('f1', { 'color:#9a9a92': 'color:#7d7d74' })\nreturn checks.review('f1').then(r => ({ clean: r.findings.length === 0 })) /* ~240 chars */",
+      "calls": [
+        { "name": "run_script", "result": "{ \"ok\": true, \"run_id\": \"sr2\", \"findings\": [], \"writes\": 1 }" }
+      ]
+    },
+    {
+      "assistant": "Clean review; grabbing the final full-resolution screenshot for the record.",
+      "calls": [{ "name": "get_frame_screenshot", "result": "[image 1440x900] Screenshot of “Landing”" }]
+    },
+    {
+      "assistant": "Done — dark editorial landing, tokens set, zero findings after the contrast fix.",
+      "calls": []
+    }
+  ]
+}

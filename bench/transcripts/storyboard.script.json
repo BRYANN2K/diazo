@@ -1,0 +1,29 @@
+{
+  "job": "storyboard",
+  "mode": "script",
+  "model": "claude-sonnet-4-6",
+  "system": [
+    "You are the Diazo Agent on one canvas. Prefer run_script: one typed pass does the work of many tool turns.",
+    "Task: animate the three-frame storyboard on Page 1 into a 9-second film."
+  ],
+  "toolsChars": 6000,
+  "turns": [
+    {
+      "assistant": "One script: storyboard skeleton, camera moves, captions, motion lint — all in one pass.\n\nconst { canvas, compositions, checks } = diazo\nconst page = canvas.pages()[0]\nawait compositions.storyboard(page.id, { shot_seconds: 3 })\nawait compositions.patch(page.id, [\n  { op: 'update_keyframe', track: 'camera', /* push, pan, release — ~1,100 chars of ops */ }\n])\nawait compositions.patch(page.id, [ /* caption clips per beat — ~600 chars */ ])\nconst lint = await checks.motion(page.id)\nreturn { revision: 4, issues: lint.issues } /* ~2,000 chars of script */",
+      "calls": [
+        {
+          "name": "run_script",
+          "result": "{ \"ok\": true, \"run_id\": \"sr1\", \"issues\": [{ \"rule\": \"MO-12\", \"message\": \"caption clip crosses a cut\" }] }"
+        }
+      ]
+    },
+    {
+      "assistant": "MO-12 — trimming the caption inside the same script surface.\n\nconst { compositions, checks } = diazo\nawait compositions.patch(page.id, [{ op: 'update_clip', id: 'cap2', duration: 2.4 }])\nreturn checks.motion(page.id) /* ~160 chars */",
+      "calls": [{ "name": "run_script", "result": "{ \"ok\": true, \"run_id\": \"sr2\", \"issues\": [] }" }]
+    },
+    {
+      "assistant": "Seek-safe. Done — three beats, camera moves, captions, zero lint issues.",
+      "calls": []
+    }
+  ]
+}
