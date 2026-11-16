@@ -1,0 +1,84 @@
+<!doctype html>
+<!--
+  The shell's only bundled page (tauri.conf.json frontendDist). The app opens a
+  server's pages, never this one, except when the default server does not
+  answer at launch and the person asks to choose another (src/server.rs). It
+  is a local page, so it gets the bundled capability; it asks for exactly one
+  command, server_choose, which checks the address, confirms natively and
+  restarts.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Diazo</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+      }
+      body {
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        margin: 0;
+      }
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        width: min(420px, 90vw);
+      }
+      h1 {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      p {
+        margin: 0;
+        font-size: 13.5px;
+        opacity: 0.75;
+      }
+      input,
+      button {
+        font: inherit;
+        font-size: 13.5px;
+        padding: 8px 12px;
+        border-radius: 8px;
+      }
+      #error {
+        color: #c4321f;
+        min-height: 1.2em;
+        opacity: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <form id="choose">
+      <h1>Choose a Diazo server</h1>
+      <p>
+        The server on this computer (http://127.0.0.1:4400) did not answer. Start it, or enter the address of another
+        Diazo server.
+      </p>
+      <input id="url" type="text" placeholder="https://diazo.example.com" autocomplete="url" autofocus required />
+      <button type="submit">Connect</button>
+      <p id="error" role="alert"></p>
+    </form>
+    <script>
+      document.getElementById('choose').addEventListener('submit', async (event) => {
+        event.preventDefault()
+        const error = document.getElementById('error')
+        error.textContent = ''
+        try {
+          const changed = await window.__TAURI__.core.invoke('server_choose', {
+            url: document.getElementById('url').value,
+          })
+          if (!changed)
+            error.textContent = 'Nothing changed. Start the server on this computer, or enter another address.'
+        } catch (e) {
+          error.textContent = String(e)
+        }
+      })
+    </script>
+  </body>
+</html>
