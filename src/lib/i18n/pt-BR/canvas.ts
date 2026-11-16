@@ -26,6 +26,7 @@ export const canvas: Catalog['canvas'] = {
   idCopied: 'Id do canvas copiado',
   copyFailed: 'Não foi possível copiar',
   autoSaved: '— Salvo automaticamente',
+  pagePickerAria: 'Página {page} — trocar de página',
   reconnecting: '— Reconectando…',
   justYou: 'Só você aqui',
   importTitle: 'Importar uma página web ao vivo como frame',

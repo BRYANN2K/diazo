@@ -100,6 +100,7 @@ import {
   MoreHorizontalIcon,
   PlayIcon,
   PlugIcon,
+  ChevronDownIcon,
   ClapperboardIcon,
   PlusIcon,
   PrototypeModeIcon,
@@ -112,6 +113,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from '../components/ui/dropdown-menu'
 import { SelectionBar, SelectionBarAction } from '../components/ui/selection-bar'
@@ -916,8 +919,9 @@ export function CanvasPage({
             />
             <span className="flex min-w-0 flex-col justify-center leading-none">
               <CanvasName readOnly={readOnly} />
-              <span className="truncate px-1.5 text-caption text-ink-3">
-                {activePageName}
+              <span className="flex min-w-0 items-center px-1.5 text-caption text-ink-3">
+                {/* ShellTitle's page picker: the page under the name opens the list */}
+                <PagePicker />
                 {connected ? (
                   !readOnly && <span className="max-lg:hidden"> {t('canvas.autoSaved')}</span>
                 ) : (
@@ -2532,5 +2536,40 @@ function CanvasName({ readOnly }: { readOnly: boolean }) {
         useStore.getState().renameCanvasLocal(name)
       }}
     />
+  )
+}
+
+/** The page under the canvas name in the title island: a quiet menu of the
+ *  canvas's pages, the open one checked. */
+function PagePicker() {
+  const pages = useStore((s) => s.canvas?.pages ?? [])
+  const activePageId = useStore((s) => s.activePageId)
+  const setActivePage = useStore((s) => s.setActivePage)
+  const t = useT()
+  const active = pages.find((page) => page.id === activePageId)
+  if (pages.length < 2) return <span className="truncate">{active?.name ?? ''}</span>
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="bare"
+          size="inline"
+          className="min-w-0 gap-0.5 text-ink-3 hover:text-ink"
+          aria-label={t('canvas.pagePickerAria', { page: active?.name ?? '' })}
+        >
+          <span className="truncate">{active?.name ?? ''}</span>
+          <ChevronDownIcon className="size-3 flex-none" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent width="md" align="start">
+        <DropdownMenuRadioGroup value={activePageId ?? ''} onValueChange={setActivePage}>
+          {pages.map((page) => (
+            <DropdownMenuRadioItem key={page.id} value={page.id}>
+              {page.name}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
