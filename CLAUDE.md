@@ -13,8 +13,11 @@ status, and an activity feed in realtime over one WebSocket room per canvas.
 
 ## Fork rules (BRYANN2K/diazo)
 
-- Work on `main` (or a `feat/*` branch merged into it). Never push to `upstream`
-  (`kgoedecke/doop`); `origin` is `BRYANN2K/diazo` (formerly `BRYANN2K/redoop`).
+- Branches: `feat/*` (or `fix/*`, `docs/*`…) → PR into `dev` → `staging` (deployed to the VPS for
+  testing) → `main` (public: the curl installers and the `:main` / `:latest` image). Nothing is
+  pushed to `dev`, `staging` or `main` directly, and every PR is shown to Bryan as a local draft
+  first. Never push to `upstream` (`kgoedecke/doop`); `origin` is `BRYANN2K/diazo` (formerly
+  `BRYANN2K/redoop`).
 - Read `FORK.md` first: merged and dropped upstream PRs, the resync recipe, the k3s deploy.
 - The fork's own features are listed in `docs/FEATURES.md` (the README's "What it does" sums them
   up). Update it when you add one. The project is presented as **Diazo**, its built-in agent as

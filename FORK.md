@@ -5,6 +5,18 @@ des très grands canvases (5000+ frames), plus une poignée de fiabilisations et
 de fonctionnalités. Chaque PR upstream est mergée individuellement, avec ses
 conflits résolus à la main pour préserver l'intention de chaque côté.
 
+## Branches et flux de travail
+
+- **`feat/*`, `fix/*`, `docs/*`** : une branche par sujet, ouverte depuis `dev`.
+- **`dev`** : reçoit les PR de sujet. La CI tourne sur chaque PR et sur chaque push.
+- **`staging`** : reçoit `dev` par PR. Chaque push construit l'image `ghcr.io/bryann2k/diazo:staging`,
+  que le VPS fait tourner (`deploy/k3s/doop.yaml`, `DOOP_UPDATE_BRANCH=staging`) pour les tests.
+- **`main`** : reçoit `staging` par PR. C'est la version publique : les scripts `curl … | sh`,
+  l'image `:main` / `:latest` et les tags `desktop-v*`.
+- Aucun push direct sur `dev`, `staging` ou `main` (protection de branche). Chaque PR est d'abord
+  montrée en brouillon local à Bryan ; titre en Conventional Commits, corps en anglais, aucune
+  mention d'outil d'IA dans les commits ou la PR.
+
 ## Renommage en Diazo (2026-11-15)
 
 doop est une marque (nom et logo, voir `docs/doop-reference.md`, « please rebrand derived

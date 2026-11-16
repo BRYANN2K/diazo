@@ -31,12 +31,16 @@ spec:
     spec:
       containers:
         - name: doop
-          image: ghcr.io/bryann2k/diazo:main
+          # the VPS is the test instance: it runs what is on `staging`
+          image: ghcr.io/bryann2k/diazo:staging
           imagePullPolicy: Always
           env:
             # the update card's instructions (server/updateCheck.ts)
             - name: DOOP_INSTALL
               value: kubernetes
+            # announce builds of the branch this instance runs
+            - name: DOOP_UPDATE_BRANCH
+              value: staging
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
