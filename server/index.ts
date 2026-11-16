@@ -1,6 +1,6 @@
 import { registerSpeechRoutes } from './speechRoutes.ts'
 import { registerBlenderRoutes } from './blenderRoutes.ts'
-import { runServerRender } from './motionRender.ts'
+import { queueServerRender, renderAccess } from './motionRender.ts'
 import { recoverSpeechJobs } from './speechJobs.ts'
 import { recoverBlenderOps } from './blenderOps.ts'
 import * as libraries from './libraries.ts'
@@ -1016,6 +1016,8 @@ declare global {
       user?: SessionUser
       /** admin's user id when this session is a "view as" — see /api/admin */
       impersonatedBy?: string
+      /** a server render's scoped read token — server/motionRender.ts */
+      renderGrant?: { canvasId: string; pageId: string }
     }
   }
 }
@@ -1029,6 +1031,15 @@ app.use('/api', compression())
 app.use('/api/live-activities', logLiveActivityRequests)
 app.use('/api', async (req, res, next) => {
   try {
+    /* a server render's token stands in for a session on exactly the two
+       harness GETs it was minted for — renderAccess checks method, path,
+       (canvasId, pageId) and expiry; anything else falls through to the
+       session gate (server/motionRender.ts) */
+    const grant = renderAccess(req.headers.cookie, req.method, req.path)
+    if (grant) {
+      req.renderGrant = grant
+      return next()
+    }
     const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) })
     if (!session) return res.status(401).json({ error: 'unauthorized' })
     req.user = session.user
@@ -1208,6 +1219,17 @@ function requireCanvas(req: express.Request, res: express.Response, canvasId: st
     return null
   }
   return checkRole(req, res, c, need) ? c : null
+}
+
+/* a server render's token reads its own canvas like a viewer — it only
+   exists on the two harness GETs renderAccess admits (motionRender.ts) */
+function requireCanvasOrRenderGrant(req: express.Request, res: express.Response, canvasId: string) {
+  if (req.renderGrant?.canvasId === canvasId) {
+    const c = store.getCanvas(canvasId)
+    if (!c) res.status(404).json({ error: 'not found' })
+    return c ?? null
+  }
+  return requireCanvas(req, res, canvasId, 'view')
 }
 
 function checkRole(req: express.Request, res: express.Response, canvas: Canvas, need: CanvasRole): boolean {
@@ -2200,10 +2222,10 @@ app.post('/api/canvases/:id/duplicate', async (req, res) => {
    the rest arrive `htmlDeferred` (GET /api/frames/:id has the HTML of any). With
    no `pageId` every frame is complete, as it always was. */
 app.get('/api/canvases/:id', (req, res) => {
-  const c = requireCanvas(req, res, req.params.id, 'view')
+  const c = requireCanvasOrRenderGrant(req, res, req.params.id)
   if (!c) return
   /* the caller's own role rides along, so the editor knows to go read-only */
-  const role = canvasRole(req.user!.id, c)
+  const role = req.renderGrant ? ('view' as const) : canvasRole(req.user!.id, c)
   const { pageId } = req.query
   if (pageId === undefined) return res.json({ ...c, role })
   if (typeof pageId !== 'string' || !canvasPages(c).some((page) => page.id === pageId))
@@ -3038,8 +3060,11 @@ registerBlenderRoutes(app)
    (PATCH) or removes it (DELETE). expectedRevision guards concurrent
    writers: 409 when the timeline moved under them. */
 app.get('/api/canvases/:id/pages/:pageId/composition', (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  const canvas = requireCanvasOrRenderGrant(req, res, req.params.id)
   if (!canvas) return
+  /* the token is page-bound as well: it only reads its own page */
+  if (req.renderGrant && req.renderGrant.pageId !== req.params.pageId)
+    return res.status(403).json({ error: 'this canvas is private — ask the owner for access' })
   res.json({ composition: store.getComposition(canvas.id, req.params.pageId) ?? null })
 })
 
@@ -3150,7 +3175,7 @@ app.post('/api/canvases/:id/pages/:pageId/composition/renders', (req, res) => {
   })
   if (!created.ok) return res.status(created.status).json({ error: created.error })
   /* a server-target job renders on the instance itself, in the background */
-  if (created.job.target === 'server') void runServerRender(created.job)
+  if (created.job.target === 'server') queueServerRender(created.job)
   res.status(201).json({ job: created.job })
 })
 

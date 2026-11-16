@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import { parse, type DefaultTreeAdapterTypes as Tree } from 'parse5'
 import { nanoid } from 'nanoid'
 import { asc, eq, gt, inArray } from 'drizzle-orm'
@@ -128,6 +129,33 @@ export async function createAsset(
   return storeAsset(buf, { mime, ext: MIME_EXT[mime] }, meta)
 }
 
+/** storeAsset from a file on disk — for payloads written incrementally
+ *  (server renders) that never sit whole in memory. */
+export async function storeAssetFile(
+  file: string,
+  type: { mime: string; ext: string },
+  meta: { canvasId?: string; ownerId?: string; uploadedBy: string },
+): Promise<AssetMeta> {
+  const { mime, ext } = type
+  const id = nanoid(10)
+  const size = (await fs.promises.stat(file)).size
+  await storage.putObjectFile(`${id}.${ext}`, file, mime)
+  await db.insert(t.assets).values({
+    id,
+    canvasId: meta.canvasId ?? null,
+    ownerId: meta.ownerId ?? null,
+    mime,
+    ext,
+    size,
+    uploadedBy: meta.uploadedBy,
+    createdAt: Date.now(),
+  })
+  const asset = { id, mime, ext, size }
+  if (meta.canvasId && isDescribableImage(mime))
+    emitCanvasEvent(meta.canvasId, { type: 'asset.stored', asset: { ...asset, canvasId: meta.canvasId } })
+  return asset
+}
+
 /** Store bytes whose type the caller has already established (images via
  *  createAsset, fonts via server/fonts.ts) under a fresh /a/ id. */
 export async function storeAsset(
@@ -222,15 +250,23 @@ export async function getAsset(id: string, signal?: AbortSignal): Promise<{ meta
 /** Fetch a remote image through the SSRF guard, validating every redirect
  *  hop, with a hard size cap enforced while streaming. A caller that only
  *  reads a small file (a favicon) may pass a tighter cap than the store's. */
-export async function fetchRemote(rawUrl: string, maxBytes: number = MAX_ASSET_BYTES): Promise<Buffer> {
+export async function fetchRemote(
+  rawUrl: string,
+  maxBytes: number = MAX_ASSET_BYTES,
+  options: { accept?: string; headers?: Record<string, string>; timeoutMs?: number } = {},
+): Promise<Buffer> {
   const { fetchPinnedPublicUrl, parsePublicHttpUrl } = await import('./publicUrl.ts')
   const tooBig = new Error(`file exceeds the ${Math.round(maxBytes / 1024 / 1024)} MB limit`)
   let url = parsePublicHttpUrl(rawUrl)
   for (let hop = 0; hop < 4; hop++) {
     const res = await fetchPinnedPublicUrl(url, {
       redirect: 'manual',
-      headers: { accept: 'image/*,*/*;q=0.8', 'user-agent': 'DoopAssets/1.0' },
-      signal: AbortSignal.timeout(20_000),
+      headers: {
+        accept: options.accept ?? 'image/*,*/*;q=0.8',
+        'user-agent': 'DoopAssets/1.0',
+        ...options.headers,
+      },
+      signal: AbortSignal.timeout(options.timeoutMs ?? 20_000),
     })
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get('location')
