@@ -1750,3 +1750,14 @@ body[data-panel-resizing] * {
     animation: none !important;
   }
 }
+
+/* the shared expand (src/lib/sharedExpand.ts): the pressed tile grows into
+   the view it opens on the slow step, the rest of the page cross-fades */
+::view-transition-group(shared-expand) {
+  animation-duration: var(--dur-slow);
+  animation-timing-function: var(--ease-in-out);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--dur-base);
+}

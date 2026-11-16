@@ -11,7 +11,7 @@ import { NewLibraryModal } from '../components/library/NewLibraryModal'
 import { LibraryTile } from '../components/library/LibraryTile'
 import { Button } from '../components/ui/button'
 import { EmptyState } from '../components/ui/empty-state'
-import { PlusIcon, SparkIcon } from '../components/ui/icons'
+import { PlusIcon } from '../components/ui/icons'
 import { Modal, ModalActions, ModalLede, ModalTitle } from '../components/ui/modal'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { Skeleton } from '../components/ui/skeleton'
@@ -43,8 +43,8 @@ export function Libraries() {
       <DashMain className="[background:var(--paper)]">
         <DashHeader variant="bare">
           <span className="flex-1" />
-          <Button size="bar" onClick={() => setCurating(true)} title={t('library.curateHint')}>
-            <SparkIcon width={15} height={15} strokeWidth={1.75} /> {t('library.curateOpen')}
+          <Button size="bar" variant="agent" onClick={() => setCurating(true)} title={t('library.curateHint')}>
+            {t('library.curateOpen')}
           </Button>
           <Button variant="primary" size="bar" onClick={() => setStarting(true)}>
             <PlusIcon width={15} height={15} strokeWidth={1.75} /> {t('library.newLibrary')}

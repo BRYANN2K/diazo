@@ -7,6 +7,7 @@ import { Pressable } from '../ui/pressable'
 import { Tile, TileBody, TileCover } from '../ui/tile'
 import { FindPreview } from '../FindPreview'
 import { ItemThumb } from './ItemThumb'
+import { sharedExpand } from '../../lib/sharedExpand'
 
 /** How long the pointer rests on a tile before its live preview loads. */
 export const LIVE_HOVER_MS = 400
@@ -51,13 +52,22 @@ export function LibraryItemTile({
         onHover(null)
       }}
     >
-      <Pressable onClick={onOpen} onPointerDown={onPointerDown} aria-label={item.label}>
+      <Pressable
+        onClick={(e) => {
+          /* a plain click grows the cover into the item view; a modified
+             click (new tab, new window) opens as before */
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return onOpen(e)
+          sharedExpand(e.currentTarget.querySelector('[data-slot=tile-cover]'), () => onOpen(e))
+        }}
+        onPointerDown={onPointerDown}
+        aria-label={item.label}
+      >
         <TileCover aspect="4/3">
           {live ? <FindPreview frameId={item.frameId} focus={focusOfItem(item)} /> : <ItemThumb item={item} />}
         </TileCover>
         <TileBody>
-          <div className="truncate font-mono text-caption text-ink-faint">{item.id}</div>
-          <div className="truncate text-copy text-ink">{item.label}</div>
+          <div className="truncate text-body font-medium text-ink">{item.label}</div>
+          <div className="truncate font-mono text-micro text-ink-3">{item.id}</div>
           <div className="mt-1.5 flex flex-wrap items-center gap-1">
             {variantCount > 0 && <Badge>{t('library.countVariants', { count: variantCount })}</Badge>}
             {showStatus && <Badge tone="outline">{t(`library.status_${item.status}`)}</Badge>}
