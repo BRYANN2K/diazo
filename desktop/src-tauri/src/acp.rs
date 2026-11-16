@@ -244,15 +244,20 @@ fn command_at(cli: &Cli) -> Command {
 }
 
 /// Kills the agent and everything in its process group, then reaps it.
+///
+/// The group is signalled with kill(2) itself, before the reap, so the
+/// leader's pid (and with it the group id) cannot have been reused. Never
+/// through `/bin/kill`: procps' kill, given a group whose only member has
+/// already exited, signals the caller's own process group instead, which
+/// took down the app (and, under `cargo test`, the CI runner).
 fn kill_tree(child: &mut Child) {
     #[cfg(unix)]
-    {
-        let _ = Command::new("/bin/kill")
-            .args(["-KILL", &format!("-{}", child.id())])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+    // a negative 0 or 1 would mean our own group or every process we may signal
+    if let Some(group) = libc::pid_t::try_from(child.id()).ok().filter(|pid| *pid > 1) {
+        // SAFETY: kill(2) takes no pointers; the target is the child's own group
+        unsafe {
+            libc::kill(-group, libc::SIGKILL);
+        }
     }
     let _ = child.kill();
     let _ = child.wait();
@@ -1119,6 +1124,36 @@ mod tests {
     /// second), far below the 20 s each one is given.
     #[cfg(unix)]
     const SESSION_LIMIT: Duration = Duration::from_secs(60);
+
+    /* The agent's group is killed once it has exited, which is the common
+       case: it answered and quit. procps' /bin/kill, handed a group whose
+       only member is an unreaped zombie, signals the caller's own group, so
+       the shell-out killed the test run (and the CI runner with it). The
+       helper it left behind must die, and we must not. */
+    #[cfg(unix)]
+    #[test]
+    fn an_exited_agent_is_killed_with_its_helpers_and_nothing_else() {
+        within(SESSION_LIMIT, || {
+            let mut cmd = Command::new("/bin/sh");
+            cmd.args(["-c", "sleep 30 & echo started"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+            {
+                use std::os::unix::process::CommandExt;
+                cmd.process_group(0);
+            }
+            let mut child = cmd.spawn().unwrap();
+            let mut stdout = BufReader::new(child.stdout.take().unwrap());
+            assert_eq!(read_line(&mut stdout, 100).unwrap().as_deref(), Some("started"));
+            // the leader exits (left unreaped, a zombie) while `sleep` keeps stdout open
+            std::thread::sleep(Duration::from_millis(300));
+            kill_tree(&mut child);
+            // the pipe closes only once the helper is gone
+            let (sender, receiver) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(read_line(&mut stdout, 100));
+            });
+            assert_eq!(receiver.recv_timeout(Duration::from_secs(5)).unwrap().unwrap(), None);
+        });
+    }
 
     #[cfg(unix)]
     const HANDSHAKE: &str = r#"read -r l; say '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}}}}'

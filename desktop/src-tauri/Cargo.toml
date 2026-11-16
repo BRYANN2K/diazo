@@ -42,6 +42,11 @@ base64 = "0.22"
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
+# kill(2) on a local agent's process group (src/acp.rs): procps' /bin/kill,
+# handed a group whose only member has exited, signals the caller's own group
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # Repositioning the traffic lights over the web app's tab strip (main.rs);
 # AppKit resets them on window events, so the shell moves them itself.
 [target.'cfg(target_os = "macos")'.dependencies]

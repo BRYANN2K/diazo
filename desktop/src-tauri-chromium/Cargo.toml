@@ -52,6 +52,10 @@ tokio = { version = "1", features = ["time"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
+# kill(2) on a local agent's process group (../src-tauri/src/acp.rs), in step with ../src-tauri
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSButton", "NSControl", "NSEvent", "NSResponder", "NSView", "NSWindow"] }
 # reading the WebKit app's cookies and localStorage on the first launch (src/webkit_migration.rs)
