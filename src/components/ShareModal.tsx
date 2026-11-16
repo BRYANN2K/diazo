@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { DialogFamilyTabs } from './DialogFamily'
 import { COMMUNITY_CATEGORIES, type Canvas, type CommunityCategory } from '../../shared/types'
 import { toLinkAccess, type LinkAccess } from '../../shared/canvasRole'
 import { navigate } from '../App'
@@ -207,6 +208,7 @@ export function ShareModal({
     <Modal size="sm" onClose={onClose}>
       <>
         <ModalTitle className="min-w-0">{t('panels.shareTitle', { name: canvas.name })}</ModalTitle>
+        <DialogFamilyTabs active="share" />
         {isOwner && (
           <>
             <div className="mt-4 flex flex-col items-stretch gap-2 sm:flex-row">

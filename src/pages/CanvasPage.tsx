@@ -1,4 +1,5 @@
 import { CAPTURE_PREFIX, pasteWebCapture } from '../lib/webCapture'
+import { DialogFamilyProvider, DialogFamilyTabs } from '../components/DialogFamily'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { canEditOpenCanvas, roleOf, useStore } from '../lib/store'
 import { MOD_KEY, PRESENT_SHORTCUT_HINT, isControlTarget, isTypingTarget } from '../lib/keys'
@@ -1391,67 +1392,79 @@ export function CanvasPage({
           )
         }}
       />
-      {showShare && canvas && (
-        <ShareModal
-          key={canvas.id}
-          canvas={canvas}
-          onChange={(patch) => {
-            const current = useStore.getState().canvas
-            if (current?.id === canvasId) useStore.getState().setCanvas({ ...current, ...patch })
-          }}
-          onClose={() => setShowShare(false)}
-          onCopied={() => {
-            setShowShare(false)
-            showToast(t('canvas.linkCopied'))
-          }}
-        />
-      )}
-      {limitWall && (
-        <LimitWall
-          canvasId={canvasId}
-          onClose={() => useStore.getState().setLimitWall(false)}
-          onOpenConnect={() => {
-            useStore.getState().setLimitWall(false)
-            posthog.capture('agent_connection_opened')
-            setShowConnect(true)
-          }}
-        />
-      )}
-      {exporting && (
-        <ExportModal
-          frames={exporting.frames}
-          initialSelection={exporting.selected}
-          onClose={() => setExporting(null)}
-        />
-      )}
+      <DialogFamilyProvider
+        value={{
+          available: guest ? [] : readOnly ? ['share', 'export'] : ['share', 'export', 'import'],
+          switchTo: (next) => {
+            setShowShare(next === 'share')
+            setShowImport(next === 'import')
+            if (next === 'export') openExport()
+            else setExporting(null)
+          },
+        }}
+      >
+        {showShare && canvas && (
+          <ShareModal
+            key={canvas.id}
+            canvas={canvas}
+            onChange={(patch) => {
+              const current = useStore.getState().canvas
+              if (current?.id === canvasId) useStore.getState().setCanvas({ ...current, ...patch })
+            }}
+            onClose={() => setShowShare(false)}
+            onCopied={() => {
+              setShowShare(false)
+              showToast(t('canvas.linkCopied'))
+            }}
+          />
+        )}
+        {limitWall && (
+          <LimitWall
+            canvasId={canvasId}
+            onClose={() => useStore.getState().setLimitWall(false)}
+            onOpenConnect={() => {
+              useStore.getState().setLimitWall(false)
+              posthog.capture('agent_connection_opened')
+              setShowConnect(true)
+            }}
+          />
+        )}
+        {exporting && (
+          <ExportModal
+            frames={exporting.frames}
+            initialSelection={exporting.selected}
+            onClose={() => setExporting(null)}
+          />
+        )}
+        {showImport && editorReady && (
+          <ImportModal
+            canvasId={canvasId}
+            installPass={ghInstallPass}
+            installError={ghInstallError}
+            initialSource={importRequested && importRequested !== '1' ? importRequested : null}
+            onClose={() => {
+              setShowImport(false)
+              setGhInstallPass(null)
+            }}
+            onDone={(frameIds, failedCount) => {
+              setShowImport(false)
+              select(frameIds[0] ?? null)
+              const imported = t('canvas.itemsImported', { count: frameIds.length })
+              showToast(failedCount ? t('canvas.importedWithFailures', { imported, failed: failedCount }) : imported)
+            }}
+            onQueued={(cardCount) => {
+              setShowImport(false)
+              setGhInstallPass(null)
+              showToast(t('canvas.cardsQueued', { count: cardCount }))
+            }}
+          />
+        )}
+      </DialogFamilyProvider>
       {convertingLibrary && (
         <ConvertToLibraryModal
           canvasId={canvasId}
           onClose={() => setConvertingLibrary(false)}
           onConverted={() => showToast(translate('library.converted'))}
-        />
-      )}
-      {showImport && editorReady && (
-        <ImportModal
-          canvasId={canvasId}
-          installPass={ghInstallPass}
-          installError={ghInstallError}
-          initialSource={importRequested && importRequested !== '1' ? importRequested : null}
-          onClose={() => {
-            setShowImport(false)
-            setGhInstallPass(null)
-          }}
-          onDone={(frameIds, failedCount) => {
-            setShowImport(false)
-            select(frameIds[0] ?? null)
-            const imported = t('canvas.itemsImported', { count: frameIds.length })
-            showToast(failedCount ? t('canvas.importedWithFailures', { imported, failed: failedCount }) : imported)
-          }}
-          onQueued={(cardCount) => {
-            setShowImport(false)
-            setGhInstallPass(null)
-            showToast(t('canvas.cardsQueued', { count: cardCount }))
-          }}
         />
       )}
       {/* every message at once, stacked: the newest in front */}
@@ -1807,7 +1820,10 @@ function ImportModal({
         ) : !discovery ? (
           <>
             {source === null ? (
-              <SourcePicker onPick={setSource} sources={importSources()} />
+              <>
+                <DialogFamilyTabs active="import" />
+                <SourcePicker onPick={setSource} sources={importSources()} />
+              </>
             ) : source === 'website' ? (
               <>
                 <ImportStepHeader

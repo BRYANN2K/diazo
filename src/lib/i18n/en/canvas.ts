@@ -28,6 +28,7 @@ export const canvas = {
   copyFailed: 'Could not copy',
   autoSaved: '— Auto-saved',
   pagePickerAria: 'Page {page} — switch page',
+  dialogFamilyAria: 'Share, export or import',
   reconnecting: '— Reconnecting…',
   justYou: 'Just you here',
   importTitle: 'Import a live web page as a frame',
