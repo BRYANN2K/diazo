@@ -120,7 +120,7 @@ import { Field } from '../components/ui/field'
 import { PeerAvatars, PresenceFace } from '../components/PeerAvatars'
 import { MotionTimeline } from '../components/motion/MotionTimeline'
 import { Checkbox, CheckboxCard } from '../components/ui/checkbox'
-import { Toast, ToastAction, ToastSpinner } from '../components/ui/toast'
+import { Toast, ToastAction, ToastSpinner, ToastStack } from '../components/ui/toast'
 import { Tooltip } from '../components/ui/tooltip'
 import { Note } from '../components/ui/note'
 import { Textarea } from '../components/ui/textarea'
@@ -1450,21 +1450,22 @@ export function CanvasPage({
           }}
         />
       )}
-      {updateReady ? (
-        <Toast>
-          {t('canvas.appUpdated')}
-          <ToastAction onClick={() => location.reload()}>{t('canvas.reload')}</ToastAction>
-        </Toast>
-      ) : toast ? (
-        <Toast>{toast}</Toast>
-      ) : (
-        storeNotice && (
-          <Toast>
+      {/* every message at once, stacked: the newest in front */}
+      <ToastStack>
+        {storeNotice && (
+          <Toast key="notice" tone={storeNotice.busy ? 'agent' : undefined}>
             {storeNotice.busy && <ToastSpinner />}
             {storeNotice.text}
           </Toast>
-        )
-      )}
+        )}
+        {toast && <Toast key="toast">{toast}</Toast>}
+        {updateReady && (
+          <Toast key="update">
+            {t('canvas.appUpdated')}
+            <ToastAction onClick={() => location.reload()}>{t('canvas.reload')}</ToastAction>
+          </Toast>
+        )}
+      </ToastStack>
     </div>
   )
 }
