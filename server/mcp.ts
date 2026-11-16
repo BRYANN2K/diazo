@@ -33,6 +33,13 @@ import {
 } from '../shared/designTokens.ts'
 import { webFontFamilies, webFontsBrief } from '../shared/webFonts.ts'
 import * as actions from './actions.ts'
+import {
+  animateStoryboard,
+  getCompositionData,
+  lintMotion,
+  renderComposition,
+  setCompositionData,
+} from './motionTools.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
 import { isAgentKeySecret, verifyAgentKey } from './agentKeys.ts'
@@ -1848,6 +1855,154 @@ export function buildMcpServer(
       if (!f) return noFrame(frame_id)
       const outcome = await checkAndStore(frame_id, actorFrom(agent_name), { force: force === true })
       return text({ frame: frameSummary(f), ...checkOutcomeForAgent(outcome) })
+    },
+  )
+
+  /* ------------------------------------------------------------------ */
+  /* Motion Studio: a page's timeline, its lint, its renders              */
+  /* ------------------------------------------------------------------ */
+
+  server.registerTool(
+    'get_composition',
+    {
+      title: "Read a page's timeline",
+      description:
+        "Read a page's Motion Studio composition: duration, fps, output size and its tracks (camera moves, per-element properties, clips, audio, captions) with every keyframe and its easing. The page carries the film — compositions are per page, one each. Returns a revision: pass it back as expected_revision to set_composition so a collaborator's edit is never silently overwritten.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = getCompositionData(c, page_id)
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, composition: out.data })
+    },
+  )
+
+  server.registerTool(
+    'set_composition',
+    {
+      title: 'Write or patch a page timeline',
+      description:
+        "Write a page's Motion Studio composition — send composition for a whole timeline ({duration, fps, width, height, tracks}) or ops for a surgical patch (set_meta, add_track, remove_track, update_track, move_track, set_camera, add_keyframe, update_keyframe, remove_keyframe, add_clip, update_clip, remove_clip). Ops apply atomically; expected_revision makes a write fail when the timeline moved since you read it. Everyone in the room sees the change live.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        composition: z.record(z.unknown()).optional().describe('Full timeline body; mutually exclusive with ops'),
+        ops: z.array(z.record(z.unknown())).optional().describe('Patch ops applied atomically'),
+        expected_revision: z.number().int().optional().describe('Fail when the live revision differs'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, composition, ops, expected_revision, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = setCompositionData(c, page_id, { composition, ops, expected_revision }, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'animate_storyboard',
+    {
+      title: 'Turn a page of frames into a film',
+      description:
+        'Build a Motion Studio composition from the frames already laid out on a page: one shot per frame in reading order (top-to-bottom rows, left-to-right), a camera track that cuts between shots at shot_seconds each. Call it AFTER planning the story from the brief — this is the deterministic half; refine the result with set_composition ops to turn cuts into camera moves (change hold easings), add captions, clips and element animation, then lint_motion before render_composition.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        shot_seconds: z.number().optional().describe('Seconds per shot, default 3'),
+        margin: z.number().optional().describe('Breathing room around each shot, default 1.08'),
+        fps: z.number().int().optional().describe('Output rate, default 30'),
+        width: z.number().int().optional().describe('Output width px, default 1920'),
+        height: z.number().int().optional().describe('Output height px, default 1080'),
+        frame_ids: z.array(z.string()).optional().describe('Only these frames become shots, in reading order'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, shot_seconds, margin, fps, width, height, frame_ids, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = animateStoryboard(
+        c,
+        page_id,
+        { shot_seconds, margin, fps, width, height, frame_ids },
+        actorFrom(agent_name),
+      )
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'lint_motion',
+    {
+      title: 'Check a page is seek-safe',
+      description:
+        "Motion Studio's lint: a film's pixels must be a function of time only, so flag everything that would render differently on a seek — wall clocks (Date.now), free-running loops (setInterval, requestAnimationFrame), unseeded Math.random, CSS animations/transitions not bound to the timeline, GSAP, network calls inside seek code, autoplaying media, and malformed motion blocks or track references (MO-* rules). Run it on a page before rendering; composition structure issues and per-frame HTML issues come back together.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string().optional().describe('The page to lint (or give frame_id to lint its page)'),
+        frame_id: z.string().optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, frame_id, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await lintMotion(c, { page_id, frame_id })
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, ...(out.data as object) })
+    },
+  )
+
+  server.registerTool(
+    'render_composition',
+    {
+      title: 'Queue a video render',
+      description:
+        "Queue a render job for a page's Motion Studio composition — mp4 or webm, the composition's size/rate or an override, the whole timeline or a range. The job waits for a renderer: a browser tab (MediaRecorder/WebCodecs) or the desktop app (target desktop, deterministic frames + local ffmpeg). It appears in the room as render:progress and the finished file lands as an /a/ asset. Server-side rendering lands in a later phase — this queues, it does not block.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        format: z.enum(['mp4', 'webm']).optional().describe('Container, default mp4'),
+        target: z.enum(['browser', 'desktop']).optional().describe('Who renders it, default browser'),
+        width: z.number().int().optional(),
+        height: z.number().int().optional(),
+        fps: z.number().int().optional(),
+        range: z
+          .object({ start: z.number().optional(), end: z.number().optional() })
+          .optional()
+          .describe('Seconds window to render, default the whole composition'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, format, target, width, height, fps, range, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = renderComposition(
+        c,
+        page_id,
+        { format, target, width, height, fps, range },
+        { id: ownerId ?? `mcp:${owner ?? 'anonymous'}`, name: agent_name ?? owner ?? 'agent' },
+      )
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, ...(out.data as object) })
     },
   )
 

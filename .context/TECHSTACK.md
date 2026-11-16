@@ -982,6 +982,27 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   fit, fill; `screenLayout`, remembered under `doop:proto-scaling`); the
   Prototype tab and `PrototypeOverlay.tsx` edit and draw them; MCP has `get_prototype` and
   `set_prototype_start`. `tests/prototypeBrowser.test.ts` drives the player in Chromium.
+- Motion Studio ("Rostrum", `.context/specs/motion-studio.md`, backend MVP): a page carries a
+  composition — duration, fps, output size and tracks (camera keyframes over the world, per-element
+  properties, clips, audio, captions; `shared/motion.ts` is the wire contract, `docs/motion-api.md`
+  its documentation). `shared/motionRuntime.ts` maps time → frame state as a pure function
+  (frame-authored motion blocks first, element tracks override, semi-open clip windows), and
+  `shared/motionLint.ts` rejects non-seek-safe markup (MO-* rules: wall clocks, free-running loops,
+  unseeded random, CSS animations, GSAP, seek-time network, autoplaying media). Server side:
+  `compositions`/`composition_versions`(≤20)/`render_jobs` tables (migration 0071), write-through
+  in `server/db/persist.ts`, copy-with-remap on page/canvas duplication in `server/store.ts`,
+  actions + broadcasts (`composition`, `composition:playhead`, `render:progress`) in
+  `server/actions.ts`, REST under `/api/canvases/:id/pages/:pageId/composition` and
+  `/api/renders/:id` (upload sniffs mp4/webm into `/a/` assets) behind the canvas view/edit gates.
+  Render jobs are claimable records (`server/motionJobs.ts`): the browser renders via
+  MediaRecorder/WebCodecs, or the desktop shell renders deterministically —
+  `desktop/src-tauri/src/motion.rs` drives a hidden webview through the page's seek/capture hooks
+  and encodes with an allowlisted local `ffmpeg` (`__DOOP_MOTION_RENDER__`, capability
+  `motion-render.json`); `src/blender.rs` is the disabled-by-default (`DOOP_BLENDER_BRIDGE`)
+  Blender-MCP spawn + read-only relay groundwork. MCP tools (`server/motionTools.ts`, parity in
+  `server/resident.ts`): `get_composition`, `set_composition`, `animate_storyboard`, `lint_motion`,
+  `render_composition`. Tests: `motion.test.ts`, `motionHttp.test.ts`, `motion::tests`,
+  `blender::tests`.
 
 - Motion Studio UI (`src/components/motion/`, `src/lib/motion/`, contract `docs/motion-api.md` of
   `feat/motion-backend`): the bar's Motion button mounts `MotionTimeline` over the stage for the
