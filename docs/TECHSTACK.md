@@ -253,6 +253,20 @@ Status: current, updated 2026-11-17
   migration 0047, so a trimmed task history cannot move it). Tests: `agentRunner.test.ts`,
   `runnerQueue.test.ts`, `modelPickerRunners.test.tsx`, the pick cases in
   `localAgentRouting.test.ts`.
+- Orca dev tasks (`shared/devTasks.ts`, `server/devTasks.ts`,
+  `desktop/src-tauri/src/orca.rs`, docs/orca.md): a `ready_for_dev` frame can be sent to an
+  Orca worktree. `POST /api/frames/:id/dev-tasks` builds the handoff pack, writes a
+  `frame_dev_tasks` row (migration 0072; `frameIds`, the pack, the Orca `wt2:` identity —
+  never a path) and hands a `dev_task` `RepoRequest` to the requester's desktop over the
+  `/api/local-repo/poll` bridge, which only a device holding the canvas's repo grant may
+  claim. The shell's typed commands (`orca_status`, `orca_resolve_repo`,
+  `orca_launch_task` behind a native confirmation, `orca_poll`, `orca_activate` —
+  `__DIAZO_ORCA__`) build one argv each, never a shell string and never `--surface` (the
+  person's Chat | CLI setting decides); it reports through `/api/dev-tasks/:id/report`,
+  polls `worktree ps` trimmed to the identities it launched (`orca-tasks.json`), and the
+  coding agent pushes `update_dev_task` over MCP after reading its brief with
+  `get_handoff`. Every change broadcasts `dev-task` to the room. Tests:
+  `devTasks.test.ts`, `devTaskRoutes.test.ts`, the `orca::tests` unit tests.
 - Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and
   every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
   empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)
