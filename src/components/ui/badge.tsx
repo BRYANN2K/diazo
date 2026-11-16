@@ -53,16 +53,20 @@ const badgeVariants = cva(
   },
 )
 
-function Badge({
-  className,
-  tone,
-  shape,
-  interactive,
-  asChild = false,
-  ...props
-}: React.ComponentProps<'span'> & VariantProps<typeof badgeVariants> & { asChild?: boolean }) {
+/* forwards its ref, so a Tooltip can anchor on a badge (the frame checks) */
+const Badge = React.forwardRef<
+  HTMLSpanElement,
+  React.ComponentProps<'span'> & VariantProps<typeof badgeVariants> & { asChild?: boolean }
+>(function Badge({ className, tone, shape, interactive, asChild = false, ...props }, ref) {
   const Comp = asChild ? Slot : 'span'
-  return <Comp data-slot="badge" className={cn(badgeVariants({ tone, shape, interactive, className }))} {...props} />
-}
+  return (
+    <Comp
+      ref={ref}
+      data-slot="badge"
+      className={cn(badgeVariants({ tone, shape, interactive, className }))}
+      {...props}
+    />
+  )
+})
 
 export { Badge, badgeVariants }
