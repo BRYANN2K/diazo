@@ -196,6 +196,10 @@ const schema = {
      people curate. Rules, visibility and whether a canvas is a library stay
      people-only whatever this says. */
   AGENT_LIBRARY_WRITES: bool({ default: true }),
+  /* The agent-cost script tools (query_script, run_script). Off removes them
+     from the MCP server and the resident agent and refuses direct calls —
+     the sandbox and the diazo SDK stop being a capability of this instance. */
+  DOOP_AGENT_SCRIPTS: bool({ default: true }),
   /* Whether a design library may be made public: usable (searched, browsed,
      inserted from) by every account on the instance, never opened as a
      canvas. Off by default: libraries often hold content copied from
