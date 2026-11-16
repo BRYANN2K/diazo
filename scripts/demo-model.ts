@@ -11,6 +11,8 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { ANTHROPIC_MODELS } from '../shared/modelMenu.ts'
+import { CLAUDE_PINNED_MODELS } from '../shared/localAgent.ts'
 
 type Block = { type: string; text?: string; content?: unknown }
 type Message = { role: string; content: string | Block[] }
@@ -310,12 +312,47 @@ function sse(model: string, r: Reply): string {
   return events.map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join('')
 }
 
+/* what `/v1/models` lists: the curated rosters, as each API spells them */
+const ANTHROPIC_LIST = [...ANTHROPIC_MODELS, ...CLAUDE_PINNED_MODELS]
+  .filter((m, i, all) => all.findIndex((o) => o.id === m.id) === i)
+  .map((m, i) => ({
+    type: 'model',
+    id: m.id,
+    display_name: m.name,
+    created_at: new Date(Date.UTC(2026, 9, 1) - i * 86_400_000).toISOString(),
+  }))
+const OPENAI_LIST = ['gpt-6.1-sol', 'gpt-6.1', 'gpt-6-mini'].map((id, i) => ({
+  id,
+  object: 'model',
+  created: 1_790_000_000 - i * 86_400,
+  owned_by: 'demo',
+}))
+
 /** Start the stand-in on a free local port; resolves with its base URL. */
 export async function startDemoModel(writeFrame: FrameWriter): Promise<{ url: string; server: Server }> {
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     let body = ''
     req.on('data', (chunk: Buffer) => (body += chunk.toString()))
     req.on('end', () => {
+      /* the model lists Settings and the composer ask for, so a demo key
+         reads as a working connection without reaching a provider */
+      if (req.method === 'GET' && req.url?.startsWith('/openai/v1/models')) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ object: 'list', data: OPENAI_LIST }))
+        return
+      }
+      if (req.method === 'GET' && req.url?.startsWith('/v1/models')) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(
+          JSON.stringify({
+            data: ANTHROPIC_LIST,
+            has_more: false,
+            first_id: ANTHROPIC_LIST[0]?.id ?? null,
+            last_id: ANTHROPIC_LIST.at(-1)?.id ?? null,
+          }),
+        )
+        return
+      }
       if (!req.url?.includes('/messages')) {
         res.writeHead(404, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ type: 'error', error: { type: 'not_found_error', message: 'demo model only' } }))

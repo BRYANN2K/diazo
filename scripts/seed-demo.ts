@@ -4,14 +4,18 @@
  *
  *   npx tsx scripts/seed-demo.ts        # boots a fresh demo, seeds it, keeps it running
  *
- * It starts, all on this machine: a scripted stand-in for the model API
+ * It starts, all on this machine: a scripted stand-in for the model APIs
  * (scripts/demo-model.ts), the server on a fresh PGlite in a temp folder
- * (:4400) with a demo Claude key routed to that stand-in, the Vite web app
- * (:4300), and a fake desktop device that serves a small demo repo, so the
- * repo features (token sync, frame → code) have a linked project. Then it
- * seeds through the REST API, the way the app and agents do. Nothing is
- * sent to a model provider and no real account or data is used.
- * Sign in at http://localhost:4300 with DEMO_EMAIL / DEMO_PASSWORD.
+ * (DEMO_API_PORT, default 4410) with demo Claude, OpenAI and OpenRouter keys
+ * routed to that stand-in, the Vite web app (DEMO_WEB_PORT, default 4310),
+ * and a fake desktop device that serves a small demo repo, so the repo
+ * features (token sync, frame → code) have a linked project. Then it seeds
+ * through the REST API, the way the app and agents do. Nothing is sent to a
+ * model provider and no real account or data is used. The ports are not
+ * 4400 / 4300, where a local Diazo or `bun run dev` answers, and the seed
+ * refuses to start when either already answers, so it never writes into an
+ * instance it did not start.
+ * Sign in at http://localhost:<DEMO_WEB_PORT> with DEMO_EMAIL / DEMO_PASSWORD.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -37,8 +41,16 @@ import {
 } from './demo-content.ts'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-export const API = 'http://localhost:4400'
-export const WEB = 'http://localhost:4300'
+
+function port(name: string, fallback: number): number {
+  const value = Number(process.env[name] || fallback)
+  if (!Number.isInteger(value) || value < 1 || value > 65_535) throw new Error(`${name} is not a port: ${value}`)
+  return value
+}
+export const API_PORT = port('DEMO_API_PORT', 4410)
+export const WEB_PORT = port('DEMO_WEB_PORT', 4310)
+export const API = `http://localhost:${API_PORT}`
+export const WEB = `http://localhost:${WEB_PORT}`
 export const DEMO_EMAIL = 'maya@fieldnote.example'
 export const DEMO_PASSWORD = 'fieldnote-demo-only'
 
@@ -299,48 +311,6 @@ export async function seedDemo(dataDir: string): Promise<Seeded> {
     })
   }
 
-  /* the anti-slop lint a client computes inside the iframe, written straight
-     for the demo: the landing trips errors, the dashboard warnings only, the
-     pricing is clean — one badge of each tone */
-  const checkedAt = Date.now()
-  await c.json('PUT', `/api/frames/${landing.id}/lint`, {
-    lint: {
-      score: 52,
-      errors: 3,
-      warnings: 4,
-      issues: [
-        { ruleId: 'AS-TYP-01', severity: 'error', message: 'Heading skips a level', detail: 'h1 after h3' },
-        { ruleId: 'AS-COL-02', severity: 'error', message: 'Text contrast below AA', detail: '2.7:1' },
-        { ruleId: 'AS-GRD-01', severity: 'error', message: 'Gradient behind a button', detail: 'linear-gradient' },
-        { ruleId: 'AS-SPC-03', severity: 'warning', message: 'Off-grid spacing', detail: '13px' },
-        { ruleId: 'AS-ICO-02', severity: 'warning', message: 'Emoji in chrome', detail: 'fire icon' },
-        { ruleId: 'AS-TYP-02', severity: 'warning', message: 'A third typeface appears once', detail: 'Poppins' },
-        { ruleId: 'AS-SPC-01', severity: 'warning', message: 'Dense paragraph', detail: '92 words' },
-      ],
-      checkedAt,
-      version: 1,
-      engine: 'static',
-    },
-  })
-  await c.json('PUT', `/api/frames/${dashboard.id}/lint`, {
-    lint: {
-      score: 84,
-      errors: 0,
-      warnings: 3,
-      issues: [
-        { ruleId: 'AS-SPC-03', severity: 'warning', message: 'Off-grid spacing', detail: '13px' },
-        { ruleId: 'AS-TYP-03', severity: 'warning', message: 'Label set in all caps', detail: 'RECENT' },
-        { ruleId: 'AS-COL-04', severity: 'warning', message: 'Two accent hues compete', detail: 'amber + green' },
-      ],
-      checkedAt,
-      version: 1,
-      engine: 'static',
-    },
-  })
-  await c.json('PUT', `/api/frames/${pricing.id}/lint`, {
-    lint: { score: 100, errors: 0, warnings: 0, issues: [], checkedAt, version: 1, engine: 'static' },
-  })
-
   /* two open threads (one with a reply) and a resolved one: the Comments tab
      and the canvas pins all have something to draw */
   const productPage = (app.pages ?? [{ id: `${app.id}:page1`, name: 'Page 1' }])[0]!
@@ -472,7 +442,7 @@ export async function seedDemo(dataDir: string): Promise<Seeded> {
     brief: 'Empty state for a workspace with no interviews yet.',
     picks: [
       { provider: 'anthropic-key', model: 'claude-sonnet-5' },
-      { provider: 'anthropic-key', model: 'claude-haiku-5' },
+      { provider: 'anthropic-key', model: 'claude-haiku-4-5-20251001' },
     ],
   })
   await until(
@@ -492,6 +462,51 @@ export async function seedDemo(dataDir: string): Promise<Seeded> {
     text: 'Plan a three-step onboarding for new teams, reusing our tokens and the UI kit.',
   })
   await new Promise((r) => setTimeout(r, 6000))
+
+  /* the anti-slop lint a client computes inside the iframe, written straight
+     for the demo: the landing trips errors, the dashboard warnings only, the
+     pricing is clean — one badge of each tone. Written last, after every run
+     that rewrites a frame, as passes with computed styles: a client keeps a
+     verdict taken after the document's last change (lintIsCurrent) instead
+     of scoring it again */
+  const checkedAt = Date.now()
+  await c.json('PUT', `/api/frames/${landing.id}/lint`, {
+    lint: {
+      score: 52,
+      errors: 3,
+      warnings: 4,
+      issues: [
+        { ruleId: 'AS-TYP-01', severity: 'error', message: 'Heading skips a level', detail: 'h1 after h3' },
+        { ruleId: 'AS-COL-02', severity: 'error', message: 'Text contrast below AA', detail: '2.7:1' },
+        { ruleId: 'AS-GRD-01', severity: 'error', message: 'Gradient behind a button', detail: 'linear-gradient' },
+        { ruleId: 'AS-SPC-03', severity: 'warning', message: 'Off-grid spacing', detail: '13px' },
+        { ruleId: 'AS-ICO-02', severity: 'warning', message: 'Emoji in chrome', detail: 'fire icon' },
+        { ruleId: 'AS-TYP-02', severity: 'warning', message: 'A third typeface appears once', detail: 'Poppins' },
+        { ruleId: 'AS-SPC-01', severity: 'warning', message: 'Dense paragraph', detail: '92 words' },
+      ],
+      checkedAt,
+      version: 1,
+      engine: 'dom',
+    },
+  })
+  await c.json('PUT', `/api/frames/${dashboard.id}/lint`, {
+    lint: {
+      score: 84,
+      errors: 0,
+      warnings: 3,
+      issues: [
+        { ruleId: 'AS-SPC-03', severity: 'warning', message: 'Off-grid spacing', detail: '13px' },
+        { ruleId: 'AS-TYP-03', severity: 'warning', message: 'Label set in all caps', detail: 'RECENT' },
+        { ruleId: 'AS-COL-04', severity: 'warning', message: 'Two accent hues compete', detail: 'amber + green' },
+      ],
+      checkedAt,
+      version: 1,
+      engine: 'dom',
+    },
+  })
+  await c.json('PUT', `/api/frames/${pricing.id}/lint`, {
+    lint: { score: 100, errors: 0, warnings: 0, issues: [], checkedAt, version: 1, engine: 'dom' },
+  })
 
   return {
     client: c,
@@ -531,9 +546,21 @@ export function chromePath(): string | undefined {
   }
 }
 
-async function waitFor(url: string, ms = 90_000): Promise<void> {
+/** Whether anything answers HTTP on a local port. */
+async function answers(port: number): Promise<boolean> {
+  try {
+    await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) })
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function waitFor(url: string, ms = 90_000, exited?: () => string | null): Promise<void> {
   const deadline = Date.now() + ms
   for (;;) {
+    const gone = exited?.()
+    if (gone) throw new Error(`${gone} exited before ${url} answered`)
     try {
       if ((await fetch(url)).ok) return
     } catch {
@@ -549,20 +576,37 @@ export interface Demo extends Seeded {
 }
 
 export async function startDemo(): Promise<Demo> {
+  /* never seed into an instance this script did not start */
+  for (const taken of [API_PORT, WEB_PORT]) {
+    if (await answers(taken))
+      throw new Error(`port ${taken} already answers; stop what runs there or set DEMO_API_PORT / DEMO_WEB_PORT`)
+  }
   const dataDir = mkdtempSync(path.join(tmpdir(), 'redoop-demo-'))
   const model = await startDemoModel(writeFrame)
   const chrome = chromePath()
+  /* every provider URL the server could call points at the stand-in, and
+     every other provider key is blank: the fake keys never leave this machine */
   const env = {
     ...process.env,
-    PORT: '4400',
-    VITE_PORT: '4300',
+    PORT: String(API_PORT),
+    VITE_PORT: String(WEB_PORT),
     BETTER_AUTH_URL: WEB,
     DATABASE_URL: '',
     /* the distiller reads env.ANTHROPIC_API_KEY, not the model account: a
        demo key routed to the stand-in turns Memory proposals on */
     ANTHROPIC_API_KEY: 'sk-ant-demo-local-stand-in-only',
-    OPENAI_API_KEY: '',
     ANTHROPIC_BASE_URL: model.url,
+    OPENAI_API_KEY: '',
+    OPENAI_MODELS_URL: `${model.url}/openai/v1/models`,
+    OPENAI_RESPONSES_URL: `${model.url}/openai/v1/responses`,
+    OPENROUTER_CHAT_URL: `${model.url}/openrouter/v1/chat/completions`,
+    AZURE_OPENAI_API_KEY: '',
+    GEMINI_API_KEY: '',
+    ARK_API_KEY: '',
+    PEXELS_API_KEY: '',
+    REMOTE_BROWSER_URL: '',
+    REMOTE_BROWSER_TOKEN: '',
+    DOOP_UPDATE_CHECK: 'false',
     POSTHOG_KEY: '',
     VITE_POSTHOG_KEY: '',
     SMTP_HOST: '',
@@ -577,7 +621,7 @@ export async function startDemo(): Promise<Demo> {
       env,
       stdio: ['ignore', log, log],
     }),
-    spawn(path.join(ROOT, 'node_modules/.bin/vite'), ['--port', '4300', '--strictPort'], {
+    spawn(path.join(ROOT, 'node_modules/.bin/vite'), ['--port', String(WEB_PORT), '--strictPort'], {
       cwd: ROOT,
       env,
       stdio: ['ignore', 'ignore', 'inherit'],
@@ -587,9 +631,14 @@ export async function startDemo(): Promise<Demo> {
     for (const child of children) child.kill()
     model.server.close()
   }
+  const names = ['the demo server', 'the web app']
+  const exited = () => {
+    const at = children.findIndex((child) => child.exitCode !== null || child.signalCode !== null)
+    return at < 0 ? null : (names[at] ?? 'a child process')
+  }
   try {
-    await waitFor(`${API}/healthz`)
-    await waitFor(WEB)
+    await waitFor(`${API}/healthz`, 90_000, exited)
+    await waitFor(WEB, 90_000, exited)
     const seeded = await seedDemo(dataDir)
     return {
       ...seeded,
