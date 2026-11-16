@@ -9,14 +9,4 @@
   (auto-imported).
 - [@CODESTYLE.md](CODESTYLE.md) - ESLint/Prettier/commitlint crib sheet (auto-imported).
 
-## Subfolders
-
-### `specs/`
-
-- [specs/INDEX.md](specs/INDEX.md) - Complete record of design specs. Feature and API designs for
-  doop (canvas, MCP server, auth, realtime).
-
-### `plans/`
-
-- [plans/INDEX.md](plans/INDEX.md) - Complete record of implementation plans. Test-first task
-  breakdowns derived from the specs.
+Specs and plans moved to Stip: accepted behaviour in `.workflow/specs/`, work in `.workflow/changes/` and `.workflow/archive/`.

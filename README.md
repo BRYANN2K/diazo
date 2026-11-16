@@ -72,7 +72,7 @@ The canvas holds frames that render real HTML. People edit them in the browser o
 - **Code.** Link a canvas to a project folder. Tokens sync with the repo's CSS variables, and a frame exports as a React or Astro component, shown as a patch before it is written.
 - **Updates.** Admins see when a newer build is out, and the command that updates their install.
 
-Coming next: Motion Studio, where a page gains a timeline and the Diazo Agent animates a storyboard into seek-safe HTML. See [.context/specs/motion-studio.md](.context/specs/motion-studio.md).
+Coming next: Motion Studio, where a page gains a timeline and the Diazo Agent animates a storyboard into seek-safe HTML. See [.workflow/changes/motion-studio/proposal.md](.workflow/changes/motion-studio/proposal.md).
 
 The full list of what Diazo adds is in [docs/FEATURES.md](docs/FEATURES.md).
 

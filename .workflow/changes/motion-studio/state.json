@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "id": "motion-studio",
+  "target": "motion-studio",
+  "extensions": ["frontend-engineering", "backend-engineering", "desktop-engineering", "ai-engineering", "ux-design"],
+  "target_before": null,
+  "created_at": "2026-11-16T17:57:38.132887+00:00",
+  "phase": "exploring",
+  "updated_at": "2026-11-16T17:57:38.132989+00:00"
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "mac-all-in-one-install",
+  "target": "mac-all-in-one-install",
+  "extensions": [
+    "desktop-engineering",
+    "devops-delivery",
+    "release-management",
+    "cli-tooling",
+    "security-engineering"
+  ],
+  "target_before": null,
+  "created_at": "2026-11-16T17:57:38.249481+00:00",
+  "phase": "draft",
+  "updated_at": "2026-11-16T17:58:44.124158+00:00"
+}

@@ -6,7 +6,7 @@ import { Client, startServer, type Server } from './harness.ts'
  * View-only and comment-only share links, against the real server: what a
  * link visitor may read, comment and change over REST, the WebSocket room
  * and MCP (authenticated with the visitor's own agent key). Spec:
- * .context/specs/share-link-roles.md
+ * .workflow/specs/share-link-roles.md
  */
 
 let server: Server

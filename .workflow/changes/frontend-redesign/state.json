@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "id": "frontend-redesign",
+  "target": "frontend-redesign",
+  "extensions": [
+    "frontend-engineering",
+    "design-system",
+    "accessibility",
+    "ux-design"
+  ],
+  "target_before": null,
+  "created_at": "2026-11-16T17:57:38.210919+00:00",
+  "phase": "draft",
+  "updated_at": "2026-11-16T17:58:44.084625+00:00"
+}

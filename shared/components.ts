@@ -5,7 +5,7 @@
  * everything that reads frame HTML (the iframe, exports, screenshots, comments,
  * the Layers panel) needs no idea components exist. Agents read and write the
  * short form, `<doop-use component="Button" label="Buy"></doop-use>`.
- * Spec: .context/specs/components.md.
+ * Spec: .workflow/specs/components.md.
  */
 
 export const COMPONENT_ATTR = 'data-doop-component'

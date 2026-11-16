@@ -297,7 +297,7 @@ export with the frame, and agents write them with the same tools they design wit
 
 Agents check their wiring with `get_prototype`, which flags links to missing frames, and set
 the start with `set_prototype_start`. Both the MCP server and the built-in Doop Agent have them.
-The full attribute reference is in [`.context/specs/prototyping.md`](../.context/specs/prototyping.md).
+The full attribute reference is in [`.workflow/specs/prototyping.md`](../.workflow/specs/prototyping.md).
 
 ## iPhone and iPad app
 

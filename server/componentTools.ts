@@ -26,7 +26,7 @@ import * as actions from './actions.ts'
 /**
  * The component tools every agent gets, over MCP (server/mcp.ts) or in the server
  * (server/resident.ts): one schema and one handler each, so the two cannot drift.
- * Spec: .context/specs/components.md.
+ * Spec: .workflow/specs/components.md.
  */
 
 export const propSchema = z.object({
