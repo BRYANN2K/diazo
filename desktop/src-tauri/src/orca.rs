@@ -18,8 +18,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
@@ -29,6 +31,9 @@ const ACTIVATE_TIMEOUT: Duration = Duration::from_secs(60);
 /// `worktree create` blocks on repo setup hooks and the agent launch reply.
 const CREATE_TIMEOUT: Duration = Duration::from_secs(300);
 const PS_LIMIT: &str = "100";
+/// How much of one output stream `run_orca` keeps — `worktree ps` over a
+/// busy install is the biggest answer and stays well under this.
+const MAX_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 
 /* field caps — mirror shared/devTasks.ts, keep in step */
 const MAX_PROMPT_CHARS: usize = 8 * 1024;
@@ -71,6 +76,32 @@ fn orca_bin() -> Option<PathBuf> {
     candidates.into_iter().find(|p| p.is_file())
 }
 
+/// Drain one pipe on its own thread while the child runs — reading only
+/// after exit deadlocks the moment output passes the pipe buffer (~64 KB)
+/// and the child never finishes to be read. Past the cap the bytes are
+/// still consumed and dropped, so a loud child can never block.
+fn drain(pipe: impl Read + Send + 'static) -> mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut kept = Vec::new();
+        let mut chunk = [0u8; 8192];
+        let mut pipe = pipe;
+        loop {
+            match pipe.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let room = MAX_OUTPUT_BYTES.saturating_sub(kept.len());
+                    if room > 0 {
+                        kept.extend_from_slice(&chunk[..n.min(room)]);
+                    }
+                }
+            }
+        }
+        let _ = tx.send(kept);
+    });
+    rx
+}
+
 /// Run `orca <args>` and return the envelope's `result` (or the whole
 /// object when there is none). A non-zero exit, a timeout or an `ok:false`
 /// envelope becomes the error text — the caller decides what it means.
@@ -91,6 +122,8 @@ fn run_orca(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("orca would not start: {e}"))?;
+    let stdout = child.stdout.take().map(drain);
+    let stderr = child.stderr.take().map(drain);
     let deadline = std::time::Instant::now() + timeout;
     loop {
         match child.try_wait() {
@@ -100,22 +133,29 @@ fn run_orca(
             }
             Ok(None) => {
                 let _ = child.kill();
+                let _ = child.wait();
                 return Err(format!("orca did not answer within {}s", timeout.as_secs()));
             }
             Err(e) => {
                 let _ = child.kill();
+                let _ = child.wait();
                 return Err(format!("could not wait on orca: {e}"));
             }
         }
     }
-    let out = child
-        .wait_with_output()
-        .map_err(|e| format!("could not read orca's answer: {e}"))?;
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    /* the child is reaped, so each drainer ends at EOF — a stray grandchild
+       still holding the pipe forfeits what it has not sent after 5s */
+    let collect = |rx: Option<mpsc::Receiver<Vec<u8>>>| {
+        rx.and_then(|r| r.recv_timeout(Duration::from_secs(5)).ok())
+            .unwrap_or_default()
+    };
+    let out = collect(stdout);
+    let err = collect(stderr);
+    let stdout = String::from_utf8_lossy(&out);
     let trimmed = stdout.trim();
     let parsed: Value = serde_json::from_str(trimmed).map_err(|_| {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        let detail = stderr.trim();
+        let detail = String::from_utf8_lossy(&err);
+        let detail = detail.trim();
         let fallback: String = trimmed.chars().take(400).collect();
         format!(
             "orca did not answer with json: {}",
