@@ -4,7 +4,7 @@ import { fixtureUrl } from './browser'
 
 declare global {
   interface Window {
-    canvasPageHarness: { seed: (frames: Frame[]) => void }
+    canvasPageHarness: { seed: (frames: Frame[]) => void; frames: () => Frame[] }
   }
 }
 
@@ -25,8 +25,14 @@ export async function openCanvasPage(page: Page, frames: Frame[], search = ''): 
   await showCanvasPage(page, frames, search)
 }
 
-/** The stubs alone, for a test that has something to do before the page loads. */
-export async function prepareCanvasPage(page: Page): Promise<void> {
+/** An answer to a request outside `/api/`, or undefined to let it through. */
+export type FixtureResponder = (
+  path: string,
+) => { status: number; contentType?: string; body: Buffer | string; headers?: Record<string, string> } | undefined
+
+/** The stubs alone, for a test that has something to do before the page
+ *  loads. `respond` answers other paths the test serves itself (frame images). */
+export async function prepareCanvasPage(page: Page, respond?: FixtureResponder): Promise<void> {
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(window, 'WebSocket', {
       value: class {
@@ -38,8 +44,12 @@ export async function prepareCanvasPage(page: Page): Promise<void> {
   })
   await page.setRequestInterception(true)
   page.on('request', (request) => {
-    const path = new URL(request.url()).pathname
-    if (!path.startsWith('/api/')) return void request.continue()
+    const url = new URL(request.url())
+    const path = url.pathname
+    if (!path.startsWith('/api/')) {
+      const answer = respond?.(path + url.search)
+      return void (answer ? request.respond(answer) : request.continue())
+    }
     const body =
       path === '/api/auth/get-session'
         ? { user: { id: 'u', name: 'Tester', email: 'tester@test.dev' }, session: { id: 's', userId: 'u' } }

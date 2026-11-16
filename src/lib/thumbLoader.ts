@@ -1,12 +1,14 @@
 /**
- * Loading library thumbnails in the gallery: a few requests at a time
+ * Loading server-rendered images (library thumbnails in the gallery, frame
+ * previews on a zoomed-out stage): a few requests at a time
  * (a page of tiles never fires hundreds at once), and the answer read by
  * status, so a renderer that is busy (503 + Retry-After) is retried rather
  * than taken for a broken image.
  */
 
 export type ThumbLoad =
-  | { kind: 'ok'; blob: Blob }
+  /** `stale`: the server sent an older render while it draws the current one */
+  | { kind: 'ok'; blob: Blob; stale: boolean }
   /** the server is drawing it: ask again after `retryAfterMs` */
   | { kind: 'busy'; retryAfterMs: number }
   /** a real failure (404, 500, a broken response): show the fallback */
@@ -45,7 +47,7 @@ function next() {
 
 async function fetchThumb(url: string, signal: AbortSignal): Promise<ThumbLoad> {
   const res = await fetch(url, { signal, credentials: 'same-origin' })
-  if (res.ok) return { kind: 'ok', blob: await res.blob() }
+  if (res.ok) return { kind: 'ok', blob: await res.blob(), stale: res.headers.get('X-Doop-Preview') === 'stale' }
   if (res.status === 503) return { kind: 'busy', retryAfterMs: retryAfterMs(res.headers.get('Retry-After')) }
   return { kind: 'failed' }
 }

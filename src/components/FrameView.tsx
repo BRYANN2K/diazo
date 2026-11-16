@@ -23,7 +23,8 @@ export function hasExecutableContent(html: string): boolean {
   return /<script[\s>]|\son[a-z]+\s*=|javascript:/i.test(html)
 }
 import { FRAME_DOCUMENTS_TAKE_ZOOM_AS_DENSITY, counterZoom } from '../lib/layoutZoom'
-import { frameImageUrl, type FrameLod } from '../lib/frameLod'
+import { type FrameLod } from '../lib/frameLod'
+import { FrameImage } from './FrameImage'
 import { dropEntry, recordCreate, recordUpdate, recordUpdates, trackSave, type HistoryEntry } from '../lib/history'
 import { snapFrame } from '../lib/snap'
 import { visibleGuides } from '../lib/guides'
@@ -139,28 +140,6 @@ const EDITOR_CHIP =
 const EDITOR_CHIP_TEXT = '@max-[180px]/title:hidden'
 /* the element toolbar's buttons sit on ink and stay compact */
 const EL_TOOLBAR_BTN = 'rounded-[7px] px-2 py-1 text-xs'
-
-/** What a culled frame shows instead of its document: the persisted preview
- *  render (`/i/<id>.jpg?preview`, the top `PREVIEW_MAX_HEIGHT` px of the frame)
- *  across the frame's width, so a zoomed-out page reads as its screens and not
- *  as blank boxes. `version` gives a changed frame a fresh URL past the
- *  browser cache; a render that fails leaves the hatch underneath. */
-function FramePlaceholderPreview({ frameId, version }: { frameId: string; version: number }) {
-  const src = `/i/${frameId}.jpg?preview&v=${version}`
-  const [failedSrc, setFailedSrc] = useState<string | null>(null)
-  if (failedSrc === src) return null
-  return (
-    <img
-      src={src}
-      alt=""
-      loading="lazy"
-      decoding="async"
-      draggable={false}
-      className="block w-full select-none"
-      onError={() => setFailedSrc(src)}
-    />
-  )
-}
 
 /** A hidden frame's place on the stage: nothing, unless it is selected —
  *  then a dashed box with its name, so a pick from the Layers panel still
@@ -856,7 +835,10 @@ export const FrameView = memo(function FrameView({
   const [wasMounted, setWasMounted] = useState(mounted)
   if (mounted !== wasMounted) {
     setWasMounted(mounted)
-    if (!mounted) setRuntimeReady(false)
+    if (!mounted) {
+      setRuntimeReady(false)
+      setRuntimeDocument(null)
+    }
   }
 
   /* a live frame's stored HTML is only the placeholder card: the desktop
@@ -1995,29 +1977,24 @@ export const FrameView = memo(function FrameView({
                   }}
                 />
               )
-            ) : lod === 'image' && frame.html ? (
-              /* the server's render of the current design (frameImageUrl):
-                 one decoded bitmap instead of a whole document. The world's
-                 zoom scales it like any other box, so no counter-zoom. */
-              <img
-                className={cn('block', isCanvasElement(frame.html) ? 'bg-transparent' : 'bg-white')}
-                src={frameImageUrl(frame, isCanvasElement(frame.html))}
-                alt=""
-                draggable={false}
-                decoding="async"
-                style={{ width: frame.width, height: frame.height }}
-              />
             ) : (
-              /* no document behind it: the frame's last preview render over the
-                 hatch of an empty frame, which shows while it loads or if it fails */
-              <div
-                data-frame-placeholder=""
-                className="absolute inset-0 overflow-hidden bg-[repeating-linear-gradient(45deg,transparent_0_10px,rgba(28,26,21,0.025)_10px_20px)]"
-              >
-                {(frame.htmlDeferred || (frame.html && !isCanvasElement(frame.html))) && (
-                  <FramePlaceholderPreview frameId={frame.id} version={frame.updatedAt} />
-                )}
-              </div>
+              /* no document behind it: the server's render of the design
+                 (FrameImage), fetched while the frame is on screen and shown
+                 from the cache off it. Never the frame's HTML, so a deferred
+                 frame stays deferred. */
+              (frame.html || frame.htmlDeferred) && (
+                <FrameImage frame={frame} ext={isCanvasElement(frame.html) ? 'png' : 'jpg'} fetch={lod !== 'none'} />
+              )
+            )}
+            {/* a document mounting under a picture the cache already holds:
+                the picture stays until the design shows, then fades */}
+            {mounted && !liveMounted && (
+              <FrameImage
+                frame={frame}
+                ext={isCanvasElement(frame.html) ? 'png' : 'jpg'}
+                fetch={false}
+                covering={!runtimeReady || runtimeDocument === null}
+              />
             )}
             {/* a standalone element is see-through: the paper's grid shows —
                 not over a live frame, whose placeholder is not artwork */}

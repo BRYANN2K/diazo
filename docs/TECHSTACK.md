@@ -491,15 +491,32 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   pixel grid (⇧'), other people's cursors (⌘⌥\ / Ctrl+Alt+\) and the comment pins (⇧C), each read
   by `code` (registry actions `pixel-grid`, `comments`, `cursors`). Hidden pins still show under
   the Comment tool and for a thread that is open. Tests: `viewOptions.test.ts`, `zoomMenu.test.tsx`.
-- Live frames (`src/lib/frameCulling.ts`): every frame is an iframe, so `Stage` mounts one only
-  for frames within half a stage of the viewport (kept until a full stage away) and, once zoomed
-  out below 25%, only for those over 160px on screen; a hatched placeholder of the same box
-  stands in for the rest. Selected, streamed-into, peer-edited and context-menu frames, the frame
-  of a picked element and every frame in prototype mode stay live, and standalone drawings are never culled
-  for size. `FrameView`'s `live` prop swaps the iframe for the placeholder and resets its
-  runtime state; `hasFrameWindow` is false for a frame without a document, so a press on one
-  selects the frame rather than waiting on an element hit-test. A frame still `htmlDeferred`
-  shows the placeholder too. Tests: `frameCulling.test.ts`.
+- Live frames (`src/lib/frameLod.ts`, `src/hooks/use-frame-lods.ts`): every frame is an iframe, so
+  once the camera settles `Stage` gives a document only to the frames worth one: on screen (a
+  quarter screen of margin), at least 96px on their shorter side, the largest first, within a
+  per-device budget (12, or 3 on touch). Selected, streamed-into, peer-edited and context-menu
+  frames, the frame of a picked element and every frame in prototype mode stay live. The other
+  frames on screen are drawn as pictures (`'image'`), frames off screen as `'none'`; zooming out
+  never mounts a document. A picture (`FrameImage.tsx`, `src/lib/framePreviews.ts`) is the
+  server's render at about the width the frame takes on screen: `/i/<id>.<jpg|png>?lod=<w>&v=<updatedAt>`,
+  `w` one of 128 / 256 / 512 / 1024 (`shared/framePreview.ts`, picked from zoom × device pixel
+  ratio once the camera settles), png only for standalone shapes. The client keeps one decoded
+  picture per frame (object URL, decoded with `img.decode()` before it is shown; LRU of 400,
+  never one on the stage), reuses a wider one of the same version, keeps the old version up
+  while an edit's loads, and asks through `thumbLoader` (six at a time, a 503 asked again after
+  its Retry-After with backoff, five tries). Until one arrives a page shows a neutral
+  `bg-paper-deep` well, never white; a frame off screen shows only what the cache holds. A frame
+  that goes live keeps its picture over the iframe until the runtime has shown the document, then
+  fades it. Nothing here reads frame HTML, so a deferred frame (`htmlDeferred`) stays deferred.
+  Server side (`server/previews.ts`, `server/thumbs.ts`), each width is rendered once at
+  background priority and stored as `thumb/<id>-w<w>.<ext>`, stale-while-revalidate: a stored
+  picture is served at once, marked `X-Doop-Preview: stale` (and `no-store`) while its frame's
+  current design renders, and the client asks again a few times. Freshness follows design writes
+  (`store.onFrameWrite`), so moving a frame keeps its picture; a write re-renders the widths
+  someone already looked at once the frame has been quiet 15s, ahead of the next zoom-out. A
+  current picture under its own `v` is served `immutable`. Tests: `frameLod.test.ts`,
+  `framePreviews.test.ts`, `thumbs.test.ts`, `previews.test.ts`, `framePreviewsBrowser.test.ts`,
+  `frameLodBrowser.test.ts`.
 - Canvas panel layout (Settings → Appearance → Canvas panels, `src/lib/panelLayout.ts`, per
   browser under `doop:panel-layout`): `floating` (the default) keeps the islands over a
   full-window stage; `docked` makes Layers, the tool rail, the icon islands, the Inspector /

@@ -18,6 +18,7 @@
       window.canvasPageHarness = {
         seed: (frames) =>
           useStore.getState().setCanvas({ id: 'c', name: 'Canvas', frames, role: 'edit', createdAt: 0, updatedAt: 0 }),
+        frames: () => useStore.getState().canvas?.frames ?? [],
       }
       createRoot(document.getElementById('root')).render(
         React.createElement(TooltipProvider, null, React.createElement(CanvasPage, { canvasId: 'c' })),

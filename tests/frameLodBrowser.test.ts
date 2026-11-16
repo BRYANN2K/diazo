@@ -38,7 +38,8 @@ describe.skipIf(!findBrowserPath())('frames drawn as images', () => {
       window.contextMenuHarness.seed([f])
       window.contextMenuHarness.drawAsImage(true)
     }, frame)
-    await page.waitForSelector('img[src^="/i/f.jpg"]')
+    /* the picture's place: here no server answers, so it stays the neutral well */
+    await page.waitForSelector('[data-frame-image]')
     expect(await page.$('iframe')).toBeNull()
 
     /* the element-move path waits for a document an image does not have,
