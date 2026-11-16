@@ -286,6 +286,10 @@ interface RunState {
   vision: boolean
   /** whose account pays for generated images: the run's payer, else the server key */
   payerId?: string
+  /** the human who asked — usually the payer, but not when the run pays on
+   *  another person's connected account; speech/blender tools and job
+   *  ownership act as this person, never as the payer */
+  askerId?: string
   /** the requester's own user id — set when they linked a local project to
    *  this canvas, so the repo_* tools read their folder through their app */
   repoUserId?: string
@@ -777,6 +781,11 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       lintResults: new Map(),
       vision: model.vision !== false,
       ...(model.userId ? { payerId: model.userId } : {}),
+      /* the requesting person: the first claimed ask's author — payerId is
+         whose account pays, not who asked */
+      ...((comments[0]?.fromUserId ?? claimed[0]?.fromUserId ?? allCards[0]?.queuedByUserId)
+        ? { askerId: comments[0]?.fromUserId ?? claimed[0]?.fromUserId ?? allCards[0]?.queuedByUserId }
+        : {}),
       ...(repoLink && repoUserId ? { repoUserId } : {}),
       imagesGenerated: 0,
       /* a run about a comment delivers on that comment's page */
@@ -1587,6 +1596,7 @@ async function runChat(
     lintResults: new Map(),
     vision: model.vision !== false,
     ...(model.userId ? { payerId: model.userId } : {}),
+    ...(asks.find((m) => m.fromUserId)?.fromUserId ? { askerId: asks.find((m) => m.fromUserId)!.fromUserId } : {}),
     ...(repoLink && repoUserId ? { repoUserId } : {}),
     imagesGenerated: 0,
     repliedThreads: new Set(),
@@ -2709,9 +2719,9 @@ const TOOLS: Anthropic.Tool[] = [
         seconds: { type: 'number' },
         aspect: { type: 'string', enum: ['16:9', '9:16', '1:1'] },
         seed: { type: 'number' },
-        first_frame: { type: 'string' },
-        last_frame: { type: 'string' },
-        refs: { type: 'array', items: { type: 'string' } },
+        first_frame: { type: 'string', maxLength: 8_000_000 },
+        last_frame: { type: 'string', maxLength: 8_000_000 },
+        refs: { type: 'array', items: { type: 'string', maxLength: 8_000_000 }, maxItems: 5 },
         at: { type: 'number' },
       },
       required: ['page_id', 'prompt'],
@@ -3925,9 +3935,10 @@ export async function execTool(
       case 'list_voices': {
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
-        if (!runState.payerId) return fail('sign in to use speech')
+        /* speech jobs belong to the person who asked, not the account that pays */
+        if (!runState.askerId) return fail('sign in to use speech')
         try {
-          return ok(JSON.stringify(await runSpeechTool(block.name, canvas, runState.payerId, block.input)))
+          return ok(JSON.stringify(await runSpeechTool(block.name, canvas, runState.askerId, block.input)))
         } catch (error) {
           return fail(error instanceof Error ? error.message : 'speech tool failed')
         }
@@ -3940,9 +3951,10 @@ export async function execTool(
       case 'get_blender_result': {
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
-        if (!runState.payerId) return fail('sign in to use blender')
+        /* blender ops queue under the person who asked, not the paying account */
+        if (!runState.askerId) return fail('sign in to use blender')
         try {
-          return ok(JSON.stringify(await runBlenderTool(block.name, canvas, runState.payerId, block.input)))
+          return ok(JSON.stringify(await runBlenderTool(block.name, canvas, runState.askerId, block.input)))
         } catch (error) {
           return fail(error instanceof Error ? error.message : 'blender tool failed')
         }
@@ -3997,7 +4009,7 @@ export async function execTool(
             range:
               raw.range && typeof raw.range === 'object' ? (raw.range as { start?: number; end?: number }) : undefined,
           },
-          { id: runState.payerId ?? `resident:${actor.name}`, name: actor.name },
+          { id: runState.askerId ?? runState.payerId ?? `resident:${actor.name}`, name: actor.name },
         )
         if (!out.ok) return fail(out.error)
         return ok(JSON.stringify(out.data))
@@ -4012,7 +4024,7 @@ export async function execTool(
         if (DESIGN_LIBRARY_TOOL_NAMES.includes(block.name)) {
           const canvas = store.getCanvas(canvasId)
           /* libraries are read as the person who asked, plus this canvas when it is one */
-          const reader = runState.payerId ?? canvas?.ownerId
+          const reader = runState.askerId ?? runState.payerId ?? canvas?.ownerId
           const outcome = await runLibraryTool(block.name, block.input as Record<string, unknown>, {
             userId: reader,
             actor,
@@ -4038,7 +4050,7 @@ export async function execTool(
         if (!COMPONENT_TOOL_NAMES.includes(block.name)) return fail(`unknown tool ${block.name}`)
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
-        const reader = runState.payerId
+        const reader = runState.askerId ?? runState.payerId
         const outcome = runComponentTool(block.name, block.input as Record<string, unknown>, {
           canvas,
           actor,

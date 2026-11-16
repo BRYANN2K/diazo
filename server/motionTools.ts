@@ -591,6 +591,13 @@ export async function generateVideoClip(
 ): Promise<Outcome> {
   if (!pageOn(canvas, pageId)) return fail(`no page ${pageId} on this canvas`)
   if (!input.prompt?.trim()) return fail('a prompt is required')
+  /* frame and reference images are bounded — a megabyte-scale prompt
+     argument is a corrupt call, not a photo */
+  const IMAGE_MAX = 8_000_000
+  if ((input.first_frame?.length ?? 0) > IMAGE_MAX || (input.last_frame?.length ?? 0) > IMAGE_MAX)
+    return fail('a frame image is too large')
+  if (input.refs && (input.refs.length > 5 || input.refs.some((r) => typeof r !== 'string' || r.length > IMAGE_MAX)))
+    return fail('too many or too large reference images')
   if (!payerId) return fail('connect a Diazo account to run video generation on your own key')
   const comp = store.getComposition(canvas.id, pageId)
   if (!comp) return fail(`page ${pageId} has no composition — make the timeline first`)
@@ -629,7 +636,7 @@ export async function generateVideoClip(
     generation: {
       ...video.recipe,
       ...(input.refs?.length ? { refs: input.refs } : {}),
-      ...(input.first_frame ? { camera: input.first_frame } : {}),
+      ...(input.first_frame ? { first_frame: input.first_frame } : {}),
     },
     createdAt: prev?.createdAt ?? now,
     updatedAt: now,

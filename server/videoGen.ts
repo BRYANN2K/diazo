@@ -16,11 +16,14 @@
 
 import { env } from './env.ts'
 import { getAccounts } from './modelAccounts.ts'
+import { fetchRemote } from './assets.ts'
 import { videoModel, type VideoAspect, type VideoModelOption } from '../shared/videoModels.ts'
 
 const FETCH_TIMEOUT_MS = 60_000
 const POLL_EVERY_MS = 5_000
 const POLL_DEADLINE_MS = 12 * 60 * 1000
+/** generated clips are seconds long — anything beyond this is not a clip */
+const MAX_VIDEO_BYTES = 512 * 1024 * 1024
 
 export interface VideoRequest {
   prompt: string
@@ -46,6 +49,45 @@ export interface GeneratedVideo {
 }
 
 export class VideoGenError extends Error {}
+
+/* ---- the result download ---- */
+
+/** Trust the bytes, not the provider's content-type: mp4 and webm are the
+ *  only containers a clip lands as — an error page or anything else is
+ *  refused rather than stored and served under the app origin. */
+export function sniffVideoMime(buf: Buffer): 'video/mp4' | 'video/webm' | undefined {
+  /* iso-bmff: size + 'ftyp' + a known major brand */
+  if (
+    buf.length >= 12 &&
+    buf.toString('latin1', 4, 8) === 'ftyp' &&
+    /^(isom|iso2|iso4|iso5|iso6|avc1|mp41|mp42|dash|MSNV|M4V |M4A |qt {2}|heic|heix)/.test(
+      buf.toString('latin1', 8, 12),
+    )
+  )
+    return 'video/mp4'
+  /* ebml/webm */
+  if (buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return 'video/webm'
+  return undefined
+}
+
+/** Download a provider result through the SSRF-pinned fetch (every
+ *  redirect re-validated, streamed under a hard cap), then keep it only
+ *  if it really is video. */
+export async function downloadVideo(url: string, headers?: Record<string, string>): Promise<Buffer> {
+  const buf = await fetchRemote(url, MAX_VIDEO_BYTES, {
+    accept: 'video/*,*/*;q=0.8',
+    headers,
+    timeoutMs: FETCH_TIMEOUT_MS * 2,
+  }).catch((error) => {
+    throw error instanceof VideoGenError
+      ? error
+      : new VideoGenError(error instanceof Error ? error.message : String(error))
+  })
+  if (!sniffVideoMime(buf)) {
+    throw new VideoGenError('the provider sent no playable video — refusing to store it')
+  }
+  return buf
+}
 
 /* ---- provider calls ---- */
 
@@ -95,11 +137,8 @@ async function openRouterVideo(key: string, model: VideoModelOption, req: VideoR
       (Array.isArray(job.data) ? (job.data[0] as { url?: string } | undefined)?.url : undefined) ??
       (job.output as { url?: string } | undefined)?.url
     if (!url) throw new VideoGenError('the finished job carries no video url')
-    const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS * 2) })
-    if (!res.ok) throw new VideoGenError(`the video download failed (${res.status})`)
-    const buf = Buffer.from(await res.arrayBuffer())
-    const mime = res.headers.get('content-type')?.split(';')[0] ?? 'video/mp4'
-    return finish(buf, mime, 'openrouter', model, req)
+    const buf = await downloadVideo(url)
+    return finish(buf, sniffVideoMime(buf)!, 'openrouter', model, req)
   }
 }
 
@@ -132,11 +171,9 @@ async function geminiVideo(key: string, model: VideoModelOption, req: VideoReque
     const response = job.response as { generateVideoResponse?: { generatedSamples?: { video?: { uri?: string } }[] } }
     const uri = response.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
     if (!uri) throw new VideoGenError('the finished operation carries no video uri')
-    const res = await fetch(uri, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS * 2) })
-    if (!res.ok) throw new VideoGenError(`the video download failed (${res.status})`)
-    const buf = Buffer.from(await res.arrayBuffer())
-    const mime = res.headers.get('content-type')?.split(';')[0] ?? 'video/mp4'
-    return finish(buf, mime, 'gemini', model, req)
+    /* the download uri wants the same credential as the api call */
+    const buf = await downloadVideo(uri, { 'x-goog-api-key': key })
+    return finish(buf, sniffVideoMime(buf)!, 'gemini', model, req)
   }
 }
 
