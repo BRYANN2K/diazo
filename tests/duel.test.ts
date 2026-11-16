@@ -146,6 +146,50 @@ describe('duelView', () => {
     expect(view.results[1]).toMatchObject({ status: 'failed', exists: true })
     expect(view.results[1]!.runId).toBeUndefined()
   })
+
+  it('marks a script-mode slot, shows its check score, and prices it through the agent run', async () => {
+    store.init([structuredClone(CANVAS)])
+    vi.spyOn(duelDeps, 'insert').mockResolvedValue()
+    const duel = await startDuel({
+      canvasId: 'c1',
+      brief: 'Hero',
+      picks: [gpt, claude],
+      actor: human,
+      userId: 'u1',
+      modes: ['script'],
+    })
+    const [a, b] = duel.entries
+    expect(a!.mode).toBe('script')
+    expect(b!.mode).toBeUndefined()
+    const cards = actions.getTasks('c1')
+    /* the queued card's "Script mode." lead is what arms the script tools
+       for that slot's run (resident.ts gates them on the work text) */
+    expect(cards.find((c) => c.id === a!.cardId)!.status).toContain('Script mode.')
+    expect(cards.find((c) => c.id === b!.cardId)!.status).not.toContain('Script mode.')
+
+    store.getFrame(a!.frameId)!.checks = { score: 77 } as never
+    vi.spyOn(duelDeps, 'frameRuns').mockImplementation(async (frameId) =>
+      frameId === a!.frameId ? ['script-run-1'] : [],
+    )
+    const { scriptRunDeps } = await import('../server/scriptRuns.ts')
+    vi.spyOn(scriptRunDeps, 'get').mockResolvedValue({
+      record: { agentRunId: 'agent-run-1' },
+    } as never)
+    vi.spyOn(duelDeps, 'run').mockImplementation(async (id) =>
+      id === 'agent-run-1'
+        ? ({ costUsd: 0.05, costEstimated: true, startedAt: 0, endedAt: 1000 } as never)
+        : (undefined as never),
+    )
+    const view = await duelView(duel)
+    expect(view.results[0]).toMatchObject({
+      mode: 'script',
+      checkScore: 77,
+      runId: 'script-run-1',
+      costUsd: 0.05,
+      costEstimated: true,
+      durationMs: 1000,
+    })
+  })
 })
 
 describe('pickDuel', () => {

@@ -4260,6 +4260,9 @@ app.post('/api/canvases/:id/duels', async (req, res) => {
   }
   try {
     const duel = await startDuel({
+      modes: Array.isArray(req.body.modes)
+        ? req.body.modes.map((m: unknown) => (m === 'script' ? 'script' : 'tools'))
+        : undefined,
       canvasId: req.params.id,
       ...(pageId ? { pageId } : {}),
       brief,

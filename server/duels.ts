@@ -1,3 +1,4 @@
+import { scriptRunDeps } from './scriptRuns.ts'
 import { nanoid } from 'nanoid'
 import { and, desc, eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
@@ -161,6 +162,7 @@ export async function startDuel(input: {
   picks: unknown
   actor: Actor
   userId: string
+  modes?: ('tools' | 'script')[]
 }): Promise<ModelDuel> {
   const picks = (Array.isArray(input.picks) ? input.picks : [])
     .map(parseRunnerPick)
@@ -185,7 +187,7 @@ export async function startDuel(input: {
     if (!frame) throw new DuelInputError('the canvas is gone')
     const card = actions.addQueuedCard(
       input.canvasId,
-      `${brief}\n\n(Model duel, entry ${duelLetter(i)}: design this in the empty frame you are scoped to. Other models answer the same brief in the frames beside it; do not touch them.)`,
+      `${input.modes?.[i] === 'script' ? 'Script mode. ' : ''}${brief}\n\n(Model duel, entry ${duelLetter(i)}: design this in the empty frame you are scoped to. Other models answer the same brief in the frames beside it; do not touch them.)`,
       input.actor.name,
       ['doop'],
       [],
@@ -194,7 +196,13 @@ export async function startDuel(input: {
       pick,
     )
     if (!card) throw new DuelInputError('the card could not be queued')
-    entries.push({ frameId: frame.id, cardId: card.id, runner: pick, label })
+    entries.push({
+      frameId: frame.id,
+      cardId: card.id,
+      runner: pick,
+      label,
+      ...(input.modes?.[i] === 'script' ? { mode: 'script' as const } : {}),
+    })
   }
   const duel: ModelDuel = {
     id: nanoid(10),
@@ -233,11 +241,16 @@ export async function duelView(duel: ModelDuel): Promise<DuelView> {
             ? 'running'
             : 'queued'
     const [runId] = await duelDeps.frameRuns(entry.frameId)
-    const run = runId ? await duelDeps.run(runId) : undefined
+    let run = runId ? await duelDeps.run(runId) : undefined
+    if (runId && !run) {
+      const script = await scriptRunDeps.get(runId)
+      if (script?.record.agentRunId) run = await duelDeps.run(script.record.agentRunId)
+    }
     results.push({
       ...entry,
       status,
       exists: !!frame,
+      ...(frame?.checks ? { checkScore: frame.checks.score } : {}),
       ...(frame?.lint ? { lintScore: frame.lint.score } : {}),
       ...(runId ? { runId } : {}),
       ...(run?.costUsd !== undefined ? { costUsd: run.costUsd } : {}),

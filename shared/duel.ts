@@ -11,6 +11,7 @@ export const DUEL_MAX = 3
 export const DUEL_MAX_BRIEF = 4000
 
 export interface DuelEntry {
+  mode?: 'tools' | 'script'
   frameId: string
   cardId: string
   runner: RunnerPick
@@ -58,6 +59,7 @@ export interface DuelEntryResult extends DuelEntry {
   exists: boolean
   /** the anti-slop lint score of the frame, 0-100 */
   lintScore?: number
+  checkScore?: number
   /** the run that designed it (agent_runs) */
   runId?: string
   costUsd?: number

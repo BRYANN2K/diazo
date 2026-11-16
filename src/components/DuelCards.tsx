@@ -94,6 +94,7 @@ function DuelCard({
                 elapsed(entry.durationMs),
                 entry.runner.effort ? effortLabel(entry.runner.effort, undefined, t) : '',
                 entry.lintScore !== undefined ? t('duel.lint', { score: entry.lintScore }) : '',
+                entry.checkScore !== undefined ? t('duel.checks', { score: entry.checkScore }) : '',
               ]
                 .filter(Boolean)
                 .join(' · ')}

@@ -23,6 +23,7 @@ export const duel = {
   cancel: 'Cancel',
   cardsTitle: 'Model duels',
   lint: 'lint {score}',
+  checks: 'checks {score}',
   statusQueued: 'Queued',
   statusRunning: 'Designing…',
   statusFailed: 'Failed',
