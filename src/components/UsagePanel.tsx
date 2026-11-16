@@ -9,7 +9,7 @@ import { RunReplayModal } from './RunReplayModal'
 import { PanelBody } from './ui/panel'
 import { Button } from './ui/button'
 import { SyncIcon } from './ui/icons'
-import { knownModelName } from '../../shared/agentRunner'
+import { modelNameForId } from '../../shared/agentRunner'
 
 function elapsed(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000))
@@ -84,7 +84,7 @@ export function UsagePanel({ canvasId }: { canvasId: string }) {
           <ListItem key={m.model}>
             <div className="grid grid-cols-[minmax(0,1fr)_minmax(48px,40%)_auto] items-center gap-3">
               <ListTitle className="truncate" title={m.model}>
-                {modelName(m.model)}
+                {modelNameForId(m.model)}
               </ListTitle>
               <span aria-hidden className="h-1.5 overflow-hidden rounded-full bg-well">
                 <span className="block h-full rounded-full bg-agent" style={{ width: `${share * 100}%` }} />
@@ -109,11 +109,6 @@ export function UsagePanel({ canvasId }: { canvasId: string }) {
       {openRun && <RunReplayModal canvasId={canvasId} runId={openRun} onClose={() => setOpenRun(null)} />}
     </PanelBody>
   )
-}
-
-/** A run's model id as the menus name it ("Sonnet 5"), else the id. */
-function modelName(id: string): string {
-  return knownModelName('anthropic-key', id)
 }
 
 function RunRow({ run, onOpen }: { run: AgentRunRecord; onOpen: () => void }) {

@@ -65,3 +65,37 @@ it('says so when no run has been metered yet', async () => {
   await act(async () => root.render(<UsagePanel canvasId="c1" />))
   expect(container.textContent).toContain('No agent runs on this canvas yet')
 })
+
+it('names every provider’s models as the menus do, not only Claude’s', async () => {
+  const gpt: AgentRunRecord = {
+    ...run,
+    id: 'r2',
+    label: 'OpenAI run',
+    provider: 'openai-key',
+    models: [{ model: 'gpt-6.1-sol', inputTokens: 1_000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 }],
+  }
+  const kimi: AgentRunRecord = {
+    ...run,
+    id: 'r3',
+    label: 'OpenRouter run',
+    provider: 'openrouter-key',
+    models: [
+      { model: 'moonshotai/kimi-k3', inputTokens: 1_000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ],
+  }
+  const custom: AgentRunRecord = {
+    ...run,
+    id: 'r4',
+    label: 'Custom run',
+    provider: 'custom:abc',
+    models: [{ model: 'my-local-llm', inputTokens: 1_000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 }],
+  }
+  vi.spyOn(api, 'getUsage').mockResolvedValue(summarizeUsage([run, gpt, kimi, custom]))
+  await act(async () => root.render(<UsagePanel canvasId="c1" />))
+  const text = container.textContent ?? ''
+  expect(text).toContain('Sonnet 4.6')
+  expect(text).toContain('GPT-6.1 Sol')
+  expect(text).toContain('Kimi K3')
+  expect(text).toContain('my-local-llm')
+  expect(text).not.toContain('gpt-6.1-sol')
+})
