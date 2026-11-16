@@ -1073,6 +1073,12 @@ body[data-panel-resizing] * {
     transform: translateY(4px) scale(0.98);
   }
 }
+@keyframes pin-pop {
+  from {
+    opacity: 0;
+    scale: 0.5;
+  }
+}
 @keyframes stop-in {
   from {
     opacity: 0;

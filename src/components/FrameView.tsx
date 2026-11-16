@@ -2212,7 +2212,8 @@ export const FrameView = memo(function FrameView({
                     const thread: [ElementComment, ...ElementComment[]] = [c, ...replies.sort((a, b) => a.at - b.at)]
                     return (
                       <CommentPin
-                        key={c.id}
+                        /* keyed by its anchor too: a re-anchored pin lands with the pop */
+                        key={`${c.id}@${c.elementId ?? `${c.x},${c.y}`}`}
                         thread={thread}
                         open={open}
                         left={pos.x}
