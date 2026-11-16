@@ -205,11 +205,12 @@ export function AcpAgentRow({ agent, isDefault = false, onMakeDefault, onChange 
         sub={short}
         action={
           <Button size="sm" disabled={busy} onClick={() => void choose({ enabled: true })}>
-            {t('models.connect')}
+            {busy ? t('models.connecting') : t('models.connect')}
           </Button>
         }
         panel={panel}
-        open={!!native && (!native.installed || !native.connected || !!error)}
+        /* the error must show even when the shell answered nothing (native null) */
+        open={!!error || !!(native && (!native.installed || !native.connected))}
       />
     )
   }

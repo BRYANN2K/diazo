@@ -62,6 +62,26 @@ describe('a desktop agent over ACP in Settings', () => {
     expect(mocks.refresh).toHaveBeenCalledExactlyOnceWith('alice', 'grok', true)
     expect(mocks.select).toHaveBeenCalledExactlyOnceWith('alice', 'grok', { enabled: true, model: 'default' })
   })
+  it('shows Connecting while it waits, then the refusal under the row when the shell has no status', async () => {
+    mocks.state = { ...idle, preference: null, native: null }
+    await mount('grok')
+    let refuse!: (error: Error) => void
+    mocks.refresh.mockClear()
+    mocks.refresh.mockImplementationOnce(() => new Promise((_, reject) => (refuse = reject)))
+    act(() => button('Connect')!.click())
+    expect(button('Connecting…')).toBeTruthy()
+    expect(button('Connect')).toBeUndefined()
+    await act(async () => refuse(new Error('acp_status is not allowed')))
+    expect(button('Connect')).toBeTruthy()
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('acp_status is not allowed')
+    expect(button('Refresh')).toBeTruthy()
+  })
+  it('opens the row with the error when connecting fails', async () => {
+    mocks.select.mockRejectedValueOnce(new Error('Server unreachable'))
+    await mount('grok')
+    await act(async () => button('Connect')!.click())
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Server unreachable')
+  })
   it('says how to sign in when the CLI is signed out, and does not connect', async () => {
     mocks.state = { ...mocks.state, native: { installed: true, connected: false, enabled: false } }
     await mount('devin')

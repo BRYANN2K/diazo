@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-acp-login"
+description = "Enables the acp_login command without any pre-configured scope."
+commands.allow = ["acp_login"]
+
+[[permission]]
+identifier = "deny-acp-login"
+description = "Denies the acp_login command without any pre-configured scope."
+commands.deny = ["acp_login"]

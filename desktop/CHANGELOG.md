@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Bug Fixes
+
+* **desktop:** grant the page the `acp_*` commands it invokes — Connect on a Devin or Grok desktop agent was refused by the shell and looked dead
+
 ## 0.16.0 (diazo)
 
 ### Features

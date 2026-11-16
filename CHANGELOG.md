@@ -56,5 +56,6 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 - A zoomed-out canvas shows frame designs instead of white boxes, with stored pictures sized to the zoom and a neutral placeholder while they load. Unchanged pictures survive restarts and moves; edits replace them without caching an older design as current. Busy renderers and network interruptions retry, off-screen pictures can leave the memory cache, and a frame going live fades its picture away.
 - Presence: no ghost presences on overlapping joins, and a leave is broadcast when a connection switches canvas.
 - `edit_frame_html` inserts its replacement text literally.
+- Settings → Diazo Agent: Connect on a Devin or Grok desktop agent did nothing — the shell refused the agent commands, and the row hid the error. Connect now shows progress and any error under the row.
 
 [Unreleased]: https://github.com/BRYANN2K/diazo/compare/v0.14.0...main
