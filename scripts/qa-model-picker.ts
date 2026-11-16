@@ -100,19 +100,24 @@ async function run(page: Page, canvasId: string, theme: 'light' | 'dark'): Promi
   await page.click(MODEL_PILL)
   await pause(700)
   await shot(page, `menu-${theme}`)
-  /* the "Older" folds, expanded in place */
-  if (await clickText(page, '[role="menuitem"]', /Older/)) {
-    await clickText(page, '[role="menuitem"]', /Older/)
-    await pause(500)
-    await shot(page, `menu-fold-${theme}`)
-  }
-  /* the search filters as it types */
-  const search = await page.$('input[aria-label="Search models"]')
-  if (search) {
-    await page.keyboard.type('opus', { delay: 20 })
-    await pause(400)
-    await shot(page, `menu-search-${theme}`)
-  }
+  /* the first "Older" fold, expanded in place (one click: a second closes it) */
+  if (!(await clickText(page, '[role="menuitem"]', /Older/))) throw new Error('no Older fold')
+  await pause(500)
+  const expanded = await page.$eval('[role="menuitem"][aria-expanded]', (e) => e.getAttribute('aria-expanded'))
+  if (expanded !== 'true') throw new Error('the fold did not open')
+  await shot(page, `menu-fold-${theme}`)
+  /* the search keeps the keyboard: focus is on the fold row, and what is typed
+     there still lands in the field */
+  await page.keyboard.type('opus', { delay: 20 })
+  await pause(400)
+  const query = await page.$eval('input[aria-label="Search models"]', (e) => (e as HTMLInputElement).value)
+  if (query !== 'opus') throw new Error(`the search holds "${query}", not "opus"`)
+  await shot(page, `menu-search-${theme}`)
+  /* and a query nothing matches */
+  await page.click('input[aria-label="Search models"]', { count: 3 })
+  await page.keyboard.type('zzz', { delay: 20 })
+  await pause(300)
+  await shot(page, `menu-nomatch-${theme}`)
   await page.keyboard.press('Escape')
   await pause(400)
 
@@ -140,6 +145,8 @@ async function run(page: Page, canvasId: string, theme: 'light' | 'dark'): Promi
     }
     if ((await fillSlot(1, /^Latest Opus/)) && (await fillSlot(2, /^Grok 4.7/))) {
       await shot(page, `duel-filled-${theme}`)
+      /* the same model and effort twice: the slot warns and Start holds back */
+      if (await fillSlot(3, /^Grok 4.7/)) await shot(page, `duel-repeat-${theme}`)
     }
     await page.keyboard.press('Escape')
     await pause(400)
@@ -171,16 +178,45 @@ async function main(): Promise<void> {
     await browser.setCookie(
       ...[...demo.client.cookies].map(([name, value]) => ({ name, value, domain: 'localhost', path: '/' })),
     )
-    for (const theme of ['light', 'dark'] as const) {
+    const open = async (theme: 'light' | 'dark', locale: string, agents: number) => {
       const page = await browser.newPage()
       await page.setViewport({ width: 1600, height: 1000, deviceScaleFactor: 2 })
-      const t = theme
-      await page.evaluateOnNewDocument((t) => {
-        localStorage.setItem('doop-theme', t)
-        localStorage.setItem('doop:canvas-panel-widths', JSON.stringify({ layers: 264, agents: 340 }))
-        localStorage.setItem('doop:onboarding', JSON.stringify({ connected: true, tasked: true, dismissed: true }))
-      }, t)
+      await page.evaluateOnNewDocument(
+        (t, l, w) => {
+          localStorage.setItem('doop-theme', t)
+          localStorage.setItem('doop-locale', l)
+          localStorage.setItem('doop:canvas-panel-widths', JSON.stringify({ layers: 264, agents: w }))
+          localStorage.setItem('doop:onboarding', JSON.stringify({ connected: true, tasked: true, dismissed: true }))
+        },
+        theme,
+        locale,
+        agents,
+      )
+      return page
+    }
+    for (const theme of ['light', 'dark'] as const) {
+      const page = await open(theme, 'en', 340)
       await run(page, demo.app.canvasId, theme)
+      await page.close()
+    }
+    /* the narrowest Agents panel, and pt-BR's longer labels and blurbs */
+    for (const [name, locale, agents] of [
+      ['narrow', 'en', 300],
+      ['pt-BR', 'pt-BR', 340],
+    ] as const) {
+      const page = await open('light', locale, agents)
+      await page.goto(`${WEB}/c/${demo.app.canvasId}`, { waitUntil: 'networkidle2', timeout: 60_000 })
+      await pause(3500)
+      await shotFoot(page, `foot-${name}`)
+      /* the composer's effort pill, in either language */
+      const effort = await page.$(
+        'button[aria-label^="Reasoning effort:"], button[aria-label^="Esforço de raciocínio:"]',
+      )
+      if (!effort) throw new Error(`no effort pill (${name})`)
+      await effort.click()
+      await pause(700)
+      await shot(page, `effort-${name}`)
+      await page.keyboard.press('Escape')
       await page.close()
     }
   } finally {

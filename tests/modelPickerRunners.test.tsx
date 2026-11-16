@@ -288,3 +288,80 @@ it('says beside its name when a desktop connection is not running', async () => 
   expect(captions).toContain('Claude Plan · Desktop app not running')
   expect(captions).toContain('ChatGPT')
 })
+
+it('does nothing on Enter with an empty search: the pick stays', async () => {
+  mocks.runners.mockResolvedValue(folded)
+  await act(async () => root.render(<ModelPicker />))
+  await settle()
+  await open()
+  keydown(search()!, 'Enter')
+  expect(currentRunnerPick()).toEqual({ provider: 'chatgpt', model: 'gpt-5.6-terra', effort: 'medium' })
+  expect(mocks.capture).not.toHaveBeenCalled()
+  expect(menu()).toBeTruthy()
+})
+
+it('focuses the search on open, and ↓ / ↑ from it land on the first / last row', async () => {
+  mocks.runners.mockResolvedValue(folded)
+  await act(async () => root.render(<ModelPicker />))
+  await settle()
+  await open()
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+  expect(document.activeElement).toBe(search())
+  keydown(search()!, 'ArrowDown')
+  expect(document.activeElement).toBe(radio('GPT-6 Astra'))
+  /* ↑ on the first row goes back to the field */
+  keydown(radio('GPT-6 Astra')!, 'ArrowUp')
+  expect(document.activeElement).toBe(search())
+  /* ↑ from the field wraps to the list's last row: here the fold */
+  keydown(search()!, 'ArrowUp')
+  expect(document.activeElement?.textContent).toBe('Older (3)')
+})
+
+it('sends what is typed on a row back to the search, not to the menu’s typeahead', async () => {
+  mocks.runners.mockResolvedValue(folded)
+  await act(async () => root.render(<ModelPicker />))
+  await settle()
+  await open()
+  const row = radio('GPT-5.6 Terra')!
+  act(() => row.focus())
+  keydown(row, '5')
+  expect(search()!.value).toBe('5')
+  expect(document.activeElement).toBe(search())
+  /* the fold, the foot: anywhere in the menu */
+  const settings = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+    (el) => el.textContent === 'Model settings…',
+  )!
+  act(() => settings.focus())
+  keydown(settings, '.')
+  keydown(settings, '5')
+  expect(search()!.value).toBe('5.5')
+  expect(radioLabels()).toEqual(['GPT-5.5'])
+  keydown(settings, 'Backspace')
+  expect(search()!.value).toBe('5.')
+})
+
+it('matches a connection’s name in the search', async () => {
+  await act(async () => root.render(<ModelPicker />))
+  await settle()
+  await open()
+  type(search()!, 'chatgpt')
+  expect(radioLabels()).toEqual(['GPT-5.6 Terra'])
+  type(search()!, 'claude')
+  expect(radioLabels()).toEqual(['Opus', 'Sonnet'])
+})
+
+it('lists a pick the catalog does not know without writing it into the catalog', async () => {
+  useRunnerPick.setState({ stored: { provider: 'claude-local', model: 'claude-opus-4-1' } })
+  await act(async () => root.render(<ModelPicker />))
+  await settle()
+  await open()
+  expect(radioLabels()[0]).not.toBe('Opus')
+  expect(radios()[0]?.getAttribute('aria-checked')).toBe('true')
+  /* the phantom row is the menu's alone: the store's list is untouched */
+  expect(useRunnerPick.getState().runners?.runners[0]?.models.map((m) => m.id)).toEqual(['opus', 'sonnet'])
+  pickItem('Opus')
+  await open()
+  expect(radioLabels()).toEqual(['Opus', 'Sonnet', 'GPT-5.6 Terra'])
+})

@@ -21,7 +21,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './ui/dropdown-menu'
-import { ChevronRightIcon } from './ui/icons'
+import { ChevronLeftIcon, ChevronRightIcon } from './ui/icons'
 import { SearchField } from './ui/search-field'
 
 /* the radio id standing for "no effort sent" */
@@ -47,13 +47,15 @@ export interface PickedEffort {
  *  "Older" fold. A list with nothing flagged — a curated fallback, a custom
  *  provider — shows everything. A picked id the list does not know leads the
  *  group so the check has a row. */
-function splitModels(
+export function splitModels(
   provider: AgentRunner['provider'],
   models: RunnerOption[],
   pickedId: string | undefined,
 ): { shown: RunnerOption[]; older: RunnerOption[] } {
   const flagged = models.filter((m) => m.recommended)
-  const shown = flagged.length > 0 ? flagged : models
+  /* a copy either way: the phantom row below must never land in the caller's
+     list, which is the store's catalog */
+  const shown = [...(flagged.length > 0 ? flagged : models)]
   const older = flagged.length > 0 ? models.filter((m) => !m.recommended) : []
   if (pickedId && !models.some((m) => m.id === pickedId))
     shown.unshift({ id: pickedId, name: knownModelName(provider, pickedId), blurb: '' })
@@ -142,14 +144,38 @@ export function ModelMenu({
       : undefined
   const connected = !!runners && runners.length > 0
   const searchRef = useRef<HTMLInputElement>(null)
+  const [query, setQuery] = useState('')
+
+  /* the search keeps the keyboard wherever focus sits in the menu (a row the
+     pointer or ↓ moved to, the fold, the foot): a typed character or Backspace
+     goes back to the field instead of Radix's typeahead, and ↑ on the first
+     row returns to it */
+  const onContentKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const search = searchRef.current
+    if (!search || e.target === search || e.metaKey || e.ctrlKey || e.altKey) return
+    if (e.key === 'Backspace' || (e.key.length === 1 && e.key !== ' ')) {
+      e.preventDefault()
+      setQuery((q) => (e.key === 'Backspace' ? q.slice(0, -1) : q + e.key))
+      search.focus()
+    } else if (e.key === 'ArrowUp' && e.target === menuRows(e.currentTarget)[0]) {
+      e.preventDefault()
+      search.focus()
+    }
+  }
 
   return (
-    <DropdownMenu onOpenChange={setOpen}>
+    <DropdownMenu
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (next) setQuery('')
+      }}
+    >
       <DropdownMenuTrigger asChild>{trigger(picked)}</DropdownMenuTrigger>
       <DropdownMenuContent
         side={side}
         align={align}
         width="auto"
+        onKeyDown={connected ? onContentKey : undefined}
         /* ~420px cap: the groups scroll inside, the search and the foot stay */
         className="flex max-h-[min(420px,var(--radix-dropdown-menu-content-available-height,420px))] flex-col overflow-hidden"
       >
@@ -161,6 +187,8 @@ export function ModelMenu({
               onModel={onModel}
               modelsOf={modelsOf}
               searchRef={searchRef}
+              query={query}
+              onQuery={setQuery}
               catalogError={liveKind ? catalog?.error : undefined}
             />
             <DropdownMenuSeparator />
@@ -177,14 +205,26 @@ export function ModelMenu({
   )
 }
 
+/** The rows a keyboard can land on, in order, skipping disabled ones. */
+function menuRows(root: HTMLElement | null): HTMLElement[] {
+  return [...(root?.querySelectorAll<HTMLElement>('[role="menuitemradio"], [role="menuitem"]') ?? [])].filter(
+    (el) => el.getAttribute('aria-disabled') !== 'true',
+  )
+}
+
+/* on a touch screen focusing the field would raise the keyboard over the menu */
+const coarsePointer = () => typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches
+
 /** The menu's body: the search field and the scroll of groups. Mounted per
- *  open, so the query and the folds reset each time. */
+ *  open, so the folds reset each time (the query is the menu's, reset on open). */
 function ModelMenuList({
   runners,
   value,
   onModel,
   modelsOf,
   searchRef,
+  query,
+  onQuery,
   catalogError,
 }: {
   runners: AgentRunner[]
@@ -192,39 +232,45 @@ function ModelMenuList({
   onModel: (runner: AgentRunner, model: string) => void
   modelsOf: (runner: AgentRunner) => RunnerOption[]
   searchRef: RefObject<HTMLInputElement>
+  query: string
+  onQuery: (query: string) => void
   catalogError: string | undefined
 }) {
   const t = useT()
-  const [query, setQuery] = useState('')
+  const listRef = useRef<HTMLDivElement>(null)
   /* the typing hand is already on the keys: once Radix has put focus on the
-     menu, it lands in the search field */
+     menu, it lands in the search field (not on a touch screen); the pick is
+     scrolled into view, an opened "Older" fold included */
   useEffect(() => {
-    const id = window.setTimeout(() => searchRef.current?.focus(), 0)
+    const id = window.setTimeout(() => {
+      listRef.current?.querySelector<HTMLElement>('[data-state="checked"]')?.scrollIntoView?.({ block: 'nearest' })
+      if (!coarsePointer()) searchRef.current?.focus()
+    }, 0)
     return () => window.clearTimeout(id)
   }, [searchRef])
   const q = query.trim().toLowerCase()
+  const has = (text: string) => text.toLowerCase().includes(q)
   const groups = runners.map((r) => {
     const models = modelsOf(r)
     const picked = value?.provider === r.provider ? value.model : undefined
     const { shown, older } = splitModels(r.provider, models, picked)
-    /* a search folds nothing: matches surface from the whole list */
-    const matches = q ? models.filter((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)) : []
+    /* a search folds nothing: matches surface from the whole list, the unknown
+       pick's row included; a query naming the connection lists all of it */
+    const all = [...shown, ...older]
+    const matches = !q ? [] : has(r.name) ? all : all.filter((m) => has(m.name) || has(m.id))
     return { runner: r, shown, older, matches, olderHasPick: !!picked && older.some((m) => m.id === picked) }
   })
   /* a fold holding the pick opens with the menu */
   const [expanded, setExpanded] = useState<Set<string>>(
     () => new Set(groups.filter((g) => g.olderHasPick).map((g) => g.runner.provider)),
   )
-  const listRef = useRef<HTMLDivElement>(null)
   const visible = groups.filter((g) => (q ? g.matches.length : g.shown.length + g.older.length) > 0)
 
-  const items = () =>
-    [...(listRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"], [role="menuitem"]') ?? [])].filter(
-      (el) => el.getAttribute('aria-disabled') !== 'true',
-    )
+  const items = () => menuRows(listRef.current)
 
   /* the menu's typeahead would steal focus, so every key but Escape and Tab
-     stops here; arrows move into the list, Enter takes its first row */
+     stops here; arrows move into the list, Enter takes the first match (with
+     no query it does nothing: the pick stays) */
   const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
@@ -234,7 +280,7 @@ function ModelMenuList({
     } else if (e.key === 'Enter') {
       e.preventDefault()
       e.stopPropagation()
-      items()[0]?.click()
+      if (q) items()[0]?.click()
     } else if (e.key !== 'Escape' && e.key !== 'Tab') {
       e.stopPropagation()
     }
@@ -254,7 +300,7 @@ function ModelMenuList({
         ref={searchRef}
         variant="ring"
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => onQuery(e.target.value)}
         onKeyDown={onSearchKey}
         placeholder={t('panels.modelSearch')}
         aria-label={t('panels.modelSearch')}
@@ -376,7 +422,10 @@ export function EffortMenu({
         </DropdownMenuRadioGroup>
         <div className="flex items-center justify-between px-2.5 pb-1.5 pt-1 text-caption text-ink-faint">
           <span>{t('panels.effortFaster')}</span>
-          <span aria-hidden>◂ ▸</span>
+          <span aria-hidden className="flex items-center">
+            <ChevronLeftIcon width={12} height={12} />
+            <ChevronRightIcon width={12} height={12} />
+          </span>
           <span>{t('panels.effortSmarter')}</span>
         </div>
       </DropdownMenuContent>

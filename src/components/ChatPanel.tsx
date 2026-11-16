@@ -979,7 +979,7 @@ function ChatComposer({
           onKeyDown={onKeyDown}
           onChange={(e) => setText(e.target.value)}
         />
-        <div className="flex min-w-0 items-center gap-1">
+        <div className="@container/foot flex min-w-0 items-center gap-1">
           {canEdit && <SkillMenu disabled={sending} onPick={pickSkill} />}
           {canEdit && <ModelPicker disabled={sending} />}
           <span className="flex-1" />

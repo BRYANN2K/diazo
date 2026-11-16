@@ -434,7 +434,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
             }
           }}
         />
-        <div className="mt-1.5 flex items-center gap-1.5">
+        <div className="@container/foot mt-1.5 flex items-center gap-1.5">
           <Button
             variant="bare"
             size="icon-sm"
@@ -462,7 +462,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
               pointer events, so the span under it is what the tooltip hangs on */}
           <Tooltip label={meter ?? t('panels.promptSendTooltip')} side="top" align="end">
             <span
-              className="inline-flex rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+              className="inline-flex flex-none rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
               /* while the button is disabled the wrapper takes its tab stop,
                  so the meter can be reached and read without a pointer */
               tabIndex={busy || !text.trim() ? 0 : -1}

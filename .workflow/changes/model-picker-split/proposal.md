@@ -1,6 +1,6 @@
 # Split the model picker's model and effort controls
 
-Status: active, updated 2026-11-16
+Status: active, updated 2026-11-17
 
 ## Problem and authorized scope
 
@@ -34,6 +34,14 @@ pull requests, no container images.
 
 ## Approval source
 
-The task brief records the owner's chosen design verbatim (composer foot layout,
-group fold, effort popover contents, duel split, file list, checks). It is the
-validated contract; no further sign-off is needed before apply.
+The task brief records the owner's chosen design (composer foot layout, group
+fold, effort popover contents, duel split, file list, checks). The owner has not
+yet signed off this contract; approval is his to record.
+
+## Review fixes (2026-11-17)
+
+A review asked for: the send button kept inside a narrow foot, wrapping effort
+blurbs, the search keeping the keyboard, Enter with no query leaving the pick
+alone, `splitModels` not mutating the store's list, corrected QA evidence, and
+this change kept open until those land. The AC-1 and AC-2 wording above carries
+the resulting behaviour.

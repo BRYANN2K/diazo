@@ -181,7 +181,7 @@ function DuelSlot({
       variant="quiet"
       data-effort-index={n}
       aria-label={t('duel.slotEffortAria', { n, label: picked.text })}
-      className="mx-1.5 mb-1 mt-0.5 h-6 gap-1.5 self-start rounded-pill bg-well px-2 font-mono text-micro text-ink-2 hover:bg-well hover:text-ink"
+      className="mx-1.5 mb-1 mt-0.5 h-6 gap-1.5 self-start rounded-pill bg-well px-2 text-caption text-ink-2 hover:bg-line-soft hover:text-ink"
       icon={<EffortGlyph fraction={picked.fraction} size={10} />}
     >
       {picked.text}

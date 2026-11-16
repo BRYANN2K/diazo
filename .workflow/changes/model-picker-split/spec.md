@@ -1,6 +1,6 @@
 # Split the model picker's model and effort controls
 
-Status: active, updated 2026-11-16
+Status: active, updated 2026-11-17
 
 ## Intent
 
@@ -11,9 +11,13 @@ and effort — in the composer foot and on each duel slot.
 
 - AC-1: The composer foot renders two pills: the picked model (connection mark +
   name) and, only when the picked connection has an effort dial, the current
-  effort (dial glyph + name). Nothing else changes in the foot.
+  effort (dial glyph + name). Nothing else changes in the foot. In a narrow foot
+  the model name truncates and the effort pill keeps only its dial, so the send
+  button always stays inside the composer.
 - AC-2: The model menu shows a search field on top that filters as you type
-  (name and id), keeps ↑/↓/↩ keyboard navigation, and groups models per
+  (name, id or the connection's name), keeps ↑/↓/↩ keyboard navigation (typing
+  with focus anywhere in the menu goes to the field, ↑ on the first row returns
+  to it, Enter with no query changes nothing), and groups models per
   connection. Each group lists its `recommended` entries — the aliases
   ("Latest …", "… default") and live-confirmed curated rows — or every model
   when none is flagged; the rest fold under "Older (N)" per group and expand in

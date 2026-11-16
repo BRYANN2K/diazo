@@ -44,6 +44,10 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
   }
 
   const pill = 'h-[26px] min-w-0 gap-[5px] rounded-pill px-[9px] text-ink shadow-ring hover:bg-well'
+  /* the model pill is the one that gives way in a narrow foot: MenuButton is
+     flex-none, so it opts back into shrinking and its label truncates; the
+     effort pill and the send button keep their size */
+  const modelPill = `${pill} flex-initial`
   return (
     <>
       <ModelMenu
@@ -58,7 +62,8 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
               variant="quiet"
               disabled={disabled || !runners}
               aria-label={t('panels.modelAria', { label })}
-              className={pill}
+              title={label}
+              className={modelPill}
               icon={
                 <span className="grid size-3 flex-none place-items-center">
                   {mark ? (
@@ -85,6 +90,7 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
             variant="quiet"
             disabled={disabled || !runners}
             aria-label={t('panels.modelEffortAria', { label: picked.text })}
+            title={picked.text}
             className={pill}
             icon={
               <span className="grid size-3 flex-none place-items-center text-ink-2">
@@ -92,7 +98,9 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
               </span>
             }
           >
-            <span className="truncate">{picked.text}</span>
+            {/* in a narrow composer foot (a `@container/foot`) the dial alone
+                stands for the level, which the label and title still name */}
+            <span className="truncate @max-[330px]/foot:hidden">{picked.text}</span>
           </MenuButton>
         )}
       />

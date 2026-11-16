@@ -1,6 +1,6 @@
 # TECHSTACK - Diazo
 
-Status: current, updated 2026-11-16
+Status: current, updated 2026-11-17
 
 ## 1. Language and Runtime
 
@@ -228,6 +228,12 @@ Status: current, updated 2026-11-16
   rest folded under "Older (N)", the pick checked and Model settings at the foot; `EffortMenu`
   is the radio list of the connection's levels with their `effortLabels` blurbs, a "Default"
   row where none is configured, a Faster/Smarter caption and a quarter→full dial on the pill.
+  The search keeps the keyboard: a character or Backspace typed with focus anywhere in the menu
+  goes to the field rather than Radix's typeahead, ↑ on the first row returns to it, Enter with
+  an empty query changes nothing, and the field is not focused on a coarse pointer. A query
+  matches a model's name or id, or a connection's name (all its rows). In a narrow composer
+  foot (`@container/foot` in `PromptBar` and `ChatPanel`) the model pill shrinks and truncates
+  while the effort pill drops to its dial below 330px.
   A slot adds Clear (or Delete/Backspace on its model button). A slot's effort starts at its
   connection's own (`runner.effort`, else Default) and stays with the slot across that
   connection's models.
