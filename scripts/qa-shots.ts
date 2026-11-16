@@ -156,12 +156,14 @@ const SHOTS: Record<string, Shot> = {
   async hover(page, ids) {
     await openCanvas(page, ids)
     await tab(page, 'Agents')
-    await selectFrame(page, 'Landing — Hero')
-    await zoomSelection(page)
-    /* hover the dashboard's title: its badges should appear, unselected */
+    await fit(page)
+    await zoomIn(page)
+    await page.keyboard.press('Escape')
+    await pause(800)
+    /* hover the landing's title, nothing selected: its red badges appear */
     const el = await page.evaluateHandle(() => {
       const spans = [...document.querySelectorAll('span')]
-      return spans.find((s) => s.textContent === 'Dashboard — Interviews') ?? null
+      return spans.find((s) => s.textContent === 'Landing — Hero') ?? null
     })
     const box = await el.asElement()?.boundingBox()
     if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
