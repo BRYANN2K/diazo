@@ -151,12 +151,14 @@ function DuelSlot({
           }
         }}
         className={cn(
-          'h-7 min-w-0 max-w-56 gap-[5px] px-2 text-label',
-          !picked && 'text-ink-faint',
-          repeated && 'text-accent-ink',
+          /* Duel 1: each slot is a card — the caption, the model with the
+             agent dot, the connection; a repeated pick reads in danger ink */
+          'h-auto w-full min-w-0 max-w-none items-start gap-2 rounded-card bg-surface px-3 py-2.5 text-left text-label shadow-ring hover:bg-well [&>svg:last-child]:mt-0.5',
+          !picked && 'text-ink-3',
+          repeated && 'text-danger shadow-[0_0_0_1px_var(--danger)]',
         )}
         icon={
-          <span className="grid size-3 flex-none place-items-center">
+          <span className="mt-0.5 grid size-3 flex-none place-items-center">
             {picked ? mark && <BrandMark brand={mark} size={12} /> : <PlusIcon className="size-3" strokeWidth={1.6} />}
           </span>
         }
@@ -164,15 +166,19 @@ function DuelSlot({
         {/* keyed by the pick, so a slot filling or changing eases its label in */}
         <span
           key={picked ? runnerKey(pick) : 'empty'}
-          className="flex min-w-0 items-baseline gap-[5px] motion-safe:animate-[chip-in_0.18s_ease]"
+          className="flex min-w-0 flex-1 flex-col gap-1 motion-safe:animate-[pop-in_320ms_var(--spring-snap)_both]"
         >
-          {picked ? (
-            <>
-              <span className="truncate text-ink">{picked.name}</span>
-              {picked.effortText && <span className="flex-none text-ink-faint">{picked.effortText}</span>}
-            </>
-          ) : (
-            t('duel.slot', { n })
+          <span className="font-mono text-micro text-ink-3">{t('duel.slot', { n })}</span>
+          {picked && (
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span aria-hidden className="size-1.5 flex-none rounded-full bg-agent" />
+              <span className="truncate font-semibold text-ink">{picked.name}</span>
+              {picked.effortText && (
+                <span className="ml-auto flex-none rounded-tag bg-well px-1.5 font-mono text-micro text-ink-2">
+                  {picked.effortText}
+                </span>
+              )}
+            </span>
           )}
         </span>
       </MenuButton>
@@ -254,16 +260,16 @@ export function DuelDialog({
       <ModalTitle>{t('duel.title')}</ModalTitle>
       <ModalLede>{t('duel.lede', { min: DUEL_MIN, max: DUEL_MAX })}</ModalLede>
       {/* the brief and its slots are one field, as in the composer */}
-      <div className="mt-4 rounded-row border border-line bg-surface px-3 pb-2 pt-2.5 transition-[border-color,box-shadow] duration-normal ease-out-quad focus-within:border-ink focus-within:ring-[3px] focus-within:ring-ink/[0.07]">
+      <div className="mt-4">
         <Textarea
-          variant="bare"
-          rows={3}
+          rows={4}
+          className="text-copy md:text-copy"
           value={brief}
           onChange={(e) => setBrief(e.target.value)}
           placeholder={t('duel.briefPlaceholder')}
           aria-label={t('duel.briefLabel')}
         />
-        <div role="group" aria-label={t('duel.contestants')} className="mt-2 flex flex-wrap justify-end gap-1.5">
+        <div role="group" aria-label={t('duel.contestants')} className="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-3">
           {slots.map((pick, index) => (
             <DuelSlot
               key={index}
@@ -276,13 +282,13 @@ export function DuelDialog({
           ))}
         </div>
       </div>
-      {menuRunners && menuRunners.length === 0 && <p className="mt-2 text-body text-ink-soft">{t('duel.noModels')}</p>}
+      {menuRunners && menuRunners.length === 0 && <p className="mt-2 text-body text-ink-2">{t('duel.noModels')}</p>}
       {[...repeats].map(([index, other]) => (
-        <p key={index} role="alert" className="mt-2 text-body text-accent-ink">
-          {t('duel.same', { n: index + 1, other: other + 1 })}
+        <p key={index} role="alert" className="mt-2 text-body text-danger">
+          !{t('duel.same', { n: index + 1, other: other + 1 })}
         </p>
       ))}
-      {error && <p className="mt-2 text-body text-accent-ink">{error}</p>}
+      {error && <p className="mt-2 text-body text-danger">! {error}</p>}
       <ModalActions>
         <Button variant="ghost" onClick={onClose}>
           {t('duel.cancel')}

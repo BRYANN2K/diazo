@@ -83,6 +83,8 @@ afterEach(() => {
 
 const dialog = () => document.querySelector('[role="dialog"]')!
 const slot = (n: number) => dialog().querySelector<HTMLButtonElement>(`button[data-slot-index="${n}"]`)!
+/* the slot card leads with its caption ("Model 1"); the pick is what follows */
+const slotPick = (n: number) => slot(n).textContent?.replace(/^Model \d/, '') ?? ''
 const menu = () => document.querySelector<HTMLElement>('[role="menu"]')
 const captions = () =>
   [...menu()!.querySelectorAll('[data-slot="dropdown-menu-caption"]')]
@@ -204,7 +206,7 @@ describe('the duel dialog', () => {
     /* nothing picked yet: no effort to set */
     expect(slider()).toBeNull()
     await select(radios().find((r) => r.connection === 'ChatGPT' && r.model === 'GPT-6.1 Sol')!.el)
-    expect(slot(1).textContent).toBe('GPT-6.1 SolMedium')
+    expect(slotPick(1)).toBe('GPT-6.1 SolMedium')
     expect(slot(1).getAttribute('aria-label')).toBe('Model 1: GPT-6.1 Sol · Medium')
     await openSlot(1)
     expect(
@@ -250,9 +252,9 @@ describe('the duel dialog', () => {
     await pick(2, 'ChatGPT', 'GPT-5.6 Terra')
     await pick(3, 'Claude API', 'Sonnet 5')
     /* a Plan with no configured effort runs the CLI's own setting: Default, not Low */
-    expect(slot(1).textContent).toBe('Latest OpusDefault')
-    expect(slot(2).textContent).toBe('GPT-5.6 TerraMedium')
-    expect(slot(3).textContent).toBe('Sonnet 5')
+    expect(slotPick(1)).toBe('Latest OpusDefault')
+    expect(slotPick(2)).toBe('GPT-5.6 TerraMedium')
+    expect(slotPick(3)).toBe('Sonnet 5')
     await openSlot(1)
     expect(slider()!.getAttribute('aria-valuetext')).toBe('Default')
   })
@@ -265,7 +267,7 @@ describe('the duel dialog', () => {
     expect(startButton().disabled).toBe(true)
     /* efforts: low, medium, high, xhigh */
     await setEffort(2, 2)
-    expect(slot(2).textContent).toBe('GPT-6.1 SolHigh')
+    expect(slotPick(2)).toBe('GPT-6.1 SolHigh')
     expect(dialog().textContent).not.toContain('same model and effort')
     expect(startButton().disabled).toBe(false)
   })
@@ -280,11 +282,11 @@ describe('the duel dialog', () => {
     /* the Plan's steps: Default, then low … max */
     await setEffort(1, 5)
     await setEffort(2, 3)
-    expect(slot(1).textContent).toBe('Latest OpusMax')
-    expect(slot(2).textContent).toBe('GPT-5.6 TerraExtra high')
+    expect(slotPick(1)).toBe('Latest OpusMax')
+    expect(slotPick(2)).toBe('GPT-5.6 TerraExtra high')
     /* a model change within a connection keeps the slot's effort */
     await pick(2, 'ChatGPT', 'GPT-6.1 Sol')
-    expect(slot(2).textContent).toBe('GPT-6.1 SolExtra high')
+    expect(slotPick(2)).toBe('GPT-6.1 SolExtra high')
     await act(async () => startButton().click())
     expect(mocks.startDuel).toHaveBeenCalledWith(
       'c1',
