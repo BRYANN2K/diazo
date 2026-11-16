@@ -61,4 +61,8 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 - `edit_frame_html` inserts its replacement text literally.
 - Settings → Diazo Agent: Connect on a Devin or Grok desktop agent did nothing — the shell refused the agent commands, and the row hid the error. Connect now shows progress and any error under the row.
 
+### Security
+
+- The desktop app no longer gives doop.design (upstream's hosted service, which this fork does not control) access to the app's native features. Only the server the app opens gets them. With nothing chosen the app now opens the Diazo server on this computer (`http://127.0.0.1:4400`) and offers to choose another when it does not answer. Needs a desktop release.
+
 [Unreleased]: https://github.com/BRYANN2K/diazo/compare/v0.14.0...main

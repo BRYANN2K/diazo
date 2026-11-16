@@ -5,7 +5,7 @@
   "identifier": "dev.bryann2k.diazo",
   "build": {
     "devUrl": "http://localhost:4300",
-    "frontendDist": "https://doop.design"
+    "frontendDist": "shell-dist"
   },
   "plugins": {
     "deep-link": {

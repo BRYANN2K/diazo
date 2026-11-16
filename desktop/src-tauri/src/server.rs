@@ -1,7 +1,9 @@
-//! Which Diazo (or doop) server the shell opens. Official builds open doop.design (or
-//! the `DOOP_APP_URL` they were built with); the sign-in screen's server
-//! settings (src/components/ServerSettings.tsx) let a person point the same
-//! build at a self-hosted instance instead, through `server_choose`.
+//! Which Diazo server the shell opens. Official builds open the server on
+//! this computer, `http://127.0.0.1:4400` (the all-in-one install of
+//! scripts/install.sh, or `docker compose up`), or the `DOOP_APP_URL` they
+//! were built with; the sign-in screen's server settings
+//! (src/components/ServerSettings.tsx) let a person point the same build at
+//! another instance instead, through `server_choose`.
 //!
 //! The choice is the server's origin in `server.json` in the app's data
 //! directory (`server-dev.json` for debug builds, which otherwise open the
@@ -9,21 +11,26 @@
 //! the remote IPC grant and the first page all follow it, so changing it
 //! restarts the app.
 //!
-//! The IPC grant is capabilities/default.json with its remote URLs swapped
-//! for the chosen origin, added at runtime: that file is the one list of
-//! what a page may ask the shell for, and a chosen server gets exactly that.
+//! The IPC grant is capabilities/default.json with a remote URL list of the
+//! one server this launch opens, added at runtime (`grant`): that file is the
+//! one list of what a page may ask the shell for, and the open server gets
+//! exactly that. The bundled file names no remote origin, so no other site
+//! ever gets IPC. doop.design and www.doop.design (upstream's hosted
+//! service, whose pages this fork does not control) are refused as a server
+//! outright (`refused`), and a saved choice of them is ignored.
 //! It is also why a change needs the person's say-so in a native dialog. The
 //! asking page is the current server's, and the next one can run Claude Code
 //! on this computer, read fonts the person picks and write their Codex and
 //! Claude settings.
 //!
 //! A server that never loads leaves no page to change it from. So at launch
-//! the shell checks a chosen server answers and, when it does not, asks in a
-//! native dialog whether to try again or go back to doop.design (every
-//! platform: Windows and Linux have no menu bar), and on macOS the app menu
-//! also has "Use doop.design (original doop)…" while another server is
-//! chosen. A Diazo shell has no public server of its own, so doop.design
-//! (upstream's hosted service) stays the default and the way back.
+//! the shell checks the server answers and, when it does not, asks in a
+//! native dialog (every platform: Windows and Linux have no menu bar): a
+//! chosen server offers Try Again or the server on this computer; the
+//! default offers Try Again or "Choose a Server…", which opens the shell's
+//! one bundled page (shell-dist/index.html) to type another address. On
+//! macOS the app menu also has "Use this computer’s server…" while another
+//! server is chosen.
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -38,10 +45,22 @@ const CONNECT: &str = "Connect";
 const SWITCH: &str = "Switch";
 const CANCEL: &str = "Cancel";
 const RETRY: &str = "Try Again";
+const CHOOSE: &str = "Choose a Server…";
 /// How long a server gets to answer the check before it counts as absent.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 
 static ACTIVE: OnceLock<String> = OnceLock::new();
+
+/// Upstream doop's hosted service. This fork does not control its pages, so
+/// it never gets the shell's IPC: it cannot be chosen, nor be the default.
+const REFUSED_HOSTS: &[&str] = &["doop.design", "www.doop.design"];
+
+fn refused(server: &str) -> bool {
+    Url::parse(server)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .is_some_and(|host| REFUSED_HOSTS.contains(&host.as_str()))
+}
 
 /// The server the shell opens with nothing chosen.
 pub fn default_url() -> String {
@@ -114,7 +133,14 @@ fn save(app: &AppHandle, url: Option<&str>) -> Result<(), String> {
 pub fn normalize(input: &str) -> Result<String, String> {
     let origin = parse_origin(input)?;
     secure(&origin)?;
-    Ok(origin.origin().ascii_serialization())
+    let origin = origin.origin().ascii_serialization();
+    if refused(&origin) {
+        return Err(format!(
+            "{} is the original doop service, not a Diazo server. Use the doop app for it.",
+            display(&origin)
+        ));
+    }
+    Ok(origin)
 }
 
 /// Plain http is only for this computer. Anyone on the path of an http
@@ -171,20 +197,29 @@ fn same_server(a: &str, b: &str) -> bool {
 }
 
 /// Hosts whose pages stay in the window: the server's, with and without
-/// `www.`, and local addresses (the dev server, a local self-host).
+/// `www.`, local addresses (the dev server, a local self-host) and the
+/// bundled page's (`tauri.localhost` on Windows). Staying in the window is
+/// not IPC: only the open server's exact origin gets that (`grant`).
 pub fn app_hosts(server: &str) -> Vec<String> {
-    let mut hosts: Vec<String> = vec!["localhost".into(), "127.0.0.1".into()];
+    let mut hosts: Vec<String> = vec![
+        "localhost".into(),
+        "127.0.0.1".into(),
+        "tauri.localhost".into(),
+    ];
     if let Some(host) = Url::parse(server).ok().as_ref().and_then(Url::host_str) {
         hosts.push(host.to_string());
-        hosts.push(match host.strip_prefix("www.") {
-            Some(bare) => bare.to_string(),
-            None => format!("www.{host}"),
-        });
+        if host.parse::<std::net::IpAddr>().is_err() && host != "localhost" {
+            hosts.push(match host.strip_prefix("www.") {
+                Some(bare) => bare.to_string(),
+                None => format!("www.{host}"),
+            });
+        }
     }
+    hosts.dedup();
     hosts
 }
 
-/// The shell capability, granted to `server` instead of doop.design.
+/// The shell capability, granted to `server`.
 fn capability_for(server: &str) -> Result<String, String> {
     let mut capability: Value =
         serde_json::from_str(CAPABILITY).map_err(|error| error.to_string())?;
@@ -206,20 +241,27 @@ fn motion_capability_for(server: &str) -> Result<String, String> {
     Ok(capability.to_string())
 }
 
-/// Lets a chosen server's pages use the shell's IPC. The bundled capability
-/// already covers the default server (and dev builds' local pages).
-pub fn grant(app: &AppHandle) -> Result<(), String> {
-    // The bundled capability lists doop.design only. A shell built with
-    // DOOP_APP_URL opens another origin by default (so it is not "custom"),
-    // and that origin needs the same grant or every IPC call is refused.
-    let bundled = same_server(active(app), "https://doop.design");
-    if !is_custom(app) && (bundled || cfg!(debug_assertions)) {
-        return Ok(());
+/// The remote origin this launch grants the shell's IPC to: the server it
+/// opens, and nothing else. None for a debug build on its dev server, whose
+/// pages count as local (tauri.conf.json devUrl), and for a refused server,
+/// which `active` never returns but is checked again here.
+fn granted_origin(server: &str, custom: bool, debug: bool) -> Option<String> {
+    if (debug && !custom) || refused(server) {
+        return None;
     }
-    let capability = capability_for(active(app))?;
+    Some(server.trim_end_matches('/').to_string())
+}
+
+/// Lets the open server's pages use the shell's IPC. The bundled capability
+/// names no remote origin, so this is the only grant a site ever gets.
+pub fn grant(app: &AppHandle) -> Result<(), String> {
+    let Some(server) = granted_origin(active(app), is_custom(app), cfg!(debug_assertions)) else {
+        return Ok(());
+    };
+    let capability = capability_for(&server)?;
     app.add_capability(capability)
         .map_err(|error| error.to_string())?;
-    let motion = motion_capability_for(active(app))?;
+    let motion = motion_capability_for(&server)?;
     app.add_capability(motion)
         .map_err(|error| error.to_string())
 }
@@ -276,19 +318,35 @@ fn dialog(app: &AppHandle, title: &str, description: &str) -> AsyncMessageDialog
     }
 }
 
-/// How the dialogs and the menu name the default server. doop.design is the
-/// upstream doop service this Diazo shell opens with nothing chosen, so the
-/// label says whose it is; a self-hoster's own default is named by its host.
+/// How the dialogs and the menu name the default server: the one on this
+/// computer by that name, a self-hoster's own default by its host.
 fn default_name() -> String {
     server_name(&default_url())
 }
 
 fn server_name(server: &str) -> String {
-    let host = display(server);
-    if same_server(server, "https://doop.design") {
-        format!("{host} (original doop)")
+    if same_server(server, crate::local_server::LOCAL_URL)
+        || same_server(server, "http://localhost:4400")
+    {
+        "this computer’s server".into()
     } else {
-        host
+        display(server)
+    }
+}
+
+/// The bundled page that asks for a server's address (shell-dist), as the
+/// window loads it on this platform: WebView2 and the CEF runtime (the macOS
+/// Chromium shell) serve bundled pages on `http://tauri.localhost`, WebKit on
+/// the `tauri://` scheme.
+fn chooser_url() -> &'static str {
+    chooser_url_for(cfg!(any(windows, chromium)))
+}
+
+fn chooser_url_for(http_scheme: bool) -> &'static str {
+    if http_scheme {
+        "http://tauri.localhost/index.html"
+    } else {
+        "tauri://localhost/index.html"
     }
 }
 
@@ -300,7 +358,7 @@ fn display(server: &str) -> String {
 }
 
 /// Asks, saves and restarts; false when the person said no. Going back to
-/// the default needs no warning, since the bundled grant already covers it.
+/// the default needs no warning: it is this computer's own server.
 async fn switch(app: &AppHandle, server: String) -> Result<bool, String> {
     let to_default = same_server(&server, &default_url());
     let choice = if to_default {
@@ -333,13 +391,15 @@ async fn switch(app: &AppHandle, server: String) -> Result<bool, String> {
     Ok(true)
 }
 
-/// The chosen server's launch check: nothing for the default server, which
-/// the app menu and the bundled grant already cover, and nothing while the
-/// chosen one answers. Otherwise the window shows the webview's error page,
-/// so ask until the person goes back to the default or the server answers,
-/// and then load `entry` again. Closing the dialog leaves the window as it is.
+/// The launch check, nothing while the server answers (and nothing for a
+/// debug build on its dev server). Otherwise the window shows the webview's
+/// error page, so ask until the server answers, then load `entry` again. A
+/// chosen server offers the default instead; the default offers the bundled
+/// page that asks for another address. Closing the dialog leaves the window
+/// as it is.
 pub fn check_on_launch(app: &AppHandle, entry: Url) {
-    if !is_custom(app) {
+    let custom = is_custom(app);
+    if cfg!(debug_assertions) && !custom {
         return;
     }
     let app = app.clone();
@@ -348,7 +408,11 @@ pub fn check_on_launch(app: &AppHandle, entry: Url) {
         let mut failed = false;
         while let Err(error) = probe(server).await {
             failed = true;
-            let back = format!("Use {}", default_name());
+            let back = if custom {
+                format!("Use {}", default_name())
+            } else {
+                CHOOSE.to_string()
+            };
             let choice = dialog(&app, &format!("Can’t reach {}", display(server)), &error)
                 .set_level(MessageLevel::Warning)
                 .set_buttons(MessageButtons::OkCancelCustom(RETRY.into(), back.clone()))
@@ -356,6 +420,14 @@ pub fn check_on_launch(app: &AppHandle, entry: Url) {
                 .await;
             match launch_choice(&choice, &back) {
                 LaunchChoice::Retry => continue,
+                LaunchChoice::Default if !custom => {
+                    if let (Some(window), Ok(url)) =
+                        (app.get_webview_window("main"), Url::parse(chooser_url()))
+                    {
+                        let _ = window.navigate(url);
+                    }
+                    return;
+                }
                 LaunchChoice::Default => {
                     if let Err(error) = save(&app, None) {
                         dialog(&app, "Couldn’t switch servers", &error)
@@ -409,7 +481,7 @@ pub fn server_status(app: AppHandle) -> Value {
 /// Resolves false when nothing changed: the same server, or a cancel.
 #[tauri::command]
 pub async fn server_choose(app: AppHandle, url: String) -> Result<bool, String> {
-    // the default needs no check: the bundled grant already covers it
+    // going back to the default needs no check: it is the way back
     let typed = parse_origin(&url)?.origin().ascii_serialization();
     let server = if same_server(&typed, &default_url()) {
         default_url()
@@ -458,10 +530,125 @@ mod tests {
     use super::*;
 
     #[test]
-    fn names_doop_design_as_the_original_doop() {
-        assert_eq!(server_name("https://doop.design"), "doop.design (original doop)");
-        assert_eq!(server_name("https://www.doop.design/"), "www.doop.design (original doop)");
-        assert_eq!(server_name("https://diazo.example.com"), "diazo.example.com");
+    fn opens_the_chooser_where_each_runtime_serves_bundled_pages() {
+        assert_eq!(chooser_url_for(true), "http://tauri.localhost/index.html");
+        assert_eq!(chooser_url_for(false), "tauri://localhost/index.html");
+        assert_eq!(chooser_url(), chooser_url_for(cfg!(any(windows, chromium))));
+    }
+
+    #[test]
+    fn names_the_local_server_as_this_computers() {
+        assert_eq!(
+            server_name("http://127.0.0.1:4400"),
+            "this computer’s server"
+        );
+        assert_eq!(
+            server_name("http://localhost:4400/"),
+            "this computer’s server"
+        );
+        assert_eq!(
+            server_name("https://diazo.example.com"),
+            "diazo.example.com"
+        );
+    }
+
+    #[test]
+    fn opens_the_server_on_this_computer_by_default() {
+        if option_env!("DOOP_APP_URL").is_none() && !cfg!(debug_assertions) {
+            assert_eq!(default_url(), crate::local_server::LOCAL_URL);
+        }
+        assert_eq!(
+            crate::APP_URL,
+            option_env!("DOOP_APP_URL").unwrap_or("http://127.0.0.1:4400")
+        );
+        assert!(!refused(crate::APP_URL));
+    }
+
+    #[test]
+    fn refuses_doop_design_as_a_server() {
+        for typed in [
+            "doop.design",
+            "https://doop.design/",
+            "https://www.doop.design/c/abc",
+            "HTTPS://WWW.DOOP.DESIGN",
+        ] {
+            assert!(
+                normalize(typed).unwrap_err().contains("original doop"),
+                "{typed}"
+            );
+        }
+        assert!(normalize("https://doop.design.example.com").is_ok());
+        assert!(normalize("https://notdoop.design").is_ok());
+    }
+
+    #[test]
+    fn the_bundled_capabilities_grant_no_remote_origin_but_loopback_renders() {
+        let shell: Value = serde_json::from_str(CAPABILITY).unwrap();
+        assert!(
+            shell.get("remote").is_none(),
+            "default.json must name no remote origin"
+        );
+        for file in [
+            MOTION_CAPABILITY,
+            include_str!("../capabilities/live-snapshot.json"),
+        ] {
+            let capability: Value = serde_json::from_str(file).unwrap();
+            for url in capability["remote"]["urls"].as_array().unwrap() {
+                let url = url.as_str().unwrap();
+                assert!(
+                    url.starts_with("http://localhost")
+                        || url.starts_with("https://localhost")
+                        || url.starts_with("http://*.localhost")
+                        || url.starts_with("https://*.localhost")
+                        || url.starts_with("http://127.")
+                        || url.starts_with("https://127."),
+                    "{} grants {url}",
+                    capability["identifier"]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_config_loads_no_remote_page_as_local() {
+        // a frontendDist URL counts as local to Tauri's IPC check, which would
+        // hand that site every bundled permission
+        for conf in [
+            include_str!("../tauri.conf.json"),
+            include_str!("../../src-tauri-chromium/tauri.conf.json"),
+        ] {
+            let conf: Value = serde_json::from_str(conf).unwrap();
+            let dist = conf["build"]["frontendDist"].as_str().unwrap();
+            assert!(!dist.contains("://"), "frontendDist is {dist}");
+            assert_eq!(
+                conf["plugins"]["updater"]["endpoints"],
+                json!(["https://github.com/BRYANN2K/diazo/releases/download/desktop-updates/latest.json"])
+            );
+        }
+    }
+
+    #[test]
+    fn grants_ipc_to_the_open_server_only() {
+        // a release build grants the server it opens, default or chosen
+        assert_eq!(
+            granted_origin("http://127.0.0.1:4400", false, false).as_deref(),
+            Some("http://127.0.0.1:4400")
+        );
+        assert_eq!(
+            granted_origin("https://diazo.example.com/", true, false).as_deref(),
+            Some("https://diazo.example.com")
+        );
+        assert_eq!(
+            granted_origin("https://diazo.example.com", true, true).as_deref(),
+            Some("https://diazo.example.com")
+        );
+        // a debug build's dev server is local already
+        assert_eq!(granted_origin("http://localhost:4300", false, true), None);
+        // upstream's service never, whatever path got it here
+        for server in ["https://doop.design", "https://www.doop.design"] {
+            assert_eq!(granted_origin(server, true, false), None);
+            assert_eq!(granted_origin(server, false, false), None);
+        }
     }
 
     #[test]
@@ -572,6 +759,9 @@ mod tests {
         assert!(hosts.contains(&"www.doop.example.com".to_string()));
         assert!(hosts.contains(&"localhost".to_string()));
         assert!(!hosts.contains(&"doop.design".to_string()));
+        let local = app_hosts("http://127.0.0.1:4400");
+        assert!(!local.iter().any(|host| host.starts_with("www.")));
+        assert!(local.contains(&"tauri.localhost".to_string()));
     }
 
     #[test]
@@ -595,7 +785,7 @@ mod tests {
 
     #[test]
     fn reads_the_launch_dialog_by_its_buttons() {
-        let back = "Use doop.design";
+        let back = "Use this computer’s server";
         let custom = |label: &str| MessageDialogResult::Custom(label.into());
         assert_eq!(launch_choice(&custom(RETRY), back), LaunchChoice::Retry);
         assert_eq!(

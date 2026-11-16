@@ -1,23 +1,28 @@
 # Diazo desktop
 
-A thin [Tauri](https://tauri.app) shell around the hosted app. It loads
-`https://doop.design` in a native window — there is no bundled frontend, so
-every deploy is instantly "in" the desktop app and the binary only
+A thin [Tauri](https://tauri.app) shell around a Diazo server. It loads the
+server's pages in a native window — the only bundled page is
+`src-tauri/shell-dist/index.html`, a fallback that asks for a server's address
+— so every deploy is instantly "in" the desktop app and the binary only
 needs a new release when the shell itself changes (icon, menu, Tauri bump).
 
 The released installers (macOS DMG, Windows NSIS setup, and the Linux AppImage,
-.deb and .rpm) talk to the hosted
-service at doop.design. Self-hosting your own doop instance? The cog on the
-sign-in screen points the same app at it: the shell checks that the address
+.deb and .rpm) open the Diazo server on this computer, `http://127.0.0.1:4400`
+(`scripts/install.sh` on a Mac, or `docker compose up`). Only the server a
+launch opens gets the shell's IPC, for its exact origin, added at runtime:
+`capabilities/default.json` names no remote origin. doop.design, upstream's
+hosted service, is refused as a server and never gets IPC. A server elsewhere?
+The cog on the sign-in screen points the same app at it: the shell checks that the address
 answers as a Doop server (`/api/locale-config`, following redirects to where
 the pages really load; https only, plain http only on this computer), asks for confirmation in a
 native dialog (the server gets the app's IPC, Claude Code included), saves it
 as `server.json` in the app's data directory and restarts onto it
 (`src-tauri/src/server.rs`). The server gets `capabilities/default.json` for
-its own origin at runtime. If a chosen server does not answer at launch, a
-native dialog offers Try Again or "Use doop.design (original doop)" (on every platform), and on
-macOS the app menu has "Use doop.design (original doop)…" while one is chosen. Diazo has no
-public server of its own, so upstream doop.design stays the default and the way back. Shells advertise this with
+its own origin at runtime. If the server does not answer at launch, a native
+dialog (on every platform) offers Try Again, then "Use this computer’s server" for
+a chosen one, or "Choose a Server…" for the default, which opens the bundled
+page to type another address. On macOS the app menu has "Use this computer’s
+server…" while another one is chosen. Shells advertise this with
 `__DOOP_SERVER_CHOOSE__`. Debug builds keep their pick in `server-dev.json`.
 
 You can also build a shell that opens your instance by default, without
@@ -30,7 +35,7 @@ DOOP_APP_URL=https://doop.example.com bun run build
 The URL is baked in at compile time (`src-tauri/src/main.rs`); the in-shell
 navigation allowlist follows it automatically.
 
-Links outside doop.design open in the system browser (`src-tauri/src/main.rs`).
+Links outside the open server open in the system browser (`src-tauri/src/main.rs`).
 Google / Microsoft / SSO sign-in runs there too: identity providers refuse
 embedded webviews, so the page opens the provider in the browser and the
 finished sign-in returns through a `doop://auth?token=…` link (deep-link

@@ -92,16 +92,21 @@ fn focus_main_window(app: &AppHandle) {
     }
 }
 
-/// The hosted app this shell wraps unless the person picks another server
-/// (src/server.rs). Self-hosters can also build a shell that opens their own
-/// instance by default:
+/// The server this shell opens unless the person picks another one
+/// (src/server.rs): the Diazo server on this computer, as scripts/install.sh
+/// and `docker compose up` run it. Self-hosters can also build a shell that
+/// opens their own instance by default:
 ///   DOOP_APP_URL=https://doop.example.com npm run build
-/// (When overriding, also put the origin in capabilities/default.json or the
-/// page cannot reach the shell's IPC — external links then open in-window.)
+/// Whichever it is, the open server's origin gets the shell's IPC at launch
+/// (`server::grant`); capabilities/default.json names no remote origin.
 const APP_URL: &str = match option_env!("DOOP_APP_URL") {
     Some(url) => url,
-    None => "https://doop.design",
+    None => local_server::LOCAL_URL,
 };
+
+/// Built without DOOP_APP_URL: the fork's own installers, which update from
+/// its feed (src/updates.rs).
+const OFFICIAL_BUILD: bool = option_env!("DOOP_APP_URL").is_none();
 
 /// The server this launch opens (src/server.rs), without a trailing slash.
 fn base_url() -> String {

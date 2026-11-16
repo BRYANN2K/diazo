@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "desktop-ipc-origins",
+  "target": "desktop-ipc-origins",
+  "extensions": ["backend-engineering"],
+  "target_before": null,
+  "created_at": "2026-11-17T00:00:00.000000+00:00",
+  "phase": "checked",
+  "updated_at": "2026-11-17T00:15:00.000000+00:00",
+  "approval": {
+    "by": "owner",
+    "recorded_at": "2026-11-17T00:00:00.000000+00:00"
+  },
+  "check": {
+    "report": {
+      "criteria": [
+        { "id": "AC-1", "status": "passed", "evidence": "server::tests::the_bundled_capabilities_grant_no_remote_origin_but_loopback_renders" },
+        { "id": "AC-2", "status": "passed", "evidence": "server::tests::the_config_loads_no_remote_page_as_local" },
+        { "id": "AC-3", "status": "passed", "evidence": "server::tests::grants_ipc_to_the_open_server_only; grants_the_bundled_permissions_to_the_chosen_origin" },
+        { "id": "AC-4", "status": "passed", "evidence": "server::tests::opens_the_server_on_this_computer_by_default" },
+        { "id": "AC-5", "status": "passed", "evidence": "server::tests::refuses_doop_design_as_a_server" },
+        { "id": "AC-6", "status": "passed", "evidence": "server::tests::reads_the_launch_dialog_by_its_buttons, keeps_the_chosen_hosts_in_the_window; dialog and page behaviour unverified without a build (AC-10)" },
+        { "id": "AC-7", "status": "passed", "evidence": "server::tests::the_config_loads_no_remote_page_as_local (feed URL); updates::tests::debug_builds_never_update" },
+        { "id": "AC-8", "status": "passed", "evidence": "desktop/README.md, docs/RELEASE.md, CHANGELOG.md, src/lib/desktopServer.ts" },
+        { "id": "AC-9", "status": "passed", "evidence": "cargo test 102 passed; typecheck and lint exit 0; prettier clean; 3 vitest files / 11 tests; doc-lint passed" },
+        { "id": "AC-10", "status": "unverified", "evidence": "No desktop build; Chromium shell not compiled here. Needs a desktop build and release." }
+      ]
+    }
+  }
+}
