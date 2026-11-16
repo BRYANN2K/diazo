@@ -472,3 +472,8 @@ cost}`). Routes: `GET …/pages/:pageId/media`,
   dropped, times shifted onto the clip's window), `duck_audio` (voice ranges
   → editable gain keyframes on an audio track; a media_id's transcript marks
   the speech), `suggest_cuts` (fillers + silences as cut candidates).
+  `list_video_models`/`generate_video` run the person's own OpenRouter or
+  Gemini key (registry in `shared/videoModels.ts`, dated per-second prices,
+  estimate shown first): the file lands as an /a/ asset, `scene_media`
+  keeps `{provider, model, prompt, seed, cost}` and a clip is placed on the
+  clip track.

@@ -29,6 +29,9 @@ import {
 import type { Actor, Canvas } from '../shared/types.ts'
 import type { LibraryItem, LibraryItemMeta } from '../shared/library.ts'
 import { captionsFromTranscript, duckingKeyframes, findFillers, parseMediaBody } from '../shared/motionMedia.ts'
+import { generateVideo, VideoGenError, videoCost } from './videoGen.ts'
+import { storeAsset } from './assets.ts'
+import { videoModel, VIDEO_MODELS, VIDEO_PRICE_DATE, type VideoAspect } from '../shared/videoModels.ts'
 
 type Outcome = { ok: true; data: unknown } | { ok: false; error: string }
 const ok = <T>(data: T) => ({ ok: true as const, data })
@@ -547,6 +550,111 @@ export async function suggestCuts(canvas: Canvas, input: { media_id: string; min
   if (!media || media.canvasId !== canvas.id) return fail(`no media row ${input.media_id}`)
   if (!media.transcript?.words.length) return fail('the media has no transcript')
   return ok(findFillers(media.transcript.words, input.min_silence))
+}
+
+/* ---- generate_video (14.11) ---- */
+
+/** the model menu + the estimate the panel shows before a run */
+export function videoModels(input: { model?: string; seconds?: number }) {
+  const m = input.model !== undefined ? videoModel(input.model) : undefined
+  return {
+    models: VIDEO_MODELS,
+    priceDate: VIDEO_PRICE_DATE,
+    estimate: m ? { model: m.id, cost: videoCost(m, input.seconds) } : undefined,
+  }
+}
+
+/**
+ * Generate a video clip on the person's own OpenRouter or Gemini account,
+ * store it as an /a/ asset, write its scene_media row with the recipe
+ * ({provider, model, prompt, seed, cost}) and land it as a clip at `at`
+ * seconds. Long-running: the provider job is polled, so this call can take
+ * minutes.
+ */
+export async function generateVideoClip(
+  canvas: Canvas,
+  pageId: string,
+  input: {
+    prompt: string
+    model?: string
+    seconds?: number
+    aspect?: VideoAspect
+    seed?: number
+    first_frame?: string
+    last_frame?: string
+    refs?: string[]
+    at?: number
+  },
+  actor: Actor,
+  /** the user whose connected key pays — undefined only bills nobody */
+  payerId: string | undefined,
+): Promise<Outcome> {
+  if (!pageOn(canvas, pageId)) return fail(`no page ${pageId} on this canvas`)
+  if (!input.prompt?.trim()) return fail('a prompt is required')
+  if (!payerId) return fail('connect a Diazo account to run video generation on your own key')
+  const comp = store.getComposition(canvas.id, pageId)
+  if (!comp) return fail(`page ${pageId} has no composition — make the timeline first`)
+  let video
+  try {
+    video = await generateVideo(payerId, {
+      prompt: input.prompt,
+      model: input.model,
+      seconds: input.seconds,
+      aspect: input.aspect,
+      seed: input.seed,
+      firstFrame: input.first_frame,
+      lastFrame: input.last_frame,
+      refs: input.refs,
+    })
+  } catch (e) {
+    if (e instanceof VideoGenError) return fail(e.message)
+    throw e
+  }
+  const asset = await storeAsset(
+    video.buf,
+    { mime: video.mime, ext: video.ext },
+    { canvasId: canvas.id, ownerId: payerId, uploadedBy: actor.name },
+  )
+  const now = Date.now()
+  const prev = await persist.findSceneMediaByAsset(canvas.id, pageId, asset.id)
+  const media = {
+    id: prev?.id ?? nanoid(10),
+    canvasId: canvas.id,
+    pageId,
+    assetId: asset.id,
+    kind: 'video' as const,
+    trimIn: 0,
+    trimOut: null,
+    cuts: [],
+    generation: {
+      ...video.recipe,
+      ...(input.refs?.length ? { refs: input.refs } : {}),
+      ...(input.first_frame ? { camera: input.first_frame } : {}),
+    },
+    createdAt: prev?.createdAt ?? now,
+    updatedAt: now,
+  }
+  persist.saveSceneMedia(media)
+  const at = input.at ?? 0
+  const clip = {
+    id: `gen-${asset.id}`,
+    start: at,
+    duration: video.seconds,
+    source: { type: 'asset' as const, assetId: asset.id },
+    name: input.prompt.slice(0, 60),
+  }
+  const clipTrack = comp.tracks.find((t) => t.kind === 'clip' && !t.muted)
+  const ops = clipTrack
+    ? [{ op: 'add_clip' as const, trackId: clipTrack.id, clip }]
+    : [
+        {
+          op: 'add_track' as const,
+          track: { id: 'generated', kind: 'clip' as const, name: 'Generated', clips: [clip] },
+        },
+      ]
+  const applied = actions.patchComposition(canvas.id, pageId, ops, actor)
+  if (!applied.ok) return fail(applied.error ?? 'clip insert rejected')
+  return ok({ asset, media, clip, composition: applied.composition, cost: video.recipe.cost })
 }
 
 export type { Composition }

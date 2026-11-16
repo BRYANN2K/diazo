@@ -60,6 +60,7 @@ import {
   checkLibraryItemMotion,
   duckAudio,
   exportComposition,
+  generateVideoClip,
   getCompositionData,
   insertClip,
   lintMotion,
@@ -68,6 +69,7 @@ import {
   setCompositionData,
   setMedia,
   suggestCuts,
+  videoModels,
 } from './motionTools.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
@@ -2683,6 +2685,36 @@ const TOOLS: Anthropic.Tool[] = [
       required: ['media_id'],
     },
   },
+  {
+    name: 'list_video_models',
+    description:
+      "The generate_video registry: video models the person's own accounts can run, lengths, aspects and dated per-second prices, plus the estimate for a model/seconds pair.",
+    input_schema: {
+      type: 'object',
+      properties: { model: { type: 'string' }, seconds: { type: 'number' } },
+    },
+  },
+  {
+    name: 'generate_video',
+    description:
+      "Generate a video clip on the person's own OpenRouter or Gemini account (list_video_models first — show the estimate). Lands as an /a/ asset, keeps its recipe on scene_media, and a clip is placed at `at` seconds. Long-running. UI/text/logos are HTML — generated video is B-roll.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        prompt: { type: 'string' },
+        model: { type: 'string' },
+        seconds: { type: 'number' },
+        aspect: { type: 'string', enum: ['16:9', '9:16', '1:1'] },
+        seed: { type: 'number' },
+        first_frame: { type: 'string' },
+        last_frame: { type: 'string' },
+        refs: { type: 'array', items: { type: 'string' } },
+        at: { type: 'number' },
+      },
+      required: ['page_id', 'prompt'],
+    },
+  },
 ]
 
 /* the same tools as MCP, minus the arguments a resident run already has */
@@ -3864,6 +3896,39 @@ export async function execTool(
           media_id: String(input.media_id ?? ''),
           min_silence: typeof input.min_silence === 'number' ? input.min_silence : undefined,
         })
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'list_video_models': {
+        const raw = block.input as Record<string, unknown>
+        const out = videoModels({
+          model: typeof raw.model === 'string' ? raw.model : undefined,
+          seconds: typeof raw.seconds === 'number' ? raw.seconds : undefined,
+        })
+        return ok(JSON.stringify(out))
+      }
+      case 'generate_video': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as Record<string, unknown>
+        const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+        const out = await generateVideoClip(
+          canvas,
+          String(raw.page_id ?? ''),
+          {
+            prompt: String(raw.prompt ?? ''),
+            model: typeof raw.model === 'string' ? raw.model : undefined,
+            seconds: num(raw.seconds),
+            aspect: typeof raw.aspect === 'string' ? (raw.aspect as '16:9' | '9:16' | '1:1') : undefined,
+            seed: num(raw.seed),
+            first_frame: typeof raw.first_frame === 'string' ? raw.first_frame : undefined,
+            last_frame: typeof raw.last_frame === 'string' ? raw.last_frame : undefined,
+            refs: Array.isArray(raw.refs) ? (raw.refs as string[]) : undefined,
+            at: num(raw.at),
+          },
+          actor,
+          runState.payerId,
+        )
         if (!out.ok) return fail(out.error)
         return ok(JSON.stringify(out.data))
       }

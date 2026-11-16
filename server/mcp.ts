@@ -39,6 +39,7 @@ import {
   checkLibraryItemMotion,
   duckAudio,
   exportComposition,
+  generateVideoClip,
   getCompositionData,
   insertClip,
   lintMotion,
@@ -47,6 +48,7 @@ import {
   setCompositionData,
   setMedia,
   suggestCuts,
+  videoModels,
 } from './motionTools.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
@@ -2178,6 +2180,60 @@ export function buildMcpServer(
       const out = await suggestCuts(c, { media_id, min_silence })
       if (!out.ok) return err(out.error)
       return text({ ok: true, ...(out.data as object) })
+    },
+  )
+
+  server.registerTool(
+    'list_video_models',
+    {
+      title: 'Video models and the estimate',
+      description:
+        "The generate_video registry: the video models the person's own accounts can run (Veo via OpenRouter, Gemini Omni Flash), their lengths/aspects, the dated per-second prices and the cost a call would estimate at.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        model: z.string().optional(),
+        seconds: z.number().optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, model, seconds, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      return text({ ok: true, ...videoModels({ model, seconds }) })
+    },
+  )
+
+  server.registerTool(
+    'generate_video',
+    {
+      title: 'Generate a video clip',
+      description:
+        "Generate a video clip on the person's own OpenRouter or Gemini account (list_video_models shows the menu and the per-second price — show the estimate before a run). The file lands as an /a/ asset, its scene_media row keeps the recipe ({provider, model, prompt, seed, cost}) for Regenerate and Vary, and a clip is placed at `at` seconds on the clip track. Long-running: the provider job is polled, so this call can take minutes. Rule: product UI, text and logos are HTML — generated video is B-roll.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        prompt: z.string(),
+        model: z.string().optional().describe('A VIDEO_MODELS id; default Veo on OpenRouter'),
+        seconds: z.number().optional().describe('One of the model’s lengths'),
+        aspect: z.enum(['16:9', '9:16', '1:1']).optional(),
+        seed: z.number().optional(),
+        first_frame: z.string().optional().describe('base64 image the clip opens on'),
+        last_frame: z.string().optional(),
+        refs: z.array(z.string()).optional().describe('reference images, base64'),
+        at: z.number().optional().describe('seconds on the clock, default 0'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await generateVideoClip(c, page_id, input, actorFrom(agent_name), ownerId)
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
     },
   )
 

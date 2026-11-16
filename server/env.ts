@@ -240,6 +240,12 @@ const schema = {
   DOOP_IMAGE_MODEL: str({ default: 'gpt-image-2' }),
   DOOP_IMAGE_ROUTER_MODEL: str({ default: undefined }),
 
+  /* ------------------------------------------------ video generation
+     (generate_video, proposal 3.1): the person's own OpenRouter or Gemini
+     key — never the server's by default, the caller pays */
+  OPENROUTER_VIDEOS_URL: str({ default: 'https://openrouter.ai/api/v1/videos' }),
+  GEMINI_VIDEOS_URL: str({ default: 'https://generativelanguage.googleapis.com/v1beta/models' }),
+
   /* ------------------------------------------------------ integrations */
   META_APP_ID: str({ default: undefined }),
   META_APP_SECRET: str({ default: undefined }),
