@@ -1682,6 +1682,7 @@ export const FrameView = memo(function FrameView({
         <div
           /* the Stage reads this: a press on a locked frame is a press on the canvas */
           data-frame-locked={frame.locked ? '' : undefined}
+          data-selected={selected ? '' : undefined}
           className={cn(
             'group absolute',
             /* an agent writing into the frame: a 1px orange beam travels round

@@ -1,4 +1,5 @@
 import type { Frame } from '../../shared/types'
+import { cn } from '@/lib/utils'
 import { Badge } from './ui/badge'
 import { Tooltip } from './ui/tooltip'
 import { useT } from '../lib/i18n'
@@ -15,9 +16,16 @@ export function FrameChecksBadge({ frame }: { frame: Frame }) {
   const title = `${t('checks.badgeTitle')} · ${t('checks.scoreLabel', { score: checks.score })}`
   return (
     <Tooltip label={title} side="top" align="start">
+      {/* Frame checks: passed is ok, errors are danger (with their "!"), and
+          warnings wear the yellow pencil, shown only on hover or selection */}
       <Badge
-        tone={count === 0 ? 'success' : checks.errors > 0 ? 'banned' : 'outline'}
-        className="shrink-0"
+        tone={count === 0 ? 'ok' : checks.errors > 0 ? 'danger' : 'caution'}
+        className={cn(
+          'shrink-0',
+          count > 0 &&
+            checks.errors === 0 &&
+            'opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 group-data-[selected]:opacity-100',
+        )}
         aria-label={label}
       >
         {t('checks.badgeLabel')} {count === 0 ? '✓' : count}

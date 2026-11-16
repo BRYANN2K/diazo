@@ -79,9 +79,10 @@ it('shows a ✓ chip for a clean lint', () => {
   expect(container.textContent).toBe('✓')
 })
 
-it('shows ⚠ with the issue count', () => {
+it('shows the issue count on a danger tag (its "!" is drawn by the tone)', () => {
   mount(<FrameLintBadge frame={{ ...frame, lint: lintWithIssues }} />)
-  expect(container.textContent).toBe('⚠ 2')
+  expect(container.textContent).toBe('2')
+  expect(container.querySelector('[data-slot="badge"]')?.className).toContain('text-danger')
 })
 
 it('lists issues in the Inspector quality section', () => {

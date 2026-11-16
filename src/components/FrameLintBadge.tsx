@@ -14,8 +14,8 @@ export function FrameLintBadge({ frame }: { frame: Frame }) {
   const title = `${t('lint.badgeTitle')} · ${t('lint.scoreLabel', { score: lint.score })}`
   return (
     <Tooltip label={title} side="top" align="start">
-      <Badge tone={count === 0 ? 'success' : 'banned'} className="shrink-0" aria-label={label}>
-        {count === 0 ? '✓' : `⚠ ${count}`}
+      <Badge tone={count === 0 ? 'ok' : 'danger'} className="shrink-0" aria-label={label}>
+        {count === 0 ? '✓' : count}
       </Badge>
     </Tooltip>
   )
