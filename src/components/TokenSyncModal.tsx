@@ -107,7 +107,7 @@ export function TokenSyncModal({ canvasId, onClose }: { canvasId: string; onClos
   }
 
   const row = (e: TokenDiffEntry, checkable: boolean) => (
-    <li key={e.name} className="flex items-start gap-2 py-1">
+    <li key={e.name} className="flex items-start gap-2 border-t border-line py-2 first:border-t-0">
       {checkable && (
         <label className="relative mt-0.5 flex">
           <Checkbox aria-label={e.name} checked={picked.has(e.name)} onChange={() => toggle(e.name)} />
@@ -116,7 +116,10 @@ export function TokenSyncModal({ canvasId, onClose }: { canvasId: string; onClos
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
           <code className="truncate text-label text-ink">{e.name}</code>
-          <Badge tone="outline">{t(`panels.tokenSyncKind_${e.kind === 'doop-only' ? 'doopOnly' : e.kind}`)}</Badge>
+          {/* token sync diff: changed in caution, new in ok, Diazo-only neutral */}
+          <Badge tone={e.kind === 'change' ? 'caution' : e.kind === 'add' ? 'ok' : 'default'}>
+            {t(`panels.tokenSyncKind_${e.kind === 'doop-only' ? 'doopOnly' : e.kind}`)}
+          </Badge>
         </span>
         {e.doop && (
           <span className="block truncate text-caption text-ink-faint">
@@ -140,7 +143,7 @@ export function TokenSyncModal({ canvasId, onClose }: { canvasId: string; onClos
       <ModalEyebrow>{t('panels.tokenSyncEyebrow')}</ModalEyebrow>
       <ModalTitle>{t('panels.tokenSyncTitle')}</ModalTitle>
       {!preview && !error && <ModalLede className="mt-4">{t('panels.tokenSyncReading')}</ModalLede>}
-      {error && !preview && <p className="mt-4 text-copy text-accent-ink">{error}</p>}
+      {error && !preview && <p className="mt-4 text-copy text-danger">! {error}</p>}
       {patch && !written && (
         <>
           <ModalLede>{t('panels.tokenSyncPatchLede', { repo: patch.repo })}</ModalLede>
@@ -164,7 +167,7 @@ export function TokenSyncModal({ canvasId, onClose }: { canvasId: string; onClos
               ))}
             </ul>
           )}
-          {error && <p className="mt-2 text-caption text-accent-ink">{error}</p>}
+          {error && <p className="mt-2 text-caption text-danger">! {error}</p>}
           <ModalActions>
             <Button variant="bare" onClick={() => setPatch(null)}>
               {t('common.back')}
@@ -204,7 +207,10 @@ export function TokenSyncModal({ canvasId, onClose }: { canvasId: string; onClos
             <p className="mt-3 text-copy text-ink-soft">{t('panels.tokenSyncInSync')}</p>
           )}
           {incoming.length > 0 && (
-            <ul className="mt-3 max-h-[300px] list-none overflow-y-auto p-0" data-testid="token-sync-incoming">
+            <ul
+              className="stagger-children mt-3 max-h-[300px] list-none overflow-y-auto p-0"
+              data-testid="token-sync-incoming"
+            >
               {incoming.map((e) => row(e, true))}
             </ul>
           )}
@@ -215,7 +221,7 @@ export function TokenSyncModal({ canvasId, onClose }: { canvasId: string; onClos
             </>
           )}
           {preview.truncated && <p className="mt-2 text-caption text-ink-faint">{t('panels.tokenSyncTruncated')}</p>}
-          {error && <p className="mt-2 text-caption text-accent-ink">{error}</p>}
+          {error && <p className="mt-2 text-caption text-danger">! {error}</p>}
           <ModalActions>
             <Button variant="bare" onClick={onClose}>
               {t('common.cancel')}
