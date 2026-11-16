@@ -66,7 +66,7 @@ export function SkillModal({
           {creating && (
             <Field labelVariant="form" label={t('panels.skillName')} hint={`/${slug || '…'}`}>
               <Input
-                variant="well"
+                variant="mono"
                 autoFocus
                 value={nameDraft}
                 maxLength={64}
@@ -88,9 +88,10 @@ export function SkillModal({
             />
           </Field>
           <Field labelVariant="form" label={t('panels.skillBody')}>
+            {/* Skill dialog: the body is written in the dark code well */}
             <Textarea
-              variant="well"
-              className="min-h-[38dvh] resize-y font-mono"
+              variant="code"
+              className="min-h-[38dvh] resize-y rounded-card px-3.5 py-3 text-label/relaxed md:text-label/relaxed"
               value={markdown}
               maxLength={MAX_SKILL_CHARS}
               disabled={busy}
