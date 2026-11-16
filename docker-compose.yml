@@ -28,6 +28,9 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       EMAIL_FROM: ${EMAIL_FROM:-}
+    volumes:
+      # uploads, frame images, fonts and thumbnails: kept across rebuilds and updates
+      - diazo-data:/app/data
     depends_on:
       db:
         condition: service_healthy
@@ -50,3 +53,4 @@ services:
 
 volumes:
   doop-pg:
+  diazo-data:
