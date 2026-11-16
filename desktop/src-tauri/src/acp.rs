@@ -957,6 +957,8 @@ fn is_auth_error(code: i64, message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use crate::test_support::within;
 
     #[test]
     fn only_allowlisted_agents_parse() {
@@ -1113,6 +1115,11 @@ mod tests {
         }
     }
 
+    /// Far above what a session against the fake agent takes (well under a
+    /// second), far below the 20 s each one is given.
+    #[cfg(unix)]
+    const SESSION_LIMIT: Duration = Duration::from_secs(60);
+
     #[cfg(unix)]
     const HANDSHAKE: &str = r#"read -r l; say '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}}}}'
 read -r l; printf '%s\n' "$l" > "$OUT/new.json"; say '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s1"}}'
@@ -1121,10 +1128,11 @@ read -r l; printf '%s\n' "$l" > "$OUT/prompt.json""#;
     #[cfg(unix)]
     #[test]
     fn runs_a_session_against_a_fake_agent() {
-        let (dir, mut cmd) = fake_agent(
-            "run",
-            &format!(
-                r#"{HANDSHAKE}
+        within(SESSION_LIMIT, || {
+            let (dir, mut cmd) = fake_agent(
+                "run",
+                &format!(
+                    r#"{HANDSHAKE}
 say '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"s1","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"Made "}}}}}}}}'
 say '{{"jsonrpc":"2.0","id":"p1","method":"session/request_permission","params":{{"sessionId":"s1","toolCall":{{"toolCallId":"c1","kind":"other","title":"mcp__doop__create_frame"}},"options":[{{"optionId":"ok","kind":"allow_once"}},{{"optionId":"no","kind":"reject_once"}}]}}}}'
 read -r l; printf '%s\n' "$l" > "$OUT/perm1.json"
@@ -1135,78 +1143,83 @@ read -r l; printf '%s\n' "$l" > "$OUT/fs.json"
 say '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"s1","update":{{"sessionUpdate":"usage_update","used":10,"size":100,"cost":{{"amount":0.25,"currency":"USD"}}}}}}}}'
 say '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"s1","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"a card."}}}}}}}}'
 say '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn","usage":{{"inputTokens":120,"outputTokens":30,"totalTokens":150}}}}}}'"#
-            ),
-        );
-        let mut seen = String::new();
-        let result = run_session(cmd.spawn().unwrap(), &spec(&dir), Arc::new(AtomicBool::new(false)), Duration::from_secs(20), |t| seen.push_str(t)).unwrap();
-        assert_eq!(result["success"], true);
-        assert_eq!(result["text"], "Made a card.");
-        assert_eq!(seen, "Made a card.");
-        assert_eq!(result["acpUsage"]["usage"]["inputTokens"], 120);
-        assert_eq!(result["acpUsage"]["cost"]["amount"], 0.25);
-        let read = |name: &str| serde_json::from_str::<Value>(&std::fs::read_to_string(dir.join(name)).unwrap()).unwrap();
-        let new = read("new.json");
-        assert_eq!(new["method"], "session/new");
-        assert_eq!(new["params"]["mcpServers"][0]["url"], "https://doop.test/local-agent/mcp/run");
-        assert_eq!(new["params"]["mcpServers"][0]["headers"][0]["value"], format!("Bearer {}", "t".repeat(64)));
-        assert_eq!(read("prompt.json")["params"]["prompt"][0]["text"], "Design a card");
-        assert_eq!(read("perm1.json"), json!({"jsonrpc": "2.0", "id": "p1", "result": {"outcome": {"outcome": "selected", "optionId": "ok"}}}));
-        assert_eq!(read("perm2.json")["result"]["outcome"]["optionId"], "no");
-        assert_eq!(read("fs.json")["error"]["code"], -32601);
-        std::fs::remove_dir_all(dir).unwrap();
+                ),
+            );
+            let mut seen = String::new();
+            let result = run_session(cmd.spawn().unwrap(), &spec(&dir), Arc::new(AtomicBool::new(false)), Duration::from_secs(20), |t| seen.push_str(t)).unwrap();
+            assert_eq!(result["success"], true);
+            assert_eq!(result["text"], "Made a card.");
+            assert_eq!(seen, "Made a card.");
+            assert_eq!(result["acpUsage"]["usage"]["inputTokens"], 120);
+            assert_eq!(result["acpUsage"]["cost"]["amount"], 0.25);
+            let read = |name: &str| serde_json::from_str::<Value>(&std::fs::read_to_string(dir.join(name)).unwrap()).unwrap();
+            let new = read("new.json");
+            assert_eq!(new["method"], "session/new");
+            assert_eq!(new["params"]["mcpServers"][0]["url"], "https://doop.test/local-agent/mcp/run");
+            assert_eq!(new["params"]["mcpServers"][0]["headers"][0]["value"], format!("Bearer {}", "t".repeat(64)));
+            assert_eq!(read("prompt.json")["params"]["prompt"][0]["text"], "Design a card");
+            assert_eq!(read("perm1.json"), json!({"jsonrpc": "2.0", "id": "p1", "result": {"outcome": {"outcome": "selected", "optionId": "ok"}}}));
+            assert_eq!(read("perm2.json")["result"]["outcome"]["optionId"], "no");
+            assert_eq!(read("fs.json")["error"]["code"], -32601);
+            std::fs::remove_dir_all(dir).unwrap();
+        });
     }
 
     #[cfg(unix)]
     #[test]
     fn a_stop_sends_session_cancel() {
-        let (dir, mut cmd) = fake_agent(
-            "cancel",
-            &format!(
-                r#"{HANDSHAKE}
+        within(SESSION_LIMIT, || {
+            let (dir, mut cmd) = fake_agent(
+                "cancel",
+                &format!(
+                    r#"{HANDSHAKE}
 read -r l; printf '%s\n' "$l" > "$OUT/cancel.json"
 say '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"cancelled"}}}}'"#
-            ),
-        );
-        let cancel = Arc::new(AtomicBool::new(false));
-        let flag = cancel.clone();
-        let stopper = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(400));
-            flag.store(true, Ordering::SeqCst);
+                ),
+            );
+            let cancel = Arc::new(AtomicBool::new(false));
+            let flag = cancel.clone();
+            let stopper = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(400));
+                flag.store(true, Ordering::SeqCst);
+            });
+            let started = Instant::now();
+            let result = run_session(cmd.spawn().unwrap(), &spec(&dir), cancel, Duration::from_secs(20), |_| {}).unwrap();
+            stopper.join().unwrap();
+            assert!(started.elapsed() < Duration::from_secs(5));
+            assert_eq!(result["success"], false);
+            assert_eq!(result["stopReason"], "cancelled");
+            let sent: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("cancel.json")).unwrap()).unwrap();
+            assert_eq!(sent, json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": "s1"}}));
+            std::fs::remove_dir_all(dir).unwrap();
         });
-        let started = Instant::now();
-        let result = run_session(cmd.spawn().unwrap(), &spec(&dir), cancel, Duration::from_secs(20), |_| {}).unwrap();
-        stopper.join().unwrap();
-        assert!(started.elapsed() < Duration::from_secs(5));
-        assert_eq!(result["success"], false);
-        assert_eq!(result["stopReason"], "cancelled");
-        let sent: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("cancel.json")).unwrap()).unwrap();
-        assert_eq!(sent, json!({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": "s1"}}));
-        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[cfg(unix)]
     #[test]
     fn signed_out_and_unsupported_agents_say_what_to_do() {
-        let (dir, mut cmd) = fake_agent(
-            "auth",
-            r#"read -r l; say '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}}}}'
+        within(SESSION_LIMIT, || {
+            let (dir, mut cmd) = fake_agent(
+                "auth",
+                r#"read -r l; say '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}}}}'
 read -r l; say '{"jsonrpc":"2.0","id":2,"error":{"code":-32000,"message":"Authentication required"}}'"#,
-        );
-        let error = run_session(cmd.spawn().unwrap(), &spec(&dir), Arc::new(AtomicBool::new(false)), Duration::from_secs(20), |_| {}).unwrap_err();
-        assert_eq!(error, "Grok is not signed in on this computer. Run `grok login` in your terminal, then Refresh.");
-        std::fs::remove_dir_all(dir).unwrap();
+            );
+            let error = run_session(cmd.spawn().unwrap(), &spec(&dir), Arc::new(AtomicBool::new(false)), Duration::from_secs(20), |_| {}).unwrap_err();
+            assert_eq!(error, "Grok is not signed in on this computer. Run `grok login` in your terminal, then Refresh.");
+            std::fs::remove_dir_all(dir).unwrap();
 
-        let (dir, mut cmd) = fake_agent(
-            "nohttp",
-            r#"read -r l; say '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{}}}'"#,
-        );
-        let error = run_session(cmd.spawn().unwrap(), &spec(&dir), Arc::new(AtomicBool::new(false)), Duration::from_secs(20), |_| {}).unwrap_err();
-        assert!(error.contains("no HTTP MCP support"), "{error}");
-        std::fs::remove_dir_all(dir).unwrap();
+            let (dir, mut cmd) = fake_agent(
+                "nohttp",
+                r#"read -r l; say '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{}}}'"#,
+            );
+            let error = run_session(cmd.spawn().unwrap(), &spec(&dir), Arc::new(AtomicBool::new(false)), Duration::from_secs(20), |_| {}).unwrap_err();
+            assert!(error.contains("no HTTP MCP support"), "{error}");
+            std::fs::remove_dir_all(dir).unwrap();
 
-        let (dir, mut cmd) = fake_agent("dies", "exit 3");
-        let error = run_session(cmd.spawn().unwrap(), &spec(&dir), Arc::new(AtomicBool::new(false)), Duration::from_secs(20), |_| {}).unwrap_err();
-        assert!(error.contains("exited") || error.contains("stopped reading"), "{error}");
-        std::fs::remove_dir_all(dir).unwrap();
+            let (dir, mut cmd) = fake_agent("dies", "exit 3");
+            let error = run_session(cmd.spawn().unwrap(), &spec(&dir), Arc::new(AtomicBool::new(false)), Duration::from_secs(20), |_| {}).unwrap_err();
+            assert!(error.contains("exited") || error.contains("stopped reading"), "{error}");
+            std::fs::remove_dir_all(dir).unwrap();
+        });
     }
 }

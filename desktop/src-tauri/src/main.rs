@@ -59,6 +59,8 @@ mod live;
 mod local_server;
 mod repo;
 mod server;
+#[cfg(test)]
+mod test_support;
 mod updates;
 mod view_menu;
 #[cfg(all(chromium, target_os = "macos"))]
