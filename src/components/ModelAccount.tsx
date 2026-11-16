@@ -857,7 +857,7 @@ export function ModelAccountPanel({ onChange }: { onChange?: () => void }) {
         <p className="ml-1 text-body text-ink-soft">{t('models.noConnections')}</p>
       )}
       {unconnected.length > 0 && (
-        <ConnectionSection title={t('models.addConnection')}>
+        <ConnectionSection title={t('models.addConnection')} layout="grid">
           {unconnected.map((entry) => entry.node)}
         </ConnectionSection>
       )}

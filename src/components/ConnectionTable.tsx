@@ -33,21 +33,39 @@ import {
  *  connected but switched off (its credential kept). */
 export type ConnectionState = 'none' | 'on' | 'off'
 
-/** One of the two lists, under its heading. */
+/** One of the lists, as a card with its heading inside (Settings · Diazo
+ *  Agent): `grid` lays the rows out as tiles, the way "Add an agent" offers
+ *  the providers not connected yet. */
 export function ConnectionSection({
   title,
+  caption,
+  layout = 'list',
   className,
   children,
 }: {
   title: string
+  caption?: ReactNode
+  layout?: 'list' | 'grid'
   className?: string
   children: ReactNode
 }) {
   return (
     <section aria-label={title} className={cn('max-w-[1000px]', className)}>
-      <h3 className="mb-[10px] ml-1 text-copy font-medium">{title}</h3>
-      <div role="list" className="overflow-hidden rounded-panel bg-surface shadow-ring">
-        {children}
+      <div className="overflow-hidden rounded-panel bg-paper shadow-ring">
+        <header className="flex items-baseline gap-2 border-b border-line px-4 py-3">
+          <h3 className="text-body font-semibold">{title}</h3>
+          {caption && <span className="truncate text-caption text-ink-3">{caption}</span>}
+        </header>
+        <div
+          role="list"
+          data-layout={layout}
+          className={cn(
+            'group/conn',
+            layout === 'grid' && 'grid grid-cols-1 gap-2 p-3 sm:grid-cols-2 xl:grid-cols-3 stagger-children',
+          )}
+        >
+          {children}
+        </div>
       </div>
     </section>
   )
@@ -200,8 +218,20 @@ export function AvailableRow({
   open?: boolean
 }) {
   return (
-    <div role="listitem" className={cn(rowClass, open && panel && 'bg-sub')}>
-      <div className={rowLine}>
+    <div
+      role="listitem"
+      className={cn(
+        rowClass,
+        'group-data-[layout=grid]/conn:rounded-card group-data-[layout=grid]/conn:border-b-0 group-data-[layout=grid]/conn:bg-surface group-data-[layout=grid]/conn:shadow-ring',
+        open && panel && 'bg-well group-data-[layout=grid]/conn:col-span-full',
+      )}
+    >
+      <div
+        className={cn(
+          rowLine,
+          'group-data-[layout=grid]/conn:gap-3 group-data-[layout=grid]/conn:px-3 group-data-[layout=grid]/conn:py-2.5',
+        )}
+      >
         <span aria-hidden className="flex-none">
           {mark}
         </span>
