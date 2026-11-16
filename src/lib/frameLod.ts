@@ -4,8 +4,9 @@
    and WebKit kills the tab ("a problem repeatedly occurred"). So only the frames
    worth a live document get one — on screen, big enough to work in, the
    largest first, within a per-device budget. The rest of the frames on
-   screen show the server's rendered image of the same design, and frames
-   off screen show nothing at all. */
+   screen show the server's rendered image of the same design, at about the
+   width they take on screen (FrameImage, framePreviews.ts), and frames off
+   screen show only a picture already in memory. */
 
 import type { Frame } from '../../shared/types'
 import type { Viewport } from './store'
@@ -75,11 +76,4 @@ const DESKTOP_BUDGET = 12
 /** The live-document budget for this device. */
 export function liveFrameBudget(): number {
   return window.matchMedia('(pointer: coarse)').matches ? TOUCH_BUDGET : DESKTOP_BUDGET
-}
-
-/** The server-rendered image of a frame's current design. The version in
- *  the query busts the browser cache when the design changes; standalone
- *  elements keep their transparency as png, pages go as smaller jpeg. */
-export function frameImageUrl(frame: Pick<Frame, 'id' | 'updatedAt'>, transparent: boolean): string {
-  return transparent ? `/i/${frame.id}.png?v=${frame.updatedAt}` : `/i/${frame.id}.jpg?quality=80&v=${frame.updatedAt}`
 }

@@ -453,6 +453,8 @@ export interface RenderOptions extends PageOptions {
   type?: 'png' | 'jpeg'
   quality?: number
   maxHeight?: number
+  /** Keep the paper behind a standalone stage element visible. */
+  omitBackground?: boolean
   /** capture this region of the frame only (frame px), e.g. a library item's box */
   clip?: { x: number; y: number; width: number; height: number }
 }
@@ -486,6 +488,7 @@ async function screenshotOn(page: Page, frame: Frame, scale: number, opts: Rende
   const clip = opts.clip ?? (height < fullHeight ? { x: 0, y: 0, width, height } : undefined)
   const buf = await page.screenshot({
     type,
+    omitBackground: opts.omitBackground,
     ...(type === 'jpeg' ? { quality: opts.quality ?? 90 } : {}),
     ...(clip ? { clip } : {}),
   })

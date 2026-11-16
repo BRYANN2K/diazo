@@ -2980,7 +2980,9 @@ function restyleTokenFrames(canvasId: string, actor: Actor, rename?: TokenRename
     const prevHtml = frame.html
     const updated = store.updateFrame(frame.id, { html }, actor.name, { annotation: true })
     if (!updated) continue
-    thumbs.purge(frame.id)
+    /* the frame lives on — its stored previews are dropped, not the frame's
+       right to have any (thumbs.invalidate, not purge) */
+    thumbs.invalidate(frame.id)
     const openReveal = reveals.get(frame.id)
     if (openReveal) {
       /* mid-playback: rewind to where the documents diverge, as a rewrite does */

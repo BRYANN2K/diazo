@@ -20,6 +20,8 @@ Avoid: board, file, document.
 **Frame.** An artboard that renders a complete HTML document in a sandboxed iframe. People and agents edit the same HTML.
 Code: `Frame`, `frames` table. Avoid: artboard (in UI copy), screen.
 
+**Frame preview.** A stored picture of a frame at a dashboard size or a canvas width bucket. It stands in for a live document when a frame is too small to edit. A stale preview shows an older design while the current picture renders.
+
 **Element.** A node inside a frame's HTML, addressed by its `data-doop-id` for picks, comments, links and keyframes.
 
 **Component.** One design used in many places: a **main** and its **instances**, with props, enum variants, slots and overrides. Instances are materialized HTML kept in step by propagation. See `.workflow/specs/components.md`.

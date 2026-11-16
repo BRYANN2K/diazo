@@ -53,6 +53,7 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 - Duel entries are labelled by model name, not by raw id, and no duel card shows when a list answer is not a list.
 - Synced stylesheets resolve their `url()`s against the sheet, so synced fonts load.
 - A culled frame shows its preview render instead of a blank box.
+- A zoomed-out canvas shows frame designs instead of white boxes, with stored pictures sized to the zoom and a neutral placeholder while they load. Unchanged pictures survive restarts and moves; edits replace them without caching an older design as current. Busy renderers and network interruptions retry, off-screen pictures can leave the memory cache, and a frame going live fades its picture away.
 - Presence: no ghost presences on overlapping joins, and a leave is broadcast when a connection switches canvas.
 - `edit_frame_html` inserts its replacement text literally.
 

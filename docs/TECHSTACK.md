@@ -1,5 +1,7 @@
 # TECHSTACK - Diazo
 
+Status: current, updated 2026-11-16
+
 ## 1. Language and Runtime
 
 - TypeScript 5.9 (strict mode) - primary language across `server/`, `src/`, and `shared/`.
@@ -491,15 +493,47 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   pixel grid (⇧'), other people's cursors (⌘⌥\ / Ctrl+Alt+\) and the comment pins (⇧C), each read
   by `code` (registry actions `pixel-grid`, `comments`, `cursors`). Hidden pins still show under
   the Comment tool and for a thread that is open. Tests: `viewOptions.test.ts`, `zoomMenu.test.tsx`.
-- Live frames (`src/lib/frameCulling.ts`): every frame is an iframe, so `Stage` mounts one only
-  for frames within half a stage of the viewport (kept until a full stage away) and, once zoomed
-  out below 25%, only for those over 160px on screen; a hatched placeholder of the same box
-  stands in for the rest. Selected, streamed-into, peer-edited and context-menu frames, the frame
-  of a picked element and every frame in prototype mode stay live, and standalone drawings are never culled
-  for size. `FrameView`'s `live` prop swaps the iframe for the placeholder and resets its
-  runtime state; `hasFrameWindow` is false for a frame without a document, so a press on one
-  selects the frame rather than waiting on an element hit-test. A frame still `htmlDeferred`
-  shows the placeholder too. Tests: `frameCulling.test.ts`.
+- Live frames (`src/lib/frameLod.ts`, `src/hooks/use-frame-lods.ts`): every frame is an iframe, so
+  once the camera settles `Stage` gives a document only to the frames worth one: on screen (a
+  quarter screen of margin), at least 96px on their shorter side, the largest first, within a
+  per-device budget (12, or 3 on touch). Selected, streamed-into, peer-edited and context-menu
+  frames, the frame of a picked element and every frame in prototype mode stay live. The other
+  frames on screen are drawn as pictures (`'image'`), frames off screen as `'none'`; zooming out
+  never mounts a document. A picture (`FrameImage.tsx`, `src/lib/framePreviews.ts`) is the
+  server's render at about the width the frame takes on screen: `/i/<id>.<jpg|png>?lod=<w>&v=<updatedAt>`,
+  `w` one of 128 / 256 / 512 / 1024 (`shared/framePreview.ts`, picked from zoom × device pixel
+  ratio once the camera settles), png only for standalone shapes. The client keeps one decoded
+  picture per frame (object URL and retained decoded image). Its LRU targets 400 entries or
+  64 MiB of compressed blobs. On-screen request holders are protected; releasing them enforces
+  eviction, even while off-screen components remain subscribed. A wider picture is reused only
+  for the same version and format. The old picture stays visible while an edit's replacement
+  loads. Cache notifications flush once per animation frame; initial arrivals have no individual
+  fade. Requests use `thumbLoader` (six at a time). Network failures, 429 and 503 retry with
+  exponential backoff and Retry-After, at most five tries; failed requests can retry after a
+  cooldown or when the frame returns. Failure and stale-retry markers are bounded. Until a
+  picture arrives a page shows a neutral `bg-paper-deep` well. A frame going live keeps its
+  picture over the iframe until the runtime shows the document, then fades it once. The cover
+  expires after three seconds if no runtime reply arrives. Deferred client HTML stays deferred;
+  the server chooses PNG for standalone elements, including a deferred client's JPEG request,
+  and preserves their transparent background.
+  Server side (`server/previews.ts`, `server/thumbs.ts`), each width renders at background
+  priority and is stored as `thumb/<id>-w<w>-v<renderedAt>.<ext>`. The shared freshness ledger
+  (`thumb/_freshness.json`) records versions and HTML/dimension fingerprints. Unchanged images
+  survive restarts and position-only moves without rendering. The fingerprint detects an edit
+  even if the process stopped before recording its write notification. Legacy unversioned
+  objects are served stale and replaced on demand. A missing or unreadable ledger requires
+  regeneration on demand; storage writes are best-effort and failed writes may cost another
+  render after restart. Old version objects are removed after replacement; deletion runs four
+  objects at a time. A crash between an object write and its ledger update can leave an orphan.
+  Stored older designs are marked `X-Doop-Preview: stale` and `no-store`; they never enter the
+  current-version cache or become immutable under a newer URL. Recently requested variants
+  refresh after 15 seconds of quiet following a design write; variants unused for a day expire.
+  Frames never requested as images are not pre-rendered. Stage captures are capped at about
+  four million pixels. Moving still changes the client's version URL and can re-download the
+  same picture, but it does not re-render it. Only a fresh picture under its own `v` is immutable.
+  Tests: `frameLod.test.ts`, `framePreviews.test.ts`, `frameImage.test.tsx`, `thumbLoader.test.ts`,
+  `thumbs.test.ts`, `previews.test.ts`, `framePreviewHttp.test.ts`, `framePreviewsBrowser.test.ts`,
+  `frameLodBrowser.test.ts`, `framePreviewPerformance.test.ts`.
 - Canvas panel layout (Settings → Appearance → Canvas panels, `src/lib/panelLayout.ts`, per
   browser under `doop:panel-layout`): `floating` (the default) keeps the islands over a
   full-window stage; `docked` makes Layers, the tool rail, the icon islands, the Inspector /
