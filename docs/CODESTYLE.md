@@ -1,4 +1,4 @@
-# CODESTYLE - doop
+# CODESTYLE - Diazo
 
 ## Formatting (Prettier, `.prettierrc.json`)
 

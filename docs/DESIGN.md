@@ -1,4 +1,4 @@
-# DESIGN - doop
+# DESIGN - Diazo
 
 Design tokens live in `src/styles.css` as CSS custom properties, mapped into Tailwind 4 via
 `@theme`. shadcn is configured with style `radix-nova`, base color `neutral`, CSS variables on,

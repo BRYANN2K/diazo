@@ -1113,13 +1113,13 @@ through identical plumbing.
 PRs welcome — see [CONTRIBUTING.md](../CONTRIBUTING.md) for commit conventions and code style. First-time
 contributors sign the [CLA](../CLA.md); a bot asks for it on your first PR.
 
-| Command                           | What it does                                                                      |
-| --------------------------------- | --------------------------------------------------------------------------------- |
-| `bun run test`                    | Vitest over `tests/`: unit tests plus integration tests that boot the real server |
-| `bun run typecheck`               | `tsgo`, the native TypeScript compiler                                            |
-| `bun run lint` / `bun run format` | oxlint + ESLint / Prettier                                                        |
-| `bun run doc-lint`                | Checks that `CLAUDE.md` and `.context/` stay in step with the code                |
-| `bun run storybook`               | The component catalogue on :6006                                                  |
+| Command                           | What it does                                                                        |
+| --------------------------------- | ----------------------------------------------------------------------------------- |
+| `bun run test`                    | Vitest over `tests/`: unit tests plus integration tests that boot the real server   |
+| `bun run typecheck`               | `tsgo`, the native TypeScript compiler                                              |
+| `bun run lint` / `bun run format` | oxlint + ESLint / Prettier                                                          |
+| `bun run doc-lint`                | Checks the root files, `docs/`, the ADR index, Stip changes and every relative link |
+| `bun run storybook`               | The component catalogue on :6006                                                    |
 
 CI runs all of these except Storybook, plus `format:check` and a production build, on every PR, and lints the PR title as a conventional
 commit (PRs land as a squash). Schema changes go through drizzle migrations (`npx drizzle-kit generate`

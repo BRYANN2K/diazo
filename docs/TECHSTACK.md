@@ -1,4 +1,4 @@
-# TECHSTACK - doop
+# TECHSTACK - Diazo
 
 ## 1. Language and Runtime
 
@@ -174,7 +174,7 @@
   first step sends no effort where the connection has none configured) — and `pickModel` honours it (`accountWithPick` for the OpenAI
   kinds, `isClaudeEffort` → `claude --effort` on the Plan); the localized names and blurbs for
   the dials live in `src/lib/effortLabels.ts`.
-- Image descriptions (`.context/specs/image-descriptions.md`, `server/imageDescriptions.ts`,
+- Image descriptions (`.workflow/specs/image-descriptions.md`, `server/imageDescriptions.ts`,
   `shared/imageDescriptions.ts`): raster uploads emit `asset.stored` and get an asynchronous
   description. Billing resolves uploader → eligible canvas owner → server; Off on either
   person stops analysis, and a server-only uploader bypasses both accounts. The stable uploader
@@ -295,7 +295,7 @@
   Tests: `uploadFontHttp.test.ts`, `fonts.test.ts` (a real WOFF2 in `tests/fixtures/fonts`), `fontLibrary.test.ts`,
   `fontLibraryRace.test.ts`, `fontFrameWrites.test.ts` (faces on create, stream end and idle; an idle close sends viewers the
   healed document, so a cut-off script never runs).
-- Design tokens (`shared/designTokens.ts`, spec `.context/specs/design-tokens.md`): a canvas's
+- Design tokens (`shared/designTokens.ts`, spec `.workflow/specs/design-tokens.md`): a canvas's
   typed design values (Paper's eleven types: colour, opacity, radius, spacing, container,
   breakpoint, font family / weight / size, line height, letter spacing), each a CSS custom
   property frames use as `var(--name)`, with a value per theme (`canvas.tokenThemes`; a frame
@@ -853,7 +853,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   re-anchors the root and its replies together and broadcasts each; a drop on the same anchor
   sends nothing, Esc mid-drag puts the pin back. Tests: `commentMove.test.ts`,
   `canvasCommentsRoute.test.ts`, `elementIds.test.ts`, the drag case in `drawingGeometryBrowser.test.ts`.
-- Components (`.context/specs/components.md`): a main is an element marked `data-doop-component`; an
+- Components (`.workflow/specs/components.md`): a main is an element marked `data-doop-component`; an
   instance is full markup marked `data-doop-instance`, so frame consumers need no changes. Every
   frame write passes `prepareFrameHtml` (`server/components.ts`): `<doop-use>` expands, a changed main
   becomes a revision, instances reconcile against the revision they were rendered from
@@ -893,7 +893,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   0.8). `runImport` leaves matches out (`report.duplicates`) unless `force` / `asVariantOf`; `POST
 /api/libraries/check` and the read-only tool `check_library` answer "do we have it?". Tests:
   `libraryDuplicates.test.ts`, `addToLibraryUi.test.tsx`.
-- Design libraries (`.context/specs/design-libraries.md`, plan in `.context/plans/design-libraries.md`):
+- Design libraries (`.workflow/specs/design-libraries.md`, plan in `.workflow/archive/design-libraries/tasks.md`):
   a canvas is a library when it has a `libraries` row (migration 0066: `libraries`, the rebuildable
   projection `library_items`, the curation `library_item_meta`), mirrored on `canvas.library`
   (`LibraryInfo`) and broadcast as a `library` room message. `shared/library.ts` (types,
@@ -974,7 +974,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   Tests: `libraryDescribe.test.ts`.
   Tests: `library*.test.ts`,
   `librariesHttp.test.ts`, `findLibrary*.test.ts*`, `findRows.test.ts`, `convertLibraryUi.test.tsx`.
-- Prototypes (`.context/specs/prototyping.md`): interactions are `data-doop-on` /
+- Prototypes (`.workflow/specs/prototyping.md`): interactions are `data-doop-on` /
   `data-doop-action` (or the JSON `data-doop-interactions`) attributes in frame HTML, parsed by
   `shared/prototype.ts`, whose parser the frame runtime inlines by source. `PrototypePlayer.tsx`
   (Play, and the full-page `/c/<id>/proto`) runs them with Web Animations transitions, under the
@@ -1042,7 +1042,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 - Canvas access: `canvasRole` in `server/access.ts` gives owners, members and workspace members
   edit, and share-link visitors the link's level (`none` / `view` / `comment` / `edit`). REST,
   the WebSocket room and MCP gate reads, comments and writes on it separately; spec in
-  `.context/specs/share-link-roles.md`.
+  `.workflow/specs/share-link-roles.md`.
 - Design libraries add their own gate beside canvas access, never inside it: `libraryRole` in
   `server/libraries.ts` (manage = `canManageCanvas`, curate = `canEditCanvas`, read =
   `canAccessCanvas`, plus every signed-in account for a `public` library while
@@ -1126,7 +1126,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 
 - React 18.3.1 + Vite 8 - SPA, entry at `index.html`.
 - Tailwind CSS 4.3.3 (`@tailwindcss/vite` 4.3.3) - styling; `tw-animate-css` 1.4.0 for animation
-  utilities. Design tokens in `src/styles.css` (see `.context/DESIGN.md`).
+  utilities. Design tokens in `src/styles.css` (see `docs/DESIGN.md`).
 - Tauri 2.9.0 (`@tauri-apps/cli`, `desktop/src-tauri`) - desktop app wrapper around the web build.
 - Chromium shell (the macOS app): `desktop/src-tauri-chromium` builds the same sources (its
   `[[bin]]` and build script point into `desktop/src-tauri`) on Tauri 3.0.0-alpha.5 with

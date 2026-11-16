@@ -1,4 +1,6 @@
-@.context/INDEX.md
+@docs/TECHSTACK.md
+@docs/DESIGN.md
+@docs/CODESTYLE.md
 
 This is a placeholder. Will need to be updated.
 https://github.com/kgoedecke/doop
@@ -23,7 +25,7 @@ status, and an activity feed in realtime over one WebSocket room per canvas.
   up). Update it when you add one. The project is presented as **Diazo**, its built-in agent as
   the **Diazo Agent** (`@diazo`). doop's name and Disc-D logo are its owner's trademarks: never put
   them back in anything a user sees. Marks come from `src/components/Logo.tsx` (rules in
-  `.context/DESIGN.md`, Marks).
+  `docs/DESIGN.md`, Marks).
 - Internal identifiers keep the old name on purpose, so data and integrations do not break:
   `data-doop-*` attributes, `doop:` storage keys, `DOOP_*` env vars, `doop-secrets` and the `doop`
   namespace, DB tables, MCP tool names, the `doop://` scheme, the `doop-desktop` executable, crate
@@ -36,7 +38,7 @@ status, and an activity feed in realtime over one WebSocket room per canvas.
 ## Tech stack
 
 TypeScript/React/Express/Postgres (drizzle), realtime over `ws`, MCP server for agent access, Tauri
-desktop shell. Full details in `.context/TECHSTACK.md`, which `.context/INDEX.md` links.
+desktop shell. Full details in `docs/TECHSTACK.md`.
 
 Always use the `clean-code:typescript` skill when writing or reviewing TypeScript code in this
 repo.
@@ -71,7 +73,6 @@ tests/             - vitest test suite
 ## Language
 
 TypeScript. Always use the `clean-code:typescript` skill when writing or reviewing TypeScript
-code. Formatter and lint rules are captured in `.context/CODESTYLE.md`, which `.context/INDEX.md`
-links.
+code. Formatter and lint rules are captured in `docs/CODESTYLE.md`.
 
 @AGENTS.md

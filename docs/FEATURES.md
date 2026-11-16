@@ -14,7 +14,7 @@ upstream pull requests it merged ahead of upstream. Resync notes are in
   `@diazo` mentions (`@doop` still routes), the desktop app `Diazo.app` (`dev.bryann2k.diazo`,
   data copied over from the doop shell on first launch) and the install scripts. Internal
   identifiers (`data-doop-*`, `DOOP_*`, tables, MCP tool names) are unchanged
-  ([DESIGN.md, Marks](../.context/DESIGN.md#marks-diazo)).
+  ([DESIGN.md, Marks](DESIGN.md#marks-diazo)).
 
 - **⌘F across every page** — a palette: This canvas (this page or all pages), Library or All as
   one segmented control, results in sections (canvas matches, then library items with their
