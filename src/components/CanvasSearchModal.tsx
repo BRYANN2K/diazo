@@ -84,7 +84,7 @@ export function CanvasSearchModal({
               onMouseEnter={() => setCursor(i)}
               onClick={() => onOpen(c)}
               className={cn(
-                'flex items-center gap-3 rounded-pill px-2.5 py-2 transition-colors',
+                'flex items-center gap-3 rounded-row px-2.5 py-2 transition-colors',
                 i === active ? 'bg-paper-deep' : 'hover:bg-paper',
               )}
             >

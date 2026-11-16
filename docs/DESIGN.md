@@ -5,78 +5,108 @@ Design tokens live in `src/styles.css` as CSS custom properties, mapped into Tai
 icon library `lucide` (`components.json`). Generate new shadcn components with the shadcn CLI
 rather than hand-rolling primitives; it writes into `src/components/ui` per the aliases below.
 
+## Source of truth
+
+The UI follows the redesign frames on the canvas "redoop — Redesign 2026-11" (`bIK8evKpnI`): its
+design tokens (`get_tokens`), the guidelines `redoop-system` and `redoop-build-notes`, the
+components of 01 Foundations, and the pages "00 Brand — Diazo" and "18 Motion Studio". The direction
+is the **Cyanotype bench**: a quiet graphite bench with one blueprint-blue signal for people and one
+marker-orange for agents; type does the hierarchy; motion is physical, short and tied to a cause.
+
 ## Palette
 
-White system (Doop UI v2, canvas guideline `doop-ui-system`): neutral greys, no warm cream.
+Role tokens in `src/styles.css`, light then dark (`.dark`); Tailwind classes `bg-<role>`,
+`text-<role>`.
 
-- `--paper` `#fdfdfd` (page ground) / `--paper-deep` `#f0f0f0` (pressed or selected row fill) / `--sub`
-  `#f7f7f7` (filled field wells) - background layers.
-- `--canvas` `#f5f5f5` (`bg-canvas`) - the editor stage behind the frames, a step below white so a
-  white frame reads on it without a border (frames wear no resting edge, only a soft brand ring on
-  hover); in dark it is `--paper`.
-- `--surface` `#ffffff` - card/panel surfaces.
-- `--ink` `#111`, `--ink-soft` `#5f5e5b`, `--ink-faint` `#9c9b99`, `--ink-ghost` `#b8b8b8` - text, in
-  descending emphasis (ghost: placeholders, unit letters).
-- `--line` `#dcdcdc`, `--line-soft` `#ececec` - borders/dividers.
-- `--brand` `#0177d3` - the one accent: selection, focus, live signal. `--accent-ink` - failure red.
-  The primary button is ink (black), not brand.
-- `--code` `#17171b` / `--code-ink` `#e9e9ee` (`bg-code`, `text-code-ink`) - the dark code well of
-  `CodeBlock` and the HTML editors; the same in both themes.
-- `--glaze-ring` - the silver hairline an active agent wears in the presence pill.
-- Full shadcn semantic set also present: `--primary`, `--secondary`, `--muted`, `--accent`,
-  `--destructive`, `--border`, `--input`, `--ring`, `--card`, `--popover`, `--sidebar-*`,
-  `--chart-1` through `--chart-5`.
+- `--ground` `#eef0f2` / `#0c0d10` - the stage and the app backdrop (`bg-ground`; `--canvas` is
+  its alias).
+- `--paper` `#fbfbfc` / `#15171b` - a page. `--surface` `#ffffff` / `#1c1f24` - islands, cards,
+  menus. `--well` `#f1f3f5` / `#22252b` - a filled field, a hovered or pressed row.
+- `--line` `#e1e4e8` / `#2a2e35` - the 1px ring; `--line-soft` the quieter divider.
+- `--ink` `#15171c` / `#eceef2`, `--ink-2` `#5b616b` / `#a3a9b3`, `--ink-3` `#9298a2` / `#6d737d` -
+  text in descending emphasis; `--on-ink` is text on an ink fill. `--ink-ghost` - placeholders, unit
+  letters.
+- `--signal` `#1f5fff` / `#5b8cff` (+ `--signal-wash`) - **people and selection**: selection, focus,
+  a person's presence, a checked menu row, an on chip.
+- `--agent` `#e8650a` / `#ff8f45` (+ `--agent-ink`, `--agent-wash`) - **anything an agent does**:
+  presence, cursor, the beam round a frame being written, thinking and streaming, agent badges.
+  Never swapped with signal, and never shown by colour alone (mark + beam pattern).
+- `--danger` (+ wash) - failure only, always icon + text. Delete is ink + confirm, not red.
+  `--ok` (+ wash) - connected, passed, done. `--caution` / `--caution-ink` - hover or a selected
+  frame only.
+- `--code` / `--code-ink` - the dark code well of `CodeBlock` and the HTML editors, both themes.
+- Aliases kept for older screens, all resolving to the roles: `--paper-deep` and `--sub` → well,
+  `--ink-soft` → ink-2, `--ink-faint` → ink-3, `--brand` → signal, `--accent-ink` → danger,
+  `--success*` → ok, `--warning*` → caution, `--glaze-ring` → agent. New code uses the role names.
+- The primary button is ink with `--on-ink` text, one per screen.
 
 ## Typography
 
-- `--font-ui` / `--font-display`: `'Inter'` - UI and headings (`--font-sans` / `--font-heading`
-  aliases). `--font-mono`: `'Geist Mono', ui-monospace, monospace` - values only (ids, sizes,
-  numbers, key caps, code); the mono-uppercase caption voice is retired, captions and field labels
-  are `text-caption` / `text-label` in sentence case. `--font-hero`: `'Hanken Grotesk'` Light - the
-  home greeting, and nothing else (loaded in `index.html`). Every font stack lists `'Doop Keys'`
-  after its face: a 5 KB cut of the full Inter, inlined in `src/styles.css`, carrying only
-  the key symbols (⌘ ⌥ ⇧ ⌃ ⌫ ↩ ⇥ ⎋, arrows) the Google Fonts builds of Inter and Geist Mono drop, so
-  shortcut hints never fall back to the OS font's undersized glyphs. A new symbol in a hint goes
-  into its `unicode-range` and the subset (rebuild steps in `src/styles.css`). There is no
-  serif: Instrument Serif was retired, and page-level headings outside the dashboard (sign-in,
-  not-found, the desktop handoff) use `DashTitle` like every other page title.
-- **The scale** is named by role, as `--text-*` tokens in `src/styles.css` (each carries its line
-  height, so one class sets both). Use these; `text-[Npx]` is for a one-off the scale cannot name,
-  and the canvas editor's chrome is still being moved over.
+- Direction **B Hyperlegible**: `--font-ui` Atkinson Hyperlegible Next (the chrome), `--font-mono`
+  Atkinson Hyperlegible Mono (values only: ids, sizes, numbers, key caps, code, costs),
+  `--font-display` Familjen Grotesk (headings at 20px and up only; `--font-hero`, the home
+  greeting, is the same face). Self-hosted variable woff2 (latin + latin-ext) in `src/assets/fonts`
+  with their OFL licences; no Google Fonts request for the UI's own faces. Every stack lists
+  `'Doop Keys'` after its face: a 5 KB cut of Inter carrying only the key symbols (⌘ ⌥ ⇧ ⌃ ⌫ ↩ ⇥ ⎋,
+  arrows), inlined in `src/styles.css`. A new symbol in a hint goes into its `unicode-range` and the
+  subset (rebuild steps in `src/styles.css`).
+- Atkinson runs wide: the chrome is `text-body` 12.5px with `-0.005em` tracking (carried by the
+  step), rows and menu items 30px, chips 26px, and labels never wrap (`whitespace-nowrap` +
+  `truncate`). Numbers are `tabular-nums` everywhere (set on `body`).
+- **The scale** is named by role, as `--text-*` tokens (each carries its line height and tracking,
+  so one class sets all three). `text-[Npx]` is for a one-off the scale cannot name.
 
   | class          | size   | used for                                                    |
   | -------------- | ------ | ----------------------------------------------------------- |
-  | `text-micro`   | 10px   | mono captions, key caps, badges                             |
-  | `text-caption` | 11px   | timestamps, counts, section labels, the line under a row    |
-  | `text-label`   | 12px   | chrome labels                                               |
+  | `text-micro`   | 10.5px | key caps, mono captions                                     |
+  | `text-caption` | 11px   | timestamps, counts, hints, badges, the line under a row     |
+  | `text-label`   | 12px   | chrome labels, field labels, small buttons                  |
   | `text-body`    | 12.5px | the chrome's voice: rail rows, buttons, chips, menus, lists |
-  | `text-copy`    | 13.5px | prose inside cards and modals                               |
-  | `text-lead`    | 15px   | a modal's lede, the composer's placeholder                  |
-  | `text-heading` | 18px   | card and modal headings                                     |
-  | `text-title`   | 24px   | page titles (`DashTitle`)                                   |
-  | `text-display` | 46px   | the home greeting                                           |
+  | `text-copy`    | 13.5px | prose inside cards and dialogs, large buttons               |
+  | `text-lead`    | 15px   | a dialog's lede, the composer's placeholder                 |
+  | `text-heading` | 20px   | card and dialog headings (`font-display`)                   |
+  | `text-title`   | 28px   | page titles (`DashTitle`, `font-display`)                   |
+  | `text-display` | 44px   | the home greeting (`font-display`)                          |
 
-- **Weights**: 400 for text, 500 for labels, buttons and emphasis. 600 is for card and modal
-  headings only; nothing in the chrome goes heavier.
-- Icons: Lucide via `src/components/ui/icons.tsx`, 1.15 stroke (`ICON_STROKE`), and nowhere else:
-  screens import the glyph from there rather than wrapping or inlining one. Sizes come from
-  `ICON_SIZE` through the `size` prop: `size="rail"` (14px) beside rail rows, menu items, tabs and
-  the editor chrome, the 16px default (`button`) inside buttons; a pixel count for a one-off. One
-  glyph per destination: Community is `WebIcon`, Automations `WorkflowIcon`, Integrations
-  `BlocksIcon`.
+- **Weights**: 400 for text, 500 for labels, buttons and emphasis, 600 for headings and badges.
+- Icons: Lucide via `src/components/ui/icons.tsx`, stroke 1.5 (`ICON_STROKE`), 14 / 16 / 20px, and
+  nowhere else. Tabs are icon + label. One glyph per destination: Community is `WebIcon`,
+  Automations `WorkflowIcon`, Integrations `BlocksIcon`.
 
 ## Shape and depth
 
-- `--radius`: `0.5rem`, with `--radius-sm` through `--radius-4xl` derived from it
-  (`calc(var(--radius) * N)`). The shapes the system actually draws have names: `rounded-tag`
-  (4px, badges and checkbox squares), `rounded-row` (7px, list and rail rows), `rounded-control`
-  (8px, buttons and fields), `rounded-pill` (10px, chips and pills), `rounded-card` (12px, cards
-  and tiles), `rounded-panel` (14px, floating panels and modals). Reach for these before a
-  `rounded-[Npx]`.
-- No borders on controls: `--shadow-ring` (`shadow-ring`, 1px ring + soft drop) for inputs, chips and
-  pills, `--shadow-ring-hover` on hover, `--shadow-float` (`shadow-float`) for panels floating over
-  the canvas, `--shadow-pop` for menus and toasts. `--shadow-card` / `--shadow-elevation-*` alias
-  these.
+- Named corners: `rounded-tag` (4px, badges and checkbox squares), `rounded-control` (7px, buttons
+  and fields), `rounded-row` (8px, list, menu and rail rows), `rounded-pill` (fully round, chips),
+  `rounded-card` (12px, cards and tiles), `rounded-panel` (14px, floating islands), `rounded-sheet`
+  (20px, dialogs). Reach for these before a `rounded-[Npx]`.
+- Elevation, no borders on controls: 1 `shadow-ring` (a 1px `--line` ring, resting controls), 2
+  `shadow-panel` (islands over the stage; `shadow-float` is its alias), 3 `shadow-pop` (menus,
+  toasts), 4 `shadow-modal` (dialogs, over `--scrim`). Focus is a 2px signal outline offset 2px, or
+  for a field a signal ring plus a 3px signal wash.
+- The editor is a **floating shell** by default: islands on elevation 2, radius 14, a 12px gutter.
+  Docked is an option (Settings → Appearance).
+
+## Motion
+
+Tokens in `src/styles.css` and mirrored for script in `src/lib/motion.ts` (`DURATION`, `EASE`,
+`SPRING`, `staggerDelay`, `useReducedMotion`, `animate`); `tests/motion.test.ts` keeps the two in
+step.
+
+- Durations: `--dur-instant` 80ms (hover in), `--dur-fast` 140ms (hover out, press), `--dur-base`
+  200ms (enters, tab glide), `--dur-slow` 280ms (panels, shared expand), `--dur-slower` 420ms (number
+  roll). Tailwind: `duration-instant|fast|normal|slow|slower`.
+- Curves: `ease-out` (enter), `ease-in-out` (between two states), `ease-exit` (leave), and three
+  springs as CSS `linear()`: `ease-spring-soft` (400ms: dialogs, toasts, shared expand),
+  `ease-spring-snap` (320ms: segmented pill, chips), `ease-spring-pop` (450ms: something landing).
+- Enter: opacity 0→1, 6px up, .98→1 (`animate-enter`, keyframes `enter`). Exit at 70% of the time on
+  `ease-exit`, no overshoot. Stagger 30ms over the first eight items (`stagger-children`). Hover is
+  colour only, 80ms in / 140ms out. Press scales to .97 over 140ms (`press`).
+- AI states are agent orange: the status label rolls through steps under a 2s shimmer
+  (`shimmer-text`) and folds to "Thought for 12s"; streamed words fade in from a 4px blur
+  (`word-in`); a 1px conic beam travels round a frame being written (`agent-beam`).
+- Never animate zoom, pan, arrow nudges, undo/redo, typing or Tab selection.
+- Reduced motion: transforms become 120ms opacity fades; the shimmer, beam and glaze hold still. A
+  global rule in `src/styles.css` enforces it; script animation goes through `animate()`.
 
 ## Theme
 
@@ -86,10 +116,10 @@ White system (Doop UI v2, canvas guideline `doop-ui-system`): neutral greys, no 
   browser. `index.html` paints it before the bundle loads; `src/lib/theme.ts` owns it after that
   (`initTheme()` in `main.tsx`, `useTheme()` in components). Controls: Settings -> Appearance and
   the account menu.
-- `--success` / `--success-ink` and `--warning` / `--warning-ink` are the status colours; use
-  them (`bg-success`, `text-success-ink`) rather than literal greens. Text on an ink fill is
-  `text-paper`, never `text-white`, so it flips with the theme. `text-white` is for brand and
-  accent fills and for dark overlays, which stay dark in both themes.
+- `--ok`, `--caution`, `--danger` and their washes are the status colours; use them (`bg-ok-wash`,
+  `text-ok`) rather than literal greens. Text on an ink fill is `text-on-ink`, never `text-white`,
+  so it flips with the theme. `text-white` is for signal and agent fills and for dark overlays,
+  which stay dark in both themes.
 
 ## Marks (Diazo)
 

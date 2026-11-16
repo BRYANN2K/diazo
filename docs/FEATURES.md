@@ -210,6 +210,25 @@ compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per bu
   invented product (Fieldnote), with a scripted stand-in for the model API and a fake desktop
   device serving a demo repo, so the agent, usage, duel, curation and repo features run without a
   provider. `scripts/readme-shots.ts` takes the README screenshots from it.
+- **Redesign 2026-11 (Cyanotype bench)** — the interface follows the redesign frames of the canvas
+  "redoop — Redesign 2026-11": a graphite palette with signal blue for people and selection and
+  agent orange for anything an agent does, Atkinson Hyperlegible Next / Mono with Familjen Grotesk
+  for headings (self-hosted), named motion tokens (durations, three `linear()` springs, a 30 ms
+  stagger) with a reduced-motion fallback, restyled primitives (gliding tabs and segmented
+  controls, number roll, agent thinking line), the floating editor shell (title and presence in
+  one island, Import / Export / Motion / Play / Share in another, Connect AI in the agent panel),
+  the orange beam round a frame an agent is writing, the new composer and the dotted home hero
+  ([DESIGN.md](DESIGN.md)).
+- **Motion Studio (timeline UI)** — the bar's Motion button opens a timeline under the stage for
+  the page: transport and timecode, a ruler, the camera lane with its keys, the shots between them
+  and any element lanes, one playhead to scrub. Playing or scrubbing moves the editor's own view
+  through the camera's shots (cuts instead of glides under reduced motion). "Key the camera here"
+  keyframes the current view at the playhead; "Animate storyboard" asks the Diazo Agent to turn
+  the page's frames into shots and camera moves. Export renders MP4 or WebM in the browser
+  (MediaRecorder over a compositor that draws every frame from the time alone) or, in a desktop
+  shell that offers it, frame by frame with ffmpeg through the `/c/<id>/motion-render` harness.
+  Built against the contract in `docs/motion-api.md` (`feat/motion-backend`); the client types in
+  `src/lib/motion/contract.ts` are an adapter until that branch merges.
 - **Motion Studio ("Rostrum") — a page can be a film (backend, MVP)** — an ordinary page gains a
   seekable, deterministic timeline: duration/fps/size, camera tracks over the page's world,
   per-element property tracks, clips, audio and captions (contract in `shared/motion.ts`, API in

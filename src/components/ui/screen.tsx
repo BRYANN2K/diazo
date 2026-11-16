@@ -16,7 +16,10 @@ function AuthScreen({ className, children, ...props }: React.ComponentProps<'div
   return (
     <div
       data-slot="auth-screen"
-      className={cn('flex h-dvh min-h-dvh flex-col overflow-y-auto bg-paper px-4 py-5 sm:p-8 [&>*]:m-auto', className)}
+      className={cn(
+        'flex h-dvh min-h-dvh flex-col overflow-y-auto bg-ground bg-[radial-gradient(var(--dot)_1px,transparent_1.2px)] bg-size-[22px_22px] px-4 py-5 sm:p-8 [&>*]:m-auto',
+        className,
+      )}
       {...props}
     >
       {children}
@@ -48,7 +51,7 @@ function AuthCard({
     <Element
       data-slot="auth-card"
       className={cn(
-        'flex w-[min(400px,100%)] flex-col gap-3.5 rounded-card border border-line bg-surface p-6 pt-[30px] shadow-pop sm:p-9 sm:pb-7',
+        'flex w-[min(400px,100%)] flex-col gap-3.5 rounded-sheet bg-paper p-6 pt-[30px] shadow-modal animate-enter sm:p-8 sm:pb-7',
         align === 'center' && 'text-center',
         className,
       )}

@@ -433,7 +433,7 @@ export function AuthPage({ initialMode }: { initialMode?: 'signin' | 'signup' } 
             t('auth.resetBlurb')
           ) : (
             <>
-              {t('auth.taglineBefore')} <em className="not-italic text-brand">{t('auth.taglineEmphasis')}</em>
+              {t('auth.taglineBefore')} <em className="not-italic text-agent-ink">{t('auth.taglineEmphasis')}</em>
               {t('auth.taglineAfter')} {mode === 'signin' ? t('auth.taglineSignin') : t('auth.taglineSignup')}
             </>
           )}

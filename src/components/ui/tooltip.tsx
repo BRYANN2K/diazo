@@ -37,8 +37,8 @@ function Tooltip({
           sideOffset={7}
           collisionPadding={8}
           className={cn(
-            'z-[90] max-w-[260px] rounded-[6px] bg-ink px-2 py-[5px] text-caption font-medium leading-snug text-paper',
-            'animate-[chip-in_0.12s_ease] data-[state=closed]:animate-none',
+            'z-[90] max-w-[260px] rounded-[6px] bg-ink px-2 py-[5px] text-caption font-medium leading-snug text-on-ink',
+            'animate-[fade-in_120ms_var(--ease-out)] data-[state=closed]:animate-none',
             className,
           )}
           {...props}

@@ -17,7 +17,7 @@
 //! The URL is checked natively before any window exists: the active
 //! server's own origin or loopback — a render is the app driving its own
 //! page, never a page opening somewhere else. Keep `allowed_url` in step
-//! with the render URL the app builds (src/lib/motionRender.ts).
+//! with the render URL the app builds (src/lib/motion/render.ts, `harnessUrl`).
 
 use base64::Engine;
 use serde::Serialize;

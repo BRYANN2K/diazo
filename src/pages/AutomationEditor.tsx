@@ -582,7 +582,7 @@ export function AutomationEditor({ automationId }: { automationId: string }) {
 /* ------------------------------------------------------------------ */
 /* Nodes                                                               */
 
-const nodeCls = 'relative rounded-pill border border-line bg-surface px-3.5 py-3 shadow-card'
+const nodeCls = 'relative rounded-card border border-line bg-surface px-3.5 py-3 shadow-card'
 const kCls = 'text-caption text-ink-faint'
 
 /** A port: the small circle where an edge meets a node. */
@@ -1076,7 +1076,7 @@ function StepPicker({ onPick, onCancel }: { onPick: (kind: string) => void; onCa
   return (
     <div
       data-pan-node
-      className="relative rounded-pill border-[1.5px] border-dashed border-line bg-paper-deep/60 p-3.5"
+      className="relative rounded-card border-[1.5px] border-dashed border-line bg-paper-deep/60 p-3.5"
       onKeyDown={(e) => e.key === 'Escape' && onCancel?.()}
     >
       <Port side="in" dashed />

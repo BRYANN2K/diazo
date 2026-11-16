@@ -234,7 +234,7 @@ describe('render jobs', () => {
     expect(upload.status).toBe(200)
     const done = await upload.json()
     expect(done.job.status).toBe('done')
-    expect(done.asset.url).toMatch(/^\/a\/\w+\.mp4$/)
+    expect(done.asset.url).toMatch(/^\/a\/[\w-]+\.mp4$/)
     const asset = await owner.get(done.asset.url)
     expect(asset.status).toBe(200)
 

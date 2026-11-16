@@ -5,9 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { PanelIconTab, PanelTabPanel, PanelTabs, PanelTabsRoot } from '../src/components/ui/panel'
 
 /**
- * The side panel's tab strip, icon-strip style: every tab is an icon, and only
- * the active one unfolds its label beside the icon. The folded label stays in
- * the DOM so the tab keeps its name for assistive tech and tests alike.
+ * The side panel's tab strip: every tab is an icon and its label (the
+ * redesign retires icon-only strips), over a gliding surface indicator.
  */
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -56,18 +55,21 @@ describe('PanelIconTab', () => {
     expect(tab('Agents').dataset.state).toBe('active')
     expect(tab('Comments').dataset.state).toBe('inactive')
     expect(tab('Agents').querySelector('[data-testid="spark"]')).not.toBeNull()
-    /* the inactive label is folded, not removed: the tab is still "Comments" */
+    /* the inactive tab keeps its label: it is still "Comments" */
     expect(tab('Comments').textContent).toContain('Comments')
   })
 
-  it('folds the label through a grid track the active state opens', () => {
+  it('labels every tab beside its icon, active or not', () => {
     render('tasks')
-    const label = (name: string) => tab(name).querySelector('.grid-cols-\\[0fr\\]')!
-    expect(label('Agents').className).toContain('group-data-[state=active]:grid-cols-[1fr]')
-    expect(label('Comments').className).toContain('group-data-[state=active]:grid-cols-[1fr]')
+    for (const name of ['Agents', 'Comments']) {
+      const label = [...tab(name).querySelectorAll('span')].find((el) => el.textContent === name)
+      expect(label).toBeDefined()
+      expect(label?.closest('.overflow-hidden')).toBeNull()
+    }
+    expect(container.querySelector('[data-slot="glide-indicator"]')).not.toBeNull()
   })
 
-  it('pins the badge to the tab, outside the folding label', () => {
+  it('pins the badge to the tab, outside the label', () => {
     render('tasks')
     const badge = tab('Comments').querySelector('[data-testid="badge"]')!
     expect(badge.closest('.overflow-hidden')).toBeNull()

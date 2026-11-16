@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { SHARED_EXPAND } from '../../lib/sharedExpand'
 import type { LibraryItemDetail, LibraryItemPatch, LibraryItemSummary } from '../../../shared/library'
 import { api } from '../../lib/api'
 import { navigate } from '../../lib/navigate'
@@ -142,7 +143,11 @@ export function LibraryItemView({
           <TabsTrigger value="used">{t('library.tabUsed')}</TabsTrigger>
         </TabsList>
         <TabsContent value="variants" forceMount className="mt-3 data-[state=inactive]:hidden">
-          <div ref={grid} className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
+          <div
+            ref={grid}
+            className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3"
+            style={{ viewTransitionName: SHARED_EXPAND }}
+          >
             {(variants.length ? variants : [item]).map((v) => (
               <VariantCard
                 key={v.id}

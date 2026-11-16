@@ -164,7 +164,7 @@ describe.skipIf(!findBrowserPath())('components in the editor', { timeout: 60_00
   })
 
   it('lists it in the panel with a preview, and places it into the selected frame', async () => {
-    await switchTab('Components')
+    await switchTab('Assets')
     await page.waitForSelector('[data-component-card="Pill"] iframe')
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/panel.png` })
     /* a click on the card places nothing; its menu does */
@@ -277,7 +277,7 @@ describe.skipIf(!findBrowserPath())('components in the editor', { timeout: 60_00
   it('renames a component from the panel menu, and Escape keeps the old name', async () => {
     const name = async () => (await canvas()).components![0]!.name
     const field = '[data-component-card] input[aria-label="Component name"]'
-    await switchTab('Components')
+    await switchTab('Assets')
     await page.waitForSelector('[data-component-card="Pill"]')
 
     /* Escape leaves the name alone */

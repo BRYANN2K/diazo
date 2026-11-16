@@ -18,8 +18,8 @@ const menuButtonVariants = cva(
   {
     variants: {
       variant: {
-        ring: 'h-[30px] gap-[6px] rounded-control bg-surface px-[10px] text-body shadow-ring hover:shadow-ring-hover',
-        quiet: 'h-7 gap-[6px] rounded-row px-1.5 text-label hover:bg-paper-deep hover:text-ink',
+        ring: 'h-[30px] gap-[6px] rounded-control bg-surface px-[10px] text-body shadow-ring hover:bg-well',
+        quiet: 'h-7 gap-[6px] rounded-row px-1.5 text-label hover:bg-well hover:text-ink',
       },
     },
     defaultVariants: { variant: 'ring' },

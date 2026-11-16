@@ -12,14 +12,14 @@ The web app still wears doop's white UI system, and several screens added by the
 
 ## Where the work is
 
-- Branch `feat/frontend-redesign`, 19 commits from `1d2ea805` to `00186484`, worktree under `.claude/worktrees/` of the main checkout.
+- Branch `feat/frontend-redesign`, from `1d2ea805`; it merged `feat/motion-backend` (`2fdd8c6b`) and `origin/dev` (`cda02310`). Worktree under `.claude/worktrees/` of the main checkout.
 - PR #5 was closed unmerged against `main`; it must be reopened against `dev`.
-- The branch's Motion UI uses an adapter (`src/lib/motion/contract.ts`) to be replaced by the contract of `motion-studio-backend`.
-- Not yet run through Stip: no approval and no evidence are recorded.
+- The Motion UI now reads the contract of `motion-studio-backend` directly (`src/lib/motion/contract.ts` re-exports it) and follows the canvas room.
+- Evidence is recorded in `evidence.md` and the steps in `tasks.md`; no approval is recorded yet.
 
 ## Decisions and open questions
 
 - Fonts: Direction B Hyperlegible, self-hosted ([ADR 0012](../../../docs/adr/0012-self-host-the-ui-fonts.md)).
 - Older token names stay as aliases of the new roles so unmigrated screens keep working.
-- After merge, the branch's lines that cite `.context/DESIGN.md` and `.context/TECHSTACK.md` must point at `docs/DESIGN.md` and `docs/TECHSTACK.md`, including the ESLint messages.
-- Open: which redesign zones are left after part 1, and whether they ship in this change or a part 2.
+- Done in the merge: the branch's design and techstack notes now live in `docs/DESIGN.md` and `docs/TECHSTACK.md`.
+- Open: tasks 21 to 23 (zoom and settings island, Memory panel, duel running and results cards), in this change or a part 2.

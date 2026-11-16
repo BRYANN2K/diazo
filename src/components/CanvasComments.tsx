@@ -132,7 +132,8 @@ export function CanvasComments({
         if (!pinsShown && !open && drag?.id !== c.id) return null
         return (
           <CommentPin
-            key={c.id}
+            /* keyed by its anchor too: a re-anchored pin lands with the pop */
+            key={`${c.id}@${c.x},${c.y}`}
             thread={thread}
             open={open}
             left={c.x}

@@ -50,6 +50,19 @@ export async function rasterizeFrame(frame: Frame, opts: RasterOptions): Promise
   return drawSvg(svg, { width: frame.width, height: frame.height, ...opts })
 }
 
+/** A frame document given as HTML (a saved frame with extra CSS, for Motion
+ *  Studio's renders): the same inline-and-draw path as `rasterizeFrame`,
+ *  without asking the live frame for a snapshot. */
+export async function rasterizeHtml(
+  html: string,
+  size: { width: number; height: number },
+  opts: RasterOptions,
+): Promise<Blob> {
+  const signal = opts.signal ?? AbortSignal.timeout(RESOURCE_FETCH_MS)
+  const svg = await inlineDocument(html, { width: size.width, height: size.height, signal })
+  return drawSvg(svg, { width: size.width, height: size.height, ...opts })
+}
+
 /** The frame as an SVG file: the same self-contained document the raster
  *  draws (an HTML page inside a `foreignObject`, every resource inlined), so
  *  it opens anywhere a browser renders SVG but is not editable vector art.

@@ -1682,10 +1682,13 @@ export const FrameView = memo(function FrameView({
         <div
           /* the Stage reads this: a press on a locked frame is a press on the canvas */
           data-frame-locked={frame.locked ? '' : undefined}
+          data-selected={selected ? '' : undefined}
           className={cn(
             'group absolute',
+            /* an agent writing into the frame: a 1px orange beam travels round
+               its edge over a faint orange ring (frozen under reduced motion) */
             stream &&
-              "before:pointer-events-none before:absolute before:-inset-[3px] before:border-2 before:border-dashed before:border-[var(--editing-color,var(--brand))] before:content-[''] before:animate-[stream-pulse_1.1s_ease-in-out_infinite]",
+              "agent-beam before:z-[3] after:pointer-events-none after:absolute after:-inset-px after:z-[3] after:border after:border-agent/35 after:content-['']",
           )}
           style={
             {
@@ -1828,7 +1831,7 @@ export const FrameView = memo(function FrameView({
                 {stream && (
                   <span
                     className={EDITOR_CHIP}
-                    style={{ background: stream.color }}
+                    style={{ background: 'var(--agent)' }}
                     title={t('stage.isDesigning', { name: stream.name })}
                   >
                     <AgentIcon name={stream.name} size={9} color="#fff" />
@@ -2209,7 +2212,8 @@ export const FrameView = memo(function FrameView({
                     const thread: [ElementComment, ...ElementComment[]] = [c, ...replies.sort((a, b) => a.at - b.at)]
                     return (
                       <CommentPin
-                        key={c.id}
+                        /* keyed by its anchor too: a re-anchored pin lands with the pop */
+                        key={`${c.id}@${c.elementId ?? `${c.x},${c.y}`}`}
                         thread={thread}
                         open={open}
                         left={pos.x}

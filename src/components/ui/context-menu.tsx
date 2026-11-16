@@ -25,7 +25,7 @@ function ContextMenuContent({ className, ...props }: React.ComponentProps<typeof
         collisionPadding={8}
         className={cn(
           'z-[70] min-w-[190px] rounded-[12px] bg-surface p-1.5 shadow-pop',
-          'animate-[chip-in_0.18s_ease] data-[state=closed]:animate-none',
+          'animate-[menu-in_200ms_var(--ease-out)] data-[state=closed]:animate-none',
           className,
         )}
         {...props}

@@ -6,26 +6,27 @@ import { cn } from '@/lib/utils'
 import { useT } from '@/lib/i18n'
 import { XIcon } from './icons'
 
-/* Doop's modal, measured off the reference design: a white card with 22px corners on a
-   half-pixel ring and a short layered shadow, over a canvas dimmed only 15%.
-   20px padding, a 15px medium title with a lede under it, the × a 24px soft
-   circle in the corner, the actions bottom-right. Built on Radix so it brings a focus trap, Escape and scroll-locking
+/* 01 Foundations · Dialog: the one modal shell (Share, Export, Import, Skill,
+   token diff…). A paper sheet with 20px corners at elevation 4 over the scrim,
+   a Familjen title with a caption under it, a 30px close button in the
+   corner, the actions in a foot under a hairline. It opens on the soft spring
+   from .96 and closes at 70% of that on the exit curve. Built on Radix so it brings a focus trap, Escape and scroll-locking
    with it — the hand-rolled backdrop divs it replaces had none of that. Call
    sites mount it conditionally, so `open` defaults to true and `onClose` is
    the only dismissal wiring they need. */
 const modalVariants = cva(
   [
     'fixed left-1/2 top-1/2 z-[60] w-full -translate-x-1/2 -translate-y-1/2 overflow-y-auto',
-    'rounded-[22px] bg-surface p-5 text-ink shadow-modal',
-    'outline-none motion-safe:data-[state=open]:animate-[modal-in_250ms_var(--ease-out-quint)] motion-safe:data-[state=closed]:animate-[modal-out_150ms_var(--ease-out-quint)_forwards]',
+    'rounded-sheet bg-paper p-5 text-body text-ink shadow-modal',
+    'outline-none motion-safe:data-[state=open]:animate-[modal-in_400ms_var(--spring-soft)] motion-safe:data-[state=closed]:animate-[modal-out_280ms_var(--ease-exit)_forwards]',
     'max-h-[calc(100dvh-24px)] sm:max-h-[calc(100vh-96px)]',
   ],
   {
     variants: {
       size: {
         sm: 'max-w-[min(460px,calc(100vw-24px))]',
-        md: 'max-w-[min(520px,calc(100vw-24px))]',
-        lg: 'max-w-[min(620px,calc(100vw-24px))] sm:max-w-[660px]',
+        md: 'max-w-[min(560px,calc(100vw-24px))]',
+        lg: 'max-w-[min(660px,calc(100vw-24px))]',
         xl: 'max-w-[min(760px,calc(100vw-24px))]',
       },
     },
@@ -34,7 +35,7 @@ const modalVariants = cva(
 )
 
 const overlayCls =
-  'fixed inset-0 z-[60] bg-black/15 motion-safe:data-[state=open]:animate-[fade-in_250ms_ease-out] motion-safe:data-[state=closed]:animate-[fade-out_150ms_ease-out_forwards]'
+  'fixed inset-0 z-[60] bg-[var(--scrim)] motion-safe:data-[state=open]:animate-[fade-in_200ms_var(--ease-out)] motion-safe:data-[state=closed]:animate-[fade-out_280ms_var(--ease-exit)_forwards]'
 
 /* Call sites mount a Modal while it is open and unmount it to close, so by
    the time Radix could play a closing animation the node is gone. Instead,
@@ -48,7 +49,7 @@ const overlayCls =
    StrictMode runs the cleanup once at mount too, with the node still in the
    document, so the copy is taken at once but only kept if the original has
    really gone a tick later. */
-const GHOST_MS = 200
+const GHOST_MS = 300
 function leaveGhost(node: HTMLElement | null) {
   if (!node || !node.isConnected) return
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
@@ -131,9 +132,9 @@ function Modal({
           {showClose && (
             <DialogPrimitive.Close
               aria-label={t('common.close')}
-              className="absolute top-2.5 right-2.5 z-[1] grid size-6 place-items-center rounded-full bg-ink/[0.06] text-ink/50 transition-colors hover:bg-ink/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-faint"
+              className="absolute top-3.5 right-3.5 z-[1] grid size-[30px] place-items-center rounded-control text-ink-2 transition-colors duration-fast hover:bg-well hover:text-ink hover:duration-instant focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal"
             >
-              <XIcon className="size-3" />
+              <XIcon className="size-4" />
             </DialogPrimitive.Close>
           )}
           {children}
@@ -148,7 +149,7 @@ function ModalEyebrow({ className, ...props }: React.ComponentProps<'span'>) {
   return (
     <span
       data-slot="modal-eyebrow"
-      className={cn('text-micro font-medium uppercase leading-none tracking-[0.08em] text-ink-faint', className)}
+      className={cn('text-caption font-medium leading-none text-ink-3', className)}
       {...props}
     />
   )
@@ -158,7 +159,7 @@ function ModalTitle({ className, ...props }: React.ComponentProps<typeof DialogP
   return (
     <DialogPrimitive.Title
       data-slot="modal-title"
-      className={cn('pr-8 text-lead font-medium leading-5 text-ink', className)}
+      className={cn('pr-10 font-display text-heading font-semibold text-ink', className)}
       {...props}
     />
   )
@@ -168,7 +169,7 @@ function ModalLede({ className, ...props }: React.ComponentProps<typeof DialogPr
   return (
     <DialogPrimitive.Description
       data-slot="modal-lede"
-      className={cn('mt-1 text-copy text-ink-soft', className)}
+      className={cn('mt-1 text-label text-ink-2', className)}
       {...props}
     />
   )
@@ -180,7 +181,7 @@ function ModalActions({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="modal-actions"
       className={cn(
-        'mt-6 flex flex-wrap justify-end gap-2.5 [&>*]:max-xs:flex-1 [&>*]:max-xs:justify-center',
+        '-mx-5 -mb-5 mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-line px-5 pt-3 pb-4 [&>*]:max-xs:flex-1 [&>*]:max-xs:justify-center',
         className,
       )}
       {...props}
@@ -199,7 +200,7 @@ function MarkdownBlock({ className, ...props }: React.ComponentProps<'pre'>) {
     <pre
       data-slot="markdown-block"
       className={cn(
-        'mt-3.5 max-h-[52vh] overflow-auto whitespace-pre-wrap rounded-[12px] border border-line bg-paper px-[18px] py-4 font-mono text-body leading-[1.65] text-ink [word-break:break-word]',
+        'mt-3.5 max-h-[52vh] overflow-auto whitespace-pre-wrap rounded-card border border-line bg-well px-[18px] py-4 font-mono text-label leading-[1.65] text-ink [word-break:break-word]',
         className,
       )}
       {...props}

@@ -708,7 +708,7 @@ function ValueInput({
   const numberField = (inputProps: ComponentProps<'input'>) => (
     <span
       className={cn(
-        'flex h-9 min-w-0 flex-1 items-center gap-2 rounded-pill border border-line bg-paper pr-2 pl-2.5 focus-within:border-ink focus-within:bg-surface',
+        'flex h-9 min-w-0 flex-1 items-center gap-2 rounded-control border border-line bg-well pr-2 pl-2.5 focus-within:border-ink focus-within:bg-surface',
         disabled && 'opacity-50',
       )}
     >

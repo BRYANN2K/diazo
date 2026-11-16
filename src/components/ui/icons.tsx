@@ -61,6 +61,7 @@ import {
   CreditCard,
   Download,
   Ellipsis,
+  Plug,
   Eye,
   EyeOff,
   ExternalLink,
@@ -98,6 +99,9 @@ import {
   PencilRuler,
   PenTool,
   Play,
+  Pause,
+  SkipBack,
+  Clapperboard,
   Plus,
   Puzzle,
   RadioTower,
@@ -192,6 +196,7 @@ export const VerticalPaddingIcon = icon(AlignVerticalSpaceAround)
 export const WrapTextIcon = icon(WrapText)
 export const SquareDashedIcon = icon(SquareDashed)
 export const MoreHorizontalIcon = icon(Ellipsis)
+export const PlugIcon = icon(Plug)
 export const ShareIcon = icon(Share2)
 export const CopyIcon = icon(Copy)
 export const ClipboardIcon = icon(Clipboard)
@@ -270,6 +275,9 @@ export const TextIcon = icon(Type)
 export const ImageIcon = icon(Image)
 export const VectorIcon = icon(PenTool)
 export const PlayIcon = icon(Play)
+export const PauseIcon = icon(Pause)
+export const SkipBackIcon = icon(SkipBack)
+export const ClapperboardIcon = icon(Clapperboard)
 export const ArrowUpIcon = icon(ArrowUp)
 export const ArrowLeftIcon = icon(ArrowLeft)
 export const ArrowRightIcon = icon(ArrowRight)

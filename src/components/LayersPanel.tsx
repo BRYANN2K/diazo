@@ -546,13 +546,16 @@ export function LayersPanel({
     >
       {/* the panel's two faces as icon tabs, the collapse control at the far end */}
       <PanelTabsRoot value={tab} onValueChange={(next) => setTab(next as typeof tab)} className="flex-none">
-        <PanelHeader className="h-10 pl-2">
-          <PanelTabs aria-label={t('panels.layersTabsAria')}>
+        <PanelHeader className="h-auto border-b-0 px-1.5 pt-1.5 pb-0">
+          <PanelTabs
+            aria-label={t('panels.layersTabsAria')}
+            className="flex-1 [&>[role=tab]]:flex-1 [&>[role=tab]]:justify-center"
+          >
             <PanelIconTab value="layers" icon={<LayersIcon />} title={t('panels.layersTitle')}>
               {t('panels.layersTitle')}
             </PanelIconTab>
             <PanelIconTab value="components" icon={<ComponentIcon />} title={t('components.title')}>
-              {t('components.title')}
+              {t('panels.layersTabAssets')}
             </PanelIconTab>
             <PanelIconTab value="tokens" icon={<BracesIcon />} title={t('panels.layersTabTokens')}>
               {t('panels.layersTabTokens')}
@@ -570,7 +573,7 @@ export function LayersPanel({
               <Button
                 variant="bare"
                 size="icon-sm"
-                className="size-7 shrink-0 rounded-[7px] text-ink-faint hover:bg-paper-deep hover:text-ink"
+                className="size-7 shrink-0 rounded-control text-ink-3 hover:bg-well hover:text-ink"
                 aria-label={t('panels.layersCollapsePanel')}
                 onClick={() => setLayersOpen(false)}
               >
@@ -589,8 +592,21 @@ export function LayersPanel({
       )}
       {tab === 'layers' && (
         <>
-          {/* Figma's order: the pages at the top, the frames of the active page
-          under them, the search at the bottom within thumb's reach */}
+          {/* LayersIsland: the search sits at the top, under the tabs */}
+          <div className="flex-none px-1.5 pt-1.5 pb-0.5">
+            <label className="flex h-[30px] items-center gap-[7px] rounded-control px-[9px] text-ink-3 shadow-[inset_0_0_0_1px_var(--line)] transition-shadow duration-fast focus-within:shadow-[inset_0_0_0_1px_var(--signal),0_0_0_3px_var(--signal-wash)]">
+              <SearchIcon className="size-3.5 flex-none" />
+              <Input
+                variant="bare"
+                inputSize="auto"
+                className="h-full text-body placeholder:text-ink-3 md:text-body"
+                placeholder={t('panels.layersSearch')}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </label>
+          </div>
+          {/* the pages, then the frames of the active page */}
           <PagesPanel />
           <div className={cn('mt-1.5 flex h-6 flex-none items-center justify-between pr-2.5 pl-3.5', sectionHeading)}>
             <span data-slot="frame-section-heading" className={sectionHeading}>
@@ -672,19 +688,6 @@ export function LayersPanel({
               <div aria-hidden className="pointer-events-none mx-1.5 h-0.5 rounded-full bg-brand" />
             )}
           </PanelBody>
-          <footer className="flex-none px-2.5 pt-1 pb-2.5">
-            <label className="flex h-[30px] items-center gap-2 rounded-[8px] px-2.5 text-ink-faint shadow-ring focus-within:shadow-elevation-1-focus">
-              <SearchIcon className="size-3.5 flex-none" />
-              <Input
-                variant="bare"
-                inputSize="auto"
-                className="h-full text-[12px] placeholder:text-ink-ghost md:text-[12px]"
-                placeholder={t('panels.layersSearch')}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
-            </label>
-          </footer>
         </>
       )}
     </Panel>
@@ -890,7 +893,7 @@ function FrameRow({
               <>
                 <FrameApprovalBadge frame={frame} compact />
                 {stream && (
-                  <span className={editorChip} style={{ background: stream.color }}>
+                  <span className={editorChip} style={{ background: 'var(--agent)' }}>
                     <AgentIcon name={stream.name} size={8} color="#fff" />
                     {t('panels.layersDesigning')}
                   </span>

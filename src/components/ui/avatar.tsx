@@ -80,12 +80,12 @@ function Avatar({
     <span
       data-slot="avatar"
       className={cn(
-        'relative z-[1] grid flex-none place-items-center overflow-hidden rounded-full bg-surface font-medium text-ink',
+        'relative z-[1] grid flex-none place-items-center overflow-hidden rounded-full bg-surface font-semibold tracking-normal text-ink',
         labelClass(size),
-        'shadow-[0_0_0_2px_var(--surface),0_0_0_3px_rgba(0,0,0,0.07)] dark:shadow-[0_0_0_2px_var(--surface),0_0_0_3px_rgba(255,255,255,0.12)]',
-        glaze && 'z-[2] shadow-[0_0_0_2px_var(--surface),0_0_0_3px_var(--glaze-ring)]',
+        'shadow-[0_0_0_2px_var(--surface)]',
+        glaze && 'z-[2] shadow-[0_0_0_2px_var(--surface),0_0_0_3.5px_var(--agent)]',
         sweep && 'glaze-sweep',
-        tone === 'ink' && 'bg-ink text-paper shadow-none dark:shadow-none',
+        tone === 'ink' && 'bg-ink text-on-ink shadow-none',
         /* a gentle overlap: the collar still reads as a row, both initials stay legible */
         stacked && (size <= 20 ? '-ml-[3px] first:ml-0' : '-ml-1 first:ml-0'),
         className,

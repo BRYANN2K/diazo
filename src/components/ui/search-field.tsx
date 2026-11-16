@@ -12,11 +12,11 @@ import { SearchIcon } from './icons'
    `size="header"` is the ring field as a DashHeader's search: on a phone it
    drops to its own full-width 40px row under the brand row, from md it is the
    30px pill beside the title, at most 320px wide. */
-const searchFieldVariants = cva('flex items-center text-ink-faint', {
+const searchFieldVariants = cva('flex items-center text-ink-3', {
   variants: {
     variant: {
-      ring: 'h-[30px] gap-[7px] rounded-control bg-surface px-[10px] shadow-ring focus-within:shadow-ring-hover',
-      bar: 'h-12 gap-2.5 border-b border-line-soft px-4',
+      ring: 'h-[30px] gap-[7px] rounded-control bg-surface px-[9px] shadow-ring transition-shadow duration-fast focus-within:shadow-[0_0_0_1px_var(--signal),0_0_0_3px_var(--signal-wash)]',
+      bar: 'h-12 gap-2.5 border-b border-line px-4',
     },
     size: {
       default: '',
