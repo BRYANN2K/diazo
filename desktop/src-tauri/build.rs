@@ -10,6 +10,11 @@ fn main() {
     }
     let attributes =
         tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
+            "acp_status",
+            "acp_connect",
+            "acp_login",
+            "acp_run",
+            "acp_stop",
             "claude_status",
             "claude_connect",
             "claude_login",

@@ -22,6 +22,11 @@
         }
       ]
     },
+    "allow-acp-status",
+    "allow-acp-connect",
+    "allow-acp-login",
+    "allow-acp-run",
+    "allow-acp-stop",
     "allow-claude-status",
     "allow-claude-connect",
     "allow-claude-login",
