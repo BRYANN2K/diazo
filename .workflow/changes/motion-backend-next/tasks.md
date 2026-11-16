@@ -18,7 +18,7 @@ Built on `feat/motion-backend-next` (from `dev`), worktree `doop-wt/motion-next`
 - [x] 9. Speech: catalog, installs, jobs, preferences, voices, REST.
 - [ ] 10. Speech: desktop bridge (`desktop/src-tauri/src/speech.rs`).
 - [x] 11. Speech: cloud transcription (ElevenLabs Scribe, OpenAI), ElevenLabs voice-over, custom models, MCP tools, `diazo-speech` sidecar client.
-- [ ] 12. Pocket TTS mirror: design doc and script (not published).
+- [x] 12. Pocket TTS mirror: design doc and script (not published).
 
 ## Phase 4 — 3D and Blender
 
