@@ -1216,6 +1216,35 @@ export const agentRuns = pgTable(
   (t) => [index('agent_runs_canvas_idx').on(t.canvasId, t.startedAt)],
 )
 
+/** The per-call ledger (change agent-cost, shared/toolCalls.ts): one row per
+ *  agent tool call — over MCP or inside a resident run — with the sizes a
+ *  conversation would pay to carry it. Append-only, written at call end,
+ *  read by the Usage tab and get_usage. `canvas_id` is null for calls that
+ *  named no canvas; `run_id` links a resident call to its agent_runs row. */
+export const toolCalls = pgTable(
+  'tool_calls',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id'),
+    /** 'mcp' | 'resident' */
+    source: text('source').notNull(),
+    tool: text('tool').notNull(),
+    actorName: text('actor_name').notNull(),
+    /** 'user' | 'agent' */
+    actorKind: text('actor_kind').notNull(),
+    ownerId: text('owner_id'),
+    /** the resident run the call belongs to */
+    runId: text('run_id'),
+    inputBytes: integer('input_bytes').notNull(),
+    resultBytes: integer('result_bytes').notNull(),
+    imagePixels: integer('image_pixels').notNull().default(0),
+    ms: integer('ms').notNull(),
+    failed: boolean('failed').notNull().default(false),
+    at: bigint('at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('tool_calls_canvas_idx').on(t.canvasId, t.at), index('tool_calls_run_idx').on(t.runId)],
+)
+
 /** Where a component or a frame lives in the linked repo (shared/codeLinks.ts):
  *  a repo-relative path plus the export name. Canvas-level, one row per
  *  target; the repo itself is never read to store it. */

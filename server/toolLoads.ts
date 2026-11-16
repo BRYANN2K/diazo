@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { store } from './store.ts'
+import { byteSize, imagePixelsOf, recordToolCall } from './toolCalls.ts'
 
 /** The canvases a tool call names: `canvas_id`, and the canvases of
  *  `frame_id` / `frame_ids`. */
@@ -29,16 +30,71 @@ export async function withArgsCanvases<T>(args: unknown, run: () => T | Promise<
   }
 }
 
+/** Who a recorded call belongs to, from the server's own scope (the OAuth
+ *  account behind an MCP connection); the actor's display name rides on the
+ *  call's `agent_name` argument like everywhere else. */
+export interface ToolCallContext {
+  ownerId?: string
+  ownerName?: string
+}
+
+/** The per-call ledger (shared/toolCalls.ts): wraps one tool callback so its
+ *  sizes, image pixels and duration land in `tool_calls`. Metering never
+ *  changes or delays the answer. */
+function meter<T>(name: string, args: unknown, ctx: ToolCallContext | undefined, run: () => Promise<T>): Promise<T> {
+  const startedAt = Date.now()
+  const record = (result: unknown, failed: boolean) => {
+    try {
+      recordToolCall({
+        canvasId: argsCanvases(args)[0] ?? null,
+        source: 'mcp',
+        tool: name,
+        actorName:
+          (args && typeof args === 'object' && typeof (args as Record<string, unknown>).agent_name === 'string'
+            ? ((args as Record<string, unknown>).agent_name as string)
+            : undefined) ??
+          ctx?.ownerName ??
+          'agent',
+        actorKind: 'agent',
+        ownerId: ctx?.ownerId ?? null,
+        runId: null,
+        inputBytes: byteSize(args),
+        resultBytes: byteSize(result),
+        imagePixels: imagePixelsOf(result),
+        ms: Date.now() - startedAt,
+        failed,
+        at: startedAt,
+      })
+    } catch {
+      /* the ledger never breaks the call it measures */
+    }
+  }
+  return run().then(
+    (result) => {
+      record(result, !!(result as { isError?: boolean } | null)?.isError)
+      return result
+    },
+    (error: unknown) => {
+      record(undefined, true)
+      throw error
+    },
+  )
+}
+
 /** Every tool registered on `server` from here on loads and holds its
- *  canvases. A tool with an input schema is called with (args, extra), one
- *  without with (extra) alone. */
-export function loadToolTargets(server: McpServer): void {
+ *  canvases, and is recorded in the per-call ledger. A tool with an input
+ *  schema is called with (args, extra), one without with (extra) alone. */
+export function loadToolTargets(server: McpServer, ctx?: () => ToolCallContext): void {
   type Register = typeof server.registerTool
   type Callback = Parameters<Register>[2]
   const register: Register = server.registerTool.bind(server)
   server.registerTool = ((name: string, config: Parameters<Register>[1], callback: Callback) =>
     register(name, config, (async (...params: unknown[]) => {
-      const forward = () => (callback as (...forwarded: unknown[]) => unknown)(...params)
+      /* with an input schema the call is (args, extra); without, (extra) —
+        only the first kind carries arguments worth measuring */
+      const args = params.length > 1 ? params[0] : undefined
+      const forward = async () =>
+        meter(name, args, ctx?.(), () => Promise.resolve((callback as (...forwarded: unknown[]) => unknown)(...params)))
       return params.length > 1 ? withArgsCanvases(params[0], forward) : forward()
     }) as unknown as Callback)) as Register
 }

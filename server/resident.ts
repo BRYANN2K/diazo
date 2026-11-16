@@ -27,6 +27,8 @@ import {
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { inspectFrame, renderFrame } from './screenshot.ts'
+import { imageSize } from './imageSize.ts'
+import { byteSize, recordToolCall } from './toolCalls.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName, withoutMentions } from '../shared/agents.ts'
 import type { AgentRole } from '../shared/agents.ts'
 import { runnerKey } from '../shared/agentRunner.ts'
@@ -3233,7 +3235,73 @@ async function readableFrame(
 }
 
 /** Runs one tool call of the resident's loop. Exported for tests. */
+/** Every resident tool call lands in the per-call ledger (shared/toolCalls.ts)
+ *  beside the MCP calls: same tool name, the run's canvas and run id, the
+ *  sizes a conversation pays to carry the call. */
 export async function execTool(
+  block: Anthropic.ToolUseBlockParam,
+  canvasId: string,
+  actor: ReturnType<typeof actions.resolveActor>,
+  runState: RunState,
+): Promise<Anthropic.ToolResultBlockParam> {
+  const startedAt = Date.now()
+  try {
+    const result = await execToolInner(block, canvasId, actor, runState)
+    recordToolCall({
+      canvasId,
+      source: 'resident',
+      tool: block.name,
+      actorName: actor.name,
+      actorKind: 'agent',
+      ownerId: runState.payerId ?? null,
+      runId: actor.runId ?? null,
+      inputBytes: byteSize(block.input),
+      resultBytes: byteSize(result),
+      imagePixels: residentImagePixels(result),
+      ms: Date.now() - startedAt,
+      failed: result.is_error === true,
+      at: startedAt,
+    })
+    return result
+  } catch (error) {
+    recordToolCall({
+      canvasId,
+      source: 'resident',
+      tool: block.name,
+      actorName: actor.name,
+      actorKind: 'agent',
+      ownerId: runState.payerId ?? null,
+      runId: actor.runId ?? null,
+      inputBytes: byteSize(block.input),
+      resultBytes: 0,
+      imagePixels: 0,
+      ms: Date.now() - startedAt,
+      failed: true,
+      at: startedAt,
+    })
+    throw error
+  }
+}
+
+/** Resident tool results hold images as `source` blocks, not MCP image items. */
+function residentImagePixels(result: Anthropic.ToolResultBlockParam): number {
+  const content = result.content
+  if (!Array.isArray(content)) return 0
+  let pixels = 0
+  for (const block of content) {
+    const image = block as { type?: string; source?: { type?: string; media_type?: string; data?: string } }
+    if (image.type !== 'image' || image.source?.type !== 'base64' || typeof image.source.data !== 'string') continue
+    try {
+      const size = imageSize(Buffer.from(image.source.data, 'base64'), image.source.media_type ?? 'image/png')
+      pixels += size.width * size.height
+    } catch {
+      /* undecodable — the byte size still records what the context carries */
+    }
+  }
+  return pixels
+}
+
+async function execToolInner(
   block: Anthropic.ToolUseBlockParam,
   canvasId: string,
   actor: ReturnType<typeof actions.resolveActor>,

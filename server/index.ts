@@ -74,6 +74,7 @@ import { BUILT_BODY_LIMIT, handleBuiltDelivery } from './builtRoutes.ts'
 import { compareFrameWithUrl, driftErrorMessage, getComparison, listComparisons } from './drift.ts'
 import { classifyDriftUrl } from '../shared/drift.ts'
 import { usageReport } from './agentRuns.ts'
+import { toolCallReport } from './toolCalls.ts'
 import { RollbackConflictError, rollbackRun, runTimeline } from './runReplay.ts'
 import { DuelInputError, listDuels, pickDuel, startDuel, startMotionDuel } from './duels.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
@@ -3882,11 +3883,13 @@ app.get('/api/canvases/:id/find', (req, res) => {
   res.json(findInCanvas(canvas, q, { matchCase: req.query.case === '1' }))
 })
 
-/* the usage meter (server/agentRuns.ts): every resident run's tokens, time
-   and cost on this canvas — what editors spend, so editors read it */
+/* the usage meter (server/agentRuns.ts) plus the per-call ledger
+   (server/toolCalls.ts): every resident run's tokens, time and cost, and
+   every tool call's sizes — what editors spend, so editors read it */
 app.get('/api/canvases/:id/usage', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
-  res.json(await usageReport(req.params.id))
+  const [report, calls] = await Promise.all([usageReport(req.params.id), toolCallReport(req.params.id)])
+  res.json({ ...report, toolCalls: calls })
 })
 
 /* run replay (server/runReplay.ts): one resident run's activity and the

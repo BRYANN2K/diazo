@@ -77,6 +77,7 @@ import * as workspaces from './workspaces.ts'
 import { auth, getUserName, isBanned } from './auth.ts'
 import { compareFrameWithUrl } from './drift.ts'
 import { USAGE_RUN_LIMIT, usageReport } from './agentRuns.ts'
+import { toolCallReport } from './toolCalls.ts'
 import { capture, captureThrottled } from './analytics.ts'
 import { renderFrame } from './screenshot.ts'
 import { lintAndStore } from './lint.ts'
@@ -493,7 +494,7 @@ export function buildMcpServer(
     if (agent_name) actions.heartbeatAgent(canvasId, actorFrom(agent_name))
   }
   const server = new McpServer({ name: 'diazo-canvas', version: packageJson.version }, { instructions: INSTRUCTIONS })
-  loadToolTargets(server)
+  loadToolTargets(server, () => ({ ownerId, ownerName: owner }))
   registerFramePreview(server)
 
   server.registerTool(
@@ -991,7 +992,12 @@ export function buildMcpServer(
       /* what editors spend, so editors read it — same as the Usage tab */
       if (!canvasFor(canvas_id, 'edit')) return noCanvas(canvas_id)
       const report = await usageReport(canvas_id)
-      const body = { ...report, runs: report.runs.slice(0, limit ?? 20) }
+      const calls = await toolCallReport(canvas_id).catch(() => undefined)
+      const body = {
+        ...report,
+        ...(calls ? { toolCalls: calls } : {}),
+        runs: report.runs.slice(0, limit ?? 20),
+      }
       return withFeedbackNotice(text(JSON.stringify(body)), canvas_id, agent_name ? actorFrom(agent_name) : undefined)
     },
   )
