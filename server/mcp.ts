@@ -79,7 +79,7 @@ import { compareFrameWithUrl } from './drift.ts'
 import { USAGE_RUN_LIMIT, usageReport } from './agentRuns.ts'
 import { toolCallReport } from './toolCalls.ts'
 import { capture, captureThrottled } from './analytics.ts'
-import { renderFrame } from './screenshot.ts'
+import { contactSheet, renderFrame, SHEET_CELL, SHOT_MAX_EDGE, shotScaleFor } from './screenshot.ts'
 import { lintAndStore } from './lint.ts'
 import { checkAndStore, checkOutcomeForAgent } from './frameChecks.ts'
 import { applyAgentUpdate, briefFor, devTaskFor, devTasksForCanvas } from './devTasks.ts'
@@ -3601,15 +3601,72 @@ export function buildMcpServer(
         'Render a frame and return a PNG screenshot of it — this is how you SEE your design. Always review your work with this after creating or updating a frame, then fix what looks wrong (spacing, overflow, contrast, alignment) and check again. Iterate until it actually looks good, not just until the HTML seems right.',
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
-        frame_id: z.string(),
+        frame_id: z.string().optional().describe('The frame to render (or send frame_ids for a contact sheet)'),
+        frame_ids: z
+          .array(z.string())
+          .max(12)
+          .optional()
+          .describe('Render several frames into ONE contact-sheet image, in this order (max 12)'),
         scale: z
           .union([z.literal(1), z.literal(2)])
           .optional()
           .describe('Device scale factor: 1 (default) or 2 for a retina-resolution image'),
+        max_edge: z
+          .number()
+          .int()
+          .min(64)
+          .max(4096)
+          .optional()
+          .describe(
+            "Cap the returned image's long edge in px (default 1568) — ask less when checking layout, more for final pixel review",
+          ),
+        region: z
+          .object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+          .optional()
+          .describe(
+            'Capture only this rectangle of the frame, in frame px — zoom on a corner instead of re-reading a whole shot',
+          ),
         agent_name: agentName.optional(),
       },
     },
-    async ({ frame_id, scale, agent_name }) => {
+    async ({ frame_id, frame_ids, scale, max_edge, region, agent_name }) => {
+      if (frame_ids?.length) {
+        const frames = frame_ids.map((id) => ({ id, live: frameFor(id, 'view') }))
+        const missing = frames.find((f) => !f.live)
+        if (missing) return noFrame(missing.id)
+        arrive(frames[0]!.live!.canvasId, agent_name)
+        try {
+          const shots = await Promise.all(
+            frames.map(async ({ live }) => {
+              const f = { ...live! }
+              const s = shotScaleFor(f.width, f.height, 1, SHEET_CELL.width * 2)
+              return { frame: f, png: await renderFrame(f, s) }
+            }),
+          )
+          const sheet = await contactSheet(shots)
+          const names = shots.map(({ frame }) => `“${frame.name}”`).join(', ')
+          return withPreview(
+            withFeedbackNotice(
+              {
+                content: [
+                  { type: 'image' as const, data: sheet.toString('base64'), mimeType: 'image/png' },
+                  {
+                    type: 'text' as const,
+                    text: `Contact sheet of ${shots.length} frames, left to right then down: ${names}`,
+                  },
+                ],
+              },
+              frames[0]!.live!.canvasId,
+              agent_name ? actorFrom(agent_name) : undefined,
+            ),
+            frames[0]!.live!.canvasId,
+            shots.map(({ frame }) => frame),
+          )
+        } catch (e) {
+          return err(`contact sheet failed: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      }
+      if (!frame_id) return err('send frame_id, or frame_ids for a contact sheet')
       const live = frameFor(frame_id, 'view')
       if (!live) return noFrame(frame_id)
       arrive(live.canvasId, agent_name)
@@ -3617,10 +3674,24 @@ export function buildMcpServer(
          this older image with its newer updatedAt, or the cache would serve
          it as current for the next five minutes */
       const f = { ...live }
+      if (region) {
+        const inside =
+          region.width > 0 &&
+          region.height > 0 &&
+          region.x >= 0 &&
+          region.y >= 0 &&
+          region.x < f.width &&
+          region.y < f.height
+        if (!inside) return err(`region ${JSON.stringify(region)} falls outside the ${f.width}×${f.height} frame`)
+      }
+      const cap = max_edge ?? SHOT_MAX_EDGE
+      const capture = region ? { width: region.width, height: region.height } : { width: f.width, height: f.height }
+      const effective = shotScaleFor(capture.width, capture.height, scale ?? 1, cap)
       try {
-        const png = await renderFrame(f, scale ?? 1)
-        /* the ChatGPT card loads this exact image next — serve it from cache */
-        primeImage(f, scale ?? 1, png)
+        const png = await renderFrame(f, effective, region ? { clip: region } : {})
+        /* the ChatGPT card loads this exact image next — serve it from cache,
+           but only a full-frame shot at the asked scale is that image */
+        if (!region && effective === (scale ?? 1)) primeImage(f, scale ?? 1, png)
         return withPreview(
           withFeedbackNotice(
             {
@@ -3628,7 +3699,7 @@ export function buildMcpServer(
                 { type: 'image' as const, data: png.toString('base64'), mimeType: 'image/png' },
                 {
                   type: 'text' as const,
-                  text: `Screenshot of “${f.name}” (${f.width}×${f.height}@${scale ?? 1}x, html ${f.html.length} bytes)${croppedNote(f, scale ?? 1)}`,
+                  text: `Screenshot of “${f.name}” (${Math.round(capture.width)}×${Math.round(capture.height)}@${Number(effective.toFixed(3))}x, html ${f.html.length} bytes)${region ? `, region (${region.x},${region.y} ${region.width}×${region.height})` : croppedNote(f, effective)}`,
                 },
               ],
             },

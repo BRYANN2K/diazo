@@ -2,6 +2,7 @@ import { env, windowsBrowserDirectories } from './env.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
+import sharp from 'sharp'
 import type { Frame } from '../shared/types.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
 import { renderedHeight } from './renderLimits.ts'
@@ -474,6 +475,62 @@ export function renderFrame(
     },
     { priority: opts.priority },
   )
+}
+
+/* ---------------------------------------------------------------- */
+/* agent-cost AC-5: bounded screenshots and contact sheets           */
+/* ---------------------------------------------------------------- */
+
+/** Without max_edge, a tool screenshot's long edge never exceeds this. */
+export const SHOT_MAX_EDGE = 1568
+/** A contact sheet cell; the grid is at most SHEET_COLS wide. */
+export const SHEET_CELL = { width: 480, height: 360 }
+export const SHEET_COLS = 3
+const SHEET_GAP = 16
+
+/** The deviceScaleFactor that keeps a capture's long edge within maxEdge —
+ *  never above the caller's scale, only below it. */
+export function shotScaleFor(captureWidth: number, captureHeight: number, scale: number, maxEdge: number): number {
+  const long = Math.max(captureWidth, captureHeight, 1)
+  return Math.min(scale, maxEdge / long)
+}
+
+/** One PNG holding every frame's thumbnail in order, left to right then down. */
+export async function contactSheet(frames: readonly { frame: Frame; png: Buffer }[]): Promise<Buffer> {
+  const cols = Math.min(Math.max(frames.length, 1), SHEET_COLS)
+  const rows = Math.ceil(frames.length / cols)
+  const cells = await Promise.all(
+    frames.map(({ png }) =>
+      sharp(png).resize({ width: SHEET_CELL.width, height: SHEET_CELL.height, fit: 'inside' }).png().toBuffer(),
+    ),
+  )
+  const composites = await Promise.all(
+    cells.map(async (cell, i) => {
+      const meta = await sharp(cell).metadata()
+      return {
+        input: cell,
+        left:
+          SHEET_GAP +
+          (i % cols) * (SHEET_CELL.width + SHEET_GAP) +
+          Math.floor((SHEET_CELL.width - (meta.width ?? SHEET_CELL.width)) / 2),
+        top:
+          SHEET_GAP +
+          Math.floor(i / cols) * (SHEET_CELL.height + SHEET_GAP) +
+          Math.floor((SHEET_CELL.height - (meta.height ?? SHEET_CELL.height)) / 2),
+      }
+    }),
+  )
+  return sharp({
+    create: {
+      width: cols * SHEET_CELL.width + (cols + 1) * SHEET_GAP,
+      height: rows * SHEET_CELL.height + (rows + 1) * SHEET_GAP,
+      channels: 3,
+      background: '#e8e8e8',
+    },
+  })
+    .composite(composites)
+    .png()
+    .toBuffer()
 }
 
 async function screenshotOn(page: Page, frame: Frame, scale: number, opts: RenderOptions): Promise<Buffer> {
