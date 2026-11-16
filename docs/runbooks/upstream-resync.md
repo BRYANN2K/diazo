@@ -28,7 +28,8 @@ To take one upstream pull request instead: `git fetch upstream pull/<n>/head:pr-
 ## Rules while resolving
 
 - Keep Diazo's names in everything a user sees, and upstream's `doop` in internal identifiers ([ADR 0002](../adr/0002-rename-the-fork-to-diazo.md)).
-- The fork removed upstream's CLA (`CLA.md`, `cla.yml`) and release-please (`release-please.yml`, its config and manifest). A conflict on them resolves by keeping them deleted.
+- The fork removed upstream's CLA (`CLA.md`, `.github/workflows/cla.yml`). A conflict on them resolves by keeping them deleted.
+- `release-please.yml` stays, guarded to run upstream only; its config and manifest come in unchanged.
 - Upstream's `CHANGELOG.md` entries do not come in; `CHANGELOG.md` is the fork's.
 - `ios-release.yml` needs upstream's signing secrets: never push an `ios-v*` tag in the fork.
 - Update [docs/FEATURES.md](../FEATURES.md) ("Merged upstream PRs") with each PR taken.

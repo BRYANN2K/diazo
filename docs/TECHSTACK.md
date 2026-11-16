@@ -1082,11 +1082,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
 
 - GitHub Actions:
   - `.github/workflows/ci.yml` - gates `typecheck`, `lint` + `format:check` + `doc-lint`, `build`
-    and `test` (four vitest shards) as parallel jobs on push to `main` and on PRs, cancelling
+    and `test` (four vitest shards) as parallel jobs on push to `dev`, `staging` and `main` and on PRs, cancelling
     superseded PR runs; a separate job lints the PR title with commitlint (PRs land on
     `main` as a squash, so the PR title becomes the commit subject).
-  - `.github/workflows/cla.yml` - CLA check (this is an AGPL-3.0 project with CLA-based
-    contribution).
   - `.github/workflows/desktop.yml` / `desktop-release.yml` - Tauri desktop app CI and installer
     release (tag `desktop-v*`, universal macOS DMG, Windows NSIS, Linux AppImage/.deb/.rpm,
     optional Apple signing/notarization).

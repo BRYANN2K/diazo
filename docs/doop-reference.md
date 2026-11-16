@@ -1110,8 +1110,8 @@ through identical plumbing.
 
 ## Contributing
 
-PRs welcome — see [CONTRIBUTING.md](../CONTRIBUTING.md) for commit conventions and code style. First-time
-contributors sign the [CLA](../CLA.md); a bot asks for it on your first PR.
+PRs welcome — see [CONTRIBUTING.md](../CONTRIBUTING.md) for the branch flow, commit conventions and code style.
+Diazo has no contributor licence agreement.
 
 | Command                           | What it does                                                                        |
 | --------------------------------- | ----------------------------------------------------------------------------------- |
