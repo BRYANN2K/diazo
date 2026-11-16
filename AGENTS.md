@@ -1,3 +1,89 @@
+# AGENTS.md: Diazo
+
+Entry point for coding agents working in this repository. Bryan reads it too.
+Status: current, updated 2026-11-16
+
+Diazo is a free, self-hosted multiplayer design canvas for humans and AI agents, forked from doop (`kgoedecke/doop`, AGPL-3.0). A canvas (`/c/<id>`) holds frames that render real HTML in sandboxed iframes. People edit in the browser or the desktop app, agents through the built-in MCP server, and everyone sees one WebSocket room per canvas.
+
+## Read first
+
+1. [.workflow/project.md](.workflow/project.md): intent, project map and conventions.
+2. [docs/PRD.md](docs/PRD.md) for what and why; [docs/TRD.md](docs/TRD.md) for how.
+3. [docs/adr/README.md](docs/adr/README.md): accepted decisions. Do not contradict one without a new ADR.
+4. [docs/GLOSSARY.md](docs/GLOSSARY.md): use these words in code, UI and docs.
+5. [docs/TECHSTACK.md](docs/TECHSTACK.md) (module by module), [docs/DESIGN.md](docs/DESIGN.md) (tokens and UI primitives), [docs/CODESTYLE.md](docs/CODESTYLE.md) (lint and format rules).
+6. [CONTRIBUTING.md](CONTRIBUTING.md): branches, pull requests and checks. Deploy and resync: [docs/RELEASE.md](docs/RELEASE.md) and [docs/runbooks/](docs/runbooks/).
+
+## Commands
+
+```sh
+bun install             # expected: dependencies and git hooks installed
+bun run dev             # expected: server and web app on an embedded PGlite, no setup
+bun run typecheck       # expected: exits 0
+bun run lint            # expected: oxlint then ESLint, zero warnings
+bun run format:check    # expected: no changes
+bun run doc-lint        # expected: "doc-lint passed"
+bunx vitest run tests/<file>.test.ts   # expected: that file passes
+bun run test            # expected: all pass; slow, CI shards it in four
+```
+
+Before a commit: `bun run typecheck && bun run lint && bun run test`, plus `bun run doc-lint` when docs changed. Self-host with `docker compose up` (Postgres, port 4400).
+
+## Workflow: Stip
+
+- No code without a change: `stip-explore`, then `stip-validate`, before `stip-apply`.
+- A change lives in `.workflow/changes/<id>/`: proposal.md, spec.md (`- AC-n` criteria), tasks.md, evidence.md, state.json.
+- `stip-check` marks each AC-n passed, failed or unverified, with the evidence location. Merged is not verified.
+- `stip-docs` updates the status line of every doc the change touched, the ADR index, the glossary and `docs/FEATURES.md`.
+- `stip-archive` promotes the spec to `.workflow/specs/`. A decision that outlives the change becomes an ADR first.
+
+## Branches and pull requests
+
+- Work on `feat/*`, `fix/*`, `docs/*` or `chore/*`. Open a pull request into `dev`; `dev` goes to `staging` (deployed to the VPS for testing), then to `main` (public: the curl installers and the `:main` / `:latest` image). See [ADR 0006](docs/adr/0006-merge-through-dev-staging-and-main.md).
+- Never push to `dev`, `staging` or `main` directly. Every pull request is first written as a local draft for Bryan to read.
+- `origin` is `BRYANN2K/diazo`. Never push to `upstream` (`kgoedecke/doop`); take its work with [docs/runbooks/upstream-resync.md](docs/runbooks/upstream-resync.md).
+- Commits and pull request titles: Conventional Commits with a lowercase subject, one idea per commit (`feat(canvas): add snap guides`). Commitlint enforces it.
+- No mention of an AI tool or model in commits, pull requests or docs: no co-author trailer for one, no "generated with" line.
+
+## Conventions
+
+- Code, commits and technical docs in English. Short sentences, one idea each.
+- TypeScript 5.9 strict, React 18, Express 4, drizzle on Postgres 16, Tauri 2 (Rust) for the desktop shell, Bun as package manager and script runner, Node and `tsx` as the server runtime.
+- Screens compose `src/components/ui`; type sizes, radii, weights and colours come from the named tokens in `docs/DESIGN.md` (ESLint enforces it).
+- `process.env` is read only in `server/env.ts`.
+- A new fork feature gets a line in [docs/FEATURES.md](docs/FEATURES.md) and, if user-visible, in the `[Unreleased]` section of [CHANGELOG.md](CHANGELOG.md).
+
+## Brand and internal identifiers
+
+- The product is **Diazo**, its built-in agent the **Diazo Agent** (`@diazo`). doop's name and Disc-D logo are its owner's trademarks: never put them back in anything a user sees. Marks come from `src/components/Logo.tsx` (rules in `docs/DESIGN.md`, Marks).
+- Internal identifiers keep the old name on purpose, so data and integrations do not break: `data-doop-*` attributes, `doop:` storage keys, `DOOP_*` env vars, `doop-secrets` and the `doop` namespace, DB tables, MCP tool names, the `doop://` scheme, the `doop-desktop` executable, crate and package names, the `Doop Keys` font, `.doop.json`. Do not rename them in a branding pass ([ADR 0002](docs/adr/0002-rename-the-fork-to-diazo.md)).
+
+## Boundaries
+
+- **Always:** run the checks above before calling a task done; record evidence in the Stip change.
+- **Ask first:** new dependencies, schema or data migrations, CI or release changes, accepting an ADR, deleting files.
+- **Never:** commit secrets or `.env` files (`doop-secrets` lives in the cluster only, never on disk); add an ingress, cloudflared or Funnel (the instance is Tailscale only, [ADR 0004](docs/adr/0004-expose-the-instance-over-tailscale-only.md)); edit an accepted ADR; skip or delete a failing test.
+
+## Repo map
+
+| Path          | What lives there                                                                         |
+| ------------- | ---------------------------------------------------------------------------------------- |
+| `src/`        | React web app (Vite entry `index.html`); `src/components/ui/` primitives                 |
+| `server/`     | Express API, WebSocket room, MCP server, better-auth; `server/db/` schema and migrations |
+| `shared/`     | Types and logic used by server and client                                                |
+| `desktop/`    | Tauri shell: `src-tauri/` (WebKit) and `src-tauri-chromium/` (macOS)                     |
+| `cli/`        | The `diazo` command line (`bun run diazo`)                                               |
+| `tests/`      | Vitest suite, browser tests on one shared Chromium                                       |
+| `deploy/k3s/` | The owner instance manifest                                                              |
+| `.workflow/`  | Stip: project map, accepted specs, open and archived changes                             |
+| `docs/`       | Standing docs, ADRs, runbooks                                                            |
+
+## Gotchas
+
+- Do not move or rename source files while long branches are open on them; they must still merge.
+- Two Tauri shells build the same sources; a desktop change usually needs a desktop release to reach users.
+- Frame HTML loads per canvas: reading an unloaded frame's `html` throws `FrameHtmlNotLoadedError` (see `docs/TECHSTACK.md`, Data and Persistence).
+
 <!-- spec-workflow:start -->
 
 # AGENTS.md

@@ -59,7 +59,7 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'target', 'extensions
 const SOURCE_DIRS = ['src', 'server', 'shared', 'tests', 'cli', 'desktop/src-tauri/src']
 const SOURCE_EXT_RE = /\.(ts|tsx|js|mjs|rs)$/
 
-const AGENTS_MD_MAX_LINES = 200
+const AGENTS_MD_MAX_LINES = 150
 const PLACEHOLDER_RE = /<Product>|<Project>|\bYYYY-MM-DD\b/
 
 // ============================== END CONFIG ==============================
@@ -105,7 +105,9 @@ if (claudeMd !== null && !/^@AGENTS\.md\s*$/m.test(claudeMd)) {
   errors.push('CLAUDE.md must import AGENTS.md ("@AGENTS.md" on its own line)')
 }
 const agentsMd = read(join(ROOT, 'AGENTS.md'))
-if (agentsMd !== null && agentsMd.split('\n').length > AGENTS_MD_MAX_LINES) {
+// Lines outside Stip's managed block (<!-- spec-workflow:start --> … end), which the tool owns.
+const agentsOwn = agentsMd?.replace(/<!-- spec-workflow:start -->[\s\S]*?<!-- spec-workflow:end -->/, '') ?? null
+if (agentsOwn !== null && agentsOwn.split('\n').length > AGENTS_MD_MAX_LINES) {
   warnings.push(`AGENTS.md is over ${AGENTS_MD_MAX_LINES} lines; move facts into docs/ and link them`)
 }
 
