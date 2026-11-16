@@ -131,6 +131,14 @@ upstream pull requests it merged ahead of upstream. Resync notes and the deploy 
   its designed frame (matched by route mapping or name), scored as a drift comparison, and
   rewritten in place on the next delivery. Payload and CI recipe in
   [docs/built-page.md](built-page.md).
+- **All-in-one Mac install** — `scripts/install.sh` (`curl … | sh`) sets up the local server
+  (through `install-local.sh`), a LaunchAgent that starts it at login (logs in
+  `~/Library/Logs/Diazo`), `Diazo.app` (through `install-desktop.sh`) pointed at
+  `http://127.0.0.1:4400`, and the `diazo` command (start, stop, restart, status, logs, update,
+  open, uninstall); `--app-only`, `--server-only`, `--use-local`, `--dry-run`. The app's
+  Diazo → Local Server menu (macOS, desktop 0.16) shows the server's status and starts, stops or
+  restarts it, opens its logs and switches the app to it; Settings → About shows the same status
+  ([Install](../README.md#install)).
 - **Local install on a Mac** — one `curl … | sh` runs Diazo in a single Apple `container` on
   `127.0.0.1:4400`, with PGlite and uploads in `~/.diazo/data` (an older `~/.doop` is kept in
   place) and secrets generated on the Mac ([Install](../README.md#install)).

@@ -47,6 +47,26 @@ restart, status, logs, update, uninstall), with `doop-local` as a link to it. `.
 `linux/arm64` on native runners and merges the digests; without an arm64 manifest the script
 runs the amd64 image under Rosetta, and `--build` builds it locally. Tests:
 `installLocal.test.ts` (stub `container`, `uname`, `curl`; no container is started).
+The container also gets `TRUSTED_ORIGINS=http://127.0.0.1:<port>`, the origin the app opens;
+`--keep-data` makes `uninstall` keep the data folder without asking.
+
+### All in one (`scripts/install.sh`)
+
+`curl -fsSL …/scripts/install.sh | sh` runs `install-local.sh install` and then
+`install-desktop.sh` (the copies beside it in a checkout, else downloaded from `main`; never
+duplicated), after checking Apple silicon, macOS 26+ and `container` 1.0+ (otherwise the
+download link, an `--app-only` offer on a terminal, and nothing installed). Around them: a
+LaunchAgent `~/Library/LaunchAgents/dev.bryann2k.diazo.server.plist` (`launchctl bootout` then
+`bootstrap gui/<uid>`; at login `diazo autostart` starts the services and the container when
+`/healthz` does not answer; logs in `~/Library/Logs/Diazo`), the app's `server.json` set to
+`http://127.0.0.1:4400` unless another server is chosen (`--use-local` replaces it; the shell's
+identity migration keeps it), and the `diazo` command (this script in `<home>/bin/diazo`, the
+two installers in `<home>/lib`, linked into `/usr/local/bin` or `~/.local/bin`):
+`start|stop|restart|status|logs|update|open|uninstall [--purge]`. `update` downloads the three
+scripts again and updates what `<home>/install.conf` records. Flags: `--app-only`,
+`--server-only`, `--use-local`, `--version`, `--dry-run`, `--uninstall [--purge]`. The app's
+Diazo → Local Server menu (`local_server.rs`) needs desktop 0.16.0. Tests: `install.test.ts`
+(stub `container`, `launchctl`, `curl`, `uname`, `sw_vers`, `open`, `osascript`).
 
 ## Build identity and the update check (this fork)
 
