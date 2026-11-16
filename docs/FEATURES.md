@@ -123,6 +123,10 @@ upstream pull requests it merged ahead of upstream. Resync notes are in
 - **Handoff to Stip** — a frame marked ready for dev builds a Stip change pack, previewed in the
   Inspector and plan cards, then written into the linked repo by the desktop app's single write
   command (`repo_write_change`). Agents call `create_handoff`.
+- **Zoomed-out frame pictures** — frames too small for live documents show stored previews at
+  their on-screen width. Edits keep the previous picture until its replacement loads. Unchanged
+  previews survive a server restart, and moving a frame does not render it again. A neutral
+  placeholder and bounded retries cover cold or busy renderers. Preview work starts on demand.
 - **Live frames** (desktop app) — a frame that shows a local dev server (`localhost` only) with a
   LIVE badge, created from the import picker or with `create_live_frame`, and snapshotted at the
   frame's size.

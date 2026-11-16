@@ -25,10 +25,13 @@ export async function openCanvasPage(page: Page, frames: Frame[], search = ''): 
   await showCanvasPage(page, frames, search)
 }
 
-/** An answer to a request outside `/api/`, or undefined to let it through. */
-export type FixtureResponder = (
-  path: string,
-) => { status: number; contentType?: string; body: Buffer | string; headers?: Record<string, string> } | undefined
+/** An answer to a request outside `/api/`, or undefined to let it through.
+ *  May be a promise: a test that holds a response back while it asserts what
+ *  the page does without it resolves the promise to answer (or pass on) the
+ *  request. */
+export type FixtureResponse =
+  { status: number; contentType?: string; body: Buffer | string; headers?: Record<string, string> } | undefined
+export type FixtureResponder = (path: string) => FixtureResponse | Promise<FixtureResponse>
 
 /** The stubs alone, for a test that has something to do before the page
  *  loads. `respond` answers other paths the test serves itself (frame images). */
@@ -47,8 +50,10 @@ export async function prepareCanvasPage(page: Page, respond?: FixtureResponder):
     const url = new URL(request.url())
     const path = url.pathname
     if (!path.startsWith('/api/')) {
-      const answer = respond?.(path + url.search)
-      return void (answer ? request.respond(answer) : request.continue())
+      void Promise.resolve(respond?.(path + url.search)).then((answer) =>
+        answer ? request.respond(answer) : request.continue(),
+      )
+      return
     }
     const body =
       path === '/api/auth/get-session'

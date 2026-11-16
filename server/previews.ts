@@ -58,12 +58,18 @@ export type ImageResult =
       /** false when a stored preview of an older design was served while
        *  the current one renders in the background (stage images only) */
       fresh?: boolean
+      ext?: 'jpg' | 'png'
     }
   | { status: 'rate-limited' }
 
 /** May reject when the render itself fails — the caller owns the 500. */
 export async function getImage(frame: Frame, req: ImageRequest): Promise<ImageResult> {
-  if (req.lod) return getStageImage(frame, req.lod, req)
+  if (req.lod) {
+    const source = await store.renderSource(frame)
+    const ext = /<body\b[^>]*\bdata-doop-canvas-element=/i.test(source.html) ? 'png' : req.ext
+    const result = await getStageImage(frame, req.lod, { ...req, ext })
+    return result.status === 'ok' ? { ...result, ext } : result
+  }
   const preview = req.preview && req.ext === 'jpg'
   const key = imageKey(frame.id, req.ext, req.scale, req.ext === 'jpg' ? req.quality : '', preview)
   const cached = imgCache.get(key)
@@ -83,17 +89,22 @@ export async function getImage(frame: Frame, req: ImageRequest): Promise<ImageRe
 
   if (!pending) {
     if (!(await consumeRenderBudget(req.ip, req.isAuthenticated))) return { status: 'rate-limited' }
-    pending = preview
-      ? /* renders AND persists — the next cold start serves from storage */
-        thumbs.create(frame)
-      : withRenderSlot(async () => {
-          const { renderFrame } = await loadScreenshot()
-          /* the html is read when the render starts, not when it was queued */
-          return renderFrame(await store.renderSource(frame), req.scale, {
-            type: req.ext === 'jpg' ? 'jpeg' : 'png',
-            quality: req.quality,
-          })
-        })
+    if (preview) {
+      /* renders AND persists — the next cold start serves from storage.
+         Only a render of the current design enters the cache: a write that
+         landed while it drew leaves the bytes a version behind */
+      const { buf, renderedAt } = await thumbs.create(frame)
+      if (thumbs.freshAt(frame, renderedAt)) remember(key, Promise.resolve(buf), frame.updatedAt)
+      return { status: 'ok', buf }
+    }
+    pending = withRenderSlot(async () => {
+      const { renderFrame } = await loadScreenshot()
+      /* the html is read when the render starts, not when it was queued */
+      return renderFrame(await store.renderSource(frame), req.scale, {
+        type: req.ext === 'jpg' ? 'jpeg' : 'png',
+        quality: req.quality,
+      })
+    })
     remember(key, pending, frame.updatedAt)
   }
 
@@ -117,9 +128,13 @@ async function getStageImage(frame: Frame, width: FramePreviewWidth, req: ImageR
     return { status: 'ok', buf: stored.buf, fresh: stored.fresh }
   }
   if (!(await consumeRenderBudget(req.ip, req.isAuthenticated))) return { status: 'rate-limited' }
-  const pending = thumbs.create(frame, variant)
-  remember(key, pending, frame.updatedAt)
-  return { status: 'ok', buf: await pending, fresh: true }
+  /* the render may have been started by an earlier request and seen a write
+     land while it drew: those bytes are an older design — served stale, never
+     cached, and never marked immutable under the new version's URL */
+  const { buf, renderedAt } = await thumbs.create(frame, variant)
+  const fresh = thumbs.freshAt(frame, renderedAt)
+  if (fresh) remember(key, Promise.resolve(buf), frame.updatedAt)
+  return { status: 'ok', buf, fresh }
 }
 
 function imageKey(id: string, ext: 'png' | 'jpg', scale: number, quality: number | string, preview: boolean): string {

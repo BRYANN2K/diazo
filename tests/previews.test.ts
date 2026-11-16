@@ -19,6 +19,8 @@ vi.mock('../server/storage.ts', () => ({
 }))
 
 import { getImage, primeImage } from '../server/previews.ts'
+import * as thumbs from '../server/thumbs.ts'
+import { store } from '../server/store.ts'
 
 let seq = 0
 const frame = (over: Partial<Frame> = {}): Frame =>
@@ -74,7 +76,7 @@ describe('getImage', () => {
       expect.objectContaining({ type: 'jpeg', quality: 70, maxHeight: 1200 }),
     )
     await new Promise((r2) => setTimeout(r2, 10))
-    expect(mocks.putObject).toHaveBeenCalledWith(`thumb/${f.id}.jpg`, expect.anything(), 'image/jpeg')
+    expect(mocks.putObject).toHaveBeenCalledWith(`thumb/${f.id}-v1.jpg`, expect.anything(), 'image/jpeg')
   })
 
   it('caches per frame version — one render serves repeat requests, an update re-renders', async () => {
@@ -162,8 +164,46 @@ describe('getImage', () => {
     expect(mocks.renderFrame).toHaveBeenCalledTimes(2)
   })
 
+  it('a write during the first render comes back stale for every request sharing it', async () => {
+    const resolvers: ((buf: Buffer) => void)[] = []
+    mocks.renderFrame.mockImplementation(() => new Promise<Buffer>((r) => resolvers.push(r)))
+    const f = frame()
+    const live = vi.spyOn(store, 'getFrame').mockImplementation((id) => (id === f.id ? f : undefined))
+    const first = getImage(f, req({ lod: 256 }))
+    /* the design moves on while the render runs */
+    await new Promise((r) => setTimeout(r, 10))
+    f.updatedAt = 2
+    thumbs.noteDesignWrite(f.id)
+    const second = getImage(f, req({ lod: 256 }))
+    resolvers[0]!(Buffer.from('older design'))
+    /* both requests shared the one render, and it honestly says it is behind */
+    expect(await first).toMatchObject({ status: 'ok', fresh: false })
+    expect(await second).toMatchObject({ status: 'ok', fresh: false })
+    expect(mocks.renderFrame).toHaveBeenCalledTimes(1)
+    /* not remembered as current: the next ask reads storage again and stays
+       honest while the re-render runs */
+    mocks.getObject.mockImplementation((key: string) =>
+      Promise.resolve(key.endsWith('.json') ? null : Buffer.from('older design')),
+    )
+    expect(await getImage(f, req({ lod: 256 }))).toMatchObject({ status: 'ok', fresh: false })
+    live.mockRestore()
+  })
+
+  it('a stage render of the current design is cached under its version', async () => {
+    mocks.renderFrame.mockResolvedValue(Buffer.from('current'))
+    const f = frame()
+    expect(await getImage(f, req({ lod: 512 }))).toMatchObject({ status: 'ok', fresh: true })
+    /* same version again: from memory, no render, no new storage read */
+    const reads = mocks.getObject.mock.calls.length
+    expect(await getImage(f, req({ lod: 512 }))).toMatchObject({ status: 'ok', fresh: true })
+    expect(mocks.renderFrame).toHaveBeenCalledTimes(1)
+    expect(mocks.getObject.mock.calls.length).toBe(reads)
+  })
+
   it('serves a stored stage image at once, marked stale while it refreshes, and keeps it out of memory', async () => {
-    mocks.getObject.mockResolvedValue(Buffer.from('older design'))
+    mocks.getObject.mockImplementation((key: string) =>
+      Promise.resolve(key.endsWith('.json') ? null : Buffer.from('older design')),
+    )
     mocks.renderFrame.mockImplementation(() => new Promise(() => {}))
     const f = frame()
     const first = await getImage(f, req({ lod: 256 }))
@@ -171,6 +211,6 @@ describe('getImage', () => {
     expect(first.status === 'ok' && first.buf.toString()).toBe('older design')
     /* the refresh is running; the next ask reads storage again rather than a cached stale copy */
     await getImage(f, req({ lod: 256 }))
-    expect(mocks.getObject).toHaveBeenCalledTimes(2)
+    expect(mocks.getObject.mock.calls.filter(([key]) => key === `thumb/${f.id}-w256.jpg`)).toHaveLength(2)
   })
 })

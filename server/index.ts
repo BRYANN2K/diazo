@@ -613,7 +613,7 @@ app.get('/i/:id.:ext', async (req, res) => {
   }
   const { buf } = result
 
-  res.set('Content-Type', ext === 'jpg' ? 'image/jpeg' : 'image/png')
+  res.set('Content-Type', (result.ext ?? ext) === 'jpg' ? 'image/jpeg' : 'image/png')
   if (result.fresh === false) {
     /* an older design while the current one renders: the stage asks again */
     res.set('Cache-Control', 'no-store')

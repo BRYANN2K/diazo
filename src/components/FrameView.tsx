@@ -1983,7 +1983,7 @@ export const FrameView = memo(function FrameView({
                  from the cache off it. Never the frame's HTML, so a deferred
                  frame stays deferred. */
               (frame.html || frame.htmlDeferred) && (
-                <FrameImage frame={frame} ext={isCanvasElement(frame.html) ? 'png' : 'jpg'} fetch={lod !== 'none'} />
+                <FrameImage frame={frame} ext={isCanvasElement(frame.html) ? 'png' : 'jpg'} load={lod !== 'none'} />
               )
             )}
             {/* a document mounting under a picture the cache already holds:
@@ -1992,7 +1992,7 @@ export const FrameView = memo(function FrameView({
               <FrameImage
                 frame={frame}
                 ext={isCanvasElement(frame.html) ? 'png' : 'jpg'}
-                fetch={false}
+                load={false}
                 covering={!runtimeReady || runtimeDocument === null}
               />
             )}

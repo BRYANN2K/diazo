@@ -1,5 +1,7 @@
 # TECHSTACK - Diazo
 
+Status: current, updated 2026-11-16
+
 ## 1. Language and Runtime
 
 - TypeScript 5.9 (strict mode) - primary language across `server/`, `src/`, and `shared/`.
@@ -501,22 +503,37 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   server's render at about the width the frame takes on screen: `/i/<id>.<jpg|png>?lod=<w>&v=<updatedAt>`,
   `w` one of 128 / 256 / 512 / 1024 (`shared/framePreview.ts`, picked from zoom × device pixel
   ratio once the camera settles), png only for standalone shapes. The client keeps one decoded
-  picture per frame (object URL, decoded with `img.decode()` before it is shown; LRU of 400,
-  never one on the stage), reuses a wider one of the same version, keeps the old version up
-  while an edit's loads, and asks through `thumbLoader` (six at a time, a 503 asked again after
-  its Retry-After with backoff, five tries). Until one arrives a page shows a neutral
-  `bg-paper-deep` well, never white; a frame off screen shows only what the cache holds. A frame
-  that goes live keeps its picture over the iframe until the runtime has shown the document, then
-  fades it. Nothing here reads frame HTML, so a deferred frame (`htmlDeferred`) stays deferred.
-  Server side (`server/previews.ts`, `server/thumbs.ts`), each width is rendered once at
-  background priority and stored as `thumb/<id>-w<w>.<ext>`, stale-while-revalidate: a stored
-  picture is served at once, marked `X-Doop-Preview: stale` (and `no-store`) while its frame's
-  current design renders, and the client asks again a few times. Freshness follows design writes
-  (`store.onFrameWrite`), so moving a frame keeps its picture; a write re-renders the widths
-  someone already looked at once the frame has been quiet 15s, ahead of the next zoom-out. A
-  current picture under its own `v` is served `immutable`. Tests: `frameLod.test.ts`,
-  `framePreviews.test.ts`, `thumbs.test.ts`, `previews.test.ts`, `framePreviewsBrowser.test.ts`,
-  `frameLodBrowser.test.ts`.
+  picture per frame (object URL and retained decoded image). Its LRU targets 400 entries or
+  64 MiB of compressed blobs. On-screen request holders are protected; releasing them enforces
+  eviction, even while off-screen components remain subscribed. A wider picture is reused only
+  for the same version and format. The old picture stays visible while an edit's replacement
+  loads. Cache notifications flush once per animation frame; initial arrivals have no individual
+  fade. Requests use `thumbLoader` (six at a time). Network failures, 429 and 503 retry with
+  exponential backoff and Retry-After, at most five tries; failed requests can retry after a
+  cooldown or when the frame returns. Failure and stale-retry markers are bounded. Until a
+  picture arrives a page shows a neutral `bg-paper-deep` well. A frame going live keeps its
+  picture over the iframe until the runtime shows the document, then fades it once. The cover
+  expires after three seconds if no runtime reply arrives. Deferred client HTML stays deferred;
+  the server chooses PNG for standalone elements, including a deferred client's JPEG request,
+  and preserves their transparent background.
+  Server side (`server/previews.ts`, `server/thumbs.ts`), each width renders at background
+  priority and is stored as `thumb/<id>-w<w>-v<renderedAt>.<ext>`. The shared freshness ledger
+  (`thumb/_freshness.json`) records versions and HTML/dimension fingerprints. Unchanged images
+  survive restarts and position-only moves without rendering. The fingerprint detects an edit
+  even if the process stopped before recording its write notification. Legacy unversioned
+  objects are served stale and replaced on demand. A missing or unreadable ledger requires
+  regeneration on demand; storage writes are best-effort and failed writes may cost another
+  render after restart. Old version objects are removed after replacement; deletion runs four
+  objects at a time. A crash between an object write and its ledger update can leave an orphan.
+  Stored older designs are marked `X-Doop-Preview: stale` and `no-store`; they never enter the
+  current-version cache or become immutable under a newer URL. Recently requested variants
+  refresh after 15 seconds of quiet following a design write; variants unused for a day expire.
+  Frames never requested as images are not pre-rendered. Stage captures are capped at about
+  four million pixels. Moving still changes the client's version URL and can re-download the
+  same picture, but it does not re-render it. Only a fresh picture under its own `v` is immutable.
+  Tests: `frameLod.test.ts`, `framePreviews.test.ts`, `frameImage.test.tsx`, `thumbLoader.test.ts`,
+  `thumbs.test.ts`, `previews.test.ts`, `framePreviewHttp.test.ts`, `framePreviewsBrowser.test.ts`,
+  `frameLodBrowser.test.ts`, `framePreviewPerformance.test.ts`.
 - Canvas panel layout (Settings → Appearance → Canvas panels, `src/lib/panelLayout.ts`, per
   browser under `doop:panel-layout`): `floating` (the default) keeps the islands over a
   full-window stage; `docked` makes Layers, the tool rail, the icon islands, the Inspector /
