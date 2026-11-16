@@ -1,6 +1,6 @@
 {
-  "id": "820377bc-c64a-47c1-8a05-d9232eb64d48",
-  "prevId": "2472cbc3-0da8-4ed2-bf5f-e0213649798f",
+  "id": "6e8132e9-8f6f-479a-852e-c3b2b37c5cc8",
+  "prevId": "dfcc80af-a432-4fc7-9f60-2f24c074b2fc",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -5448,12 +5448,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "request": {
-          "name": "request",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
         "output_asset_id": {
           "name": "output_asset_id",
           "type": "text",
@@ -5515,22 +5509,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "speech_jobs_active_user_idx": {
-          "name": "speech_jobs_active_user_idx",
-          "columns": [
-            {
-              "expression": "requested_by",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"speech_jobs\".\"state\" in ('queued', 'running')",
           "concurrently": false,
           "method": "btree",
           "with": {}
