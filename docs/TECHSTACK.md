@@ -1076,6 +1076,14 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `model_duels.kind = 'motion'`). Tests: `motion.test.ts`, `motionPhase2.test.ts`,
   `motionMedia.test.ts`, `motionHttp.test.ts`, `motionPhase5.test.ts`, `blender.test.ts`,
   `motion::tests`, `blender::tests`, `speech::tests`.
+  `render_composition`. `server/storyboard.ts` is the storyboard read `animate_storyboard` adds to
+  each shot — the frame's notes (elements labelled mouvement / transition / son / voix off / notes,
+  or the English words, by text or by markup) and its animatable elements with `data-doop-id`s
+  stamped in one pass through `server/elementIds.ts` `stampElements` and committed like a comment
+  stamp (`server/actions.ts` `commitElementStamps`); `set_composition` writes back the `storyboard`
+  notes check — noted shots still without an element track, over two fix passes. Tests:
+  `motion.test.ts`, `motionHttp.test.ts`, `storyboard.test.ts`, `storyboardAgent.test.ts`,
+  `motion::tests`, `blender::tests`.
 
 - Motion Studio UI (`src/components/motion/`, `src/lib/motion/`, contract `docs/motion-api.md`):
   the bar's Motion button mounts `MotionTimeline` over the stage for the active page (transport,
@@ -1088,7 +1096,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   and sends each page frame its element-track values (`elementCss.ts`) with `--t` and a
   `doop:seek` event through the runtime's `doop:motion` message (an adopted sheet, never saved).
   "Key the camera here" sends `set_camera`; "Animate storyboard" queues a board card asking the
-  resident agent for `animate_storyboard` + `set_camera` moves. Writes are `PATCH …/composition`
+  resident agent to animate every shot per the notes `animate_storyboard` extracts — element
+  tracks on the reported `data-doop-id` targets, camera moves, captions, TODO marker clips. Writes
+  are `PATCH …/composition`
   ops with `expectedRevision` (409 reloads). Export (`MotionExportDialog.tsx`): `POST …/renders`,
   then `renderInBrowser` (the compositor, `compositor.ts`, paints each frame from `t`: still frames
   rasterised once, frames with element tracks or seek-safe scene markup re-rasterised per frame

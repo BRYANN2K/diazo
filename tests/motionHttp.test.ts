@@ -393,17 +393,20 @@ describe('render jobs', () => {
 
 describe('the MCP tools', () => {
   it('storyboards a page, reads and patches its timeline, lints and queues a render', async () => {
-    /* two frames in reading order on a fresh canvas */
+    /* two frames in reading order on a fresh canvas — shot 1 carries
+       designer notes the way a storyboard panel does */
     const film = await (await owner.post('/api/canvases', { name: 'Film' })).json()
     const filmPage = film.pages[0].id
-    await owner.post(`/api/canvases/${film.id}/frames`, {
-      name: 'Shot 1',
-      x: 0,
-      y: 0,
-      width: 1000,
-      height: 600,
-      html: '<body><h1>one</h1></body>',
-    })
+    const shot1 = await (
+      await owner.post(`/api/canvases/${film.id}/frames`, {
+        name: 'Shot 1',
+        x: 0,
+        y: 0,
+        width: 1000,
+        height: 600,
+        html: '<body><h1>one</h1><img src="hero.png"/><p>MOUVEMENT / TRANSITION / SON : travelling avant lent</p><p>VOIX OFF : il était une fois</p></body>',
+      })
+    ).json()
     await owner.post(`/api/canvases/${film.id}/frames`, {
       name: 'Shot 2',
       x: 1200,
@@ -428,9 +431,30 @@ describe('the MCP tools', () => {
       agent_name: 'Rostrum',
     })
     expect(story.isError).toBe(false)
-    const storyData = JSON.parse(story.text) as { composition: Composition; shots: { frameId: string }[] }
+    const storyData = JSON.parse(story.text) as {
+      composition: Composition
+      shots: {
+        frameId: string
+        notes: { text: string; id?: string }[]
+        targets: { id: string; tag: string; label: string }[]
+      }[]
+      storyboard?: { noted: number; pending: { frameId: string }[]; animated: number }
+    }
     expect(storyData.shots).toHaveLength(2)
     expect(storyData.composition.tracks[0]?.kind).toBe('camera')
+
+    /* the shot whose frame carries notes reports them, along with the
+       elements an element track can animate — each a data-doop-id the frame
+       now really carries */
+    const shot = storyData.shots.find((s) => s.frameId === shot1.id)!
+    expect(shot.notes.map((n) => n.text)).toEqual(
+      expect.arrayContaining([expect.stringContaining('MOUVEMENT'), expect.stringContaining('VOIX OFF')]),
+    )
+    expect(shot.targets.map((t) => t.tag)).toEqual(expect.arrayContaining(['h1', 'img']))
+    const shotHtml = ((await (await owner.get(`/api/frames/${shot1.id}`)).json()) as { html?: string }).html ?? ''
+    for (const target of shot.targets) expect(shotHtml).toContain(`data-doop-id="${target.id}"`)
+    /* and the notes check names it until an element track lands on its frame */
+    expect(storyData.storyboard?.pending.map((p) => p.frameId)).toEqual([shot1.id])
 
     const got = await mcpCall(ownerKey, 'get_composition', {
       canvas_id: film.id,
@@ -449,6 +473,29 @@ describe('the MCP tools', () => {
       agent_name: 'Rostrum',
     })
     expect(patched.isError).toBe(false)
+
+    /* an element track on the noted frame clears it from the check */
+    const target = shot.targets[0]!
+    const animated = await mcpCall(ownerKey, 'set_composition', {
+      canvas_id: film.id,
+      page_id: filmPage,
+      ops: [
+        {
+          op: 'add_track',
+          track: {
+            id: 'headline-in',
+            kind: 'element',
+            frameId: shot1.id,
+            elementId: target.id,
+            keyframes: [{ id: 'k1', property: 'opacity', t: 0, value: 0 }],
+          },
+        },
+      ],
+      agent_name: 'Rostrum',
+    })
+    expect(animated.isError).toBe(false)
+    const animatedData = JSON.parse(animated.text) as { storyboard?: { pending: { frameId: string }[] } }
+    expect(animatedData.storyboard?.pending).toEqual([])
     const stale = await mcpCall(ownerKey, 'set_composition', {
       canvas_id: film.id,
       page_id: filmPage,

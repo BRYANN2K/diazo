@@ -104,14 +104,21 @@ export async function devTaskFor(id: string): Promise<DevTask | undefined> {
   return row ? toTask(row) : undefined
 }
 
+/** A canvas's dev tasks for `get_canvas`. A failed read leaves them out
+ *  rather than failing the whole canvas read, as `imagesForFrames` does. */
 export async function devTasksForCanvas(canvasId: string): Promise<DevTask[]> {
-  const rows = await db
-    .select(STATUS_COLUMNS)
-    .from(frameDevTasks)
-    .where(eq(frameDevTasks.canvasId, canvasId))
-    .orderBy(desc(frameDevTasks.createdAt))
-    .limit(100)
-  return rows.map(toTask)
+  try {
+    const rows = await db
+      .select(STATUS_COLUMNS)
+      .from(frameDevTasks)
+      .where(eq(frameDevTasks.canvasId, canvasId))
+      .orderBy(desc(frameDevTasks.createdAt))
+      .limit(100)
+    return rows.map(toTask)
+  } catch (err) {
+    console.error('[dev-tasks] could not read the canvas dev tasks', err)
+    return []
+  }
 }
 
 /** The stored pack — `get_handoff`'s payload, the one place the full row

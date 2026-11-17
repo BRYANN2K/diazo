@@ -666,6 +666,34 @@ async function stampSaved(frameId: string, id: string): Promise<boolean> {
   }
 }
 
+/** Land a batch of `data-doop-id` stamps on a frame: the annotated HTML goes
+ *  in (sign-off stands, no design-history version), every fresh id is tracked
+ *  until the write that carries it is on disk, and the room sees the frame
+ *  once. Callers hand the ids out only after this returns, so a link is never
+ *  ahead of its stamp. Undefined when the frame is gone or the write fails. */
+export async function commitElementStamps(
+  frame: Frame,
+  html: string,
+  ids: readonly string[],
+  by: string,
+  kind: ActorKind = 'user',
+): Promise<Frame | undefined> {
+  const next = store.updateFrame(frame.id, { html }, by, { annotation: true })
+  if (!next) return undefined
+  const pending = unsavedStamps.get(frame.id) ?? { ids: new Set<string>() }
+  for (const id of ids) pending.ids.add(id)
+  unsavedStamps.set(frame.id, pending)
+  for (const id of ids) {
+    /* the first stampSaved writes the frame carrying every pending id; the
+       rest see their id already carried and return at once */
+    if (!(await stampSaved(frame.id, id))) return undefined
+  }
+  /* deleted meanwhile: an update now would put it back on every screen */
+  if (!store.getFrame(frame.id)) return undefined
+  broadcast(next.canvasId, { type: 'frame:updated', frame: next, actor: resolveActor({ name: by, kind }) })
+  return next
+}
+
 /** Make the element a positional selector names addressable by id: the id
  *  it already carries, or a fresh `data-doop-id` written into the frame's
  *  HTML as an annotation (sign-off stands, no design-history version, no
@@ -692,16 +720,8 @@ export async function ensureElementId(
     const current = store.getFrame(frameId)
     return current ? { id: stamped.id, frame: current } : undefined
   }
-  const next = store.updateFrame(frameId, { html: stamped.html }, by, { annotation: true })
-  if (!next) return undefined
-  const pending = unsavedStamps.get(frameId) ?? { ids: new Set<string>() }
-  pending.ids.add(stamped.id)
-  unsavedStamps.set(frameId, pending)
-  if (!(await stampSaved(frameId, stamped.id))) return undefined
-  /* deleted meanwhile: an update now would put it back on every screen */
-  if (!store.getFrame(frameId)) return undefined
-  broadcast(next.canvasId, { type: 'frame:updated', frame: next, actor: resolveActor({ name: by, kind: 'user' }) })
-  return { id: stamped.id, frame: next }
+  const next = await commitElementStamps(frame, stamped.html, [stamped.id], by)
+  return next ? { id: stamped.id, frame: next } : undefined
 }
 
 /** An anchor inside a frame, as a client sent it. An element is kept by the
