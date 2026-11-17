@@ -139,7 +139,11 @@ jobs:
         if: failure()
         run: |
           docker logs diazo > "$RUNNER_TEMP/container.log" 2>&1 || true
-          docker inspect diazo > "$RUNNER_TEMP/container-inspect.log" 2>&1 || true
+          # allowlisted fields only: a full inspect also dumps Config.Env,
+          # which holds the install's generated secrets
+          docker inspect diazo \
+            --format 'state={{json .State}} image={{.Config.Image}} restart={{.HostConfig.RestartPolicy.Name}} userns={{.HostConfig.UsernsMode}}' \
+            > "$RUNNER_TEMP/container-state.log" 2>&1 || true
           docker ps -a > "$RUNNER_TEMP/docker-ps.log" 2>&1 || true
           journalctl --user -u diazo.service --no-pager > "$RUNNER_TEMP/unit.log" 2>&1 || true
 
@@ -148,7 +152,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: install-smoke-logs-linux-docker
-          path: ${{ runner.temp }}/*.log
+          # named files only: a *.log glob would upload anything a step left behind
+          path: |
+            ${{ runner.temp }}/install-local.log
+            ${{ runner.temp }}/install.log
+            ${{ runner.temp }}/diazo-status.log
+            ${{ runner.temp }}/diazo-update.log
+            ${{ runner.temp }}/uninstall.log
+            ${{ runner.temp }}/container.log
+            ${{ runner.temp }}/container-state.log
+            ${{ runner.temp }}/docker-ps.log
+            ${{ runner.temp }}/unit.log
           if-no-files-found: ignore
           retention-days: 7
 
@@ -249,7 +263,11 @@ jobs:
         if: failure()
         run: |
           podman logs diazo > "$RUNNER_TEMP/container.log" 2>&1 || true
-          podman inspect diazo > "$RUNNER_TEMP/container-inspect.log" 2>&1 || true
+          # allowlisted fields only: a full inspect also dumps Config.Env,
+          # which holds the install's generated secrets
+          podman inspect diazo \
+            --format 'state={{json .State}} image={{.Config.Image}} restart={{.HostConfig.RestartPolicy.Name}} userns={{.HostConfig.UsernsMode}} annotation-userns={{index .Config.Annotations "io.podman.annotations.userns"}}' \
+            > "$RUNNER_TEMP/container-state.log" 2>&1 || true
           podman ps -a > "$RUNNER_TEMP/podman-ps.log" 2>&1 || true
           journalctl --user -u diazo.service --no-pager > "$RUNNER_TEMP/unit.log" 2>&1 || true
 
@@ -258,7 +276,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: install-smoke-logs-linux-podman
-          path: ${{ runner.temp }}/*.log
+          # named files only: a *.log glob would upload anything a step left behind
+          path: |
+            ${{ runner.temp }}/install-local.log
+            ${{ runner.temp }}/install.log
+            ${{ runner.temp }}/diazo-status.log
+            ${{ runner.temp }}/diazo-update.log
+            ${{ runner.temp }}/uninstall.log
+            ${{ runner.temp }}/container.log
+            ${{ runner.temp }}/container-state.log
+            ${{ runner.temp }}/podman-ps.log
+            ${{ runner.temp }}/unit.log
           if-no-files-found: ignore
           retention-days: 7
 
@@ -309,7 +337,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: install-smoke-logs-linux-desktop
-          path: ${{ runner.temp }}/*.log
+          # named files only: a *.log glob would upload anything a step left behind
+          path: |
+            ${{ runner.temp }}/desktop-deb.log
+            ${{ runner.temp }}/dpkg-files.log
+            ${{ runner.temp }}/desktop-appimage.log
+            ${{ runner.temp }}/desktop-uninstall.log
           if-no-files-found: ignore
           retention-days: 7
 
@@ -394,6 +427,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: install-smoke-logs-windows-desktop
-          path: ${{ runner.temp }}/*.log
+          # named files only: a *.log glob would upload anything a step left behind
+          path: |
+            ${{ runner.temp }}/desktop-refused.log
+            ${{ runner.temp }}/desktop-install.log
+            ${{ runner.temp }}/desktop-uninstall.log
+            ${{ runner.temp }}/server.out.log
+            ${{ runner.temp }}/server.err.log
           if-no-files-found: ignore
           retention-days: 7
