@@ -1,6 +1,10 @@
 import type { Frame } from '../../../shared/types'
 import { rasterizeFrame, rasterizeHtml } from '../frameRaster'
 import { frameStateAt, resolveEasing, type CameraState, type Composition } from './contract'
+import { keyframeLanes, laneValueAt } from '../../../shared/motionRuntime'
+import { effectParamsAt, enabledEffects } from '../../../shared/motionFx'
+import type { EffectInstance } from '../../../shared/motion'
+import { fxGl, supportedStack } from './gl'
 import { frameMotionCss } from './elementCss'
 import { elementText, expandTextAnimator, splitUnitsForFrame } from '../../../shared/motionText'
 import { MOTION_BLOCK_ATTR, parseMotionBlock, type FrameMotionKeyframe, type TextSplit } from '../../../shared/motion'
@@ -163,4 +167,101 @@ export async function paintAt(
     }
   })
   ctx.setTransform(1, 0, 0, 1, 0, 0)
+  paintSceneFx(ctx, comp, t)
+}
+
+/** the stack the whole scene sees at t: the camera track's effects, plus each
+ *  adjustment track whose clip window covers t. Element-track stacks draw in
+ *  the browser via elementCss filters — the raster/GL scene pass does not
+ *  carry them (check_scene reports them as the layer-level stack they are). */
+function sceneStackAt(
+  comp: Composition,
+  t: number,
+): (EffectInstance & { paramsAt?: Record<string, number | string | boolean> })[] {
+  const out: (EffectInstance & { paramsAt?: Record<string, number | string | boolean> })[] = []
+  for (const track of comp.tracks) {
+    if (track.muted) continue
+    const isCamera = track.kind === 'camera'
+    const isAdjustment = track.kind === 'adjustment'
+    if (!isCamera && !isAdjustment) continue
+    if (isAdjustment) {
+      const covered = (track.clips ?? []).some(
+        (clip) => clip.source.type === 'adjustment' && t >= clip.start && t < clip.start + clip.duration,
+      )
+      if (!covered) continue
+    }
+    const lanes = keyframeLanes(track.keyframes ?? [])
+    const resolved: Record<string, number | string> = {}
+    for (const [prop, kfs] of lanes) {
+      if (!prop.startsWith('fx:')) continue
+      const v = laneValueAt(kfs, t, resolveEasing)
+      resolved[prop.slice(3)] = v
+    }
+    for (const fx of enabledEffects(track)) {
+      out.push({ ...fx, paramsAt: effectParamsAt(fx, resolved) })
+    }
+  }
+  return out
+}
+
+/** draw the scene-level stack through the WebGL2 pass; when no GL context or
+ *  an effect has no GLSL body the pixels stay as the 2D pass left them and
+ *  the caller's checks list the gap */
+function paintSceneFx(ctx: CanvasRenderingContext2D, comp: Composition, t: number) {
+  const stack = sceneStackAt(comp, t)
+  if (stack.length === 0) return
+  const { ok } = supportedStack(stack)
+  if (ok.length === 0) return
+  const gl = fxGl()
+  if (!gl) return
+  const seed = comp.tracks.reduce((h, tr) => h + tr.id.length * 31, 7)
+  const out = gl.apply(ctx.canvas, comp.width, comp.height, ok, t, seed)
+  if (!out) return
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.clearRect(0, 0, comp.width, comp.height)
+  ctx.drawImage(out, 0, 0)
+}
+
+/** `paintAt` with the filmic shutter: when the composition carries
+ *  `motionBlur`, the frame is the mean of K seeks spread across the shutter
+ *  window — `t - shutter/2` to `t + shutter/2` of one frame interval. It is
+ *  still one deterministic function of (comp, t): no accumulation across
+ *  calls, same samples every time. shutter 0 (or unset) is the hard shutter. */
+export async function paintShutter(
+  ctx: CanvasRenderingContext2D,
+  comp: Composition,
+  stage: FilmStage,
+  t: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  const mb = comp.motionBlur
+  const shutter = mb && Number.isFinite(mb.shutter) ? Math.min(Math.max(mb.shutter, 0), 360) : 0
+  if (shutter <= 0) {
+    await paintAt(ctx, comp, stage, t, signal)
+    return
+  }
+  const K = Math.min(Math.max(Math.round(mb?.samples ?? 8), 2), 64)
+  const window = (shutter / 360) * (1 / comp.fps)
+  const off = document.createElement('canvas')
+  off.width = comp.width
+  off.height = comp.height
+  const offCtx = off.getContext('2d')
+  if (!offCtx) {
+    await paintAt(ctx, comp, stage, t, signal)
+    return
+  }
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, comp.width, comp.height)
+  for (let k = 0; k < K; k++) {
+    const sub = t - window / 2 + (window * (k + 0.5)) / K
+    offCtx.setTransform(1, 0, 0, 1, 0, 0)
+    offCtx.clearRect(0, 0, comp.width, comp.height)
+    await paintAt(offCtx, comp, stage, sub, signal)
+    if (signal?.aborted) break
+    ctx.globalAlpha = 1 / K
+    ctx.drawImage(off, 0, 0)
+  }
+  ctx.restore()
 }

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { pageFrames } from '../../shared/pages'
 import { api } from '../lib/api'
 import { motionApi } from '../lib/motion/api'
-import { paintAt, prepareStage, type FilmStage } from '../lib/motion/compositor'
+import { paintShutter, prepareStage, type FilmStage } from '../lib/motion/compositor'
 import type { Composition } from '../lib/motion/contract'
 
 declare global {
@@ -91,7 +91,7 @@ export function MotionRenderHarness({ canvasId }: { canvasId: string }) {
     window.__doopMotionSeek = async (t: number) => {
       await window.__doopMotionReady
       const ctx = canvasRef.current?.getContext('2d')
-      if (film && ctx) await paintAt(ctx, film.comp, film.stage, start + t)
+      if (film && ctx) await paintShutter(ctx, film.comp, film.stage, start + t)
     }
     window.__doopMotionCapture = () => canvasRef.current?.toDataURL('image/png') ?? ''
     window.__doopMotionSheet = async ({ times, columns, maxSide, labels }) => {
@@ -124,7 +124,7 @@ export function MotionRenderHarness({ canvasId }: { canvasId: string }) {
       let prev: Float32Array | undefined
       for (let i = 0; i < cells; i++) {
         const t = times[i]!
-        await paintAt(ctx, comp, stage, start + t)
+        await paintShutter(ctx, comp, stage, start + t)
         const col = i % cols
         const row = Math.floor(i / cols)
         const dx = col * cellW * scaleDown

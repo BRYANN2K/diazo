@@ -1,5 +1,5 @@
 import { motionApi } from './api'
-import { paintAt, type FilmStage } from './compositor'
+import { paintShutter, type FilmStage } from './compositor'
 import type { Composition, RenderFormat, RenderJob } from './contract'
 
 /* Rendering a film to a video file, on either path the contract names:
@@ -158,7 +158,7 @@ export async function renderInBrowser(
   await motionApi.updateRender(job.id, { status: 'rendering', progress: 0 })
   const total = Math.max(1, Math.round((job.range.end - job.range.start) * job.fps))
   const frameMs = 1000 / job.fps
-  await paintAt(ctx, scaledComp, scaled, job.range.start, signal)
+  await paintShutter(ctx, scaledComp, scaled, job.range.start, signal)
   recorder.start()
   let lastBeat = 0
   try {
@@ -166,7 +166,7 @@ export async function renderInBrowser(
       if (signal?.aborted) throw new DOMException('canceled', 'AbortError')
       const t = job.range.start + i / job.fps
       const began = performance.now()
-      await paintAt(ctx, scaledComp, scaled, t, signal)
+      await paintShutter(ctx, scaledComp, scaled, t, signal)
       requestFrame?.()
       /* MediaRecorder timestamps frames by wall clock, so frames are paced at
          the film's rate; the picture itself only ever depends on t */

@@ -13,6 +13,7 @@
  */
 
 import { nanoid } from 'nanoid'
+import { effectSpec } from './motionFx.ts'
 
 export const MOTION_SCHEMA_VERSION = 1
 
@@ -998,6 +999,8 @@ export function parseEffectInstance(input: unknown): ParseResult<EffectInstance>
   if (typeof input.fx !== 'string' || !/^[a-z][a-z0-9-]{0,59}$/.test(input.fx)) {
     return bad('effect.fx must be a registry id (lowercase, dashes)')
   }
+  const spec = effectSpec(input.fx)
+  if (!spec) return bad(`effect.fx ${input.fx} is not in the registry`)
   const out: EffectInstance = { id: id.value, fx: input.fx, params: {} }
   if (input.params !== undefined) {
     if (!isRecord(input.params)) return bad('effect.params must be an object')
@@ -1006,6 +1009,8 @@ export function parseEffectInstance(input: unknown): ParseResult<EffectInstance>
         return bad(`effect.params.${k} must be a number, string or boolean`)
       }
     }
+    const specError = spec.validate(input.params)
+    if (specError) return bad(specError)
     out.params = input.params as Record<string, number | string | boolean>
   }
   if (input.enabled !== undefined) {
@@ -1740,7 +1745,11 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
       const effect = track?.effects?.find((e) => e.id === op.effectId)
       if (!track || !effect) return `no effect ${op.effectId}`
       if (op.enabled !== undefined) effect.enabled = op.enabled
-      if (op.params !== undefined) effect.params = { ...effect.params, ...op.params }
+      if (op.params !== undefined) {
+        const specError = effectSpec(effect.fx)?.validate(op.params)
+        if (specError) return specError
+        effect.params = { ...effect.params, ...op.params }
+      }
       if (op.seed !== undefined) effect.seed = op.seed
       if (op.mix !== undefined) effect.mix = op.mix
       if (op.blend !== undefined) {
@@ -1763,6 +1772,7 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
     case 'reorder_effects': {
       const track = findTrack(comp, op.trackId)
       if (!track) return `no track ${op.trackId}`
+      if (!Array.isArray(op.effectIds)) return 'effectIds must be an array of effect ids'
       const effects = track.effects ?? []
       const ids = new Set(op.effectIds)
       if (ids.size !== op.effectIds.length) return 'duplicate ids in effectIds'
