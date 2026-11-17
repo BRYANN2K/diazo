@@ -52,6 +52,24 @@ import {
   suggestCuts,
   videoModels,
 } from './motionTools.ts'
+import {
+  addEffect,
+  applyCameraPreset,
+  applyLook,
+  applyTextAnimation,
+  applyTransition,
+  getDirection,
+  listLooks,
+  listMotionEffects,
+  listMotionPresets,
+  removeEffect,
+  setDirection,
+  setEffects,
+  setMotionBlur,
+  updateEffect,
+} from './motionProTools.ts'
+import { checkScene, critiqueScene, sceneSnapshot } from './motionSnapshot.ts'
+import type { Direction, EffectInstance } from '../shared/motion.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
 import { isAgentKeySecret, verifyAgentKey } from './agentKeys.ts'
@@ -1944,19 +1962,452 @@ export function buildMcpServer(
         width: z.number().int().optional().describe('Output width px, default 1920'),
         height: z.number().int().optional().describe('Output height px, default 1080'),
         frame_ids: z.array(z.string()).optional().describe('Only these frames become shots, in reading order'),
+        direction: z
+          .record(z.unknown())
+          .optional()
+          .describe('The Direction — beats set per-shot seconds and handovers (see set_direction)'),
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, page_id, shot_seconds, margin, fps, width, height, frame_ids, agent_name }) => {
+    async ({ canvas_id, page_id, shot_seconds, margin, fps, width, height, frame_ids, direction, agent_name }) => {
       const c = canvasFor(canvas_id, 'edit')
       if (!c) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
       const out = await animateStoryboard(
         c,
         page_id,
-        { shot_seconds, margin, fps, width, height, frame_ids },
+        { shot_seconds, margin, fps, width, height, frame_ids, direction: direction as Direction | undefined },
         actorFrom(agent_name),
       )
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  /* ---- motion-pro: the director kit (P0) and the effect stack (P1) ---- */
+
+  server.registerTool(
+    'get_direction',
+    {
+      title: "Read the film's treatment",
+      description:
+        "Read the Direction a page's composition was directed with — the treatment paragraph, its beats (per-shot seconds and handovers), the named look, references, rhythm and palette notes, and the critique pass budget. Intent lives on the film: read it before re-cutting.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { canvas_id: z.string(), page_id: z.string(), agent_name: agentName },
+    },
+    async ({ canvas_id, page_id, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = getDirection(c, page_id)
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, ...(out.data as object) })
+    },
+  )
+
+  server.registerTool(
+    'set_direction',
+    {
+      title: 'Write the treatment before you shoot',
+      description:
+        "Write the film's Direction on the composition — the director's intent, not a script: `treatment` (one paragraph: mood, motion language, rhythm, the hero moment), `beats` (ordered {seconds, note, transition} — transitions: cut, move, push, whip, fade), `look` (a list_looks id or a described look), `references`, `rhythm`, `palette`, `passes` (critique budget, default 3, max 5). Set it BEFORE animate_storyboard and pass it there too — beats set shot lengths and handovers.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        direction: z.record(z.unknown()).nullable().describe('The Direction object, or null to clear'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, direction, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = setDirection(c, page_id, direction, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'list_motion_presets',
+    {
+      title: 'The motion vocabulary',
+      description:
+        'The named things apply_camera_preset, apply_transition and apply_text_animation can write: 13 camera moves (push-in, whip-pan, handheld, orbit…), the clip transition kinds and directions, the six text animator presets and their splits, and the blend modes layers composite with.',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { agent_name: agentName },
+    },
+    async () => {
+      const out = listMotionPresets()
+      return out.ok ? text(out.data as object) : err(out.error)
+    },
+  )
+
+  server.registerTool(
+    'apply_camera_preset',
+    {
+      title: 'A named camera move, as editable keyframes',
+      description:
+        'Write one of the 13 camera presets onto the camera track at `t`: push-in, pull-out, the pans, whip-pan, crash-zoom, crane-up/down, handheld (seeded, deterministic), dolly-zoom, orbit. `from` is the camera the timeline already has at `t` — presets compose — unless frame_id re-frames that shot first. Every value lands as an ordinary editable keyframe; nothing is opaque.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        preset: z.string().describe('One of the list_motion_presets camera ids'),
+        t: z.number().optional().describe('Seconds on the clock the move starts, default 0'),
+        duration: z.number().optional().describe('Seconds the move takes, default 1'),
+        amount: z.number().optional().describe('Preset magnitude (zoom factor, frame fraction, px or degrees)'),
+        frame_id: z.string().optional().describe('Re-frame this shot before the move'),
+        seed: z.number().int().optional().describe('Jitter seed for handheld'),
+        frequency: z.number().optional().describe('Jitter Hz for handheld'),
+        easing: z.record(z.unknown()).optional().describe('Override the preset curve'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = applyCameraPreset(c, page_id, input, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'apply_transition',
+    {
+      title: 'How a clip takes over from the last',
+      description:
+        "Set a clip's transition: dissolve, push, wipe, zoom, shared-element — or cut to clear it. The transition hangs on the incoming clip; duration is the overlap in seconds.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        track_id: z.string(),
+        clip_id: z.string(),
+        kind: z.string().describe('cut, dissolve, push, wipe, zoom, shared-element'),
+        duration: z.number().optional().describe('Seconds the two clips overlap'),
+        direction: z.string().optional().describe('push/wipe direction: left, right, up, down'),
+        token: z.string().optional().describe('The --dur-* token the duration came from'),
+        easing: z.record(z.unknown()).optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = applyTransition(c, page_id, input, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'apply_text_animation',
+    {
+      title: 'Type that arrives like a credit',
+      description:
+        "Animate a text element's units — rise-blur, typewriter, scale-pop, mask-wipe, tracking-in, scramble — over a line/word/char split. The animator rides the frame's data-doop-motion block with data-doop-split stamped on the element, so every renderer expands the same units. The element's text stays one editable string.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        frame_id: z.string(),
+        element_id: z.string().describe('The text element’s data-doop-id'),
+        preset: z.string().describe('rise-blur, typewriter, scale-pop, mask-wipe, tracking-in or scramble'),
+        split: z.string().optional().describe('line, word or char — default the element’s data-doop-split, else word'),
+        start: z.number().optional().describe('Seconds on the composition clock, default 0'),
+        duration: z.number().optional().describe('Per-unit seconds, default 0.6'),
+        stagger: z.number().optional().describe('Seconds between unit starts, default 0.04'),
+        order: z.string().optional().describe('forward, center or random'),
+        seed: z.number().int().optional().describe('Seed for random order / scramble'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await applyTextAnimation(c, page_id, input, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'get_scene_snapshot',
+    {
+      title: 'See the film you cut',
+      description:
+        'Render the composition at `times` (or auto at shot midpoints) through the real render harness and get a labelled contact-sheet PNG plus numbers: per-cell mean luminance and contrast, motion energy between cells, and the text boxes measured in the frames. THE way to look at your own render before render_composition — the same compositor every target uses, so what you see is what renders.',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        times: z.array(z.number()).optional().describe('Times on the clock (≤24); default the shots’ midpoints'),
+        auto: z.string().optional().describe('"beats" (default) samples every shot midpoint'),
+        max_side: z.number().int().optional().describe('Max sheet cell width px, default 480'),
+        columns: z.number().int().optional().describe('Sheet columns, default ~sqrt(cells)'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, times, auto, max_side, columns, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await sceneSnapshot(c, page_id, { times, auto, max_side, columns })
+      if (!out.ok) return err(out.error)
+      const data = out.data as { png?: string } & Record<string, unknown>
+      const png = data.png
+      const { png: _, ...rest } = data
+      const content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[] = [
+        { type: 'text' as const, text: JSON.stringify({ ok: true, ...rest }) },
+      ]
+      if (png) content.unshift({ type: 'image' as const, data: png.split(',')[1] ?? '', mimeType: 'image/png' })
+      return { content }
+    },
+  )
+
+  server.registerTool(
+    'check_scene',
+    {
+      title: 'The whole scene check, numbers in',
+      description:
+        "One report: the seek-safety lint (MO-* rules), pacing stats per shot with dead beats flagged, safe-zone violations (broadcast's 90%/80%), legibility (effective text px on screen), and the effect-stack cost per track. Structure always answers; the pixel parts need the instance renderer — without it they report unavailable, not a guess.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        pixels: z.boolean().optional().describe('false skips the render-dependent parts'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, pixels, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await checkScene(c, page_id, { pixels })
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, ...(out.data as object) })
+    },
+  )
+
+  server.registerTool(
+    'critique_scene',
+    {
+      title: 'Grade the film against the rubric',
+      description:
+        "The director's pass: check_scene's numbers folded into the fixed rubric (intent_coverage, hierarchy, legibility, pacing, motion_quality, continuity, polish, brand) with machine-gradable issues pre-filled, plus the pass budget — direction.passes, default 3, hard max 5. A call on a new revision is a pass; the same revision again is free. When blockers and majors hit zero or the budget runs out, `stop` says ship it.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        pixels: z.boolean().optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, pixels, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await critiqueScene(c, page_id, { pixels })
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, ...(out.data as object) })
+    },
+  )
+
+  /* ---- the effect stack (P1) ---- */
+
+  server.registerTool(
+    'list_motion_effects',
+    {
+      title: 'The effect registry',
+      description:
+        'Every effect a layer stack can carry: blur, light, lens, texture, distort, color, glitch, generator and matte families — ~30 effects with their params, ranges and GPU cost. Also the blend modes. Effects live on tracks (element = that element, clip = its clips, camera = the whole scene, adjustment = everything below over its windows); params keyframe through the `fx:<instanceId>.<param>` namespace.',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { agent_name: agentName },
+    },
+    async () => {
+      const out = listMotionEffects()
+      return out.ok ? text(out.data as object) : err(out.error)
+    },
+  )
+
+  server.registerTool(
+    'add_effect',
+    {
+      title: 'Stack an effect on a track',
+      description:
+        'Push an effect onto a track’s stack: `{track_id, fx, id?, params?, index?}` — fx is a registry id from list_motion_effects, params override its defaults (points take [u,v] or "u,v"), index places it in the stack.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        track_id: z.string(),
+        fx: z.string().describe('Registry effect id'),
+        id: z.string().optional().describe('Instance id — minted when absent'),
+        params: z.record(z.unknown()).optional(),
+        index: z.number().int().optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = addEffect(c, page_id, input, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'update_effect',
+    {
+      title: 'Tune or toggle a stacked effect',
+      description:
+        'Patch one effect on a track’s stack: `{track_id, effect_id, enabled?, params?, seed?, mix?, blend?}` — params merge over the resting values, blend null clears the override.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        track_id: z.string(),
+        effect_id: z.string(),
+        enabled: z.boolean().optional(),
+        params: z.record(z.unknown()).optional(),
+        seed: z.number().int().optional(),
+        mix: z.number().optional(),
+        blend: z.string().nullable().optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = updateEffect(c, page_id, input, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'remove_effect',
+    {
+      title: 'Take an effect off the stack',
+      description: 'Remove one effect instance from a track’s stack by id.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        track_id: z.string(),
+        effect_id: z.string(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, track_id, effect_id, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = removeEffect(c, page_id, { track_id, effect_id }, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'set_effects',
+    {
+      title: 'Rewrite a track’s whole stack',
+      description:
+        'Make a track’s effect stack exactly `effects` (complete instances, in order) — adds, updates, removes and the reorder land as one atomic ops batch.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        track_id: z.string(),
+        effects: z.array(z.record(z.unknown())),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, track_id, effects, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = setEffects(
+        c,
+        page_id,
+        { track_id, effects: effects as unknown as EffectInstance[] },
+        actorFrom(agent_name),
+      )
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'apply_look',
+    {
+      title: 'A named grade over the whole film',
+      description:
+        'Apply one of the list_looks names as an adjustment track carrying its stack — teal-orange, noir, film-35, crt, glitch, dream, product, riso. With `at`/`seconds` an adjustment clip gates the window; without them the look spans the film.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        look: z.string().describe('A list_looks id'),
+        at: z.number().optional().describe('Seconds the look starts; absent = the whole film'),
+        seconds: z.number().optional().describe('How long it holds'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, look, at, seconds, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = applyLook(c, page_id, { look, at, seconds }, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'list_looks',
+    {
+      title: 'The named grades',
+      description: 'The built-in looks apply_look can lay down, with the mood each gives.',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { agent_name: agentName },
+    },
+    async () => {
+      const out = listLooks()
+      return out.ok ? text(out.data as object) : err(out.error)
+    },
+  )
+
+  server.registerTool(
+    'set_motion_blur',
+    {
+      title: 'The filmic shutter',
+      description:
+        'Set the composition’s motion blur: `{shutter}` in degrees (0–360, sampled across that fraction of the frame) and optional `samples` (2–64, default K=8 preview / 16 render). Deterministic — the scene is re-evaluated at K sub-times, never accumulated. shutter 0 or null clears it back to a hard shutter.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        shutter: z.number().optional().describe('Shutter angle 0–360; 0 or absent clears'),
+        samples: z.number().int().optional().describe('Sub-samples K, 2–64'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, shutter, samples, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = setMotionBlur(c, page_id, { shutter, samples }, actorFrom(agent_name))
       if (!out.ok) return err(out.error)
       return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
     },
