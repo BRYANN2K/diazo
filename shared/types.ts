@@ -8,6 +8,7 @@ import type { DesignToken } from './designTokens.ts'
 import type { RunnerPick } from './agentRunner.ts'
 import type { FrameLint } from './slopRules.ts'
 import type { FrameChecks } from './frameChecks.ts'
+import type { DevTask } from './devTasks.ts'
 
 export interface Frame {
   id: string
@@ -800,6 +801,8 @@ export type ServerMessage =
   | { type: 'composition:playhead'; clientId: string; pageId: string; t: number; playing: boolean }
   /** a render job's status/progress changed */
   | { type: 'render:progress'; job: RenderJob }
+  /** a dev task (a coding agent launched in an Orca worktree) changed state */
+  | { type: 'dev-task'; task: DevTask }
 
 export const CURSOR_PALETTE = [
   '#2743EE', // cursor blue — the brand accent leads

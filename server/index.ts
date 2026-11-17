@@ -38,6 +38,16 @@ import { FIRST_CANVAS_PATH, SIGNUP_PARAM, parseSignupMethod } from '../shared/fi
 import { localAgentRouter, handleLocalAgentMcp, wake as wakeUserWork } from './localAgent.ts'
 import { deleteLink, linkFor, localRepo, localRepoRouter, putLink, repoToolCall } from './localRepo.ts'
 import { buildHandoffPack, HandoffError } from './handoff.ts'
+import {
+  applyDeviceReport,
+  cancelDevTask,
+  createDevTask,
+  devTaskFor,
+  devTasksForCanvas,
+  failStaleDevTasks,
+  wireDevTasks,
+} from './devTasks.ts'
+import { DEV_TASK_AGENTS, DEV_TASK_SUMMARY_CHARS } from '../shared/devTasks.ts'
 import { CodeLinkError, deleteCodeLink, listCodeLinks, putCodeLink } from './codeLinks.ts'
 import { suggestCodeLinks } from './codeSuggest.ts'
 import { applyRepoTokens, previewTokenPatch, previewTokenSync, TokenSyncError } from './tokenSync.ts'
@@ -471,6 +481,11 @@ setInterval(() => {
 }, 5000)
 
 actions.wire(broadcast, agentTouch)
+wireDevTasks(broadcast)
+/* a `queued` dev task's launch job lives in this process's memory — after a
+   restart nothing can claim it, so it is failed like an expired one */
+void failStaleDevTasks()
+setInterval(() => void failStaleDevTasks(), 60_000).unref()
 wireRenderJobs(broadcast)
 /* after the room has been told: email for the people who were not in it */
 onCanvasEvent(commentNotifications.onCanvasEvent)
@@ -1292,6 +1307,149 @@ app.delete('/api/canvases/:id/repo', async (req, res) => {
   const c = requireCanvas(req, res, req.params.id, 'edit')
   if (!c) return
   res.json({ ok: await deleteLink(req.user!.id, c.id) })
+})
+
+/* ---- Send to Orca (docs/orca.md). A ready-for-dev frame launches a dev
+   task: the pack is built and stored on the row, the launch job rides the
+   same poll bridge to the requester's desktop, which runs the typed orca.rs
+   commands. Status comes back through the report route and the coding
+   agent's own update_dev_task; every stored change broadcasts `dev-task`. */
+
+const devTaskCreateSchema = z
+  .object({
+    agent: z.enum(DEV_TASK_AGENTS),
+    /* the same charset the shell's valid_flag_value enforces, checked now
+       so a bad value fails before the row exists */
+    model: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9._:-]{0,59}$/i)
+      .optional(),
+    effort: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9._:-]{0,29}$/i)
+      .optional(),
+    /* an Orca environment name (`vps`); the shell re-checks it against
+       `orca host list` before passing --environment */
+    environment: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9._-]{0,59}$/i)
+      .optional(),
+  })
+  .refine((d) => !d.effort || d.model)
+
+/* a launch builds a handoff pack (frame renders, possibly a model call)
+   before the device's native confirm gates it — bound that build rate
+   like the importer's */
+const devTaskLaunchHits = new Map<string, number[]>()
+function takeDevTaskLaunchSlot(userId: string): boolean {
+  const now = Date.now()
+  const hits = (devTaskLaunchHits.get(userId) ?? []).filter((t) => now - t < 60_000)
+  if (hits.length >= 5) return false
+  hits.push(now)
+  devTaskLaunchHits.set(userId, hits)
+  return true
+}
+
+app.post('/api/frames/:id/dev-tasks', async (req, res) => {
+  const frame = requireFrame(req, res, req.params.id, 'edit')
+  if (!frame) return
+  const c = store.getCanvas(frame.canvasId)!
+  const parsed = devTaskCreateSchema.safeParse(req.body ?? {})
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid dev task request' })
+  if (frame.approval?.status !== 'ready_for_dev')
+    return res.status(409).json({ error: 'the frame is not signed off ready for dev' })
+  const link = await linkFor(req.user!.id, c.id)
+  const device = localRepo.deviceFor(req.user!.id)
+  if (!link || !device || !device.grants.has(link.id))
+    return res.status(409).json({ error: "the linked project isn't reachable — open the Diazo desktop app holding it" })
+  if (!takeDevTaskLaunchSlot(req.user!.id))
+    return res.status(429).json({ error: 'too many dev task launches — wait a minute' })
+  try {
+    const codeLinks = await listCodeLinks(c.id).catch(() => [])
+    const pack = await buildHandoffPack(c.id, {
+      frameIds: [frame.id],
+      requesterId: req.user!.id,
+      codeLinks,
+    })
+    const task = await createDevTask({
+      canvasId: c.id,
+      frameIds: [frame.id],
+      frameRevision: frame.approval.approvedFrameUpdatedAt,
+      pack,
+      link,
+      userId: req.user!.id,
+      userName: req.user!.name || 'someone',
+      ...parsed.data,
+    })
+    res.json({ task })
+  } catch (e) {
+    if (e instanceof HandoffError) return res.status(e.status === 400 ? 503 : e.status).json({ error: e.message })
+    throw e
+  }
+})
+
+app.get('/api/canvases/:id/dev-tasks', async (req, res) => {
+  const c = requireCanvas(req, res, req.params.id, 'view')
+  if (!c) return
+  res.json({ tasks: await devTasksForCanvas(c.id) })
+})
+
+app.get('/api/frames/:id/dev-tasks', async (req, res) => {
+  const frame = requireFrame(req, res, req.params.id, 'view')
+  if (!frame) return
+  const tasks = (await devTasksForCanvas(frame.canvasId)).filter((t) => t.frameIds.includes(frame.id))
+  res.json({ tasks })
+})
+
+const devTaskReportSchema = z.object({
+  deviceId: z.string().uuid(),
+  requestId: z.string().uuid().optional(),
+  launch: z
+    .object({
+      ok: z.boolean(),
+      cancelled: z.boolean().optional(),
+      error: z.string().max(1_000).optional(),
+      orcaIdentity: z.string().max(120).optional(),
+      branch: z.string().max(200).optional(),
+      launchKind: z.string().max(40).optional(),
+      launchHandle: z.string().max(200).optional(),
+      orcaSessionId: z.string().max(200).optional(),
+      operationId: z.string().max(120).optional(),
+    })
+    .optional(),
+  poll: z
+    .object({
+      found: z.boolean(),
+      status: z.string().max(40).optional(),
+      agentState: z.string().max(40).optional(),
+      outcome: z.string().max(40).optional(),
+      lastAssistantMessage: z
+        .string()
+        .max(DEV_TASK_SUMMARY_CHARS + 500)
+        .optional(),
+      linkedPR: z.string().max(500).nullable().optional(),
+      orcaSessionId: z.string().max(200).optional(),
+      branch: z.string().max(200).optional(),
+      workspaceStatus: z.string().max(60).optional(),
+      devUrl: z.string().max(500).nullable().optional(),
+    })
+    .optional(),
+})
+
+app.post('/api/dev-tasks/:id/report', async (req, res) => {
+  const parsed = devTaskReportSchema.safeParse(req.body ?? {})
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid dev task report' })
+  const outcome = await applyDeviceReport(req.user!.id, req.params.id, parsed.data)
+  if (!outcome.ok) return res.status(outcome.status).json({ error: outcome.error })
+  res.json({ ok: true, task: outcome.task })
+})
+
+app.post('/api/dev-tasks/:id/cancel', async (req, res) => {
+  const task = await devTaskFor(req.params.id)
+  if (!task) return res.status(404).json({ error: 'no such dev task' })
+  const c = requireCanvas(req, res, task.canvasId, 'edit')
+  if (!c) return
+  res.json({ task: await cancelDevTask(task.id) })
 })
 
 /* ---- Ready for dev → Stip. The server drafts a Stip change pack from

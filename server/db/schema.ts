@@ -38,6 +38,8 @@ import type {
   ComponentSnapshot,
 } from '../../shared/components.ts'
 import type { Composition, MotionTrack, RenderFormat, RenderStatus, RenderTarget } from '../../shared/motion.ts'
+import type { DevTaskDrift, DevTaskState } from '../../shared/devTasks.ts'
+import type { HandoffPack } from '../../shared/handoff.ts'
 
 /** A credential kept on a user's behalf: sealed on write and opened on read
  *  (server/secretBox.ts), so call sites see plaintext and the row does not.
@@ -1430,4 +1432,57 @@ export const renderJobs = pgTable(
     finishedAt: bigint('finished_at', { mode: 'number' }),
   },
   (t) => [index('render_jobs_canvas_idx').on(t.canvasId), index('render_jobs_composition_idx').on(t.compositionId)],
+)
+
+/** Dev tasks (shared/devTasks.ts, server/devTasks.ts): a coding agent sent
+ *  to an Orca worktree from a ready-for-dev frame. The worktree's absolute
+ *  path is never stored — `orca_identity` is the opaque `wt2:` key — and
+ *  `agent_state` is the state the coding agent itself pushed through
+ *  update_dev_task, which outranks device polls for pr_open/done. `handoff`
+ *  is the full pack built at launch (get_handoff serves it verbatim), kept
+ *  out of the row's public shape. */
+export const frameDevTasks = pgTable(
+  'frame_dev_tasks',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    /** one frame, or every frame a multi-frame pack covers */
+    frameIds: jsonb('frame_ids').$type<string[]>().notNull(),
+    handoffChangeId: text('handoff_change_id').notNull(),
+    /** `approval.approvedFrameUpdatedAt` at launch — flags a stale build */
+    frameRevision: bigint('frame_revision', { mode: 'number' }),
+    /** groups duel contestants; null for a solo launch */
+    duelId: text('duel_id'),
+    requestedByUserId: text('requested_by').notNull(),
+    requestedByName: text('requested_by_name').notNull(),
+    /** the install that answered the launch; null until its first report */
+    deviceId: text('device_id'),
+    /** the runner that owns execution — 'orca' */
+    runner: text('runner').notNull().default('orca'),
+    agent: text('agent').notNull(),
+    model: text('model'),
+    effort: text('effort'),
+    /** a label for the launch target — "This Mac" or the environment name */
+    hostLabel: text('host_label').notNull(),
+    /** the `--environment` selector the launch ran against; null = local */
+    environment: text('environment'),
+    /** Orca's opaque `wt2:<host>:<instance>` key */
+    orcaIdentity: text('orca_identity'),
+    orcaSessionId: text('orca_session_id'),
+    branch: text('branch'),
+    prUrl: text('pr_url'),
+    state: text('state').$type<DevTaskState>().notNull(),
+    /** the last state the coding agent itself reported */
+    agentState: text('agent_state').$type<DevTaskState>(),
+    summary: text('summary'),
+    drift: jsonb('drift').$type<DevTaskDrift>(),
+    /** the dev-server URL `orca ports` reported (phase 2) */
+    devUrl: text('dev_url'),
+    /** the pack built at launch — get_handoff's payload, never broadcast */
+    handoff: jsonb('handoff').$type<HandoffPack>().notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+    finishedAt: bigint('finished_at', { mode: 'number' }),
+  },
+  (t) => [index('frame_dev_tasks_canvas_idx').on(t.canvasId)],
 )

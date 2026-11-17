@@ -52,6 +52,8 @@ import { renderFrame } from './screenshot.ts'
 import { lintAndStore } from './lint.ts'
 import { checkAndStore, checkOutcomeForAgent } from './frameChecks.ts'
 import { buildHandoffPack, HandoffError } from './handoff.ts'
+import { applyAgentUpdate, devTaskFor, devTasksForCanvas, handoffFor } from './devTasks.ts'
+import { DEV_TASK_PUSH_STATES, DEV_TASK_SUMMARY_CHARS } from '../shared/devTasks.ts'
 import {
   CodeLinkError,
   SET_CODE_LINK_DESCRIPTION,
@@ -130,6 +132,7 @@ You MUST call get_guide({ topic: "diazo-instructions" }) once before using other
 
 - Context first: call get_canvas before adding or editing frames.
 - Implementation handoff: get_canvas and get_frame expose approvalStatus (draft, ready_for_dev, needs_review) and human approval attribution. Use get_canvas with approval_status="ready_for_dev" to find approved screens. Re-read get_frame before implementing; only ready_for_dev is current sign-off. HTML or size edits invalidate approval. Approval does not automatically start an implementation task; follow the human's implementation request.
+- Dev tasks: a prompt naming a dev task id was launched from a signed-off frame. Call get_handoff({ task_id }) for its Stip pack and report progress with update_dev_task; get_canvas lists a canvas's dev tasks.
 - Element links: /c/<canvas_id>?frame=<frame_id>&element=<element_id> identifies one element: the one carrying data-doop-id="<element_id>" in that frame's HTML. Read get_canvas and get_frame and find that attribute before applying the feedback. If no element carries the id any more, ask for an updated reference.
 - Keep data-doop-* attributes on every element you rewrite: data-doop-id is how comments and links point at an element, data-doop-on / data-doop-action carry prototype wiring, data-doop-locked a layer lock. Drop one only together with its element.
 - Identity: pick an agent_name and reuse the SAME name on every call — your presence and edits are attributed live.
@@ -692,6 +695,7 @@ export function buildMcpServer(
          the synced screens — context a redesign must respect */
       const flow = describeSyncFlow(await getSyncFlow(c), c.frames)
       const images = await imagesForFrames(shown.map((f) => f.id))
+      const devTasks = await devTasksForCanvas(canvas_id)
       const notes = [
         ...(images.size ? [IMAGES_NOTE] : []),
         ...(flow.length
@@ -752,6 +756,7 @@ export function buildMcpServer(
             ...(tokens.length ? { tokens: describeTokens(tokens) } : {}),
             ...(tokenThemes.length ? { tokenThemes } : {}),
             ...(flow.length ? { flow } : {}),
+            ...(devTasks.length ? { dev_tasks: devTasks } : {}),
             ...(notes.length ? { note: notes.join(' ') } : {}),
           }),
           canvas_id,
@@ -2883,6 +2888,87 @@ export function buildMcpServer(
         if (e instanceof HandoffError) return err(e.message)
         return err(`handoff failed: ${e instanceof Error ? e.message : String(e)}`)
       }
+    },
+  )
+
+  /* get_handoff / update_dev_task: the Orca coding agent's side of a dev
+     task (docs/orca.md). The pack it builds from never touches the
+     worktree — it arrives here, over MCP, and only for the requester's own
+     credentials. */
+
+  server.registerTool(
+    'get_handoff',
+    {
+      title: 'Get a dev task’s handoff pack',
+      description:
+        "Read the handoff pack stored for a dev task ('Send to Orca'): the task's id, canvas, frames, state and Stip change id, then every file — proposal/spec/tasks/state.json/tokens as text, the frame PNG exports as image blocks. Call it with the task_id your launch prompt names, before writing any code, and implement against spec.md's AC list. Only the account that launched the task may read its pack.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { task_id: z.string() },
+    },
+    async ({ task_id }) => {
+      const found = await handoffFor(task_id)
+      if (!found) return err(`no dev task ${task_id} — the id comes from the launch prompt`)
+      const { row, pack } = found
+      if (!ownerId || row.requestedByUserId !== ownerId)
+        return err('only the account that launched this dev task may read its handoff')
+      if (!canvasFor(row.canvasId, 'view')) return noCanvas(row.canvasId)
+      const content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(
+            {
+              task: {
+                id: row.id,
+                canvasId: row.canvasId,
+                frameIds: row.frameIds,
+                state: row.state,
+                handoffChangeId: row.handoffChangeId,
+              },
+              title: pack.title,
+              changeId: pack.changeId,
+              dir: pack.dir,
+              draftedBy: pack.draftedBy,
+              warnings: pack.warnings,
+              files: pack.files.map((f) => f.path),
+            },
+            null,
+            2,
+          ),
+        },
+      ]
+      for (const file of pack.files) {
+        if (file.text !== undefined) content.push({ type: 'text' as const, text: `--- ${file.path} ---\n${file.text}` })
+        else if (file.base64) content.push({ type: 'image' as const, data: file.base64, mimeType: 'image/png' })
+      }
+      return { content }
+    },
+  )
+
+  server.registerTool(
+    'update_dev_task',
+    {
+      title: 'Report on your dev task',
+      description:
+        "Push your own status on the dev task you were launched for ('Send to Orca'): state 'needs_input' while you wait on the human, 'pr_open' with pr_url once the PR exists, 'done' or 'failed' when the task ends — plus a one-line summary and the branch/orca_session_id you worked on. Report when you open the PR and again when you finish; the people on the canvas see every update live. Only the account that launched the task may update it.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        task_id: z.string(),
+        state: z.enum(DEV_TASK_PUSH_STATES).optional(),
+        pr_url: z.string().max(500).optional().describe('The PR you opened; http(s) only'),
+        summary: z.string().max(DEV_TASK_SUMMARY_CHARS).optional(),
+        orca_session_id: z.string().max(200).optional(),
+        branch: z.string().max(200).optional(),
+      },
+    },
+    async (input) => {
+      if (!ownerId) return err('this connection is not signed in to a Diazo account')
+      /* the requester must still be able to open the canvas the task lives
+         on — being the launch's account is not enough once access is gone */
+      const task = await devTaskFor(input.task_id)
+      if (task && !canvasFor(task.canvasId, 'view')) return noCanvas(task.canvasId)
+      const outcome = await applyAgentUpdate(ownerId, input)
+      if (!outcome.ok) return err(outcome.error)
+      return text({ ok: true, task: outcome.task })
     },
   )
 

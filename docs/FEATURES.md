@@ -123,6 +123,12 @@ upstream pull requests it merged ahead of upstream. Resync notes are in
 - **Handoff to Stip** — a frame marked ready for dev builds a Stip change pack, previewed in the
   Inspector and plan cards, then written into the linked repo by the desktop app's single write
   command (`repo_write_change`). Agents call `create_handoff`.
+- **Send to Orca** (desktop app) — a ready-for-dev frame can be sent to an Orca worktree on
+  this Mac or a paired environment (the `vps` target): the desktop app creates the worktree
+  and starts a coding agent in it after a native confirmation, and the canvas watches the
+  task's live state until the PR. The agent reads its handoff pack over MCP (`get_handoff`)
+  and reports with `update_dev_task`; nothing writes into the worktree and no absolute path
+  ever reaches the server ([docs/orca.md](orca.md)).
 - **Zoomed-out frame pictures** — frames too small for live documents show stored previews at
   their on-screen width. Edits keep the previous picture until its replacement loads. Unchanged
   previews survive a server restart, and moving a frame does not render it again. A neutral

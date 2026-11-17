@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-orca-ports"
+description = "Enables the orca_ports command without any pre-configured scope."
+commands.allow = ["orca_ports"]
+
+[[permission]]
+identifier = "deny-orca-ports"
+description = "Denies the orca_ports command without any pre-configured scope."
+commands.deny = ["orca_ports"]

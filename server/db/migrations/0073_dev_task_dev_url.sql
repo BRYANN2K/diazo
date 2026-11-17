@@ -1,0 +1,1 @@
+ALTER TABLE "frame_dev_tasks" ADD COLUMN "dev_url" text;

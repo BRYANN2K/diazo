@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-orca-resolve-repo"
+description = "Enables the orca_resolve_repo command without any pre-configured scope."
+commands.allow = ["orca_resolve_repo"]
+
+[[permission]]
+identifier = "deny-orca-resolve-repo"
+description = "Denies the orca_resolve_repo command without any pre-configured scope."
+commands.deny = ["orca_resolve_repo"]

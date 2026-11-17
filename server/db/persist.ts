@@ -998,6 +998,8 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.agentRuns).where(eq(t.agentRuns.canvasId, canvasId)))
   swallow(db.delete(t.modelDuels).where(eq(t.modelDuels.canvasId, canvasId)))
   swallow(db.delete(t.canvasMembers).where(eq(t.canvasMembers.canvasId, canvasId)))
+  /* dev tasks and their stored handoff packs go with the canvas */
+  swallow(db.delete(t.frameDevTasks).where(eq(t.frameDevTasks.canvasId, canvasId)))
   swallow(db.delete(t.canvases).where(eq(t.canvases.id, canvasId)))
 }
 
