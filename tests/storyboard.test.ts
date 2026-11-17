@@ -146,6 +146,31 @@ describe('shot notes — the false positives that are not notes', () => {
     expect(notes.some((n) => n.includes('Notes:') && n.includes('jot it down'))).toBe(true)
   })
 
+  it('pairs a label that CSS uppercases, and a shouted heading label', () => {
+    const html = DOC(`
+      <span class="uppercase">Voix off</span><p>Une voix calme…</p>
+      <span style="text-transform:uppercase">Son</span><p>nappe grave</p>
+      <h4>VOIX OFF</h4><p>il était une fois</p>
+      <h4 class="uppercase">Notes</h4><p>jot it down</p>
+    `)
+    const notes = shotNotesIn(html)
+    /* the rendered shout is what marks the label, not the source casing */
+    expect(notes).toContain('Voix off Une voix calme…')
+    expect(notes).toContain('Son nappe grave')
+    expect(notes).toContain('VOIX OFF il était une fois')
+    expect(notes).toContain('Notes jot it down')
+  })
+
+  it('keeps a mixed-case heading a card title, and links or buttons out even uppercased', () => {
+    const html = DOC(`
+      <h4>Voix off</h4><p>card copy</p>
+      <h3>Notes:</h3><p>section copy</p>
+      <a class="uppercase" href="/x">Voix off</a><p>nav copy</p>
+      <button class="uppercase">Son</button><p>cta copy</p>
+    `)
+    expect(shotNotesIn(html)).toEqual([])
+  })
+
   it('pairs a bare label with its sibling — never with body or the whole frame', () => {
     const html = DOC('<h1>Titre</h1><img src="hero.png"/><div>VOIX OFF</div><div>« Et si… »</div>')
     const notes = shotNotesIn(html)

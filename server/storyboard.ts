@@ -11,8 +11,8 @@
  * The detector is deliberately narrow: a note is a block labelled by its
  * text ("VOIX OFF: …", a shouted "SON — …") or by an explicit markup name
  * (`data-doop-notes`, a shot-notes/notes/voix-off/voice-over class or id),
- * or a shouted or colon-ended label paired with the sibling(s) holding its
- * text. Ordinary
+ * or a shouted — caps or CSS-uppercased — or colon-ended label paired
+ * with the sibling(s) holding its text. Ordinary
  * styling (`transition-all`, `motion-safe:*`, a "Sound wave" aria-label)
  * and headline copy ("Sound. Reimagined.") are never notes, and no note
  * ever promotes `body` — the notes bar is the deepest ancestor that holds
@@ -64,9 +64,11 @@ function startsNote(text: string): boolean {
    note is then the label's sibling(s), never its parent */
 const NOTE_ONLY = new RegExp(`^\\s*${NOTE_LABELS}\\s*:?\\s*$`, 'i')
 
-/* a bare label can never sit in a heading, a link or a button — "Notes" as
-   a card title, a nav item or a CTA is design copy, not a storyboard label */
-const NOT_LABEL_TAGS = new Set(['a', 'button', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
+/* a bare label can never sit in a link or a button — "Notes" a nav item
+   or a CTA is design copy, not a storyboard label — and a heading only
+   counts when it shouts: a mixed-case "Notes" card title stays design */
+const NOT_LABEL_TAGS = new Set(['a', 'button'])
+const HEADING_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
 
 /* a notes panel labelled by markup: a bare data-doop-notes marker, or a
    class/id token equal to or prefixed shot-notes / notes / voix-off /
@@ -251,17 +253,26 @@ interface NoteGroup {
   panel?: Element
 }
 
+/* an `uppercase` class token or an inline text-transform shouts the label
+   as surely as caps — designers often write "voix off" and let CSS shout */
+function cssShouted(el: Element): boolean {
+  if (attr(el, 'class')?.split(/\s+/).includes('uppercase')) return true
+  return /text-transform\s*:\s*uppercase\b/i.test(attr(el, 'style') ?? '')
+}
+
 /* a lone label word pairs with the sibling carrying its text only when it
-   marks itself as a label — shouted caps like the dash form ("VOIX OFF")
-   or a trailing colon ("Notes:") — in a plain element: a feature grid
-   titled Animations / Notes / Sound is product copy, not shot notes */
+   marks itself as a label — shouted like the dash form, in caps or by CSS
+   ("VOIX OFF", class="uppercase"), or with a trailing colon ("Notes:") —
+   in a plain element or a heading that shouts: a feature grid titled
+   Animations / Notes / Sound is product copy, not shot notes */
 function bareLabel(el: Element): boolean {
   const text = textOf(el).trim()
   if (!NOTE_ONLY.test(text)) return false
-  if (!/[:：]$/.test(text) && !(/\p{Lu}/u.test(text) && !/\p{Ll}/u.test(text))) return false
+  const shouted = (/\p{Lu}/u.test(text) && !/\p{Ll}/u.test(text)) || cssShouted(el)
+  if (!/[:：]$/.test(text) && !shouted) return false
   for (let node: ParentNode | null | undefined = el; node && isElement(node); node = node.parentNode) {
     const tag = node.tagName.toLowerCase()
-    if (NOT_LABEL_TAGS.has(tag)) return false
+    if (NOT_LABEL_TAGS.has(tag) || (HEADING_TAGS.has(tag) && !shouted)) return false
     if (SKIP_TAGS.has(tag)) break
   }
   return true
