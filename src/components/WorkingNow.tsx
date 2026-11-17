@@ -27,7 +27,7 @@ export function WorkingNow({ style, className }: { style?: CSSProperties; classN
       {working.map((p) => (
         <div
           key={p.clientId}
-          className="pointer-events-auto flex h-7 max-w-full min-w-0 animate-[chip-in_0.2s_ease] items-center gap-2 rounded-[8px] bg-surface pr-2.5 pl-2 text-[12px] text-ink-soft shadow-ring"
+          className="pointer-events-auto flex h-7 max-w-full min-w-0 animate-[chip-in_0.2s_ease] items-center gap-2 rounded-control bg-surface pr-2.5 pl-2 text-label text-ink-soft shadow-ring"
           title={`${p.name}${p.owner ? ` (${t('canvas.agentOf', { owner: p.owner })})` : ''}: ${p.status}`}
         >
           {p.kind === 'agent' ? (
@@ -37,7 +37,7 @@ export function WorkingNow({ style, className }: { style?: CSSProperties; classN
           ) : (
             <span className="size-2 flex-none rounded-full" style={{ background: p.color }} />
           )}
-          <b className="flex-none font-medium text-ink">{p.name}</b>
+          <b className="max-w-[45%] flex-none truncate font-medium text-ink">{p.name}</b>
           <span className="truncate">{p.status}</span>
           {streaming.has(p.name) && (
             <span className="size-1.5 flex-none animate-[status-pulse_1.6s_ease-in-out_infinite] rounded-full bg-success" />

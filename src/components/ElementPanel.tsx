@@ -270,9 +270,9 @@ export function ElementPanel({
           <span className="grid size-5 flex-none place-items-center text-ink-faint">
             <LayerKindIcon kind={node?.kind ?? 'box'} />
           </span>
-          <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">
+          <span className="min-w-0 flex-1 truncate text-body font-medium text-ink">
             {name}
-            <small className="ml-[5px] text-[11px] font-normal text-ink-faint">
+            <small className="ml-[5px] text-caption font-normal text-ink-faint">
               {t('inspector.inParent', { parent: parentLabel })}
             </small>
           </span>
@@ -568,7 +568,7 @@ function TokenMenu({
           title={t('inspector.tokenPick')}
           className={
             placement === 'beside'
-              ? 'grid size-[26px] flex-none place-items-center rounded-[7px] bg-sub text-ink-faint hover:bg-paper-deep hover:text-ink data-[state=open]:bg-paper-deep data-[state=open]:text-ink'
+              ? 'grid size-[26px] flex-none place-items-center rounded-row bg-sub text-ink-faint hover:bg-paper-deep hover:text-ink data-[state=open]:bg-paper-deep data-[state=open]:text-ink'
               : 'grid size-5 flex-none place-items-center rounded-[5px] text-ink-faint opacity-0 transition-opacity hover:bg-paper-deep hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 data-[state=open]:bg-paper-deep data-[state=open]:text-ink data-[state=open]:opacity-100'
           }
         >
@@ -577,7 +577,7 @@ function TokenMenu({
       </PopoverTrigger>
       <PopoverContent align="end" className="w-[220px] p-1.5">
         <div className="flex h-6 items-center justify-between pr-0.5 pl-2">
-          <span className="text-[11px] text-ink-faint">{t('inspector.tokenHeading')}</span>
+          <span className="text-caption text-ink-faint">{t('inspector.tokenHeading')}</span>
           {literal !== null && (
             <Popover open={creating} onOpenChange={(next) => (next ? startCreating() : setCreating(false))}>
               <PopoverTrigger asChild>
@@ -600,22 +600,22 @@ function TokenMenu({
                     void create()
                   }}
                 >
-                  <span className="px-0.5 text-[11px] text-ink-faint">
+                  <span className="px-0.5 text-caption text-ink-faint">
                     {t('inspector.tokenNewTitle', { type: t(TOKEN_TYPE_LABEL[type]).toLowerCase() })}
                   </span>
-                  <label className="flex h-7 items-center gap-1.5 rounded-[7px] bg-sub px-2 focus-within:bg-surface focus-within:shadow-elevation-1-focus">
-                    <span className="w-10 flex-none text-[10.5px] text-ink-faint">{t('inspector.tokenName')}</span>
+                  <label className="flex h-7 items-center gap-1.5 rounded-row bg-sub px-2 focus-within:bg-surface focus-within:shadow-elevation-1-focus">
+                    <span className="w-10 flex-none text-micro text-ink-faint">{t('inspector.tokenName')}</span>
                     <input
                       aria-label={t('inspector.tokenNewName')}
                       autoFocus
-                      className="w-full min-w-0 bg-transparent font-mono text-[11px] text-ink outline-none"
+                      className="w-full min-w-0 bg-transparent font-mono text-caption text-ink outline-none"
                       value={name}
                       disabled={busy}
                       onChange={(e) => setName(e.target.value)}
                     />
                   </label>
-                  <label className="flex h-7 items-center gap-1.5 rounded-[7px] bg-sub px-2 focus-within:bg-surface focus-within:shadow-elevation-1-focus">
-                    <span className="w-10 flex-none text-[10.5px] text-ink-faint">{t('inspector.tokenValue')}</span>
+                  <label className="flex h-7 items-center gap-1.5 rounded-row bg-sub px-2 focus-within:bg-surface focus-within:shadow-elevation-1-focus">
+                    <span className="w-10 flex-none text-micro text-ink-faint">{t('inspector.tokenValue')}</span>
                     {swatch && (
                       <span
                         className="size-3 flex-none rounded-[3px] border border-line"
@@ -624,17 +624,17 @@ function TokenMenu({
                     )}
                     <input
                       aria-label={t('inspector.tokenValue')}
-                      className="w-full min-w-0 bg-transparent font-mono text-[11px] text-ink outline-none"
+                      className="w-full min-w-0 bg-transparent font-mono text-caption text-ink outline-none"
                       value={value}
                       disabled={busy}
                       onChange={(e) => setValue(e.target.value)}
                     />
                   </label>
-                  {error && <p className="px-0.5 text-[10.5px] text-accent-ink">{error}</p>}
+                  {error && <p className="px-0.5 text-micro text-accent-ink">{error}</p>}
                   <button
                     type="submit"
                     disabled={!canCreate}
-                    className="h-7 rounded-[7px] bg-ink text-[11.5px] font-medium text-paper disabled:opacity-30"
+                    className="h-7 rounded-row bg-ink text-caption font-medium text-paper disabled:opacity-30"
                   >
                     {busy ? t('inspector.tokenCreating') : t('inspector.tokenCreateButton')}
                   </button>
@@ -644,7 +644,7 @@ function TokenMenu({
           )}
         </div>
         {options.length === 0 ? (
-          <p className="px-2 py-1.5 text-[11px] leading-[1.4] text-ink-faint">
+          <p className="px-2 py-1.5 text-caption text-ink-faint">
             {literal === null ? t('inspector.tokenNone') : t('inspector.tokenNoneCreate')}
           </p>
         ) : (
@@ -659,15 +659,17 @@ function TokenMenu({
                 type="button"
                 role="option"
                 aria-selected={false}
-                className="flex h-7 items-center gap-2 rounded-[7px] px-2 text-left hover:bg-sub"
+                className="flex h-7 items-center gap-2 rounded-row px-2 text-left hover:bg-sub"
                 onClick={() => {
                   onPick(token.name)
                   close()
                 }}
               >
                 <TokenSwatch token={token} tokens={tokens} size={12} theme={theme} />
-                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink">{tokenLabel(token.name)}</span>
-                <span className="max-w-[40%] flex-none truncate font-mono text-[10.5px] text-ink-faint">
+                <span className="min-w-0 flex-1 truncate font-mono text-caption text-ink">
+                  {tokenLabel(token.name)}
+                </span>
+                <span className="max-w-[40%] flex-none truncate font-mono text-micro text-ink-faint">
                   {effectiveValue(token, theme)}
                 </span>
               </button>
@@ -820,7 +822,7 @@ function DesignTab({
               key={`${axis}-${edge}`}
               variant="bare"
               size="icon-sm"
-              className="h-[26px] min-w-0 flex-1 rounded-[7px] bg-sub text-ink-soft hover:bg-paper-deep"
+              className="h-[26px] min-w-0 flex-1 rounded-row bg-sub text-ink-soft hover:bg-paper-deep"
               aria-label={t(label)}
               title={t('inspector.withinParent', { label: t(label) })}
               disabled={!info.geometry.canAlign}
@@ -877,7 +879,7 @@ function DesignTab({
                   aria-pressed={pressed}
                   disabled={!info.geometry.enabled}
                   className={cn(
-                    'h-[26px] w-full rounded-[7px] bg-sub text-ink-soft hover:bg-paper-deep',
+                    'h-[26px] w-full rounded-row bg-sub text-ink-soft hover:bg-paper-deep',
                     pressed && 'bg-paper-deep text-ink',
                   )}
                   onClick={() => editGeometry({ kind: 'flip', axis })}
@@ -1030,7 +1032,7 @@ function DesignTab({
             onCommit={(v) => apply({ 'border-radius': `${Math.max(0, v)}px` })}
           />
         </div>
-        <label className="mt-2 flex h-5 cursor-pointer items-center justify-between text-[11.5px] text-ink-soft">
+        <label className="mt-2 flex h-5 cursor-pointer items-center justify-between text-caption text-ink-soft">
           {t('inspector.clipContent')}
           <Switch
             size="sm"
@@ -1098,7 +1100,7 @@ function DesignTab({
           />
         </div>
         {border.sides && (
-          <p className="mt-1 text-[10.5px] text-ink-faint">
+          <p className="mt-1 text-micro text-ink-faint">
             {t('inspector.sides', {
               sides: border.sides
                 .split(' ')
@@ -1196,7 +1198,7 @@ function DesignTab({
                   value={value}
                   aria-label={t(label)}
                   title={t(label)}
-                  className="grid h-[26px] min-h-0 flex-1 place-items-center rounded-[7px] bg-sub p-0 hover:bg-paper-deep sm:flex-1"
+                  className="grid h-[26px] min-h-0 flex-1 place-items-center rounded-row bg-sub p-0 hover:bg-paper-deep sm:flex-1"
                 >
                   <Icon size="rail" />
                 </SegmentedItem>
