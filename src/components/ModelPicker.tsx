@@ -45,9 +45,10 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
 
   const pill = 'h-[26px] min-w-0 gap-[5px] rounded-pill px-[9px] text-ink shadow-ring hover:bg-well'
   /* the model pill is the one that gives way in a narrow foot: MenuButton is
-     flex-none, so it opts back into shrinking and its label truncates; the
-     effort pill and the send button keep their size */
-  const modelPill = `${pill} flex-initial`
+     flex-none, so it opts back into shrinking and its label truncates down
+     to its mark; the effort pill and the send button keep their size */
+  /* min-w keeps the mark, one letter and the chevron in view */
+  const modelPill = `${pill} flex-initial min-w-[52px]`
   return (
     <>
       <ModelMenu

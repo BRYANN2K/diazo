@@ -95,7 +95,7 @@ interface Pending {
   op: RepoOp
   args: RepoRequest['args']
   createdAt: number
-  /** how long the request may wait — write_change outlives reads, its
+  /** how long the request may wait — a write outlives reads, its
    *  native confirmation dialog can sit open on the device */
   ttl: number
   /** the device the request was handed to */
@@ -228,6 +228,31 @@ export class LocalRepo {
     this.pending.delete(requestId)
     p.resolve(result)
     return true
+  }
+
+  /** `finish` for a dev-task launch: the bridge entry a report settles
+   *  must be that task's own `dev_task` request — a report cannot burn a
+   *  different launch's pending job. */
+  finishDevTask(requestId: string, userId: string, deviceId: string, taskId: string, result: RepoResult): boolean {
+    const p = this.pending.get(requestId)
+    if (!p || p.op !== 'dev_task' || p.args.devTask?.taskId !== taskId) return false
+    return this.finish(requestId, userId, deviceId, result)
+  }
+
+  /** Drop a queued dev task's unclaimed bridge entries — a cancelled task's
+   *  launch must not still be claimable by the desktop. Entries already
+   *  claimed stay: that device answers through the report route, which
+   *  keeps the row cancelled. Returns how many were withdrawn. */
+  withdrawDevTask(userId: string, taskId: string): number {
+    let dropped = 0
+    for (const [id, p] of this.pending) {
+      if (p.userId === userId && p.op === 'dev_task' && p.args.devTask?.taskId === taskId && !p.claimedBy) {
+        this.pending.delete(id)
+        p.resolve({ ok: false, error: 'cancelled' })
+        dropped += 1
+      }
+    }
+    return dropped
   }
 
   /** Resolve unanswered requests and drop devices that stopped polling. */

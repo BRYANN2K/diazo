@@ -1,0 +1,167 @@
+<!doctype html>
+<html>
+  <body>
+    <script type="module">
+      import { paintAt, paintShutter } from '/src/lib/motion/compositor.ts'
+      import { rasterizeHtml } from '/src/lib/frameRaster.ts'
+      import { GL_EFFECT_IDS } from '/shared/motionFx.ts'
+
+      /* a fixed 64×64 scene: flat colour blocks on a mid ground — no text,
+         no images, so the only wobble a GPU can add is antialiasing on the
+         block edges (inside the ±2/255 golden tolerance). The white block
+         feeds the bloom threshold, and the right third sits on translucent
+         ground — alpha-reading effects (luma matte, feather, choke) have
+         real alpha steps to work on, and the blue block straddles the edge */
+      const W = 64
+      const H = 64
+      const FRAME_HTML = `<!doctype html><html><body style="margin:0">
+        <div style="position:absolute;left:0;top:0;width:41px;height:64px;background:#8090a0"></div>
+        <div style="position:absolute;left:8px;top:8px;width:24px;height:24px;background:#e04030"></div>
+        <div style="position:absolute;left:32px;top:32px;width:24px;height:24px;background:#2040c0"></div>
+        <div style="position:absolute;left:46px;top:6px;width:14px;height:14px;background:#ffffff"></div>
+      </body></html>`
+
+      /* a scene frame whose own markup reads the film clock — the square
+         slides with --t so a seek must re-raster it deterministically */
+      const SCENE_HTML = `<!doctype html><html><body style="margin:0">
+        <div style="position:absolute;inset:0;background:#8090a0"></div>
+        <div style="position:absolute;left:calc(4px + var(--t, 0) * 40px);top:16px;width:24px;height:24px;background:#e04030"></div>
+      </body></html>`
+
+      const FRAME = {
+        id: 'f1',
+        canvasId: 'c1',
+        pageId: 'p1',
+        name: 'F',
+        x: 0,
+        y: 0,
+        width: W,
+        height: H,
+        html: FRAME_HTML,
+        createdAt: 0,
+        updatedAt: 0,
+        updatedBy: 'fixture',
+      }
+
+      let stageStill
+      let stageScene
+      async function stage(scene) {
+        if (scene ? stageScene : stageStill) return scene ? stageScene : stageStill
+        const html = scene ? SCENE_HTML : FRAME_HTML
+        const blob = await rasterizeHtml(html, { width: W, height: H }, { scale: 1, type: 'png' })
+        const image = await createImageBitmap(blob)
+        const s = {
+          frames: [
+            {
+              frame: { ...FRAME, html },
+              image,
+              moving: scene,
+              scale: 1,
+              motionKfs: [],
+              unitEls: new Map(),
+            },
+          ],
+          fallback: { x: W / 2, y: H / 2, zoom: 1, rotation: 0 },
+          /* translucent on purpose — the uncovered right third paints at
+             alpha ≈ .55 so the matte effects have steps to read */
+          ground: 'rgba(16,20,24,0.55)',
+        }
+        if (scene) stageScene = s
+        else stageStill = s
+        return s
+      }
+
+      const comp = (effects, motionBlur) => ({
+        id: 'comp1',
+        canvasId: 'c1',
+        pageId: 'p1',
+        duration: 4,
+        fps: 24,
+        width: W,
+        height: H,
+        revision: 1,
+        createdAt: 0,
+        updatedAt: 0,
+        updatedBy: 'fixture',
+        motionBlur,
+        tracks: [
+          {
+            id: 'cam',
+            kind: 'camera',
+            keyframes: [
+              { id: 'k1', property: 'x', t: 0, value: W / 2, easing: { type: 'linear' } },
+              { id: 'k2', property: 'y', t: 0, value: H / 2, easing: { type: 'linear' } },
+              { id: 'k3', property: 'zoom', t: 0, value: 1, easing: { type: 'linear' } },
+            ],
+            effects,
+          },
+        ],
+      })
+
+      /* FNV-1a over every byte — the full-buffer equality check */
+      const fnv = (bytes) => {
+        let h = 0x811c9dc5
+        for (let i = 0; i < bytes.length; i++) {
+          h ^= bytes[i]
+          h = Math.imul(h, 0x01000193)
+        }
+        return (h >>> 0).toString(16)
+      }
+
+      /* every 8th pixel of the 64×64 → an 8×8 probe grid (256 channels) */
+      const probe = (data) => {
+        const out = []
+        for (let y = 0; y < H; y += 8)
+          for (let x = 0; x < W; x += 8) for (let c = 0; c < 4; c++) out.push(data[(y * W + x) * 4 + c])
+        return out
+      }
+
+      let glKilled = false
+      const killWebGl = () => {
+        if (glKilled) return
+        glKilled = true
+        const orig = HTMLCanvasElement.prototype.getContext
+        HTMLCanvasElement.prototype.getContext = function (kind, ...rest) {
+          return kind === 'webgl2' ? null : orig.call(this, kind, ...rest)
+        }
+      }
+
+      const shoot = async (film, s, t, ctx, drops) => {
+        for (const d of film.motionBlur ? await paintShutter(ctx, film, s, t) : await paintAt(ctx, film, s, t))
+          drops.set(`${d.fx}:${d.reason}`, d)
+      }
+
+      /* render({fx, params, stack, t, scene, shutter, samples, seq, noGl}) →
+       * {hash, grid, drops}: stack paints a whole ordered effect list (id,
+       * params, mix) for chain cases; seq paints the listed times on the
+       * same canvas first — the seek-path half of AC-14 — noGl kills the
+       * webgl2 context for the drop report */
+      window.motionGoldenFx = [...GL_EFFECT_IDS]
+      window.render = async (opts) => {
+        if (opts.noGl) killWebGl()
+        const s = await stage(Boolean(opts.scene))
+        const effects = opts.stack
+          ? opts.stack.map((e, i) => ({
+              id: `e${i}`,
+              fx: e.fx,
+              params: e.params ?? {},
+              ...(e.mix !== undefined ? { mix: e.mix } : {}),
+            }))
+          : opts.fx
+            ? [{ id: 'e1', fx: opts.fx, params: opts.params ?? {} }]
+            : []
+        const film = comp(
+          effects,
+          opts.shutter !== undefined ? { shutter: opts.shutter, samples: opts.samples } : undefined,
+        )
+        const canvas = Object.assign(document.createElement('canvas'), { width: W, height: H })
+        const ctx = canvas.getContext('2d')
+        const drops = new Map()
+        for (const t of opts.seq ?? []) await shoot(film, s, t, ctx, drops)
+        await shoot(film, s, opts.t ?? 0, ctx, drops)
+        const data = ctx.getImageData(0, 0, W, H).data
+        return { hash: fnv(data), grid: probe(data), drops: [...drops.values()] }
+      }
+    </script>
+  </body>
+</html>

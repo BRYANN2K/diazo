@@ -32,7 +32,6 @@ import { Avatar } from './ui/avatar'
 import { Chip } from './ui/chip'
 import { Kbd } from './ui/kbd'
 import { StatusLabel } from './ui/status-label'
-import { HandoffModal } from './HandoffModal'
 import { Note } from './ui/note'
 import {
   ArrowDownIcon,
@@ -518,7 +517,6 @@ function PlanCard({ message, plan }: { message: ChatMessage; plan: ChatPlan }) {
   const t = useT()
   const [editing, setEditing] = useState(false)
   const [revising, setRevising] = useState(false)
-  const [handoffOpen, setHandoffOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const open = isOpenPlan(plan)
 
@@ -597,21 +595,12 @@ function PlanCard({ message, plan }: { message: ChatMessage; plan: ChatPlan }) {
                   name: plan.launchedBy ?? '',
                 })}
               </span>
-              {canEdit && canvasId && (
-                <Button
-                  variant="bare"
-                  size="pill"
-                  className="ml-auto flex-none"
-                  title={t('handoff.actionTitle')}
-                  onClick={() => setHandoffOpen(true)}
-                >
-                  {t('handoff.action')}
-                </Button>
-              )}
             </div>
           )}
           {open && canEdit && (
-            <div className="mt-2.5 flex items-center gap-1 border-t border-line-soft pt-2">
+            /* the actions wrap at a narrow panel (260px, longer pt-BR labels):
+               Revise and Go design stay together on the right */
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-1 gap-y-1.5 border-t border-line-soft pt-2">
               <Button
                 variant="ghost"
                 size="sm"
@@ -625,36 +614,30 @@ function PlanCard({ message, plan }: { message: ChatMessage; plan: ChatPlan }) {
               <Button variant="ghost" size="sm" disabled={busy} onClick={() => setEditing(true)}>
                 {t('panels.chatPlanEdit')}
               </Button>
-              <Button
-                size="sm"
-                className="ml-auto"
-                disabled={busy}
-                title={t('panels.chatPlanReviseTitle')}
-                onClick={() => setRevising((v) => !v)}
-              >
-                {t('panels.chatPlanRevise')}
-              </Button>
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={busy}
-                title={t('panels.chatPlanLaunchTitle')}
-                onClick={() =>
-                  act(() => api.launchChatPlan(message.id).then(() => posthog.capture('chat_plan_launched')))
-                }
-              >
-                {t('panels.chatPlanLaunch')}
-              </Button>
+              <span className="ml-auto flex items-center gap-1">
+                <Button
+                  size="sm"
+                  disabled={busy}
+                  title={t('panels.chatPlanReviseTitle')}
+                  onClick={() => setRevising((v) => !v)}
+                >
+                  {t('panels.chatPlanRevise')}
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={busy}
+                  title={t('panels.chatPlanLaunchTitle')}
+                  onClick={() =>
+                    act(() => api.launchChatPlan(message.id).then(() => posthog.capture('chat_plan_launched')))
+                  }
+                >
+                  {t('panels.chatPlanLaunch')}
+                </Button>
+              </span>
             </div>
           )}
           {open && revising && canEdit && canvasId && <ReviseField canvasId={canvasId} message={message} />}
-          {handoffOpen && canvasId && (
-            <HandoffModal
-              canvasId={canvasId}
-              input={{ planMessageId: message.id }}
-              onClose={() => setHandoffOpen(false)}
-            />
-          )}
         </>
       )}
     </Card>

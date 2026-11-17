@@ -12,6 +12,7 @@ import { storedLinkAccess } from '../../shared/canvasRole.ts'
 import type { ComponentDef } from '../../shared/components.ts'
 import type { DesignToken, TokenType } from '../../shared/designTokens.ts'
 import type { Composition, RenderJob } from '../../shared/motion.ts'
+import type { SceneMedia } from '../../shared/motionMedia.ts'
 import type { CanvasSkill } from '../../shared/skills.ts'
 import type {
   LibraryIndexState,
@@ -279,6 +280,8 @@ function compositionRow(c: Composition) {
     height: c.height,
     posterTime: c.posterTime ?? null,
     tracks: c.tracks,
+    direction: c.direction ?? null,
+    motionBlur: c.motionBlur ?? null,
     revision: c.revision,
     createdAt: c.createdAt,
     updatedAt: c.updatedAt,
@@ -300,6 +303,8 @@ export function saveComposition(c: Composition) {
           height: c.height,
           posterTime: c.posterTime ?? null,
           tracks: c.tracks,
+          direction: c.direction ?? null,
+          motionBlur: c.motionBlur ?? null,
           revision: c.revision,
           updatedAt: c.updatedAt,
           updatedBy: c.updatedBy,
@@ -328,12 +333,103 @@ export function deleteComposition(canvasId: string, pageId: string) {
       ),
   )
   swallow(db.delete(t.renderJobs).where(and(eq(t.renderJobs.canvasId, canvasId), eq(t.renderJobs.pageId, pageId))))
+  swallow(db.delete(t.sceneMedia).where(and(eq(t.sceneMedia.canvasId, canvasId), eq(t.sceneMedia.pageId, pageId))))
 }
 
 export function deleteCompositions(canvasId: string) {
   swallow(db.delete(t.compositions).where(eq(t.compositions.canvasId, canvasId)))
   swallow(db.delete(t.compositionVersions).where(eq(t.compositionVersions.canvasId, canvasId)))
   swallow(db.delete(t.renderJobs).where(eq(t.renderJobs.canvasId, canvasId)))
+  swallow(db.delete(t.sceneMedia).where(eq(t.sceneMedia.canvasId, canvasId)))
+}
+
+/* ---- scene_media: per-page media state (phase 3) ---- */
+
+export function saveSceneMedia(m: SceneMedia & { canvasId: string; createdAt: number; updatedAt: number }) {
+  swallow(
+    db
+      .insert(t.sceneMedia)
+      .values({
+        id: m.id,
+        canvasId: m.canvasId,
+        pageId: m.pageId,
+        assetId: m.assetId,
+        kind: m.kind,
+        trimIn: m.trimIn,
+        trimOut: m.trimOut,
+        cuts: m.cuts,
+        beats: m.beats ?? null,
+        transcript: m.transcript ?? null,
+        generation: m.generation ?? null,
+        createdAt: m.createdAt,
+        updatedAt: m.updatedAt,
+      })
+      .onConflictDoUpdate({
+        target: [t.sceneMedia.pageId, t.sceneMedia.assetId],
+        set: {
+          kind: m.kind,
+          trimIn: m.trimIn,
+          trimOut: m.trimOut,
+          cuts: m.cuts,
+          beats: m.beats ?? null,
+          transcript: m.transcript ?? null,
+          generation: m.generation ?? null,
+          updatedAt: m.updatedAt,
+        },
+      }),
+  )
+}
+
+type SceneMediaRow = SceneMedia & { canvasId: string; createdAt: number; updatedAt: number }
+
+function mediaRow(r: typeof t.sceneMedia.$inferSelect): SceneMediaRow {
+  return {
+    id: r.id,
+    canvasId: r.canvasId,
+    pageId: r.pageId,
+    assetId: r.assetId,
+    kind: r.kind,
+    trimIn: r.trimIn,
+    trimOut: r.trimOut,
+    cuts: r.cuts,
+    beats: r.beats ?? undefined,
+    transcript: r.transcript ?? undefined,
+    generation: r.generation ?? undefined,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  }
+}
+
+export async function listSceneMedia(canvasId: string, pageId: string): Promise<SceneMediaRow[]> {
+  const rows = await db
+    .select()
+    .from(t.sceneMedia)
+    .where(and(eq(t.sceneMedia.canvasId, canvasId), eq(t.sceneMedia.pageId, pageId)))
+  return rows.map(mediaRow)
+}
+
+export async function getSceneMedia(canvasId: string, mediaId: string): Promise<SceneMediaRow | undefined> {
+  const rows = await db
+    .select()
+    .from(t.sceneMedia)
+    .where(and(eq(t.sceneMedia.canvasId, canvasId), eq(t.sceneMedia.id, mediaId)))
+  return rows[0] ? mediaRow(rows[0]) : undefined
+}
+
+export async function findSceneMediaByAsset(
+  canvasId: string,
+  pageId: string,
+  assetId: string,
+): Promise<SceneMediaRow | undefined> {
+  const rows = await db
+    .select()
+    .from(t.sceneMedia)
+    .where(and(eq(t.sceneMedia.canvasId, canvasId), eq(t.sceneMedia.pageId, pageId), eq(t.sceneMedia.assetId, assetId)))
+  return rows[0] ? mediaRow(rows[0]) : undefined
+}
+
+export function deleteSceneMedia(canvasId: string, mediaId: string) {
+  swallow(db.delete(t.sceneMedia).where(and(eq(t.sceneMedia.canvasId, canvasId), eq(t.sceneMedia.id, mediaId))))
 }
 
 /** a composition keeps its last 20 states (spec's undo budget) */
@@ -379,6 +475,43 @@ export function saveCompositionVersion(v: {
   )
 }
 
+/** The stored states of a composition, newest first (the undo history the
+ *  scene versions list shows; state included so a restore needs no second
+ *  read). */
+export async function listCompositionVersions(
+  canvasId: string,
+  compositionId: string,
+): Promise<{ id: string; state: Composition; savedAt: number; savedBy: string; savedByKind: string | null }[]> {
+  return db
+    .select({
+      id: t.compositionVersions.id,
+      state: t.compositionVersions.state,
+      savedAt: t.compositionVersions.savedAt,
+      savedBy: t.compositionVersions.savedBy,
+      savedByKind: t.compositionVersions.savedByKind,
+    })
+    .from(t.compositionVersions)
+    .where(and(eq(t.compositionVersions.canvasId, canvasId), eq(t.compositionVersions.compositionId, compositionId)))
+    .orderBy(desc(t.compositionVersions.savedAt))
+    .limit(MAX_COMPOSITION_VERSIONS)
+}
+
+export async function getCompositionVersion(
+  canvasId: string,
+  versionId: string,
+): Promise<{ id: string; compositionId: string; state: Composition } | undefined> {
+  const rows = await db
+    .select({
+      id: t.compositionVersions.id,
+      compositionId: t.compositionVersions.compositionId,
+      state: t.compositionVersions.state,
+    })
+    .from(t.compositionVersions)
+    .where(and(eq(t.compositionVersions.canvasId, canvasId), eq(t.compositionVersions.id, versionId)))
+    .limit(1)
+  return rows[0]
+}
+
 /** the render-job row the public RenderJob maps to and back */
 function jobRow(j: RenderJob) {
   return {
@@ -388,6 +521,7 @@ function jobRow(j: RenderJob) {
     compositionId: j.compositionId,
     format: j.format,
     target: j.target,
+    engine: j.engine ?? null,
     width: j.width,
     height: j.height,
     fps: j.fps,
@@ -999,6 +1133,8 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.agentRuns).where(eq(t.agentRuns.canvasId, canvasId)))
   swallow(db.delete(t.modelDuels).where(eq(t.modelDuels.canvasId, canvasId)))
   swallow(db.delete(t.canvasMembers).where(eq(t.canvasMembers.canvasId, canvasId)))
+  /* dev tasks and their stored handoff packs go with the canvas */
+  swallow(db.delete(t.frameDevTasks).where(eq(t.frameDevTasks.canvasId, canvasId)))
   swallow(db.delete(t.canvases).where(eq(t.canvases.id, canvasId)))
 }
 
@@ -1186,6 +1322,8 @@ async function writeComment(c: ElementComment): Promise<void> {
     failedAt: c.failedAt ?? null,
     failureReason: c.failureReason ?? null,
     resolvedBy: c.resolvedBy ?? null,
+    timeStart: c.timeStart ?? null,
+    timeEnd: c.timeEnd ?? null,
     resolvedAt: c.resolvedAt ?? null,
     parentId: c.parentId ?? null,
   }
@@ -1212,6 +1350,8 @@ async function writeComment(c: ElementComment): Promise<void> {
         failureReason: row.failureReason,
         resolvedBy: row.resolvedBy,
         resolvedAt: row.resolvedAt,
+        timeStart: row.timeStart,
+        timeEnd: row.timeEnd,
       },
     })
 }
@@ -1439,6 +1579,8 @@ export async function hydrate(): Promise<Hydrated> {
       height: row.height,
       ...(row.posterTime != null ? { posterTime: row.posterTime } : {}),
       tracks: row.tracks,
+      ...(row.direction != null ? { direction: row.direction } : {}),
+      ...(row.motionBlur != null ? { motionBlur: row.motionBlur } : {}),
       revision: row.revision,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
@@ -1576,6 +1718,8 @@ export async function hydrate(): Promise<Hydrated> {
       ...(row.resolvedBy != null ? { resolvedBy: row.resolvedBy } : {}),
       ...(row.resolvedAt != null ? { resolvedAt: row.resolvedAt } : {}),
       ...(row.parentId != null ? { parentId: row.parentId } : {}),
+      ...(row.timeStart != null ? { timeStart: row.timeStart } : {}),
+      ...(row.timeEnd != null ? { timeEnd: row.timeEnd } : {}),
     })
     comments.set(row.canvasId, list)
   }
@@ -1679,6 +1823,7 @@ export async function hydrate(): Promise<Hydrated> {
       compositionId: row.compositionId,
       format: row.format,
       target: row.target,
+      ...(row.engine != null ? { engine: row.engine } : {}),
       width: row.width,
       height: row.height,
       fps: row.fps,

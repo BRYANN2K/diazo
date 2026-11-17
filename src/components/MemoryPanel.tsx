@@ -28,7 +28,7 @@ const MAX_GUIDELINE_CHARS = 24_000
 const MAX_TITLE_CHARS = 80
 
 /* Timestamp/author line under a modal heading. */
-const meta = 'mt-1.5 text-[11.5px] text-ink-faint'
+const meta = 'mt-1.5 text-caption text-ink-faint'
 const errorText = 'mt-2.5 text-[13px] text-accent-ink'
 const modalHead = 'flex flex-wrap items-baseline gap-2.5'
 
@@ -81,15 +81,15 @@ export function MemoryPanel() {
     <PanelBody className="flex flex-col py-2">
       {empty && (
         <div className="border-b border-line-soft px-4 py-3.5">
-          <p className="text-[12.5px] leading-[1.5] font-semibold text-ink">{t('panels.memoryIntro')}</p>
+          <p className="text-body leading-[1.5] font-semibold text-ink">{t('panels.memoryIntro')}</p>
           <ul className="mt-2.5 flex flex-col gap-2 pl-4">
-            <li className="text-[12px] leading-[1.5] text-ink-soft">
+            <li className="text-label leading-[1.5] text-ink-soft">
               <b>{t('panels.memoryReferences')}</b> {t('panels.memoryIntroReferences')}
             </li>
-            <li className="text-[12px] leading-[1.5] text-ink-soft">
+            <li className="text-label leading-[1.5] text-ink-soft">
               <b>{t('panels.memoryRules')}</b> {t('panels.memoryIntroRules')}
             </li>
-            <li className="text-[12px] leading-[1.5] text-ink-soft">
+            <li className="text-label leading-[1.5] text-ink-soft">
               <b>{t('panels.memoryDecisions')}</b> {t('panels.memoryIntroDecisions')}
             </li>
           </ul>
@@ -107,8 +107,8 @@ export function MemoryPanel() {
           <Badge tone="agent" className="self-start">
             {t('panels.memorySuggestion')}
           </Badge>
-          <p className="text-copy font-medium text-ink">{p.rule.replace(/^-\s*/, '')}</p>
-          <p className="text-caption text-ink-2">{p.rationale}</p>
+          <p className="break-words text-copy font-medium text-ink">{p.rule.replace(/^-\s*/, '')}</p>
+          <p className="break-words text-caption text-ink-2">{p.rationale}</p>
           <p className="truncate text-caption text-ink-3" title={p.guideTitle ?? guideTitle({ name: p.guideName })}>
             {t('panels.memoryFromDecisions', { count: p.basedOn.length })} →{' '}
             <span className="font-medium text-ink-2">{p.guideTitle ?? guideTitle({ name: p.guideName })}</span>
@@ -196,7 +196,7 @@ export function MemoryPanel() {
           </ListSection>
           {decisions.slice(0, 20).map((d) => (
             <ListItem key={d.id} title={d.summary ? `${d.from}: “${d.text}”` : undefined}>
-              <span className="text-[12.5px] leading-[1.45] text-ink">{d.summary ?? `“${d.text}”`}</span>
+              <span className="break-words text-body leading-[1.45] text-ink">{d.summary ?? `“${d.text}”`}</span>
               <ListMeta>
                 {d.from}
                 {d.agentName ? ` → ${d.agentName}` : ''} · {timeAgo(d.at)}
@@ -230,7 +230,7 @@ function RefThumb({ reference }: { reference: MemoryReference }) {
   const scale = w / reference.width
   return (
     <span
-      className="block w-full overflow-hidden rounded-[8px] border border-line bg-surface"
+      className="block w-full overflow-hidden rounded-control border border-line bg-surface"
       style={{ height: Math.min(reference.height * scale, 150) }}
     >
       <iframe
@@ -288,7 +288,7 @@ function RefModal({
           })}
         </div>
         <div
-          className="mt-3.5 overflow-auto rounded-[12px] border border-line bg-surface"
+          className="mt-3.5 overflow-auto rounded-card border border-line bg-surface"
           style={{ height: Math.min(reference.height * scale, window.innerHeight * 0.55) }}
         >
           <iframe
@@ -366,7 +366,7 @@ function GuideModal({ canvasId, name, onClose }: { canvasId: string; name: strin
             <Input
               variant="well"
               inputSize="lg"
-              className="font-display font-extrabold md:text-[19px]"
+              className="font-display font-semibold md:text-heading"
               autoFocus={creating}
               placeholder={t('panels.memoryNamePlaceholder')}
               value={titleDraft}
@@ -378,7 +378,7 @@ function GuideModal({ canvasId, name, onClose }: { canvasId: string; name: strin
               {t('panels.memoryId')} {creating ? slugify(titleDraft) || '…' : doc?.name}
             </div>
             <Textarea
-              className="mt-3 min-h-[38dvh] resize-y rounded-[12px] bg-surface px-4 py-3.5 font-mono leading-[1.65] focus:ring-0 sm:min-h-[46vh] md:text-[12.5px]"
+              className="mt-3 min-h-[38dvh] resize-y rounded-card bg-surface px-4 py-3.5 font-mono leading-[1.65] focus:ring-0 sm:min-h-[46vh] md:text-body"
               autoFocus={!creating}
               placeholder={t('panels.memoryRulePlaceholder')}
               value={draft}
@@ -560,7 +560,7 @@ function GuideHistory({
         </>
       ) : (
         <>
-          <div className="mt-3.5 overflow-hidden rounded-[12px] border border-line bg-surface">
+          <div className="mt-3.5 overflow-hidden rounded-card border border-line bg-surface">
             {versions?.length === 0 && <ModalLede>{t('panels.memoryNoVersions')}</ModalLede>}
             {(versions ?? []).map((v, i) => (
               <ListRow
@@ -646,14 +646,14 @@ function LocalProjectRow({ canvasId }: { canvasId: string }) {
       {!link && !desktop ? (
         <ListHint>{t('panels.localProjectDesktopOnly')}</ListHint>
       ) : !link ? (
-        <div className="mx-1.5 flex items-center rounded-[8px] px-1.5 py-1.5">
+        <div className="mx-1.5 flex items-center rounded-control px-1.5 py-1.5">
           <Button variant="ghost" size="pill" disabled={busy} onClick={() => void pick()}>
             <FolderPlusIcon className="size-3.5" />
             {t('panels.localProjectLink')}
           </Button>
         </div>
       ) : (
-        <div className="mx-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-[2px] rounded-[8px] px-1.5 py-2 text-[12px] leading-[18px]">
+        <div className="mx-1.5 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-[2px] rounded-control px-1.5 py-2 text-label leading-[18px]">
           <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
             <span className="grid size-4 flex-none place-items-center">
               <FolderIcon className="size-3.5 text-ink-faint" />
@@ -671,7 +671,7 @@ function LocalProjectRow({ canvasId }: { canvasId: string }) {
               {t('panels.localProjectUnlink')}
             </Button>
           )}
-          <span className="col-span-2 flex min-w-0 items-center gap-[7px] pl-[22px] text-[11px] text-ink-faint">
+          <span className="col-span-2 flex min-w-0 items-center gap-[7px] pl-[22px] text-caption text-ink-faint">
             <Dot size="sm" tone={status.online ? 'done' : 'muted'} />
             {status.deviceMismatch
               ? t('panels.localProjectMismatch')

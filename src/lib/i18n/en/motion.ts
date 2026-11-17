@@ -15,7 +15,7 @@ export const motion = {
   animateTitle: 'Ask the Diazo Agent to turn this page’s frames into shots and camera moves',
   animateQueued: 'Queued for the Diazo Agent — the shots stream onto the timeline.',
   animatePrompt:
-    'Animate the storyboard on the page “{page}” (page id {pageId}) as a {duration}s film: call animate_storyboard, then turn the cuts into camera moves with patch_composition set_camera ops on the motion easing tokens. Keep it seek-safe.',
+    'Animate the storyboard on the page “{page}” (page id {pageId}) as a {duration}s film. Call animate_storyboard — every shot it returns lists the frame’s notes and its animatable elements (data-doop-id targets). The notes are the intent and the minimum, not a script: direct the film with set_composition ops — element tracks and keyframes on the targets, camera moves, transitions across the cuts, your own staging and rhythm where the story asks for more. Voice-over becomes a caption track with caption clips you add; music/SFX you cannot source goes on a muted caption lane named "Audio TODO"; keep the notes blocks and the notes bar out of the film (hide their ids). Every set_composition reports the noted shots still without element animation — fix them, lint_motion, then say where you went beyond the notes. Keep it seek-safe.',
   play: 'Play',
   pause: 'Pause',
   toStart: 'Back to the start',

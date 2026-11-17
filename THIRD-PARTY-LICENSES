@@ -74,3 +74,15 @@ HyperFrames (HTML rendered to video)
   attributes, [start, end) visibility windows, determinism rules, tracks and
   safe zones (ADR 0010). No HyperFrames code is copied or bundled; Diazo's own
   runtime implements the contract with WAAPI and CSS.
+
+EffectCraft (motion effects)
+  MIT License OR Apache License 2.0 (dual licensed, at your option).
+  Copyright (c) 2026 ArtCraft Team and the EffectCraft contributors.
+  Reference: https://github.com/storytold/effectcraft, revision
+  0d1fc924a35e09644e0d9f2f2457cce11da94cb0.
+  The GLSL effect bodies in src/lib/motion/gl.ts and the registry in
+  shared/motionFx.ts are Diazo's own implementations of the standard image
+  algorithms (blur taps, luminance ops, hash noise, distance fields).
+  EffectCraft's effect modules informed the family and parameter names at
+  the revision above. No EffectCraft code is copied or bundled; every
+  shader is an original implementation and the effect ids are Diazo's own.

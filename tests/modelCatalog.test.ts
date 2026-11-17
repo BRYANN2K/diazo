@@ -130,7 +130,7 @@ const GEMINI_PAGE_TWO = {
 }
 
 let mode: 'catalog' | 'down' | 'rejects' = 'catalog'
-const seen: { path: string; auth: string }[] = []
+const seen: { path: string; auth: string; authorization: string | undefined }[] = []
 
 let provider: http.Server
 let server: Server
@@ -144,6 +144,7 @@ beforeAll(async () => {
     seen.push({
       path: url.pathname + url.search,
       auth: String(req.headers['x-api-key'] ?? req.headers['x-goog-api-key'] ?? req.headers.authorization ?? ''),
+      authorization: req.headers.authorization,
     })
     const json = (status: number, body: unknown) =>
       res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(body))
@@ -165,6 +166,10 @@ beforeAll(async () => {
   server = await startServer({
     ANTHROPIC_API_KEY: '',
     ANTHROPIC_BASE_URL: base,
+    /* the server has Anthropic credentials of its own: none may ride along on
+       a per-person client, or their calls would bill to the server */
+    ANTHROPIC_AUTH_TOKEN: 'server-oauth-token',
+    ANTHROPIC_CUSTOM_HEADERS: 'X-Api-Key: sk-server-hdr\nAuthorization: Bearer server-env-token',
     OPENAI_API_KEY: '',
     OPENAI_MODELS_URL: `${base}/openai/v1/models`,
     GEMINI_MODELS_URL: `${base}/gemini/v1beta/models`,
@@ -212,6 +217,8 @@ it('Claude API: lists the models the key can run, curated first, and lets a disc
   /* the SDK paged through with the connected key, and the key never came back */
   expect(seen.some((r) => r.path.includes('after_id=claude-haiku-4-5-20251001'))).toBe(true)
   expect(seen.every((r) => r.auth === key)).toBe(true)
+  /* and no server credential rode along beside it */
+  expect(seen.every((r) => r.authorization === undefined)).toBe(true)
   expect(JSON.stringify(catalog)).not.toContain(key)
 
   /* choosing a discovered id runs as that id, not the curated default */

@@ -282,7 +282,9 @@
   --line-soft: #eceef1;
   --ink: #15171c;
   --ink-2: #5b616b;
-  --ink-3: #9298a2;
+  /* tertiary text (captions, timestamps, a quiet action): 4.5:1 on
+     --surface and --paper, so 11-12px text stays readable */
+  --ink-3: #6b717b;
   --on-ink: #ffffff;
   /* Signal blue = people and selection. Agent orange = anything an agent
      does. Never swap them, and never show an agent by colour alone. */
@@ -650,12 +652,15 @@
   --ground: #0c0d10;
   --paper: #15171b;
   --surface: #1c1f24;
-  --well: #22252b;
-  --line: #2a2e35;
-  --line-soft: #22252b;
+  /* a well, then the soft rule, then the line, each a step above
+     --surface, so bubbles, hovered rows and dividers still show */
+  --well: #2a2e35;
+  --line: #3a3f47;
+  --line-soft: #31353d;
   --ink: #eceef2;
   --ink-2: #a3a9b3;
-  --ink-3: #6d737d;
+  /* tertiary text at 4.5:1 on --surface, as in light */
+  --ink-3: #8b919b;
   --on-ink: #15171c;
   --signal: #5b8cff;
   --signal-wash: #5b8cff26;

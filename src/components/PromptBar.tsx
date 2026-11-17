@@ -9,7 +9,7 @@ import { Textarea } from './ui/textarea'
 import { Note } from './ui/note'
 import { Tooltip } from './ui/tooltip'
 import { DiazoMark } from './Logo'
-import { ArrowUpIcon, AttachmentIcon, FrameIcon, XIcon } from './ui/icons'
+import { ArrowUpIcon, AttachmentIcon, DuelIcon, FrameIcon, XIcon } from './ui/icons'
 import { ModelPicker } from './ModelPicker'
 import { DuelDialog } from './DuelDialog'
 import { currentRunnerPick, useRunnerPick } from '../lib/runnerPick'
@@ -353,7 +353,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {attachments.map((a) => (
-            <div key={a.preview} className="relative h-11 w-11 overflow-hidden rounded-[7px] bg-paper shadow-ring">
+            <div key={a.preview} className="relative h-11 w-11 overflow-hidden rounded-row bg-paper shadow-ring">
               <img src={a.preview} alt={a.file.name} className="block h-full w-full object-cover" />
               <Button
                 variant="bare"
@@ -391,7 +391,7 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
         {chip && (
           <div className="mb-2 flex">
             <span
-              className="flex h-6 min-w-0 max-w-full items-center gap-1.5 rounded-[6px] pr-1 pl-2 text-[12px] text-ink-soft shadow-ring"
+              className="flex h-6 min-w-0 max-w-full items-center gap-1.5 rounded-[6px] pr-1 pl-2 text-label text-ink-soft shadow-ring"
               title={
                 chip.kind === 'frame'
                   ? t('panels.promptScopedFrame', { name: chip.label })
@@ -457,12 +457,14 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
           <Button
             variant="ghost"
             size="sm"
-            className="h-[26px] rounded-pill px-[9px] text-label text-ink-2 shadow-ring hover:text-ink"
+            className="h-[26px] flex-none rounded-pill px-[9px] text-label text-ink-2 shadow-ring hover:text-ink @max-[300px]/foot:px-[6px]"
             title={t('duel.openTitle')}
             disabled={busy}
             onClick={() => setDuelOpen(true)}
           >
-            {t('duel.open')}
+            {/* a narrow foot keeps the glyph alone, so the model pill keeps its mark */}
+            <DuelIcon aria-hidden className="hidden size-3.5 @max-[300px]/foot:block" />
+            <span className="@max-[300px]/foot:sr-only">{t('duel.open')}</span>
           </Button>
           <span className="flex-1" />
           {/* the meter rides on the send button; a disabled button takes no
@@ -508,13 +510,13 @@ export function PromptBar({ canvasId }: { canvasId: string }) {
         />
       )}
       {(error || sent) && (
-        <div className="text-[11px] leading-[1.4]">
+        <div className="text-caption">
           {error ? (
-            <Note tone="error" size="sm" className="text-[11px]">
+            <Note tone="error" size="sm" className="text-caption">
               {error}
             </Note>
           ) : (
-            <Note size="sm" className="text-[11px] text-ink-soft">
+            <Note size="sm" className="text-caption text-ink-soft">
               <DiazoMark size={11} /> {t('panels.promptSent')}
             </Note>
           )}

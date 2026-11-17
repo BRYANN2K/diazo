@@ -2086,7 +2086,7 @@ export const FrameView = memo(function FrameView({
                   >
                     <span
                       className={cn(
-                        'absolute top-0 left-0 whitespace-nowrap bg-[#3c82f6] px-1.5 py-[3px] text-[10px] font-bold leading-none text-white [font-family:ui-monospace,monospace]',
+                        'absolute top-0 left-0 whitespace-nowrap bg-[#3c82f6] px-1.5 py-[3px] text-[10px] font-mono font-semibold leading-none text-white',
                         hover.rect.y < 18
                           ? 'origin-top-left rounded-[0_0_4px_0] [transform:translateY(0)_scale(min(calc(1/var(--zoom,1)),2.4))]'
                           : 'origin-bottom-left rounded-[4px_4px_4px_0] [transform:translateY(-100%)_scale(min(calc(1/var(--zoom,1)),2.4))]',
@@ -2273,7 +2273,7 @@ export const FrameView = memo(function FrameView({
                             </div>
                           )}
                           <div className="flex items-center gap-1.5 whitespace-nowrap rounded-[10px] bg-ink px-[7px] py-[5px] shadow-pop">
-                            <span className="rounded-[5px] bg-paper/[0.14] px-[5px] py-px text-[11px] font-bold text-paper [font-family:ui-monospace,monospace]">
+                            <span className="rounded-[5px] bg-paper/[0.14] px-[5px] py-px font-mono text-caption font-semibold text-paper">
                               {anchor.tag}
                             </span>
                             <Button

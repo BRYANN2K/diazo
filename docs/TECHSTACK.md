@@ -253,6 +253,21 @@ Status: current, updated 2026-11-17
   migration 0047, so a trimmed task history cannot move it). Tests: `agentRunner.test.ts`,
   `runnerQueue.test.ts`, `modelPickerRunners.test.tsx`, the pick cases in
   `localAgentRouting.test.ts`.
+- Orca dev tasks (`shared/devTasks.ts`, `server/devTasks.ts`,
+  `desktop/src-tauri/src/orca.rs`, docs/orca.md): a `ready_for_dev` frame can be sent to an
+  Orca worktree. `POST /api/frames/:id/dev-tasks` builds the brief (the frame's PNG export,
+  the canvas's design tokens and code links), writes a
+  `frame_dev_tasks` row (migration 0072; `frameIds`, the brief, the Orca `wt2:` identity —
+  never a path) and hands a `dev_task` `RepoRequest` to the requester's desktop over the
+  `/api/local-repo/poll` bridge, which only a device holding the canvas's repo grant may
+  claim. The shell's typed commands (`orca_status`, `orca_resolve_repo`,
+  `orca_launch_task` behind a native confirmation, `orca_poll`, `orca_activate` —
+  `__DIAZO_ORCA__`) build one argv each, never a shell string and never `--surface` (the
+  person's Chat | CLI setting decides); it reports through `/api/dev-tasks/:id/report`,
+  polls `worktree ps` trimmed to the identities it launched (`orca-tasks.json`), and the
+  coding agent pushes `update_dev_task` over MCP after reading its brief with
+  `get_handoff`. Every change broadcasts `dev-task` to the room. Tests:
+  `devTasks.test.ts`, `devTaskRoutes.test.ts`, the `orca::tests` unit tests.
 - Pages over MCP (`server/mcp.ts`): `get_canvas` lists `pages` (id, name, `startFrameId`) and
   every frame's `pageId`, and narrows to one page with `page_id`; `create_canvas_page` adds an
   empty page at the end (`actions.createCanvasPage`, a server-minted id, `MAX_PAGES` enforced)
@@ -1044,11 +1059,32 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   MediaRecorder/WebCodecs, or the desktop shell renders deterministically —
   `desktop/src-tauri/src/motion.rs` drives a hidden webview through the page's seek/capture hooks
   and encodes with an allowlisted local `ffmpeg` (`__DOOP_MOTION_RENDER__`, capability
-  `motion-render.json`); `src/blender.rs` is the disabled-by-default (`DOOP_BLENDER_BRIDGE`)
-  Blender-MCP spawn + read-only relay groundwork. MCP tools (`server/motionTools.ts`, parity in
+  `motion-render.json`); `src/blender.rs` spawns the disabled-by-default (`DOOP_BLENDER_BRIDGE`)
+  allowlisted blender-mcp process and relays server-queued ops behind read/write/render grants.
+  MCP tools (`server/motionTools.ts`, parity in
   `server/resident.ts`): `get_composition`, `set_composition`, `animate_storyboard`, `lint_motion`,
-  `render_composition`. Tests: `motion.test.ts`, `motionHttp.test.ts`, `motion::tests`,
-  `blender::tests`.
+  `render_composition`. Phases 2 to 5 (`feat/motion-backend-next`): transitions, camera presets,
+  text animators, `3d` clip sources with a scroll/pointer driver, `scene_media` (speed, cuts,
+  beats, transcript, recipe, ducking, captions), `generate_video`, the speech engine
+  (`server/speech*.ts`, `desktop/src-tauri/src/speech.rs` — the `diazo-speech` sidecar and the
+  Pocket TTS weight mirror are designed, not yet shipped; `docs/speech-mirror.md`), the Blender
+  op relay (`server/blender*.ts`, approvals in `desktop/src-tauri/src/blender.rs`), `blender` and
+  `server` render targets — the server target renders on the instance's own headless Chromium at
+  background priority under 60 s / 1080p / 30 fps / one-per-account caps, off with
+  `SERVER_RENDER_DISABLED` (`server/motionRender.ts`) — Lottie and HyperFrames interchange
+  (`shared/motionInterchange.ts`, `GET …/composition/export?format=`, `POST …/composition/import`),
+  and the motion duel (`POST …/motion-duels`: one storyboard page copied per pick,
+  `model_duels.kind = 'motion'`). Tests: `motion.test.ts`, `motionPhase2.test.ts`,
+  `motionMedia.test.ts`, `motionHttp.test.ts`, `motionPhase5.test.ts`, `blender.test.ts`,
+  `motion::tests`, `blender::tests`, `speech::tests`.
+  `render_composition`. `server/storyboard.ts` is the storyboard read `animate_storyboard` adds to
+  each shot — the frame's notes (elements labelled mouvement / transition / son / voix off / notes,
+  or the English words, by text or by markup) and its animatable elements with `data-doop-id`s
+  stamped in one pass through `server/elementIds.ts` `stampElements` and committed like a comment
+  stamp (`server/actions.ts` `commitElementStamps`); `set_composition` writes back the `storyboard`
+  notes check — noted shots still without an element track, over two fix passes. Tests:
+  `motion.test.ts`, `motionHttp.test.ts`, `storyboard.test.ts`, `storyboardAgent.test.ts`,
+  `motion::tests`, `blender::tests`.
 
 - Motion Studio UI (`src/components/motion/`, `src/lib/motion/`, contract `docs/motion-api.md`):
   the bar's Motion button mounts `MotionTimeline` over the stage for the active page (transport,
@@ -1061,7 +1097,9 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   and sends each page frame its element-track values (`elementCss.ts`) with `--t` and a
   `doop:seek` event through the runtime's `doop:motion` message (an adopted sheet, never saved).
   "Key the camera here" sends `set_camera`; "Animate storyboard" queues a board card asking the
-  resident agent for `animate_storyboard` + `set_camera` moves. Writes are `PATCH …/composition`
+  resident agent to animate every shot per the notes `animate_storyboard` extracts — element
+  tracks on the reported `data-doop-id` targets, camera moves, captions, TODO marker clips. Writes
+  are `PATCH …/composition`
   ops with `expectedRevision` (409 reloads). Export (`MotionExportDialog.tsx`): `POST …/renders`,
   then `renderInBrowser` (the compositor, `compositor.ts`, paints each frame from `t`: still frames
   rasterised once, frames with element tracks or seek-safe scene markup re-rasterised per frame
@@ -1283,3 +1321,22 @@ The shared font library serves public font assets with CORS so sandboxed frames 
 Migrations 0040 (agent feedback) and 0041 (custom fonts) retain their shared timestamps; their OSS
 snapshots omit the deferred Figma `integrations.refresh_token` column, as does the credential
 encryption backfill. Desktop downloads use the platform-neutral `https://doop.design/download` page.
+
+## Speech backend (phase 3, partial)
+
+`shared/speech.ts` defines the catalog, preferences, routing and validated job
+request. `server/speech.ts` persists jobs and preferences, claims desktop work
+atomically and adapts cloud providers and the internal sidecar protocol.
+`server/speechJobs.ts` validates canvas assets, requires cloud estimate
+acknowledgement, normalizes results and writes transcripts/audio media.
+`server/speechRoutes.ts` exposes the authenticated REST relay;
+`server/speechTools.ts` supplies the same tools to MCP and the resident agent.
+Migrations 0074–0076 add speech tables, durable request parameters and a partial
+unique index allowing one active job per person. Restarted jobs fail without
+automatic retries. Voice accounts are excluded from runner selection.
+
+Contract and limitations: [speech-api.md](speech-api.md). Tests:
+`tests/speech.test.ts`, `tests/speechHttp.test.ts`, `tests/agentToolParity.test.ts`
+and `tests/agentRunners.test.ts`. The desktop engine worker, installer, model
+release manifests and actual sidecar remain pending. No speech engine is
+bundled or downloaded by this change.

@@ -51,6 +51,9 @@ tokio = { version = "1", features = ["time"] }
 # the same reqwest and ring-backed rustls the updater already links.
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# Ed25519 + SHA-256 for speech model signature/hash checks (src/speech.rs);
+# already linked through rustls — this only declares it directly.
+ring = "0.17"
 
 # kill(2) on a local agent's process group (../src-tauri/src/acp.rs), in step with ../src-tauri
 [target.'cfg(unix)'.dependencies]

@@ -32,8 +32,8 @@ rfd = "0.16"
 tauri-plugin-updater = "2"
 tokio = { version = "1", features = ["time", "sync"] }
 # Local-project reads (src/repo.rs): link ids are uuids; repo_search's
-# `regex` arg takes a Rust-regex pattern; repo_write_change decodes the
-# pack's binary files (PNG assets) from base64.
+# `regex` arg takes a Rust-regex pattern; base64 decodes the drift/speech
+# payloads.
 uuid = { version = "1", features = ["v4"] }
 regex = "1"
 base64 = "0.22"
@@ -41,6 +41,9 @@ base64 = "0.22"
 # the same reqwest and ring-backed rustls the updater already links.
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# Ed25519 + SHA-256 for speech model signature/hash checks (src/speech.rs);
+# already linked through rustls — this only declares it directly.
+ring = "0.17"
 
 # kill(2) on a local agent's process group (src/acp.rs): procps' /bin/kill,
 # handed a group whose only member has exited, signals the caller's own group

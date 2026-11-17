@@ -11,13 +11,12 @@ import { deleteFrameTracked, recordUpdate, trackSave } from '../lib/history'
 import { setFramesLocked } from '../lib/layerEdits'
 import { FrameHistoryModal } from './FrameHistoryModal'
 import { FrameApprovalControl } from './FrameApproval'
-import { HandoffModal } from './HandoffModal'
 import { CodeLinkSection } from './CodeLinkSection'
 import { FrameCodeModal } from './FrameCodeModal'
 import { cn } from '@/lib/utils'
 import { Panel, PanelClose, PanelHeader, type PanelSurface } from './ui/panel'
 import { Collapsible, CollapsibleContent } from './ui/collapsible'
-import { ArrowRightIcon, CopyIcon, DownloadIcon, FrameIcon, LockIcon } from './ui/icons'
+import { CopyIcon, DownloadIcon, FrameIcon, LockIcon } from './ui/icons'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
@@ -30,7 +29,7 @@ import { t as translate, useT } from '../lib/i18n'
 const HTML_OPEN_KEY = 'doop:inspector-html'
 
 /* the rail's filled buttons: a grey well, 28px, tall enough to hit on a phone */
-const fillBtn = 'h-7 rounded-[7px] bg-sub px-2 text-[12px] font-normal text-ink hover:bg-paper-deep max-md:min-h-10'
+const fillBtn = 'h-7 rounded-row bg-sub px-2 text-label font-normal text-ink hover:bg-paper-deep max-md:min-h-10'
 /* the position and size fields, tall enough to hit on a phone */
 const boxField = 'max-md:h-10 max-md:min-h-10'
 
@@ -69,7 +68,6 @@ export function Inspector({
   /* what the frame actually renders at: a huge frame caps a large pick */
   const exportScale = fitExportScale(frame, exportSettings.scale)
   const [historyOpen, setHistoryOpen] = useState(false)
-  const [handoffOpen, setHandoffOpen] = useState(false)
   const [codeOpen, setCodeOpen] = useState(false)
   const [htmlCopy, setHtmlCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -221,7 +219,7 @@ export function Inspector({
       {frame.locked && (
         <div className="flex items-center justify-between gap-2 border-b border-line-soft bg-sub py-1.5 pr-2 pl-3">
           <span
-            className="flex min-w-0 items-center gap-1.5 text-[12px] text-ink-soft"
+            className="flex min-w-0 items-center gap-1.5 text-label text-ink-soft"
             title={t('inspector.lockedTitle')}
           >
             <LockIcon className="size-3 flex-none" />
@@ -229,7 +227,7 @@ export function Inspector({
           </span>
           <Button
             variant="bare"
-            className="h-6 rounded-[6px] bg-surface px-2 text-[12px] font-normal text-ink shadow-ring"
+            className="h-6 rounded-[6px] bg-surface px-2 text-label font-normal text-ink shadow-ring"
             onClick={() => setFramesLocked([frame], false)}
           >
             {t('inspector.unlock')}
@@ -239,17 +237,6 @@ export function Inspector({
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <InspectorGroup title={t('inspector.groupDevelopment')}>
           <FrameApprovalControl key={frame.id} frame={frame} hasUnsavedChanges={saveState === 'dirty'} />
-          {canEdit && (
-            <Button
-              variant="bare"
-              className={cn(fillBtn, 'mt-1.5 w-full gap-1.5')}
-              title={t('handoff.actionTitle')}
-              onClick={() => setHandoffOpen(true)}
-            >
-              <ArrowRightIcon className="size-3.5" />
-              {t('handoff.action')}
-            </Button>
-          )}
           {canEdit && (
             <Button
               variant="bare"
@@ -383,7 +370,7 @@ export function Inspector({
               aria-expanded={showHtml}
               title={showHtml ? t('inspector.hideHtmlEditor') : t('inspector.editHtml')}
               onClick={() => toggleHtml(!showHtml)}
-              className="mb-1.5 -ml-1 flex h-5 items-center gap-1 rounded-[5px] px-1 text-[12px] text-ink-soft hover:text-ink"
+              className="mb-1.5 -ml-1 flex h-5 items-center gap-1 rounded-[5px] px-1 text-label text-ink-soft hover:text-ink"
             >
               {t('inspector.code')}
             </button>
@@ -408,7 +395,7 @@ export function Inspector({
               </Button>
             </div>
             {htmlCopy === 'failed' && (
-              <p className="pt-2 text-[11px] text-accent-ink">{t('inspector.copyHtmlFailed')}</p>
+              <p className="pt-2 text-caption text-accent-ink">{t('inspector.copyHtmlFailed')}</p>
             )}
           </div>
           <CollapsibleContent className="relative flex min-h-0 flex-col">
@@ -425,7 +412,7 @@ export function Inspector({
         </Collapsible>
       </div>
       <footer className="flex flex-none items-center justify-between gap-2 border-t border-line-soft py-2 pr-2 pl-3">
-        <span className="min-w-0 truncate text-[11px] text-ink-faint">
+        <span className="min-w-0 truncate text-caption text-ink-faint">
           {saveState === 'dirty'
             ? t('inspector.saving')
             : saveState === 'saved'
@@ -436,7 +423,7 @@ export function Inspector({
           <Button
             variant="bare"
             size="sm"
-            className="h-7 rounded-[7px] px-2 text-[12px] font-normal"
+            className="h-7 rounded-row px-2 text-label font-normal"
             onClick={() => setHistoryOpen(true)}
           >
             {t('inspector.history')}
@@ -444,7 +431,7 @@ export function Inspector({
           <Button
             variant="bare-danger"
             size="sm"
-            className="h-7 rounded-[7px] px-2 text-[12px] font-normal"
+            className="h-7 rounded-row px-2 text-label font-normal"
             disabled={!!frame.locked}
             title={frame.locked ? t('inspector.unlockToDelete') : undefined}
             onClick={() => deleteFrameTracked(frame)}
@@ -455,13 +442,6 @@ export function Inspector({
       </footer>
       {codeOpen && <FrameCodeModal frameId={frame.id} onClose={() => setCodeOpen(false)} />}
       {historyOpen && <FrameHistoryModal frame={frame} onClose={() => setHistoryOpen(false)} />}
-      {handoffOpen && (
-        <HandoffModal
-          canvasId={frame.canvasId}
-          input={{ frameIds: [frame.id] }}
-          onClose={() => setHandoffOpen(false)}
-        />
-      )}
     </Panel>
   )
 }
@@ -473,10 +453,10 @@ function FrameLintIssues({ frame }: { frame: Frame }) {
   const pickElement = useStore((s) => s.pickElement)
   const lint = frame.lint
   if (!lint) {
-    return <p className="m-0 text-[12px] text-ink-faint">{t('lint.notLinted')}</p>
+    return <p className="m-0 text-label text-ink-faint">{t('lint.notLinted')}</p>
   }
   if (lint.issues.length === 0) {
-    return <p className="m-0 text-[12px] text-success-ink">{t('lint.noIssues')}</p>
+    return <p className="m-0 text-label text-success-ink">{t('lint.noIssues')}</p>
   }
   return (
     <ul className="m-0 flex list-none flex-col gap-1 p-0">
@@ -484,7 +464,7 @@ function FrameLintIssues({ frame }: { frame: Frame }) {
         <li key={`${issue.ruleId}-${i}`}>
           <button
             type="button"
-            className="flex w-full items-start gap-1.5 rounded-[6px] px-1 py-0.5 text-left text-[12px] hover:bg-sub"
+            className="flex w-full items-start gap-1.5 rounded-[6px] px-1 py-0.5 text-left text-label hover:bg-sub"
             title={issue.selector ? t('lint.pickIssueTitle') : undefined}
             onClick={() => issue.selector && pickElement({ frameId: frame.id, selector: issue.selector })}
           >
@@ -525,20 +505,20 @@ function FrameChecksSummary({ frame, canRun }: { frame: Frame; canRun: boolean }
   return (
     <div className="mt-2 flex flex-col gap-1 border-t border-line-soft pt-2">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[12px] font-medium text-ink">{t('checks.heading')}</span>
+        <span className="text-label font-medium text-ink">{t('checks.heading')}</span>
         {canRun && (
           <Button variant="bare" size="inline" disabled={running} onClick={() => void run()}>
             {running ? t('checks.running') : t('checks.run')}
           </Button>
         )}
       </div>
-      {failed && <p className="m-0 text-[12px] text-warning-ink">{t('checks.runFailed')}</p>}
+      {failed && <p className="m-0 text-label text-warning-ink">{t('checks.runFailed')}</p>}
       {!checks ? (
-        <p className="m-0 text-[12px] text-ink-faint">{t('checks.notChecked')}</p>
+        <p className="m-0 text-label text-ink-faint">{t('checks.notChecked')}</p>
       ) : (
         <>
-          {!checksAreCurrent(frame) && <p className="m-0 text-[12px] text-ink-faint">{t('checks.stale')}</p>}
-          <ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-[12px] text-ink-soft">
+          {!checksAreCurrent(frame) && <p className="m-0 text-label text-ink-faint">{t('checks.stale')}</p>}
+          <ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-label text-ink-soft">
             {checks.viewports.map((vp) => (
               <li key={vp.width} className="flex justify-between gap-2">
                 <span className="font-medium text-ink">{t('checks.widthRow', { width: vp.width })}</span>
@@ -559,14 +539,14 @@ function FrameChecksSummary({ frame, canRun }: { frame: Frame; canRun: boolean }
             </li>
           </ul>
           {checks.issues.length === 0 ? (
-            <p className="m-0 text-[12px] text-success-ink">{t('checks.noIssues')}</p>
+            <p className="m-0 text-label text-success-ink">{t('checks.noIssues')}</p>
           ) : (
             <ul className="m-0 flex list-none flex-col gap-1 p-0">
               {checks.issues.map((issue, i) => (
                 <li key={`${issue.ruleId}-${i}`}>
                   <button
                     type="button"
-                    className="flex w-full items-start gap-1.5 rounded-[6px] px-1 py-0.5 text-left text-[12px] hover:bg-sub"
+                    className="flex w-full items-start gap-1.5 rounded-[6px] px-1 py-0.5 text-left text-label hover:bg-sub"
                     title={issue.selector ? t('lint.pickIssueTitle') : undefined}
                     onClick={() => issue.selector && pickElement({ frameId: frame.id, selector: issue.selector })}
                   >
@@ -605,7 +585,7 @@ function FrameChecksSummary({ frame, canRun }: { frame: Frame; canRun: boolean }
 function InspectorGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="border-b border-line-soft px-3 py-2">
-      <h3 className="mb-1.5 flex h-5 items-center text-[12px] font-normal text-ink-soft">{title}</h3>
+      <h3 className="mb-1.5 flex h-5 items-center text-label font-normal text-ink-soft">{title}</h3>
       {children}
     </section>
   )
@@ -626,7 +606,7 @@ function NameInput({ value, onCommit }: { value: string; onCommit: (v: string) =
       variant="bare"
       inputSize="auto"
       aria-label={t('inspector.frameName')}
-      className="h-7 min-w-0 flex-1 truncate rounded-[6px] px-1 text-[12.5px] font-medium hover:bg-sub focus:bg-surface focus:shadow-elevation-1-focus md:text-[12.5px] max-md:min-h-10"
+      className="h-7 min-w-0 flex-1 truncate rounded-[6px] px-1 text-body font-medium hover:bg-sub focus:bg-surface focus:shadow-elevation-1-focus md:text-body max-md:min-h-10"
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => draft !== value && onCommit(draft)}

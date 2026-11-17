@@ -35,7 +35,13 @@ import {
   reasoningEffortOptions,
 } from '../shared/modelMenu.ts'
 import type { ModelOption } from '../shared/modelMenu.ts'
-import { RUNNER_NAMES, type AgentRunner, type AgentRunners, type RunnerProvider } from '../shared/agentRunner.ts'
+import {
+  isRunnerProvider,
+  RUNNER_NAMES,
+  type AgentRunner,
+  type AgentRunners,
+  type RunnerProvider,
+} from '../shared/agentRunner.ts'
 
 /** the curated menu each built-in account kind's picker opens with */
 export const MODEL_MENUS: Record<BuiltinAccountKind, ModelOption[]> = {
@@ -47,6 +53,7 @@ export const MODEL_MENUS: Record<BuiltinAccountKind, ModelOption[]> = {
   'deepseek-key': DEEPSEEK_MODELS,
   'kimi-key': KIMI_MODELS,
   'kimi-code': KIMI_CODE_MODELS,
+  'elevenlabs-key': [],
 }
 
 /** The menu one connected account's picker opens with: the curated one, or
@@ -58,7 +65,8 @@ export function menuFor(account: ModelAccount): ModelOption[] {
 
 /** What the composer and the meter call a connection. */
 function nameOf(account: ModelAccount): string {
-  return account.custom?.name ?? RUNNER_NAMES[account.kind as BuiltinAccountKind]
+  if (account.kind === 'elevenlabs-key') return 'ElevenLabs'
+  return account.custom?.name ?? RUNNER_NAMES[account.kind as Exclude<BuiltinAccountKind, 'elevenlabs-key'>]
 }
 
 /** The models one connected account can really run, for every menu that
@@ -113,7 +121,10 @@ export async function listRunners(userId: string): Promise<AgentRunners> {
   /* the menu must list what the connection can actually run, so it comes
      from the provider's own catalog — every account's asked at once, bounded
      by the slowest rather than their sum (each loader bounds itself at 8s) */
-  const enabled = connections.accounts.filter((account) => account.enabled)
+  const enabled = connections.accounts.filter(
+    (account): account is ModelAccount & { kind: Exclude<ModelAccount['kind'], 'elevenlabs-key'> } =>
+      account.enabled && isRunnerProvider(account.kind),
+  )
   const catalogs = await Promise.all(enabled.map((account) => catalogForAccount(account)))
   for (const [i, account] of enabled.entries()) {
     const effort = takesReasoningEffort(account.kind) ? effortFor(account) : undefined

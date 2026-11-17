@@ -131,14 +131,63 @@ function of time t, nothing else.
   expected_revision so a collaborator's edit is never silently overwritten.
 - animate_storyboard turns the frames already on a page into the first timeline: one shot per
   frame in reading order, a camera track of hard cuts. Plan the story from the brief FIRST, call
-  it once, then refine with ops — turn cuts into moves by changing hold easings, add captions,
-  clips and element animation.
+  it once. Every shot it returns lists the notes its frame carries — the elements labelled
+  mouvement, transition, son, voix off or notes (motion, transition, sound, voice-over, notes in
+  English) — and its animatable elements: headline and text blocks, images, key UI, each a
+  data-doop-id an element track can target.
+- Then direct the film from those notes — they are the intent and the minimum, not a
+  script. Animate every shot, and go beyond the notes where the story asks for it: staging,
+  rhythm, extra moves they do not name. Your tools are element tracks (add_track kind
+  element, then add_keyframe on a target's data-doop-id) and camera keyframes (set_camera,
+  add_keyframe on the camera track): entrances and exits with stagger, pulses and glows,
+  parallax between layers — a slow push-in for a travelling avant, a fast one for a whip
+  pan. Keep every move on the motion easing tokens (--dur-*, --ease-*, --spring-*).
+- The transition into the next shot is part of the shot: match cut, push, crossfade, whip —
+  it is camera and element keyframes across the cut, not a clip kind. Voice-over becomes a
+  caption track you add (add_track kind caption, then add_clip {type:'caption', text});
+  animate_storyboard builds the camera track only, so the lane does not exist until you
+  make it. Music and SFX notes with no audio asset to play go on a muted caption track
+  named "Audio TODO" — muted lanes never reach the render, so the note is kept on the
+  timeline, not shown in the film.
+- For a word-by-word or line reveal, key the word or line elements the frame already
+  wraps — their data-doop-ids come back as targets — or use the frame's own
+  data-doop-motion block when it has one. Splitting words yourself rewrites the design
+  and ends its sign-off. Keep the notes out of the film: hide the notes blocks or the
+  whole notes bar — the ids are in shots[].notes and panelId — with an element track
+  that holds it at opacity 0.
+- Each set_composition writes back a storyboard field: every noted shot still without an
+  element track on a real element of its frame is named in it. A pass counts only when a
+  write leaves the pending set unchanged — you get two; after that, finish the
+  composition and name the shots you left.
 - Everything on screen at time t comes from the timeline and the frames' markup only. Never
   animate with Date.now, setInterval, requestAnimationFrame, unseeded Math.random, CSS animations
   or GSAP — a seek must redraw the same pixels. Bind motion to keyframes on tracks, or to the
   page's data-doop-time attributes. lint_motion flags every violation; run it before rendering.
 - render_composition queues a video job (mp4/webm): a browser tab or the desktop app claims it,
-  renders deterministically and the file lands as an /a/ asset. Progress shows in the room.`
+  renders deterministically and the file lands as an /a/ asset. Progress shows in the room.
+
+The director's kit — how a film is judged:
+- Write the treatment before you shoot: set_direction puts the film's intent on the composition —
+  treatment paragraph, beats ({seconds, note, transition: cut|move|push|whip|fade}), look,
+  references, rhythm, palette, passes (critique budget, default 3, max 5). Pass it to
+  animate_storyboard: beats set per-shot seconds and how the camera hands over between shots.
+  An unknown transition is a cut, never invented motion.
+- Preset tools write ordinary editable keyframes and clips, nothing opaque: list_motion_presets is
+  the vocabulary, apply_camera_preset lands the 13 named moves at t composing with the camera
+  already there, apply_transition sets a clip's dissolve/push/wipe/zoom/shared-element, and
+  apply_text_animation rides a frame's data-doop-motion block over a line/word/char split while the
+  element's text stays one editable string.
+- See your own render before you ship: get_scene_snapshot returns a labelled contact sheet drawn by
+  the same compositor every render target uses, plus per-cell luminance/contrast, motion energy and
+  measured text boxes. check_scene is the numbers pass — lint, pacing with dead beats, safe zones
+  (90%/80%), effective text px, per-track stack cost. critique_scene folds that into the fixed
+  rubric and counts a pass each time you call it on a new revision; stop when it says so or the
+  budget runs out.
+- The effect stack is a P1 layer: list_motion_effects is the registry (~30 effects with params,
+  ranges, cost), add_effect/update_effect/remove_effect/set_effects manage a track's ordered stack,
+  apply_look lays a named grade as an adjustment track, set_blend composites the layer, and
+  set_motion_blur is the filmic shutter — deterministic sub-seek averaging, 0 clears. Effect params
+  keyframe through fx:<instanceId>.<param> lanes.`
 
 export const COMPONENTS = `A component is one design used in many places: change its main and every instance follows.
 get_canvas and list_components show a canvas's components with their props.

@@ -1,3 +1,5 @@
+import { SPEECH_TOOLS, runSpeechTool } from './speechTools.ts'
+import { BLENDER_TOOLS, runBlenderTool } from './blenderTools.ts'
 import { findInCanvas } from './canvasFind.ts'
 import { findInLibrary } from './libraryQueries.ts'
 import { env } from './env.ts'
@@ -35,11 +37,39 @@ import { webFontFamilies, webFontsBrief } from '../shared/webFonts.ts'
 import * as actions from './actions.ts'
 import {
   animateStoryboard,
+  buildCaptions,
+  checkLibraryItemMotion,
+  duckAudio,
+  exportComposition,
+  generateVideoClip,
   getCompositionData,
+  insertClip,
   lintMotion,
+  listMedia,
   renderComposition,
   setCompositionData,
+  setMedia,
+  suggestCuts,
+  videoModels,
 } from './motionTools.ts'
+import {
+  addEffect,
+  applyCameraPreset,
+  applyLook,
+  applyTextAnimation,
+  applyTransition,
+  getDirection,
+  listLooks,
+  listMotionEffects,
+  listMotionPresets,
+  removeEffect,
+  setDirection,
+  setEffects,
+  setMotionBlur,
+  updateEffect,
+} from './motionProTools.ts'
+import { checkScene, critiqueScene, sceneSnapshot } from './motionSnapshot.ts'
+import type { Direction, EffectInstance } from '../shared/motion.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
 import { isAgentKeySecret, verifyAgentKey } from './agentKeys.ts'
@@ -51,7 +81,8 @@ import { capture, captureThrottled } from './analytics.ts'
 import { renderFrame } from './screenshot.ts'
 import { lintAndStore } from './lint.ts'
 import { checkAndStore, checkOutcomeForAgent } from './frameChecks.ts'
-import { buildHandoffPack, HandoffError } from './handoff.ts'
+import { applyAgentUpdate, briefFor, devTaskFor, devTasksForCanvas } from './devTasks.ts'
+import { DEV_TASK_PUSH_STATES, DEV_TASK_SUMMARY_CHARS } from '../shared/devTasks.ts'
 import {
   CodeLinkError,
   SET_CODE_LINK_DESCRIPTION,
@@ -130,6 +161,7 @@ You MUST call get_guide({ topic: "diazo-instructions" }) once before using other
 
 - Context first: call get_canvas before adding or editing frames.
 - Implementation handoff: get_canvas and get_frame expose approvalStatus (draft, ready_for_dev, needs_review) and human approval attribution. Use get_canvas with approval_status="ready_for_dev" to find approved screens. Re-read get_frame before implementing; only ready_for_dev is current sign-off. HTML or size edits invalidate approval. Approval does not automatically start an implementation task; follow the human's implementation request.
+- Dev tasks: a prompt naming a dev task id was launched from a signed-off frame. Call get_handoff({ task_id }) for its brief and report progress with update_dev_task; get_canvas lists a canvas's dev tasks.
 - Element links: /c/<canvas_id>?frame=<frame_id>&element=<element_id> identifies one element: the one carrying data-doop-id="<element_id>" in that frame's HTML. Read get_canvas and get_frame and find that attribute before applying the feedback. If no element carries the id any more, ask for an updated reference.
 - Keep data-doop-* attributes on every element you rewrite: data-doop-id is how comments and links point at an element, data-doop-on / data-doop-action carry prototype wiring, data-doop-locked a layer lock. Drop one only together with its element.
 - Identity: pick an agent_name and reuse the SAME name on every call — your presence and edits are attributed live.
@@ -692,6 +724,7 @@ export function buildMcpServer(
          the synced screens — context a redesign must respect */
       const flow = describeSyncFlow(await getSyncFlow(c), c.frames)
       const images = await imagesForFrames(shown.map((f) => f.id))
+      const devTasks = await devTasksForCanvas(canvas_id)
       const notes = [
         ...(images.size ? [IMAGES_NOTE] : []),
         ...(flow.length
@@ -752,6 +785,7 @@ export function buildMcpServer(
             ...(tokens.length ? { tokens: describeTokens(tokens) } : {}),
             ...(tokenThemes.length ? { tokenThemes } : {}),
             ...(flow.length ? { flow } : {}),
+            ...(devTasks.length ? { dev_tasks: devTasks } : {}),
             ...(notes.length ? { note: notes.join(' ') } : {}),
           }),
           canvas_id,
@@ -1905,7 +1939,7 @@ export function buildMcpServer(
       const c = canvasFor(canvas_id, 'edit')
       if (!c) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
-      const out = setCompositionData(c, page_id, { composition, ops, expected_revision }, actorFrom(agent_name))
+      const out = await setCompositionData(c, page_id, { composition, ops, expected_revision }, actorFrom(agent_name))
       if (!out.ok) return err(out.error)
       return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
     },
@@ -1916,7 +1950,7 @@ export function buildMcpServer(
     {
       title: 'Turn a page of frames into a film',
       description:
-        'Build a Motion Studio composition from the frames already laid out on a page: one shot per frame in reading order (top-to-bottom rows, left-to-right), a camera track that cuts between shots at shot_seconds each. Call it AFTER planning the story from the brief — this is the deterministic half; refine the result with set_composition ops to turn cuts into camera moves (change hold easings), add captions, clips and element animation, then lint_motion before render_composition.',
+        'Build a Motion Studio composition from the frames already laid out on a page: one shot per frame in reading order (top-to-bottom rows, left-to-right), a camera track that cuts between shots at shot_seconds each. The result describes every shot: the notes its frame carries (elements labelled mouvement, transition, son, voix off, notes — or the English words — plus the notes bar they may share, as panelId) and its animatable elements (headlines, text, images, key UI — each a data-doop-id an element track can target). Call it AFTER planning the story from the brief. The notes are the intent and the minimum, not a script: direct the film with set_composition ops — element tracks and camera keyframes (entrances/exits, stagger, pulses, parallax, transitions across the cuts), voice-over on a caption track + caption clips you add, music/SFX you cannot source on a muted caption lane named "Audio TODO", notes blocks hidden via their ids. Every write reports the noted shots still missing element animation — fix them before finishing. lint_motion before render_composition.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
@@ -1927,19 +1961,452 @@ export function buildMcpServer(
         width: z.number().int().optional().describe('Output width px, default 1920'),
         height: z.number().int().optional().describe('Output height px, default 1080'),
         frame_ids: z.array(z.string()).optional().describe('Only these frames become shots, in reading order'),
+        direction: z
+          .record(z.unknown())
+          .optional()
+          .describe('The Direction — beats set per-shot seconds and handovers (see set_direction)'),
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, page_id, shot_seconds, margin, fps, width, height, frame_ids, agent_name }) => {
+    async ({ canvas_id, page_id, shot_seconds, margin, fps, width, height, frame_ids, direction, agent_name }) => {
       const c = canvasFor(canvas_id, 'edit')
       if (!c) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
-      const out = animateStoryboard(
+      const out = await animateStoryboard(
         c,
         page_id,
-        { shot_seconds, margin, fps, width, height, frame_ids },
+        { shot_seconds, margin, fps, width, height, frame_ids, direction: direction as Direction | undefined },
         actorFrom(agent_name),
       )
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  /* ---- motion-pro: the director kit (P0) and the effect stack (P1) ---- */
+
+  server.registerTool(
+    'get_direction',
+    {
+      title: "Read the film's treatment",
+      description:
+        "Read the Direction a page's composition was directed with — the treatment paragraph, its beats (per-shot seconds and handovers), the named look, references, rhythm and palette notes, and the critique pass budget. Intent lives on the film: read it before re-cutting.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { canvas_id: z.string(), page_id: z.string(), agent_name: agentName },
+    },
+    async ({ canvas_id, page_id, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = getDirection(c, page_id)
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, ...(out.data as object) })
+    },
+  )
+
+  server.registerTool(
+    'set_direction',
+    {
+      title: 'Write the treatment before you shoot',
+      description:
+        "Write the film's Direction on the composition — the director's intent, not a script: `treatment` (one paragraph: mood, motion language, rhythm, the hero moment), `beats` (ordered {seconds, note, transition} — transitions: cut, move, push, whip, fade), `look` (a list_looks id or a described look), `references`, `rhythm`, `palette`, `passes` (critique budget, default 3, max 5). Set it BEFORE animate_storyboard and pass it there too — beats set shot lengths and handovers.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        direction: z.record(z.unknown()).nullable().describe('The Direction object, or null to clear'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, direction, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = setDirection(c, page_id, direction, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'list_motion_presets',
+    {
+      title: 'The motion vocabulary',
+      description:
+        'The named things apply_camera_preset, apply_transition and apply_text_animation can write: 13 camera moves (push-in, whip-pan, handheld, orbit…), the clip transition kinds and directions, the six text animator presets and their splits, and the blend modes layers composite with.',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { agent_name: agentName },
+    },
+    async () => {
+      const out = listMotionPresets()
+      return out.ok ? text(out.data as object) : err(out.error)
+    },
+  )
+
+  server.registerTool(
+    'apply_camera_preset',
+    {
+      title: 'A named camera move, as editable keyframes',
+      description:
+        'Write one of the 13 camera presets onto the camera track at `t`: push-in, pull-out, the pans, whip-pan, crash-zoom, crane-up/down, handheld (seeded, deterministic), dolly-zoom, orbit. `from` is the camera the timeline already has at `t` — presets compose — unless frame_id re-frames that shot first. Every value lands as an ordinary editable keyframe; nothing is opaque.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        preset: z.string().describe('One of the list_motion_presets camera ids'),
+        t: z.number().optional().describe('Seconds on the clock the move starts, default 0'),
+        duration: z.number().optional().describe('Seconds the move takes, default 1'),
+        amount: z.number().optional().describe('Preset magnitude (zoom factor, frame fraction, px or degrees)'),
+        frame_id: z.string().optional().describe('Re-frame this shot before the move'),
+        seed: z.number().int().optional().describe('Jitter seed for handheld'),
+        frequency: z.number().optional().describe('Jitter Hz for handheld'),
+        easing: z.record(z.unknown()).optional().describe('Override the preset curve'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = applyCameraPreset(c, page_id, input, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'apply_transition',
+    {
+      title: 'How a clip takes over from the last',
+      description:
+        "Set a clip's transition: dissolve, push, wipe, zoom, shared-element — or cut to clear it. The transition hangs on the incoming clip; duration is the overlap in seconds.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        track_id: z.string(),
+        clip_id: z.string(),
+        kind: z.string().describe('cut, dissolve, push, wipe, zoom, shared-element'),
+        duration: z.number().optional().describe('Seconds the two clips overlap'),
+        direction: z.string().optional().describe('push/wipe direction: left, right, up, down'),
+        token: z.string().optional().describe('The --dur-* token the duration came from'),
+        easing: z.record(z.unknown()).optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = applyTransition(c, page_id, input, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'apply_text_animation',
+    {
+      title: 'Type that arrives like a credit',
+      description:
+        "Animate a text element's units — rise-blur, typewriter, scale-pop, mask-wipe, tracking-in, scramble — over a line/word/char split. The animator rides the frame's data-doop-motion block with data-doop-split stamped on the element, so every renderer expands the same units. The element's text stays one editable string.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        frame_id: z.string(),
+        element_id: z.string().describe('The text element’s data-doop-id'),
+        preset: z.string().describe('rise-blur, typewriter, scale-pop, mask-wipe, tracking-in or scramble'),
+        split: z.string().optional().describe('line, word or char — default the element’s data-doop-split, else word'),
+        start: z.number().optional().describe('Seconds on the composition clock, default 0'),
+        duration: z.number().optional().describe('Per-unit seconds, default 0.6'),
+        stagger: z.number().optional().describe('Seconds between unit starts, default 0.04'),
+        order: z.string().optional().describe('forward, center or random'),
+        seed: z.number().int().optional().describe('Seed for random order / scramble'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await applyTextAnimation(c, page_id, input, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'get_scene_snapshot',
+    {
+      title: 'See the film you cut',
+      description:
+        'Render the composition at `times` (or auto at shot midpoints) through the real render harness and get a labelled contact-sheet PNG plus numbers: per-cell mean luminance and contrast, motion energy between cells, and the text boxes measured in the frames. THE way to look at your own render before render_composition — the same compositor every target uses, so what you see is what renders.',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        times: z.array(z.number()).optional().describe('Times on the clock (≤24); default the shots’ midpoints'),
+        auto: z.string().optional().describe('"beats" (default) samples every shot midpoint'),
+        max_side: z.number().int().optional().describe('Max sheet cell width px, default 480'),
+        columns: z.number().int().optional().describe('Sheet columns, default ~sqrt(cells)'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, times, auto, max_side, columns, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await sceneSnapshot(c, page_id, { times, auto, max_side, columns })
+      if (!out.ok) return err(out.error)
+      const data = out.data as { png?: string } & Record<string, unknown>
+      const png = data.png
+      const { png: _, ...rest } = data
+      const content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[] = [
+        { type: 'text' as const, text: JSON.stringify({ ok: true, ...rest }) },
+      ]
+      if (png) content.unshift({ type: 'image' as const, data: png.split(',')[1] ?? '', mimeType: 'image/png' })
+      return { content }
+    },
+  )
+
+  server.registerTool(
+    'check_scene',
+    {
+      title: 'The whole scene check, numbers in',
+      description:
+        "One report: the seek-safety lint (MO-* rules), pacing stats per shot with dead beats flagged, safe-zone violations (broadcast's 90%/80%), legibility (effective text px on screen), and the effect-stack cost per track. Structure always answers; the pixel parts need the instance renderer — without it they report unavailable, not a guess.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        pixels: z.boolean().optional().describe('false skips the render-dependent parts'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, pixels, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await checkScene(c, page_id, { pixels })
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, ...(out.data as object) })
+    },
+  )
+
+  server.registerTool(
+    'critique_scene',
+    {
+      title: 'Grade the film against the rubric',
+      description:
+        "The director's pass: check_scene's numbers folded into the fixed rubric (intent_coverage, hierarchy, legibility, pacing, motion_quality, continuity, polish, brand) with machine-gradable issues pre-filled, plus the pass budget — direction.passes, default 3, hard max 5. A call on a new revision is a pass; the same revision again is free. When blockers and majors hit zero or the budget runs out, `stop` says ship it.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        pixels: z.boolean().optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, pixels, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await critiqueScene(c, page_id, { pixels })
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, ...(out.data as object) })
+    },
+  )
+
+  /* ---- the effect stack (P1) ---- */
+
+  server.registerTool(
+    'list_motion_effects',
+    {
+      title: 'The effect registry',
+      description:
+        'Every effect a layer stack can carry: blur, light, lens, texture, distort, color, glitch, generator and matte families — ~30 effects with their params, ranges and GPU cost. Also the blend modes. Effects live on tracks (element = that element, clip = its clips, camera = the whole scene, adjustment = everything below over its windows); params keyframe through the `fx:<instanceId>.<param>` namespace.',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { agent_name: agentName },
+    },
+    async () => {
+      const out = listMotionEffects()
+      return out.ok ? text(out.data as object) : err(out.error)
+    },
+  )
+
+  server.registerTool(
+    'add_effect',
+    {
+      title: 'Stack an effect on a track',
+      description:
+        'Push an effect onto a track’s stack: `{track_id, fx, id?, params?, index?}` — fx is a registry id from list_motion_effects, params override its defaults (points take [u,v] or "u,v"), index places it in the stack.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        track_id: z.string(),
+        fx: z.string().describe('Registry effect id'),
+        id: z.string().optional().describe('Instance id — minted when absent'),
+        params: z.record(z.unknown()).optional(),
+        index: z.number().int().optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = addEffect(c, page_id, input, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'update_effect',
+    {
+      title: 'Tune or toggle a stacked effect',
+      description:
+        'Patch one effect on a track’s stack: `{track_id, effect_id, enabled?, params?, seed?, mix?, blend?}` — params merge over the resting values, blend null clears the override.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        track_id: z.string(),
+        effect_id: z.string(),
+        enabled: z.boolean().optional(),
+        params: z.record(z.unknown()).optional(),
+        seed: z.number().int().optional(),
+        mix: z.number().optional(),
+        blend: z.string().nullable().optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = updateEffect(c, page_id, input, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'remove_effect',
+    {
+      title: 'Take an effect off the stack',
+      description: 'Remove one effect instance from a track’s stack by id.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        track_id: z.string(),
+        effect_id: z.string(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, track_id, effect_id, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = removeEffect(c, page_id, { track_id, effect_id }, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'set_effects',
+    {
+      title: 'Rewrite a track’s whole stack',
+      description:
+        'Make a track’s effect stack exactly `effects` (complete instances, in order) — adds, updates, removes and the reorder land as one atomic ops batch.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        track_id: z.string(),
+        effects: z.array(z.record(z.unknown())),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, track_id, effects, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = setEffects(
+        c,
+        page_id,
+        { track_id, effects: effects as unknown as EffectInstance[] },
+        actorFrom(agent_name),
+      )
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'apply_look',
+    {
+      title: 'A named grade over the whole film',
+      description:
+        'Apply one of the list_looks names as an adjustment track carrying its stack — teal-orange, noir, film-35, crt, glitch, dream, product, riso. With `at`/`seconds` an adjustment clip gates the window; without them the look spans the film.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        look: z.string().describe('A list_looks id'),
+        at: z.number().optional().describe('Seconds the look starts; absent = the whole film'),
+        seconds: z.number().optional().describe('How long it holds'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, look, at, seconds, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = applyLook(c, page_id, { look, at, seconds }, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'list_looks',
+    {
+      title: 'The named grades',
+      description: 'The built-in looks apply_look can lay down, with the mood each gives.',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { agent_name: agentName },
+    },
+    async () => {
+      const out = listLooks()
+      return out.ok ? text(out.data as object) : err(out.error)
+    },
+  )
+
+  server.registerTool(
+    'set_motion_blur',
+    {
+      title: 'The filmic shutter',
+      description:
+        'Set the composition’s motion blur: `{shutter}` in degrees (0–360, sampled across that fraction of the frame) and optional `samples` (2–64, default K=8 preview / 16 render). Deterministic — the scene is re-evaluated at K sub-times, never accumulated. shutter 0 or null clears it back to a hard shutter.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        shutter: z.number().optional().describe('Shutter angle 0–360; 0 or absent clears'),
+        samples: z.number().int().optional().describe('Sub-samples K, 2–64'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, shutter, samples, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = setMotionBlur(c, page_id, { shutter, samples }, actorFrom(agent_name))
       if (!out.ok) return err(out.error)
       return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
     },
@@ -1956,16 +2423,325 @@ export function buildMcpServer(
         canvas_id: z.string(),
         page_id: z.string().optional().describe('The page to lint (or give frame_id to lint its page)'),
         frame_id: z.string().optional(),
+        library_id: z.string().optional().describe('With item_id: check a library Motion item instead'),
+        item_id: z.string().optional().describe('The library item to seek-safety check'),
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, page_id, frame_id, agent_name }) => {
+    async ({ canvas_id, page_id, frame_id, library_id, item_id, agent_name }) => {
       const c = canvasFor(canvas_id, 'view')
       if (!c) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
+      /* a library item check: the verdict stores on the item's curation
+         row, which insert_clip trusts */
+      if (library_id !== undefined || item_id !== undefined) {
+        if (!library_id || !item_id) return err('send library_id and item_id together')
+        const out = await checkLibraryItemMotion(library_id, item_id)
+        if (!out.ok) return err(out.error)
+        return text({ ok: true, library_id, item_id, ...(out.data as object) })
+      }
       const out = await lintMotion(c, { page_id, frame_id })
       if (!out.ok) return err(out.error)
       return text({ ok: true, ...(out.data as object) })
+    },
+  )
+
+  server.registerTool(
+    'insert_clip',
+    {
+      title: 'Insert a library Motion item as a clip',
+      description:
+        "Place a design library's Motion item onto a page's clip track at `start` seconds. The item must be seek-safe: the stored verdict is checked (computed on first use via lint_motion with library_id + item_id) and an unsafe item is refused with its lint reasons — fix the item's HTML per those findings, re-lint, retry. A safe item lands as a clip whose source is the item (a variant_id picks one variant).",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        library_id: z.string().describe('The library canvas the item lives in'),
+        item_id: z.string().describe('The library item to insert'),
+        variant_id: z.string().optional().describe('A variant of the item, when the family has several'),
+        start: z.number().describe('Seconds on the composition clock the clip opens'),
+        duration: z.number().optional().describe('Clip length in seconds, default the item’s own motion length'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, library_id, item_id, variant_id, start, duration, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await insertClip(
+        c,
+        page_id,
+        { library_id, item_id, variant_id, start, duration },
+        actorFrom(agent_name),
+      )
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'export_composition',
+    {
+      title: 'Export the timeline as code',
+      description:
+        "Compile a page's Motion Studio composition to pasteable code: composition.css with @keyframes per animated element (transform/filter lanes composed per stop, token easings kept as var(--*)), and composition.js with the same motion as WAAPI Element.animate calls, the camera as the world wrapper's transform, and clip transitions as pairing notes. Springs compile to linear() sampled from the same spring curve the runtime evaluates.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await exportComposition(c, page_id)
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, ...(out.data as object) })
+    },
+  )
+
+  server.registerTool(
+    'list_media',
+    {
+      title: 'List media on a page',
+      description:
+        "The page's scene_media rows: every video/audio asset on the timeline with its trim, transcript-cut ranges, beat markers, transcript (word timings and speakers) and the recipe a generated layer was made with.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { canvas_id: z.string(), page_id: z.string(), agent_name: agentName },
+    },
+    async ({ canvas_id, page_id, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await listMedia(c, page_id)
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, media: out.data })
+    },
+  )
+
+  server.registerTool(
+    'set_media',
+    {
+      title: 'Write a media row',
+      description:
+        "Create or update a page's scene_media row for an asset: kind, trimIn/trimOut (source seconds), cuts (source-time ranges excluded at play and export — transcript editing is data, nothing re-encodes), beats ({markers, bpm}), transcript ({language, words[{text,start,end,confidence?,speaker?}], speakers{S1:name}, engine, model, target}), and generation ({provider, model, prompt, seed, refs, voice, text, cost}).",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        asset_id: z.string().describe('The /a/ asset this row describes'),
+        kind: z.enum(['video', 'audio']),
+        trimIn: z.number().optional(),
+        trimOut: z.number().nullable().optional(),
+        cuts: z.array(z.object({ start: z.number(), end: z.number() })).optional(),
+        beats: z.object({ markers: z.array(z.number()), bpm: z.number().optional() }).optional(),
+        transcript: z
+          .record(z.string(), z.unknown())
+          .optional()
+          .describe('A Transcript object (shared/motionMedia.ts)'),
+        generation: z.record(z.string(), z.unknown()).optional().describe('A GenerationRecipe object'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, asset_id, agent_name, ...body }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await setMedia(c, page_id, { asset_id, ...body })
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, media: out.data }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'build_captions',
+    {
+      title: 'Build captions from a transcript',
+      description:
+        "Fold a media row's transcript into word-timed caption clips and land them on the page's caption track. Words inside the row's cut ranges are dropped; times shift from source media time onto the clip's window on the composition clock (or `at` seconds when placing by hand). style names an editor preset (word highlight rides the per-word timings).",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        media_id: z.string(),
+        style: z.string().optional(),
+        at: z.number().optional().describe('Seconds on the clock the first word starts'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, media_id, style, at, agent_name }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await buildCaptions(c, page_id, { media_id, style, at }, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'duck_audio',
+    {
+      title: 'Duck music under speech',
+      description:
+        "Write editable gain keyframes on an audio track so the music dips under speech: pass ranges on the composition clock, or a media_id whose transcript's words mark the voice (shifted by its clip's window). depth is the ducked gain (default 0.25), attack/release the ramp seconds. The keyframes land as ordinary add_keyframe ops — the person can retime them.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        media_id: z.string().optional().describe('Transcript marks the speech'),
+        ranges: z.array(z.object({ start: z.number(), end: z.number() })).optional(),
+        track_id: z.string().optional().describe('The music lane; default the first audio track'),
+        depth: z.number().optional(),
+        attack: z.number().optional(),
+        release: z.number().optional(),
+        gain: z.number().optional().describe('Unducked level, default 1'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await duckAudio(c, page_id, input, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'suggest_cuts',
+    {
+      title: 'Suggest transcript cuts',
+      description:
+        "The transcript-editing assist: filler words (um/uh/euh) and silences over min_silence seconds in a media row's transcript, as source-time ranges. Write the ones to keep out with set_media's cuts — playback and export skip them, nothing re-encodes.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        media_id: z.string(),
+        min_silence: z.number().optional().describe('Seconds, default 0.3'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, media_id, min_silence, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await suggestCuts(c, { media_id, min_silence })
+      if (!out.ok) return err(out.error)
+      return text({ ok: true, ...(out.data as object) })
+    },
+  )
+
+  for (const tool of SPEECH_TOOLS) {
+    server.registerTool(
+      tool.name,
+      {
+        title: tool.title,
+        description: tool.description,
+        annotations: {
+          readOnlyHint: tool.readOnly,
+          destructiveHint: false,
+          idempotentHint: tool.readOnly,
+          openWorldHint: !tool.readOnly,
+        },
+        inputSchema: { ...tool.shape, canvas_id: z.string(), agent_name: agentName },
+      },
+      async ({ canvas_id, agent_name, ...input }: Record<string, unknown>) => {
+        const canvas = canvasFor(String(canvas_id), tool.readOnly ? 'view' : 'edit')
+        if (!canvas) return noCanvas(String(canvas_id))
+        arrive(canvas.id, String(agent_name))
+        if (!ownerId) return err('sign in to use speech')
+        try {
+          return text(await runSpeechTool(tool.name, canvas, ownerId, input))
+        } catch (error) {
+          return err(error instanceof Error ? error.message : 'speech tool failed')
+        }
+      },
+    )
+  }
+
+  for (const tool of BLENDER_TOOLS) {
+    server.registerTool(
+      tool.name,
+      {
+        title: tool.title,
+        description: tool.description,
+        annotations: {
+          readOnlyHint: tool.readOnly,
+          destructiveHint: false,
+          idempotentHint: tool.readOnly,
+          openWorldHint: !tool.readOnly,
+        },
+        inputSchema: { ...tool.shape, canvas_id: z.string(), agent_name: agentName },
+      },
+      async ({ canvas_id, agent_name, ...input }: Record<string, unknown>) => {
+        const canvas = canvasFor(String(canvas_id), tool.readOnly ? 'view' : 'edit')
+        if (!canvas) return noCanvas(String(canvas_id))
+        arrive(canvas.id, String(agent_name))
+        if (!ownerId) return err('sign in to use blender')
+        try {
+          return text(await runBlenderTool(tool.name, canvas, ownerId, input))
+        } catch (error) {
+          return err(error instanceof Error ? error.message : 'blender tool failed')
+        }
+      },
+    )
+  }
+
+  server.registerTool(
+    'list_video_models',
+    {
+      title: 'Video models and the estimate',
+      description:
+        "The generate_video registry: the video models the person's own accounts can run (Veo via OpenRouter, Gemini Omni Flash), their lengths/aspects, the dated per-second prices and the cost a call would estimate at.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        model: z.string().optional(),
+        seconds: z.number().optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, model, seconds, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      return text({ ok: true, ...videoModels({ model, seconds }) })
+    },
+  )
+
+  server.registerTool(
+    'generate_video',
+    {
+      title: 'Generate a video clip',
+      description:
+        "Generate a video clip on the person's own OpenRouter or Gemini account (list_video_models shows the menu and the per-second price — show the estimate before a run). The file lands as an /a/ asset, its scene_media row keeps the recipe ({provider, model, prompt, seed, cost}) for Regenerate and Vary, and a clip is placed at `at` seconds on the clip track. Long-running: the provider job is polled, so this call can take minutes. Rule: product UI, text and logos are HTML — generated video is B-roll.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        prompt: z.string(),
+        model: z.string().optional().describe('A VIDEO_MODELS id; default Veo on OpenRouter'),
+        seconds: z.number().optional().describe('One of the model’s lengths'),
+        aspect: z.enum(['16:9', '9:16', '1:1']).optional(),
+        seed: z.number().optional(),
+        first_frame: z.string().max(8_000_000).optional().describe('base64 image the clip opens on'),
+        last_frame: z.string().max(8_000_000).optional(),
+        refs: z.array(z.string().max(8_000_000)).max(5).optional().describe('reference images, base64'),
+        at: z.number().optional().describe('seconds on the clock, default 0'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await generateVideoClip(c, page_id, input, actorFrom(agent_name), ownerId)
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
     },
   )
 
@@ -1974,12 +2750,12 @@ export function buildMcpServer(
     {
       title: 'Queue a video render',
       description:
-        "Queue a render job for a page's Motion Studio composition — mp4 or webm, the composition's size/rate or an override, the whole timeline or a range. The job waits for a renderer: a browser tab (MediaRecorder/WebCodecs) or the desktop app (target desktop, deterministic frames + local ffmpeg). It appears in the room as render:progress and the finished file lands as an /a/ asset. Server-side rendering lands in a later phase — this queues, it does not block.",
+        "Queue a render job for a page's Motion Studio composition — mp4, webm, gif or pngseq (a zip of stills), the composition's size/rate or an override, the whole timeline or a range. The job waits for a renderer: a browser tab (MediaRecorder/WebCodecs) or the desktop app (target desktop, deterministic frames + local ffmpeg; GIF uses its palette pass). It appears in the room as render:progress and the finished file lands as an /a/ asset. Server-side rendering lands in a later phase — this queues, it does not block.",
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
         page_id: z.string(),
-        format: z.enum(['mp4', 'webm']).optional().describe('Container, default mp4'),
+        format: z.enum(['mp4', 'webm', 'gif', 'pngseq']).optional().describe('Container, default mp4'),
         target: z.enum(['browser', 'desktop']).optional().describe('Who renders it, default browser'),
         width: z.number().int().optional(),
         height: z.number().int().optional(),
@@ -2844,45 +3620,82 @@ export function buildMcpServer(
     },
   )
 
+  /* get_handoff / update_dev_task: the Orca coding agent's side of a dev
+     task (docs/orca.md). The brief it serves never touches the
+     worktree — it arrives here, over MCP, and only for the requester's own
+     credentials. */
+
   server.registerTool(
-    'create_handoff',
+    'get_handoff',
     {
-      title: 'Build a Stip handoff pack',
+      title: 'Get a dev task’s brief',
       description:
-        "Draft a Stip change pack ('Ready for dev') from canvas frames: proposal.md, spec.md with - AC-n: criteria, tasks.md, evidence.md, state.json, tokens.json (the canvas's design tokens) and PNG exports under assets/, all under .workflow/changes/<id>/. The pack is RETURNED, never written — write it into the linked project yourself (every file must be new). Pass your own proposal/spec/tasks to write the contract yourself; otherwise a template drafts the criteria. Frame ids pick which frames are exported (up to 6); without any, every non-demo frame goes.",
-      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+        "Read the brief stored for a dev task ('Send to Orca'): the task's id, canvas, frames and state, then the brief itself — title, the plan text when the launch carried one, the canvas's design tokens and code links as JSON, and each frame's PNG export as an image block. Call it with the task_id your launch prompt names, before writing any code. Only the account that launched the task may read its brief.",
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { task_id: z.string() },
+    },
+    async ({ task_id }) => {
+      const found = await briefFor(task_id)
+      if (!found) return err(`no dev task ${task_id} — the id comes from the launch prompt`)
+      const { row, brief } = found
+      if (!ownerId || row.requestedByUserId !== ownerId)
+        return err('only the account that launched this dev task may read its brief')
+      if (!canvasFor(row.canvasId, 'view')) return noCanvas(row.canvasId)
+      const content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [
+        {
+          type: 'text' as const,
+          text: JSON.stringify(
+            {
+              task: {
+                id: row.id,
+                canvasId: row.canvasId,
+                frameIds: row.frameIds,
+                state: row.state,
+              },
+              title: brief.title,
+              plan: brief.plan,
+              tokens: brief.tokens,
+              codeLinks: brief.codeLinks,
+              warnings: brief.warnings,
+              frames: brief.frames.map((f) => ({ id: f.id, name: f.name, width: f.width, height: f.height })),
+            },
+            null,
+            2,
+          ),
+        },
+      ]
+      for (const frame of brief.frames) {
+        if (frame.png) content.push({ type: 'image' as const, data: frame.png, mimeType: 'image/png' })
+      }
+      return { content }
+    },
+  )
+
+  server.registerTool(
+    'update_dev_task',
+    {
+      title: 'Report on your dev task',
+      description:
+        "Push your own status on the dev task you were launched for ('Send to Orca'): state 'needs_input' while you wait on the human, 'pr_open' with pr_url once the PR exists, 'done' or 'failed' when the task ends — plus a one-line summary and the branch/orca_session_id you worked on. Report when you open the PR and again when you finish; the people on the canvas see every update live. Only the account that launched the task may update it.",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
-        canvas_id: z.string(),
-        frame_ids: z.array(z.string()).max(24).optional().describe('Frames to export; omit for all non-demo frames'),
-        title: z.string().max(200).optional().describe('Pack title — also seeds the change id'),
-        change_id: z
-          .string()
-          .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
-          .max(100)
-          .optional()
-          .describe('The Stip change id (lowercase slug); one is minted when omitted'),
-        proposal: z.string().max(60000).optional().describe('Your own proposal.md, replacing the drafted one'),
-        spec: z.string().max(60000).optional().describe('Your own spec.md — keep the "- AC-n:" criteria lines'),
-        tasks: z.string().max(60000).optional().describe('Your own tasks.md'),
-        agent_name: agentName.optional(),
+        task_id: z.string(),
+        state: z.enum(DEV_TASK_PUSH_STATES).optional(),
+        pr_url: z.string().max(500).optional().describe('The PR you opened; http(s) only'),
+        summary: z.string().max(DEV_TASK_SUMMARY_CHARS).optional(),
+        orca_session_id: z.string().max(200).optional(),
+        branch: z.string().max(200).optional(),
       },
     },
-    async ({ canvas_id, frame_ids, title, change_id, proposal, spec, tasks, agent_name }) => {
-      if (!canvasFor(canvas_id, 'view')) return noCanvas(canvas_id)
-      arrive(canvas_id, agent_name)
-      try {
-        const pack = await buildHandoffPack(canvas_id, {
-          frameIds: frame_ids,
-          title,
-          changeId: change_id,
-          docs: proposal || spec || tasks ? { proposal, spec, tasks } : undefined,
-          codeLinks: await listCodeLinks(canvas_id).catch(() => []),
-        })
-        return text(pack)
-      } catch (e) {
-        if (e instanceof HandoffError) return err(e.message)
-        return err(`handoff failed: ${e instanceof Error ? e.message : String(e)}`)
-      }
+    async (input) => {
+      if (!ownerId) return err('this connection is not signed in to a Diazo account')
+      /* the requester must still be able to open the canvas the task lives
+         on — being the launch's account is not enough once access is gone */
+      const task = await devTaskFor(input.task_id)
+      if (task && !canvasFor(task.canvasId, 'view')) return noCanvas(task.canvasId)
+      const outcome = await applyAgentUpdate(ownerId, input)
+      if (!outcome.ok) return err(outcome.error)
+      return text({ ok: true, task: outcome.task })
     },
   )
 

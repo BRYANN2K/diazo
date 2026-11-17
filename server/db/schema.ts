@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import {
   pgTable,
   text,
@@ -37,7 +38,18 @@ import type {
   ComponentSlot,
   ComponentSnapshot,
 } from '../../shared/components.ts'
-import type { Composition, MotionTrack, RenderFormat, RenderStatus, RenderTarget } from '../../shared/motion.ts'
+import type {
+  BlenderEngine,
+  Composition,
+  Direction,
+  MotionTrack,
+  RenderFormat,
+  RenderStatus,
+  RenderTarget,
+} from '../../shared/motion.ts'
+import type { DevTaskBrief, DevTaskDrift, DevTaskState } from '../../shared/devTasks.ts'
+import type { GenerationRecipe, Transcript } from '../../shared/motionMedia.ts'
+import type { CustomModel, SpeechInstall, SpeechJob, SpeechPreferences, Voice } from '../../shared/speech.ts'
 
 /** A credential kept on a user's behalf: sealed on write and opened on read
  *  (server/secretBox.ts), so call sites see plaintext and the row does not.
@@ -449,6 +461,10 @@ export const comments = pgTable(
     resolvedBy: text('resolved_by'),
     resolvedAt: bigint('resolved_at', { mode: 'number' }),
     parentId: text('parent_id'),
+    /* a page comment may anchor to the page composition's clock: the scene
+       time range the thread is about (seconds) */
+    timeStart: doublePrecision('time_start'),
+    timeEnd: doublePrecision('time_end'),
   },
   (t) => [index('comments_canvas_idx').on(t.canvasId)],
 )
@@ -1229,6 +1245,7 @@ export const modelDuels = pgTable(
     id: text('id').primaryKey(),
     canvasId: text('canvas_id').notNull(),
     brief: text('brief').notNull(),
+    kind: text('kind'),
     createdBy: text('created_by').notNull(),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     entries: jsonb('entries').notNull(),
@@ -1328,6 +1345,12 @@ export const libraryItemMeta = pgTable(
     lastUsedAt: bigint('last_used_at', { mode: 'number' }),
     /** a model's description and tags, until a person accepts them */
     suggested: jsonb('suggested').$type<ItemSuggestion>(),
+    /* Motion Studio: the stored verdict of the last seek-safety check
+       (shared/motionLint rules over the item's HTML) — insert_clip trusts
+       it only when 'safe' */
+    seekSafe: text('seek_safe').$type<'safe' | 'issues'>(),
+    seekSafeFindings: jsonb('seek_safe_findings').$type<{ rule: string; message: string }[]>(),
+    seekSafeAt: bigint('seek_safe_at', { mode: 'number' }),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
     updatedBy: text('updated_by'),
   },
@@ -1366,6 +1389,8 @@ export const compositions = pgTable(
     height: integer('height').notNull(),
     posterTime: doublePrecision('poster_time'),
     tracks: jsonb('tracks').$type<MotionTrack[]>().notNull(),
+    direction: jsonb('direction').$type<Direction>(),
+    motionBlur: jsonb('motion_blur').$type<NonNullable<Composition['motionBlur']>>(),
     revision: integer('revision').notNull(),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
@@ -1412,6 +1437,7 @@ export const renderJobs = pgTable(
     compositionId: text('composition_id').notNull(),
     format: text('format').$type<RenderFormat>().notNull(),
     target: text('target').$type<RenderTarget>().notNull(),
+    engine: text('engine').$type<BlenderEngine>(),
     width: integer('width').notNull(),
     height: integer('height').notNull(),
     fps: integer('fps').notNull(),
@@ -1430,4 +1456,186 @@ export const renderJobs = pgTable(
     finishedAt: bigint('finished_at', { mode: 'number' }),
   },
   (t) => [index('render_jobs_canvas_idx').on(t.canvasId), index('render_jobs_composition_idx').on(t.compositionId)],
+)
+
+/** Dev tasks (shared/devTasks.ts, server/devTasks.ts): a coding agent sent
+ *  to an Orca worktree from a ready-for-dev frame. The worktree's absolute
+ *  path is never stored — `orca_identity` is the opaque `wt2:` key — and
+ *  `agent_state` is the state the coding agent itself pushed through
+ *  update_dev_task, which outranks device polls for pr_open/done. `handoff`
+ *  is the brief stored at launch (get_handoff serves it verbatim), kept
+ *  out of the row's public shape. */
+export const frameDevTasks = pgTable(
+  'frame_dev_tasks',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    /** one frame, or every frame a multi-frame brief covers */
+    frameIds: jsonb('frame_ids').$type<string[]>().notNull(),
+    /** `approval.approvedFrameUpdatedAt` at launch — flags a stale build */
+    frameRevision: bigint('frame_revision', { mode: 'number' }),
+    /** groups duel contestants; null for a solo launch */
+    duelId: text('duel_id'),
+    requestedByUserId: text('requested_by').notNull(),
+    requestedByName: text('requested_by_name').notNull(),
+    /** the install that answered the launch; null until its first report */
+    deviceId: text('device_id'),
+    /** the runner that owns execution — 'orca' */
+    runner: text('runner').notNull().default('orca'),
+    agent: text('agent').notNull(),
+    model: text('model'),
+    effort: text('effort'),
+    /** a label for the launch target — "This Mac" or the environment name */
+    hostLabel: text('host_label').notNull(),
+    /** the `--environment` selector the launch ran against; null = local */
+    environment: text('environment'),
+    /** Orca's opaque `wt2:<host>:<instance>` key */
+    orcaIdentity: text('orca_identity'),
+    orcaSessionId: text('orca_session_id'),
+    branch: text('branch'),
+    prUrl: text('pr_url'),
+    state: text('state').$type<DevTaskState>().notNull(),
+    /** the last state the coding agent itself reported */
+    agentState: text('agent_state').$type<DevTaskState>(),
+    summary: text('summary'),
+    drift: jsonb('drift').$type<DevTaskDrift>(),
+    /** the dev-server URL `orca ports` reported (phase 2) */
+    devUrl: text('dev_url'),
+    /** the brief stored at launch — get_handoff's payload, never broadcast */
+    handoff: jsonb('handoff').$type<DevTaskBrief>().notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+    finishedAt: bigint('finished_at', { mode: 'number' }),
+  },
+  (t) => [index('frame_dev_tasks_canvas_idx').on(t.canvasId)],
+)
+
+/** One Blender tool call an agent asked for and the desktop shell executes
+ *  through its allowlisted blender-mcp bridge (phase 4, ADR 0011). `klass`
+ *  mirrors the approval the shell must hold before running it. */
+export const blenderOps = pgTable(
+  'blender_ops',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    tool: text('tool').notNull(),
+    klass: text('klass').notNull(),
+    args: jsonb('args'),
+    state: text('state').notNull(),
+    result: jsonb('result'),
+    error: text('error'),
+    deviceId: text('device_id'),
+    requestedBy: text('requested_by').notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('blender_ops_state_idx').on(t.state, t.requestedBy)],
+)
+
+/** Per-page state of one media asset on the timeline (shared/motionMedia.ts):
+ *  trim, transcript-cut ranges, beat markers, the transcript with word
+ *  timings and speakers, and the recipe a generated layer was made with.
+ *  Clips reference the asset; this row is what they play. */
+export const sceneMedia = pgTable(
+  'scene_media',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    pageId: text('page_id').notNull(),
+    assetId: text('asset_id').notNull(),
+    kind: text('kind').$type<'video' | 'audio'>().notNull(),
+    trimIn: doublePrecision('trim_in').notNull(),
+    /** null = to the asset's end */
+    trimOut: doublePrecision('trim_out'),
+    cuts: jsonb('cuts').$type<{ start: number; end: number }[]>().notNull(),
+    beats: jsonb('beats').$type<{ markers: number[]; bpm?: number }>(),
+    transcript: jsonb('transcript').$type<Transcript>(),
+    generation: jsonb('generation').$type<GenerationRecipe>(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    index('scene_media_page_idx').on(t.canvasId, t.pageId),
+    uniqueIndex('scene_media_asset_idx').on(t.pageId, t.assetId),
+  ],
+)
+
+/* ---- speech (proposal 18): engines install in one click on the person's
+   Mac or on the server sidecar; jobs route per the person's preferences;
+   the cloud only ever runs on their own key ---- */
+
+/** Server-target installs only — desktop installs live in the shell's
+ *  speech.json and are reported with each poll. */
+export const speechInstalls = pgTable('speech_installs', {
+  id: text('id').primaryKey(),
+  modelId: text('model_id').notNull(),
+  engine: text('engine').notNull(),
+  revision: text('revision').notNull(),
+  state: text('state').$type<SpeechInstall['state']>().notNull(),
+  bytes: bigint('bytes', { mode: 'number' }).notNull(),
+  error: text('error'),
+  installedBy: text('installed_by').notNull(),
+  installedAt: bigint('installed_at', { mode: 'number' }).notNull(),
+  lastUsedAt: bigint('last_used_at', { mode: 'number' }),
+})
+
+/** A transcribe or speak job, wherever it runs (desktop, server, cloud).
+ *  The desktop claims its own through the poll relay. */
+export const speechJobs = pgTable(
+  'speech_jobs',
+  {
+    id: text('id').primaryKey(),
+    kind: text('kind').$type<SpeechJob['kind']>().notNull(),
+    target: text('target').$type<SpeechJob['target']>().notNull(),
+    deviceId: text('device_id'),
+    modelId: text('model_id').notNull(),
+    inputAssetId: text('input_asset_id'),
+    inputText: text('input_text'),
+    state: text('state').$type<SpeechJob['state']>().notNull(),
+    progress: real('progress').notNull().default(0),
+    output: jsonb('output'),
+    request: jsonb('request').$type<import('../../shared/speech.ts').SpeechRequest>(),
+    outputAssetId: text('output_asset_id'),
+    requestedBy: text('requested_by').notNull(),
+    error: text('error'),
+    canvasId: text('canvas_id'),
+    mediaId: text('media_id'),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+    updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [
+    index('speech_jobs_state_idx').on(t.state, t.target),
+    uniqueIndex('speech_jobs_active_user_idx')
+      .on(t.requestedBy)
+      .where(sql`${t.state} in ('queued', 'running')`),
+  ],
+)
+
+/** One row per person (18.12): which target each kind routes to. */
+export const speechPreferences = pgTable('speech_preferences', {
+  userId: text('user_id').primaryKey(),
+  prefs: jsonb('prefs').$type<SpeechPreferences>().notNull(),
+  updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
+})
+
+/** A model a person (or an instance admin, for the server) added (18.9):
+ *  pinned commit, per-file size + SHA-256, licence acknowledgement, sealed
+ *  HF token, disabled until its smoke test passes. */
+export const speechCustomModels = pgTable('speech_custom_models', {
+  id: text('id').primaryKey(),
+  model: jsonb('model').$type<CustomModel>().notNull(),
+  createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+})
+
+/** A cloned voice (18.14): consent is a checkbox at upload; the sample is a
+ *  private asset that never leaves the instance. */
+export const voices = pgTable(
+  'voices',
+  {
+    id: text('id').primaryKey(),
+    ownerId: text('owner_id').notNull(),
+    voice: jsonb('voice').$type<Voice>().notNull(),
+    createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+  },
+  (t) => [index('voices_owner_idx').on(t.ownerId)],
 )

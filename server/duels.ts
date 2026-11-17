@@ -78,9 +78,75 @@ function toDuel(row: typeof modelDuels.$inferSelect): ModelDuel {
     createdBy: row.createdBy,
     createdAt: row.createdAt,
     entries: Array.isArray(row.entries) ? (row.entries as DuelEntry[]) : [],
+    ...(row.kind === 'motion' ? { kind: 'motion' as const } : {}),
     ...(row.pickedFrameId ? { pickedFrameId: row.pickedFrameId } : {}),
     ...(row.decidedAt ? { decidedAt: row.decidedAt } : {}),
   }
+}
+
+/**
+ * A motion duel: one storyboard page, one copy per pick, each pick animates
+ * its own copy with the motion tools and queues a render for comparison.
+ * The entries' frameId anchors the card on the copy's first frame; the
+ * picked entry's page becomes the storyboard to keep.
+ */
+export async function startMotionDuel(input: {
+  canvasId: string
+  pageId: string
+  brief: string
+  picks: unknown
+  actor: Actor
+  userId: string
+}): Promise<ModelDuel> {
+  const picks = (Array.isArray(input.picks) ? input.picks : [])
+    .map(parseRunnerPick)
+    .filter((p): p is RunnerPick => !!p && isRunnerProvider(p.provider))
+  const brief = input.brief.trim()
+  const problem = duelProblem(brief, picks)
+  if (problem) throw new DuelInputError(problem)
+  const canvas = store.getCanvas(input.canvasId)
+  if (!canvas || !canvas.pages?.some((p) => p.id === input.pageId)) {
+    throw new DuelInputError('the storyboard page is not on this canvas')
+  }
+  const entries: DuelEntry[] = []
+  for (const [i, pick] of picks.entries()) {
+    const label = pickLabel(pick)
+    const copy = await store.duplicatePage(input.canvasId, input.pageId, input.actor.name)
+    if (!copy) throw new DuelInputError('the storyboard page could not be copied')
+    const page = copy.page
+    const anchor = copy.frames[0]?.id ?? ''
+    const card = actions.addQueuedCard(
+      input.canvasId,
+      `${brief}\n\n(Motion duel, entry ${duelLetter(i)}: animate the storyboard on page ${page.id} — your own copy — with the motion tools: PUT the composition, then update_track clips and keyframes. Other models animate the same storyboard on their own pages; do not touch them. When it plays, queue a render for comparison.)`,
+      input.actor.name,
+      ['doop'],
+      [],
+      input.userId,
+      { frameId: anchor },
+      pick,
+    )
+    if (!card) throw new DuelInputError('the card could not be queued')
+    entries.push({ frameId: anchor, cardId: card.id, runner: pick, label, pageId: page.id })
+  }
+  const duel: ModelDuel = {
+    id: nanoid(10),
+    canvasId: input.canvasId,
+    brief,
+    createdBy: input.actor.name,
+    createdAt: Date.now(),
+    entries,
+    kind: 'motion',
+  }
+  await duelDeps.insert({
+    id: duel.id,
+    canvasId: duel.canvasId,
+    brief: duel.brief,
+    kind: 'motion',
+    createdBy: duel.createdBy,
+    createdAt: duel.createdAt,
+    entries: duel.entries,
+  })
+  return duel
 }
 
 /**
@@ -215,6 +281,15 @@ export async function pickDuel(
     actor,
   )
   for (const other of others) {
+    /* a motion duel's entry is a page copy: archive every frame it holds,
+       not just the anchor one */
+    if (duel.kind === 'motion' && other.pageId) {
+      const pageFrames = (store.getCanvas(canvasId)?.frames ?? []).filter((f) => f.pageId === other.pageId)
+      for (const frame of pageFrames) {
+        if (!frame.hidden) actions.updateFrame(frame.id, { hidden: true, name: `${frame.name} (archived)` }, actor)
+      }
+      continue
+    }
     const frame = store.getFrame(other.frameId)
     if (frame && !frame.hidden) actions.updateFrame(frame.id, { hidden: true, name: `${frame.name} (archived)` }, actor)
   }

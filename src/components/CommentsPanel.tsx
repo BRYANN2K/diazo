@@ -16,7 +16,7 @@ import { Disclosure } from './ui/collapsible'
 import { isResidentLimit } from './TeamAllowance'
 import { useT } from '../lib/i18n'
 
-const emptyNote = 'px-4 py-6 text-center text-[12px] leading-[1.45] text-ink-faint'
+const emptyNote = 'px-4 py-6 text-center text-label leading-[1.45] text-ink-faint'
 
 /** Every comment thread on the current page — pinned to a frame or to the
  *  canvas itself — open ones first. Clicking a thread flies to its pin and
@@ -79,12 +79,12 @@ function FilterTab({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        'flex h-[26px] items-center gap-1.5 rounded-[7px] px-2 text-[12px] transition-colors',
+        'flex h-[26px] items-center gap-1.5 rounded-row px-2 text-label transition-colors',
         active ? 'bg-paper-deep font-medium text-ink' : 'text-ink-soft hover:bg-sub hover:text-ink',
       )}
     >
       {children}
-      <span className={cn('text-[11px] tabular-nums', active ? 'text-ink-soft' : 'text-ink-faint')}>{count}</span>
+      <span className={cn('text-caption tabular-nums', active ? 'text-ink-soft' : 'text-ink-faint')}>{count}</span>
     </button>
   )
 }
@@ -162,7 +162,7 @@ function ThreadRow({ thread }: { thread: CommentThreadGroup }) {
             goToThread()
           }
         }}
-        className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-[2px] rounded-[8px] px-1.5 py-2 text-[12px] leading-[18px] hover:bg-sub focus-visible:bg-sub focus-visible:outline-none"
+        className="grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-[2px] rounded-control px-1.5 py-2 text-label leading-[18px] hover:bg-sub focus-visible:bg-sub focus-visible:outline-none"
       >
         <span className="flex min-w-0 items-center gap-1.5 whitespace-nowrap">
           <span
@@ -174,14 +174,14 @@ function ThreadRow({ thread }: { thread: CommentThreadGroup }) {
           </span>
           <b className="truncate font-medium text-ink">{root.from}</b>
         </span>
-        <span className="text-[11px] text-ink-faint tabular-nums">{timeAgo(root.at)}</span>
+        <span className="text-caption text-ink-faint tabular-nums">{timeAgo(root.at)}</span>
         {/* open threads clamp (the pin shows the whole conversation); a
             resolved one has no pin to open, so it reads in full here */}
         <span className={cn('col-span-2 min-w-0 break-words pl-[22px] text-ink-soft', !resolved && 'line-clamp-3')}>
           {root.text}
         </span>
         {(frame || resolved) && (
-          <span className="col-span-2 flex min-w-0 items-center gap-[7px] pl-[22px] text-[11px] text-ink-faint">
+          <span className="col-span-2 flex min-w-0 items-center gap-[7px] pl-[22px] text-caption text-ink-faint">
             {resolved && (
               <span className="grid size-3 flex-none place-items-center rounded-full bg-ink text-paper">
                 <CheckIcon className="size-[8px]" strokeWidth={2.4} />
@@ -224,7 +224,7 @@ function ThreadRow({ thread }: { thread: CommentThreadGroup }) {
           <Input
             variant="bare"
             inputSize="auto"
-            className="h-7 min-w-0 flex-1 rounded-[7px] bg-surface px-2.5 shadow-ring focus:shadow-elevation-1-focus md:text-[12px]"
+            className="h-7 min-w-0 flex-1 rounded-row bg-surface px-2.5 shadow-ring focus:shadow-elevation-1-focus md:text-label"
             placeholder={t('stage.replyPanelPlaceholder')}
             aria-label={t('stage.replyTo', { name: root.from })}
             value={draft}
@@ -236,7 +236,7 @@ function ThreadRow({ thread }: { thread: CommentThreadGroup }) {
           />
           <Button
             variant="bare"
-            className="h-7 flex-none gap-1 rounded-[7px] px-2 text-[12px] font-normal"
+            className="h-7 flex-none gap-1 rounded-row px-2 text-label font-normal"
             title={t('stage.markResolved')}
             onClick={resolve}
           >
@@ -245,7 +245,7 @@ function ThreadRow({ thread }: { thread: CommentThreadGroup }) {
           </Button>
         </div>
       )}
-      {failed && <div className="pl-[28px] text-[11px] leading-[1.4] text-accent-ink">{t('stage.replyFailed')}</div>}
+      {failed && <div className="pl-[28px] text-caption text-accent-ink">{t('stage.replyFailed')}</div>}
     </div>
   )
 }

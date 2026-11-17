@@ -9,6 +9,18 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 
 ## [Unreleased]
 
+- Add the partial speech job backend: estimates, persisted transcripts, voice-over
+  audio clips, secure desktop relay, and matching canvas tools. Local engine
+  installers and the speech sidecar remain pending.
+- Extend the Motion Studio backend through phases 2 to 5: transitions, camera
+  presets, text animators and 3D clips on the composition contract; GIF and
+  PNG-sequence renders; media rows with transcripts and ducking; video
+  generation on OpenRouter and Gemini keys; the speech engine catalog with
+  desktop installs; the Blender op relay behind grants; server-side renders
+  (webm/pngseq, 60 s, 1080p, 30 fps, one per account); Lottie and HyperFrames
+  interchange; and the motion duel.
+
+
 ### Added
 
 - Design libraries: turn a canvas into a library with rules, then browse it in a gallery (`/libraries`, `/l/<id>`), search it from ⌘F and the Layers panel's Library tab, and insert an item into a frame as a linked block that offers updates.
@@ -35,6 +47,7 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 - Cut with ⌘X and from the frame and layer menus.
 - Build identity at `/api/version` and in Settings → About, and an "Update available" card for admins when a newer image of `main` is built.
 - One-command install on a Mac: the local server in Apple's `container`, and the desktop app through a curl script.
+- The installers detect the system: the desktop app installs on Linux (.deb, .rpm or AppImage) and Windows (a PowerShell script), and the all-in-one install offers a local server (Docker or Podman on Linux, with a systemd user unit) or a remote one (`--remote <url>`, checked like the app's own server choice).
 
 ### Changed
 
@@ -51,6 +64,7 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 
 ### Fixed
 
+- Animate storyboard animates the shots, not just the camera: it reads each frame's shot notes (mouvement / transition / son / voix off / notes, FR and EN) and animatable elements — stamping `data-doop-id`s the way comments do — and `set_composition` reports the noted shots still without an element track until the film is done.
 - Uploaded assets survive a container restart on the k3s deploy (persistent volume for `/app/data`).
 - A delivered card run is recorded as done, not stopped.
 - Duel entries are labelled by model name, not by raw id, and no duel card shows when a list answer is not a list.

@@ -1,0 +1,1 @@
+ALTER TABLE "model_duels" ADD COLUMN "kind" text;

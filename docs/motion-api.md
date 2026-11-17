@@ -1,5 +1,7 @@
 # Motion API — Motion Studio ("Rostrum")
 
+Status: current, updated 2026-11-16
+
 A film is a page with a clock. This is the contract the timeline editor, the
 player, the renderers and the agents code against. The types live in
 `shared/motion.ts` (data + validation + ops), `shared/motionRuntime.ts`
@@ -100,6 +102,7 @@ interface MotionClip {
   mediaStart?: number // trim into source media, seconds
   gain?: number // audio level, 1 = 0 dB
   muted?: boolean
+  transition?: MotionTransition // how it takes over the previous clip
 }
 
 type MotionClipSource =
@@ -107,11 +110,35 @@ type MotionClipSource =
   | { type: 'library'; itemId: string; variantId?: string }
   | { type: 'asset'; assetId: string }
   | { type: 'caption'; text: string; style?: string }
+  | { type: '3d'; assetId: string; fallbackAssetId?: string; driver?: 'time' | 'scroll' | 'pointer' }
 ```
+
+A `3d` clip's `assetId` is a glTF/GLB canvas asset the frame's three.js
+layer draws; `fallbackAssetId` is the still a non-3D surface (export,
+thumbnail, an old shell) draws instead. `driver` defaults to `time` —
+`scroll` or `pointer` scrubs the layer on page input even inside a timed
+composition (the same driver names `data-doop-driver` uses in markup).
+
+**Transitions** hang on the incoming clip — when a clip takes over from the
+previous clip on the same track, `transition` says how. Absent = a hard cut.
+
+```ts
+interface MotionTransition {
+  kind: 'dissolve' | 'push' | 'wipe' | 'zoom' | 'shared-element' // 'cut' is rejected: omit the field
+  duration: number // seconds the two clips overlap
+  token?: string // the --dur-* token the duration came from (retiming keeps the name)
+  direction?: 'left' | 'right' | 'up' | 'down' // push/wipe travel
+  easing?: MotionEasing // default per kind
+}
+```
+
+Validation: `duration` must be `> 0` and may not exceed the clip's own
+`duration` (a longer transition lints as a composition warning). A
+transition on a non-clip track lints.
 
 ### Patch ops
 
-`PATCH` and `patch_composition` apply a list of ops atomically:
+`PATCH` and `set_composition`'s `ops` apply a list of ops atomically:
 
 ```ts
 type CompositionOp =
@@ -125,7 +152,7 @@ type CompositionOp =
   | { op: 'update_keyframe'; trackId; keyframeId; t?; value?; easing? }
   | { op: 'remove_keyframe'; trackId; keyframeId }
   | { op: 'add_clip'; trackId; clip }
-  | { op: 'update_clip'; trackId; clipId; start?; duration?; mediaStart?; gain?; muted?; name?; source? }
+  | { op: 'update_clip'; trackId; clipId; start?; duration?; mediaStart?; gain?; muted?; name?; source?; transition? }
   | { op: 'remove_clip'; trackId; clipId }
 ```
 
@@ -141,8 +168,9 @@ interface RenderJob {
   canvasId
   pageId
   compositionId: string
-  format: 'mp4' | 'webm'
-  target: 'browser' | 'desktop' // 'server','blender' reserved — rejected today
+  format: 'mp4' | 'webm' | 'gif' | 'pngseq'
+  target: 'browser' | 'desktop' | 'blender' | 'server'
+  engine?: 'eevee' | 'cycles' | 'octane' // blender target only (default 'eevee')
   width
   height
   fps: number // defaults: the composition's
@@ -166,24 +194,84 @@ PATCHes `rendering` (claiming), PATCHes `progress` → PUTs the file to
 `…/upload` → server stores the `/a/` asset and marks it `done`. `failed`
 and `canceled` end it. Max `MAX_ACTIVE_JOBS` (3) non-finished jobs per canvas.
 
+### Server renders (phase 5)
+
+`target: 'server'` renders on the instance's own headless Chromium
+(`server/motionRender.ts` through the renderer gate at background
+priority), not on a client. The caps, enforced at creation:
+
+- formats: `webm` and `pngseq` only — mp4/gif need ffmpeg, which stays on
+  the desktop;
+- range ≤ 60 s, raster ≤ 1080p, rate ≤ 30 fps;
+- one open server render per account (429 otherwise).
+
+One server render runs at a time on the whole instance; the page sits
+behind the same public-network guard every other render uses and a
+renderer lease sized to the job's budget, so a long render is not cut at
+the renderer's default lease. The harness reads its canvas and
+composition through a dedicated render token — `doop_render_token` /
+`__Secure-doop_render_token` under HTTPS, httpOnly, bound to the job's
+canvas and page, honoured only for the two GETs it needs, expiring with
+the render budget and revoked when the render ends. Seeks are in
+seconds; `pngseq` frames are appended to a zip on disk as they arrive
+(size caps charged per frame), `webm` is encoded frame by frame through
+WebCodecs at explicit timestamps and muxed server-side — nothing is
+recorded in real time. The result lands as the job's `/a/` asset. The
+whole target is off when the instance sets `SERVER_RENDER_DISABLED` (503
+at creation).
+
 ## Seek-safe markup contract
 
 Adopted from HyperFrames (Apache-2.0). A scene is a frame document whose
 root opts in; the runtime owns the clock, markup only describes timing:
 
-| Attribute                                  | Where                              | Meaning                                                                 |
-| ------------------------------------------ | ---------------------------------- | ----------------------------------------------------------------------- |
-| `data-doop-scene`                          | scene root                         | this document is a scene                                                |
-| `data-duration`                            | root                               | scene length, seconds                                                   |
-| `data-fps` / `data-width` / `data-height`  | root                               | rate and raster                                                         |
-| `data-start`                               | timed element                      | on-screen from t = start                                                |
-| `data-duration`                            | timed element                      | visible `[start, start+duration)`                                       |
-| `data-media-start`                         | media clip                         | trim into the source, seconds                                           |
-| `data-track-index`                         | timed element                      | lane order in markup                                                    |
-| `data-volume`                              | media                              | local volume 0..1                                                       |
-| `data-hidden`                              | element                            | hidden below current scene index                                        |
-| `data-doop-track` + `data-doop-track-kind` | lane                               | `graphics`/`captions`/`video`/`audio`/`3d`                              |
-| `data-doop-motion`                         | `<script type="application/json">` | frame-authored keyframes `{ v:1, keyframes:[{el,prop,t,value,ease?}] }` |
+| Attribute                                  | Where                              | Meaning                                                                          |
+| ------------------------------------------ | ---------------------------------- | -------------------------------------------------------------------------------- |
+| `data-doop-scene`                          | scene root                         | this document is a scene                                                         |
+| `data-duration`                            | root                               | scene length, seconds                                                            |
+| `data-fps` / `data-width` / `data-height`  | root                               | rate and raster                                                                  |
+| `data-start`                               | timed element                      | on-screen from t = start                                                         |
+| `data-duration`                            | timed element                      | visible `[start, start+duration)`                                                |
+| `data-media-start`                         | media clip                         | trim into the source, seconds                                                    |
+| `data-track-index`                         | timed element                      | lane order in markup                                                             |
+| `data-volume`                              | media                              | local volume 0..1                                                                |
+| `data-hidden`                              | element                            | hidden below current scene index                                                 |
+| `data-doop-track` + `data-doop-track-kind` | lane                               | `graphics`/`captions`/`video`/`audio`/`3d`                                       |
+| `data-doop-motion`                         | `<script type="application/json">` | frame-authored keyframes `{ v:1, keyframes:[{el,prop,t,value,ease?}] }`          |
+| `data-doop-split`                          | text element                       | unit split a text animator animates: one of `TEXT_SPLITS` (`char`/`word`/`line`) |
+
+The motion block may also carry `animators: FrameTextAnimator[]` — text
+animator specs `expandTextAnimator` (shared/motionText.ts) folds into
+per-unit keyframes on generated unit targets (`el[i]` → selector
+`[data-doop-id="el"] [data-doop-unit="i"]`):
+
+```ts
+interface FrameTextAnimator {
+  el: string // element carrying data-doop-split
+  split: 'char' | 'word' | 'line'
+  preset: 'rise-blur' | 'typewriter' | 'scale-pop' | 'mask-wipe' | 'tracking-in' | 'scramble'
+  start: number // first unit's time, seconds
+  duration: number // per-unit length
+  stagger: number // between unit starts
+  order?: 'forward' | 'center' | 'random'
+  ease?: MotionEasing
+  seed?: number // 'random' order and 'scramble' are deterministic per seed
+}
+```
+
+**Camera presets** (`shared/motionPresets.ts`) compile named moves —
+`dolly-in`, `dolly-out`, `pan`, `orbit`, `handheld`, `whip-pan`, `crane`,
+`establish` — to ordinary camera-track keyframes: `presetToKeyframes(preset, {start, duration, from, to, seed})`. `handheld` jitter and
+`whip-pan` overshoot are seeded so a recompile reproduces them bit-exact.
+
+**Element properties** (element tracks and frame keyframes) accept the
+transform set (`x`, `y`, `scale`, `scaleX`, `scaleY`, `rotate`, `skewX`,
+`skewY`), paints (`opacity`, `color`, `backgroundColor`, `borderRadius`),
+filters (`blur`, `brightness`, `contrast`, `saturate`, `grayscale`,
+`hue-rotate`), masks and paths (`clipPath`, `offsetPath`, `offsetDistance`,
+`offsetRotate`, `d`, `strokeDashoffset`, `strokeDasharray`), plus any
+`--custom-property`. Numbers lerp; `inset()` clip-paths of the same shape
+lerp component-wise; other strings flip at the segment midpoint.
 
 Runtime contract: the player writes `--t` on the scene root and dispatches
 `doop:seek` at every seek. Scripts must derive pixels from `t` — never from
@@ -218,6 +306,39 @@ DELETE /api/canvases/:id/pages/:pageId/composition
 
 Every successful write broadcasts `composition` to the room.
 
+### Scene versions + code export
+
+```
+GET  /api/canvases/:id/pages/:pageId/composition/versions
+POST /api/canvases/:id/pages/:pageId/composition/versions/:versionId/restore
+GET  /api/canvases/:id/pages/:pageId/composition/export
+```
+
+- `GET …/versions` (view) → `{ versions: [{ id, savedAt, savedBy,
+savedByKind, duration, trackCount, revision }] }`, newest first. Every
+  write files the state it replaced (max 20, `MAX_COMPOSITION_VERSIONS`).
+- `POST …/versions/:id/restore` (edit) → `200 { composition }` — replaces
+  the live timeline with the version's state, keeping the composition id.
+  The state it replaced is filed as a new version, so a restore is itself
+  undoable. `404` when the version belongs to another composition.
+- `GET …/export` (view) → `{ files: [{name, content}], tokens: string[],
+notes: string[] }` — the "copy as code" export: `composition.css` with one
+  `@keyframes` per animated element on the composition clock (transform
+  and filter lanes composed per stop, token easings kept as `var(--*)`),
+  `composition.js` with the same motion as WAAPI `Element.animate` calls,
+  the camera as the world wrapper's transform, transitions as pairing
+  notes, springs sampled to `linear()`. Frame-authored `data-doop-motion`
+  keyframes and text animators are included (animators expand to unit
+  targets `[data-doop-id="el"] [data-doop-unit="i"]`).
+
+### Scene-time comments
+
+`POST /api/canvases/:id/comments` accepts `timeStart` + `timeEnd` (seconds
+on the page's composition clock, both required together, `0 ≤ start < end
+≤ duration`) on a page comment — the thread a time range on the timeline
+is about. They ride the comment's `timeStart`/`timeEnd` fields and the
+`comments` table's `time_start`/`time_end` columns.
+
 ### Render jobs
 
 ```
@@ -241,7 +362,8 @@ error?, claimedBy? }` → `{ job }`. `rendering`/`encoding` claim the job
 - `PUT /api/renders/:id/upload` (edit) — raw video bytes,
   `Content-Type: video/mp4|video/webm` matching `job.format`, ≤ 250 MB
   (`MOTION_LIMITS.RENDER_MAX_BYTES`). Sniffed: `ftyp` for mp4, EBML for
-  webm. → `200 { job, asset: { id, url } }`; stores `/a/<assetId>`,
+  webm, `GIF8` for gif, `PK\x03\x04` for pngseq (a zip of stills — stored
+  as `/a/<id>.zip`). → `200 { job, asset: { id, url } }`; stores `/a/<assetId>`,
   sets `done` + `outputAssetId`, broadcasts `render:progress`.
 - `DELETE /api/renders/:id` (edit) → `{ job }` with `status: 'canceled'`.
 
@@ -267,37 +389,94 @@ error?, claimedBy? }` → `{ job }`. `rendering`/`encoding` claim the job
 Canvas tools take `canvas_id`; resident-agent tools are scoped to the run's
 canvas and take `page_id` only. All writes need the `edit` role.
 
-| Tool                 | Input                                                                              | Result                                                                                                                                                                                          |
-| -------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_composition`    | `page_id`                                                                          | `{ composition }` or `{ composition: null }`                                                                                                                                                    |
-| `set_composition`    | `page_id, duration, fps, width, height, poster_time?, tracks?, expected_revision?` | `{ composition }` — full create/replace                                                                                                                                                         |
-| `patch_composition`  | `page_id, ops: CompositionOp[], expected_revision?`                                | `{ composition }` or `{ error }` on a failed op / `409`-style message on revision mismatch                                                                                                      |
-| `animate_storyboard` | `page_id, brief?, shot_seconds?, margin?, replace?`                                | `{ composition, shots: [{frameId,t,duration}], note }` — builds camera-track shots from the page's frames in reading order; refuses to overwrite an existing composition unless `replace: true` |
-| `lint_motion`        | `page_id, frame_id?`                                                               | `{ issues, summary }` — frame HTML (all frames on the page, or one) + composition checks                                                                                                        |
-| `render_composition` | `page_id, format?, target?, range?`                                                | `{ job, note }` — queues a render job a browser/desktop client then claims                                                                                                                      |
+| Tool                 | Input                                                                            | Result                                                                                                                                                                                                                                                                                                       |
+| -------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `get_composition`    | `page_id`                                                                        | `{ composition }` or `{ composition: null }`                                                                                                                                                                                                                                                                 |
+| `set_composition`    | `page_id, composition? \| ops?, expected_revision?`                              | `{ composition, storyboard? }` — `composition` writes the whole timeline, `ops` patches it atomically; `storyboard` is the notes check, when the page's frames carry notes; `409`-style message on revision mismatch                                                                                         |
+| `animate_storyboard` | `page_id, shot_seconds?, margin?, fps?, width?, height?, frame_ids?, direction?` | `{ composition, shots: [{frameId,t,duration,notes,targets,panelId?}], storyboard?, note }` — builds camera-track shots from the page's frames in reading order (`frame_ids` limits which) and replaces the page's composition; a `direction` rides the body and its beats set per-shot seconds and handovers |
+| `lint_motion`        | `page_id, frame_id?, library_id?, item_id?`                                      | `{ issues, summary }` — frame HTML + composition checks; with `library_id` + `item_id`, seek-safety checks one library Motion item and stores the verdict `insert_clip` trusts                                                                                                                               |
+| `insert_clip`        | `page_id, library_id, item_id, variant_id?, start, duration?`                    | `{ composition, clip, seekSafe }` — inserts a library Motion item as a clip; refuses a non-seek-safe item with the lint reasons                                                                                                                                                                              |
+| `export_composition` | `page_id`                                                                        | `{ files, tokens, notes }` — the same CSS + WAAPI export as `GET …/export`                                                                                                                                                                                                                                   |
+| `render_composition` | `page_id, format?, target?, range?`                                              | `{ job, note }` — queues a render job a browser/desktop client then claims; `format` is `mp4`/`webm`/`gif`/`pngseq` (gif/pngseq: desktop only)                                                                                                                                                               |
+
+### The director kit (P0)
+
+| Tool                   | Input                                                                                       | Result                                                                                                                                                                                   |
+| ---------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_direction`        | `page_id`                                                                                   | `{ direction }` — the treatment, beats, look, references, rhythm, palette and pass budget on the composition, `null` when unset                                                          |
+| `set_direction`        | `page_id, direction`                                                                        | `{ composition }` — writes the `Direction`; `null` clears it. Beats (`{seconds, note, transition}` — `cut`/`move`/`push`/`whip`/`fade`) tile the timeline `animate_storyboard` then cuts |
+| `list_motion_presets`  | —                                                                                           | `{ camera_presets, transitions, text_animators, splits, blend_modes }` — the names the preset tools take                                                                                 |
+| `apply_camera_preset`  | `page_id, preset, t?, duration?, amount?, frame_id?, seed?, frequency?, easing?`            | `{ composition, keyframes }` — one of the 13 camera presets as ordinary editable keyframes at `t`, composing with the camera already there (`handheld` is seeded, deterministic)         |
+| `apply_transition`     | `page_id, track_id, clip_id, kind, duration?, direction?, token?, easing?`                  | `{ composition, clip }` — `cut` clears the transition                                                                                                                                    |
+| `apply_text_animation` | `page_id, frame_id, element_id, preset, split?, start?, duration?, stagger?, order?, seed?` | `{ composition, targets }` — a text animator into the frame's `data-doop-motion` block; the element's text stays one editable string                                                     |
+| `get_scene_snapshot`   | `page_id, times?, auto?, max_side?, columns?`                                               | a contact-sheet PNG (image block) + `{ cells: [{t,label,luminance,contrast}], motionEnergy, textBoxes }` — drawn by the same compositor every render target uses                         |
+| `check_scene`          | `page_id, pixels?`                                                                          | `{ lint, pacing, safe_zones, legibility, fx_cost }` — pixel parts report `unavailable` without the instance renderer rather than guessing                                                |
+| `critique_scene`       | `page_id, pixels?`                                                                          | `{ rubric, issues, pass, passes, stop }` — check_scene folded into the fixed rubric; a call on a new revision counts a pass (`direction.passes`, default 3, max 5)                       |
+
+### The effect stack (P1)
+
+| Tool                  | Input                                                                  | Result                                                                                                                                                     |
+| --------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_motion_effects` | —                                                                      | `{ effects: FxSpec[], blend_modes }` — ~30 registered effects with params, ranges, GPU cost and families                                                   |
+| `add_effect`          | `page_id, track_id, fx, id?, params?, index?`                          | `{ composition, effect }` — pushes a registry effect onto the track's ordered stack (`id` minted when absent)                                              |
+| `update_effect`       | `page_id, track_id, effect_id, enabled?, params?, seed?, mix?, blend?` | `{ composition, effect }` — params merge; `blend: null` clears                                                                                             |
+| `remove_effect`       | `page_id, track_id, effect_id`                                         | `{ composition }` — `fx:` lanes pointing at it dangle; MO-13 reports them                                                                                  |
+| `set_effects`         | `page_id, track_id, effects`                                           | `{ composition }` — replaces the whole stack atomically                                                                                                    |
+| `apply_look`          | `page_id, look, at?, seconds?`                                         | `{ composition, track, clip }` — a named look as an `adjustment` track; `at`/`seconds` gate the window through an adjustment clip, absent = the whole film |
+| `list_looks`          | —                                                                      | `{ looks }` — teal-orange, noir, film-35, crt, glitch, dream, product, riso                                                                                |
+| `set_motion_blur`     | `page_id, shutter?, samples?`                                          | `{ composition }` — shutter angle 0–360 sampled across one frame interval; `0` or absent clears. Deterministic: K sub-seeks averaged, never accumulated    |
 
 `animate_storyboard` semantics: deterministic builder — shots follow the
 frames' reading order (rows top→bottom, left→right inside a row), each shot
 fits the camera to its frame (`margin` ≈ 1.08). Easing is `hold` (cuts);
-the agent turns cuts into moves with `patch_composition` `set_camera` ops.
+the agent turns cuts into moves with `set_composition` `set_camera` and
+`add_keyframe` ops.
+
+Every shot in the result describes its frame (`server/storyboard.ts`):
+`notes` is the text of each notes block — elements labelled mouvement,
+transition, son, voix off or notes (or the English words: motion,
+transition, sound, voice-over, notes), by a label followed by `:` or a
+shouted label followed by a spaced dash, or by markup (`data-doop-notes`,
+or a `class`/`id` token equal to or prefixed `shot-notes`, `notes`,
+`voix-off` or `voice-over`) — with the block's `data-doop-id` so the agent
+can keep the notes layer out of the film; `panelId` is the id of the whole
+notes bar the blocks share, when there is one; `targets` is the frame's
+animatable elements (headlines, text blocks, images, named layers, key UI),
+each `{ id, tag, label }` with the id stamped into the frame the same way
+comments stamp theirs — an id is only reported once the frame carrying it
+is on disk.
+
+`storyboard` in a result is the notes check: `{ noted, animated, pending:
+[{frameId, notes}], pass, maxPasses, message }` — every noted shot of this
+film with no element track on a real element of its frame yet (a track
+that only hides the notes layer, one on an id the frame does not carry,
+and a muted track do not count), scoped to the composition and the shots
+the run selected. `pass` counts consecutive rounds that reported the same
+pending set (`maxPasses` 2): the message tells the agent to animate those
+shots before finishing, and after the last pass to finish and name what is
+left. Rebuilding the film, rewriting the timeline or making progress
+resets the count.
 
 ## Seek-safe lint — MO-* rules
 
 `lintMotionHtml(html)` (static, per frame) + `lintComposition(comp)`:
 
-| Rule  | Severity      | Fires on                                                                                                                      |
-| ----- | ------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| MO-01 | error         | `Date.now`, `new Date`, `performance.now` in a script — wall clock ≠ t                                                        |
-| MO-02 | error         | `setInterval`/`setTimeout`/`requestAnimationFrame` in a script that doesn't listen for `doop:seek`                            |
-| MO-03 | error         | `Math.random` without a seed marker — seed a local PRNG                                                                       |
-| MO-04 | error         | CSS `animation`/`infinite` not bound to `var(--t)` via paused+delay                                                           |
-| MO-05 | error         | GSAP (`gsap`, `TweenMax`, `<script src=…gsap>`)                                                                               |
-| MO-06 | warning       | `fetch`/`XHR`/`WebSocket` in scene scripts — load once at setup                                                               |
-| MO-07 | error         | `<video/audio autoplay>` — the runtime seeks media                                                                            |
-| MO-08 | error         | timed media nested inside another `data-start` element                                                                        |
-| MO-09 | warning       | `data-doop-scene` root without `data-duration`                                                                                |
-| MO-10 | error         | a `data-doop-motion` block that doesn't parse                                                                                 |
-| MO-11 | error/warning | composition checks: >1 camera track, dangling element/frame refs, out-of-range keyframes/clips, clips on the wrong track kind |
+| Rule  | Severity      | Fires on                                                                                                                                                                                |
+| ----- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MO-01 | error         | `Date.now`, `new Date`, `performance.now` in a script — wall clock ≠ t                                                                                                                  |
+| MO-02 | error         | `setInterval`/`setTimeout`/`requestAnimationFrame` in a script that doesn't listen for `doop:seek`                                                                                      |
+| MO-03 | error         | `Math.random` without a seed marker — seed a local PRNG                                                                                                                                 |
+| MO-04 | error         | CSS `animation`/`infinite` not bound to `var(--t)` via paused+delay                                                                                                                     |
+| MO-05 | error         | GSAP (`gsap`, `TweenMax`, `<script src=…gsap>`)                                                                                                                                         |
+| MO-06 | warning       | `fetch`/`XHR`/`WebSocket` in scene scripts — load once at setup                                                                                                                         |
+| MO-07 | error         | `<video/audio autoplay>` — the runtime seeks media                                                                                                                                      |
+| MO-08 | error         | timed media nested inside another `data-start` element                                                                                                                                  |
+| MO-09 | warning       | `data-doop-scene` root without `data-duration`                                                                                                                                          |
+| MO-10 | error         | a `data-doop-motion` block that doesn't parse                                                                                                                                           |
+| MO-11 | error/warning | composition checks: >1 camera track, dangling element/frame refs, out-of-range keyframes/clips, clips on the wrong track kind, transitions longer than their clip or on non-clip tracks |
+| MO-12 | warning       | a text animator's target element missing `data-doop-split`, or a split value outside `TEXT_SPLITS`                                                                                      |
+| MO-13 | warning       | an `fx:<id>.<param>` keyframe lane whose effect instance id is not on the track's stack                                                                                                 |
+| MO-14 | warning       | an effect stack the active renderer cannot draw (no GLSL body / no GL context) — reported, never silently skipped                                                                       |
 
 ## Runtime — `shared/motionRuntime.ts`
 
@@ -338,16 +517,37 @@ done, total }` events; returns `{ path, bytes }`.
 - `invoke('motion_read_render', { path })` → base64 bytes — path must be
   inside `<appData>/renders/`; the page then PUTs it to `/api/renders/:id/upload`.
 
-Blender groundwork: `__DOOP_BLENDER__` advertises the bridge; the shell can
-spawn an allowlisted `blender-mcp` process (user-approved like ACP agents)
-and relay read-only tools. Disabled by default (env `DOOP_BLENDER_BRIDGE`);
-write/Python/render tools need an approval UX that does not exist yet.
+Blender bridge: `__DOOP_BLENDER__` advertises it; the shell spawns an
+allowlisted `blender-mcp` process (env `DOOP_BLENDER_BRIDGE`, ADR 0011).
+Read tools relay once started; `write` and `render` classes each need a
+grant recorded through `blender_approve`, which confirms natively in the
+desktop shell and is kept per connected server origin in
+`blender-approvals.json` (withdrawn by `blender_revoke`). Tool arguments
+follow the shared strict schemas in `shared/blender.ts`, re-validated in
+the shell; a render's output path is not caller-controlled — renders land
+under `<appData>/blender-renders/`. Python execution is never
+allowlisted.
 
 ## Changes
 
 Contract changes after the first commit land here, dated.
 
 <!-- append new entries below -->
+
+- **2026-11 — server renders and review hardening.** Server render jobs run
+  one at a time behind the public-network guard with a budget-sized lease,
+  authenticate with a render-scoped token (no minted session), seek in
+  seconds, stream `pngseq` frames to a zip on disk and encode `webm` frame
+  by frame through WebCodecs muxed server-side. `generate_video` downloads
+  through the SSRF-pinned fetch under a 512 MB cap and stores only
+  sniffed mp4/webm; `first_frame`, `last_frame` and references are bounded
+  and the requester's own provider account is required. Blender grants
+  confirm natively per server origin, arguments follow shared strict
+  schemas and render paths are shell-owned. Speech model installs
+  validate the HF repo on every path, allowlist the bundled catalog and
+  confirm natively for anything else; `speech_stage_input` /
+  `speech_read_output` carry job audio in and results out. Migrations
+  renumbered 0074–0080 after the Orca branch.
 
 - **2025-02 — additive helpers + render defaults.** `shared/motion.ts` gains
   `elementKey(frameId, elementId)` (the `frameId/elementId` index key used by
@@ -357,3 +557,122 @@ Contract changes after the first commit land here, dated.
   frames outside the copy are left alone. On `POST …/composition/renders`
   `target` is now optional and defaults to `'browser'`; `format` stays
   required.
+- **2026-02 — phase 2.** Clips carry `transition` (`update_clip` accepts
+  it, `null` clears); the motion block may carry `animators`
+  (`data-doop-split` + presets, MO-12 lints them); camera presets in
+  `shared/motionPresets.ts`; mask/path element properties. Render jobs
+  accept `gif`/`pngseq` — uploads sniff `GIF8`/`PK`, the desktop encodes
+  GIF via ffmpeg's two-pass palette and zips stills dependency-free.
+  `GET …/composition/versions` + `POST …/versions/:id/restore` expose the
+  undo history; `GET …/composition/export` + `export_composition` compile
+  CSS/WAAPI with token names kept. `insert_clip` inserts a library Motion
+  item after its stored seek-safe verdict (`lint_motion` with
+  `library_id`+`item_id` computes/stores it on `library_item_meta`).
+  Page comments accept `timeStart`/`timeEnd` — scene-time threads.
+- **2026-02 — phase 3 (media).** Clips carry `speed` (0.25–4, one value per
+  clip), `fadeIn`/`fadeOut` and caption sources carry per-word `words`.
+  `scene_media` is the per-page state of a media asset: `trimIn`/`trimOut`,
+  `cuts` (source-time ranges playback and export skip — transcript edits are
+  data), `beats` (`{markers, bpm}`), `transcript` (`{language, words[],
+speakers{S1:name}, engine, model, target, provider, jobId}`) and
+  `generation` (`{provider, model, prompt, seed, refs, voice, text, style,
+cost}`). Routes: `GET …/pages/:pageId/media`,
+  `PUT …/pages/:pageId/media/:assetId`, `DELETE …/pages/:pageId/media/:mediaId`.
+  Tools (MCP + resident): `list_media`, `set_media`, `build_captions`
+  (transcript → word-timed caption clips on the caption track, cut words
+  dropped, times shifted onto the clip's window), `duck_audio` (voice ranges
+  → editable gain keyframes on an audio track; a media_id's transcript marks
+  the speech), `suggest_cuts` (fillers + silences as cut candidates).
+  `list_video_models`/`generate_video` run the person's own OpenRouter or
+  Gemini key (registry in `shared/videoModels.ts`, dated per-second prices,
+  estimate shown first): the file lands as an /a/ asset, `scene_media`
+  keeps `{provider, model, prompt, seed, cost}` and a clip is placed on the
+  clip track.
+
+## Phase 3 speech jobs
+
+The additive speech job contract is in [speech-api.md](speech-api.md), with
+shared types in `shared/speech.ts`. REST, MCP and resident tools share the
+same submission, estimate, ownership and completion logic. Desktop relay
+and persisted transcripts are implemented; the installer, local engine
+worker and speech sidecar remain pending. This does not complete phase 3.
+
+## Phase 4 — 3D and the Blender bridge
+
+**3D layers.** A `3d` clip source (above) points at a glTF/GLB canvas asset;
+the frame renders it with a three.js layer and any surface without WebGL
+draws `fallbackAssetId`. `driver` reuses `DRIVERS` (`time`/`scroll`/`pointer`)
+so the same keyframe data can scrub on page input — `data-doop-driver` in
+markup already carries the same names.
+
+**Blender ops.** An agent never reaches Blender: it queues an op, the
+desktop shell claims it through the poll, runs the allowlisted blender-mcp
+tool and finishes it (`shared/blender.ts`).
+
+- `POST /api/blender/ops` `{ canvasId, tool, args }` → `{ op }` (edit access;
+  tool ∈ `get_scene_info`, `get_object_info`, `set_material`, `add_light`,
+  `render_frame`; `klass` marks the approval class). ≤ 8 open ops per
+  requester; args ≤ 64 kB of JSON.
+- `POST /api/blender/poll` `{ deviceId }` → `{ ops }`: claims this person's
+  queued ops, oldest first.
+- `POST /api/blender/finish/:id` `{ deviceId, state: 'done'|'failed',
+result?|error? }` — only the claiming device, while `running`.
+- `GET /api/blender/ops[/:id|?canvasId=]` — the requester's own ops.
+  A claim without a heartbeat fails after 10 minutes; boot recovery fails
+  ops left `running`.
+
+**Agent tools** (MCP + resident, same runner `server/blenderTools.ts`):
+`blender_get_scene`, `blender_get_object` (read), `blender_set_material`,
+`blender_add_light` (write approval in the shell), `blender_render_frame`
+(render approval; `engine` ∈ `eevee`/`cycles`/`octane` — Octane is a name
+Blender interprets, not an integration), and `get_blender_result { op_id }`
+to poll.
+
+**Blender render target.** `POST …/renders` accepts `target: 'blender'`
+with optional `engine` (default `eevee`, validated against
+`BLENDER_ENGINES`); the desktop claims it through the same render-job
+lifecycle and renders frames through the bridge's `render_frame` tool —
+which still needs the render grant.
+
+## Interchange (phase 5)
+
+`shared/motionInterchange.ts` converts a composition to and from Lottie
+and HyperFrames documents. Both directions cover the same **vector
+subset**: transform keyframes on element tracks — `x`/`y` → position,
+`scale`/`scaleX`/`scaleY` → scale, `rotate` → rotation, `opacity` →
+opacity. Anything a Lottie file carries beyond that (shapes, masks,
+mattes, expressions) is skipped on import, never invented.
+
+- `GET …/composition/export?format=lottie|hyperframes` → the document
+  (JSON). `format` absent or `code` keeps the existing code export.
+- `POST …/composition/import` `{ format, data, duration?, fps?, width?,
+height? }` → replaces the page's composition with the converted tracks,
+  validated by the same `parseCompositionBody` a PUT takes. `400` on a
+  malformed document or an out-of-subset body.
+
+Lottie specifics: `fr`/`w`/`h` from the composition, one transform-only
+null layer per element track named `frameId/elementId` (the name rides
+back on import so a round trip rebinds the same element; foreign files
+land on `lottie-<ind>`). Times are frames, scale and opacity percent.
+
+HyperFrames specifics: `{ format: 'hyperframes-project', version: 1,
+scene: { fps, width, height, duration, layers } }` — each layer keeps the
+track's id, kind, name and keyframes (`{ t, prop, v, ease }` with easing
+names) plus its clips verbatim.
+
+## The motion duel
+
+`POST /api/canvases/:id/motion-duels` `{ pageId, brief, picks }` starts a
+duel where the entries are **copies of one storyboard page**, not empty
+frames: the page is duplicated once per pick (`store.duplicatePage` —
+frames, guides and composition remap to the copy), and each pick gets a
+queued card scoped to the first frame of its own copy, telling it to
+animate that page with the motion tools and queue a render for
+comparison. One resident task is metered per entry, like a model duel.
+
+The row is a normal `model_duels` row with `kind: 'motion'` and
+`pageId` on each entry — `GET /api/canvases/:id/duels` lists it with the
+others. `POST …/duels/:duelId/pick` works as for model duels (the picked
+entry's `frameId` is its anchor frame); on a motion duel the losing
+**pages** are archived — every frame they hold is hidden and renamed —
+while the winner's page stays as the take to keep.

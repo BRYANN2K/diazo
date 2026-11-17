@@ -1,5 +1,5 @@
 import { motionApi } from './api'
-import { paintAt, type FilmStage } from './compositor'
+import { paintShutter, type FilmStage } from './compositor'
 import type { Composition, RenderFormat, RenderJob } from './contract'
 
 /* Rendering a film to a video file, on either path the contract names:
@@ -18,6 +18,10 @@ export interface RenderProgress {
 const MIME: Record<RenderFormat, string[]> = {
   mp4: ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1', 'video/mp4'],
   webm: ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'],
+  /* MediaRecorder cannot write a gif or a stills zip — the desktop target
+     claims those formats (ffmpeg palette pass / zip_store) */
+  gif: [],
+  pngseq: [],
 }
 
 /** the recorder type this browser can write for a format, if any */
@@ -154,7 +158,16 @@ export async function renderInBrowser(
   await motionApi.updateRender(job.id, { status: 'rendering', progress: 0 })
   const total = Math.max(1, Math.round((job.range.end - job.range.start) * job.fps))
   const frameMs = 1000 / job.fps
-  await paintAt(ctx, scaledComp, scaled, job.range.start, signal)
+  /* an effect that cannot draw must fail the render, not quietly ship a
+     film missing its look */
+  const checkDrops = (drops: { fx: string; reason: string }[]) => {
+    if (drops.length) {
+      throw new Error(
+        `the film's effect stack could not be drawn: ${drops.map((d) => `${d.fx} (${d.reason})`).join(', ')}`,
+      )
+    }
+  }
+  checkDrops(await paintShutter(ctx, scaledComp, scaled, job.range.start, signal, zoomFactor))
   recorder.start()
   let lastBeat = 0
   try {
@@ -162,7 +175,7 @@ export async function renderInBrowser(
       if (signal?.aborted) throw new DOMException('canceled', 'AbortError')
       const t = job.range.start + i / job.fps
       const began = performance.now()
-      await paintAt(ctx, scaledComp, scaled, t, signal)
+      checkDrops(await paintShutter(ctx, scaledComp, scaled, t, signal, zoomFactor))
       requestFrame?.()
       /* MediaRecorder timestamps frames by wall clock, so frames are paced at
          the film's rate; the picture itself only ever depends on t */

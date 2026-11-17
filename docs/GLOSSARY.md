@@ -93,8 +93,8 @@ Avoid: battle, A/B.
 **Code link.** A mapping from a component or frame to a file and export in the linked project.
 Code: `code_links`.
 
-**Handoff.** The Stip change pack built from a frame marked ready for dev, written into the linked project after a native confirmation.
-Code: `create_handoff`, `repo_write_change`.
+**Handoff.** The brief stored on a dev task launched from a ready-for-dev frame: title, frame PNG exports, the canvas's design tokens and code links, served to the coding agent over MCP.
+Code: `get_handoff`.
 
 **Built page.** A page that receives the routes of a preview deploy, each beside its designed frame with a drift score.
 
@@ -141,3 +141,13 @@ Code: `compositions`. Avoid: scene (the proposal's earlier word), project.
 - **ACP.** Agent Client Protocol. See **Local agent**.
 - **MCP.** Model Context Protocol, served at `/mcp`. See **Agent**.
 - **ADR.** Architecture decision record, in `docs/adr/`.
+
+## Speech
+
+**Speech job.** A persisted transcription or voice-over request, routed to a desktop, the server or an explicitly selected cloud provider. It has one requester and an immutable terminal result.
+Code: `SpeechJob`, `speech_jobs`.
+
+**Transcript.** Words with source-time start and end timestamps, optional speaker labels and engine metadata. Transcript cuts exclude ranges of source media; captions project the kept words onto the composition clock.
+Code: `Transcript`, `scene_media.transcript`.
+
+**Voice-over.** Speech generated from a script and kept as an audio media asset with timed words and its generation recipe. A voice sample for local cloning remains private to the instance.

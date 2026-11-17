@@ -17,6 +17,7 @@ import {
   type MotionEasing,
   type MotionKeyframe,
   type MotionTrackKind,
+  type MotionTransition,
 } from './motion.ts'
 
 /* ---- easing curves ---- */
@@ -117,6 +118,28 @@ function lerpColor(a: string, b: string, e: number): string | null {
   return `rgba(${Math.round(r)}, ${Math.round(g)}, ${Math.round(bl)}, ${Math.round(al * 1000) / 1000})`
 }
 
+const INSET_RE = /^inset\(\s*([-\d.]+%?)\s+([-\d.]+%?)\s+([-\d.]+%?)\s+([-\d.]+%?)\s*\)$/
+
+/** lerp `inset(t r b l)` clip-paths when every side shares a unit */
+function lerpInset(a: string, b: string, e: number): string | null {
+  const ma = INSET_RE.exec(a.trim())
+  const mb = INSET_RE.exec(b.trim())
+  if (!ma || !mb) return null
+  const parts: string[] = []
+  for (let i = 1; i <= 4; i++) {
+    const va = ma[i]!
+    const vb = mb[i]!
+    const pa = parseFloat(va)
+    const pb = parseFloat(vb)
+    const ua = va.endsWith('%') ? '%' : 'px'
+    const ub = vb.endsWith('%') ? '%' : 'px'
+    if (!Number.isFinite(pa) || !Number.isFinite(pb) || ua !== ub) return null
+    const v = pa + (pb - pa) * e
+    parts.push(`${Math.round(v * 100) / 100}${ua}`)
+  }
+  return `inset(${parts.join(' ')})`
+}
+
 /**
  * Interpolate a segment's endpoints at eased progress `e`. Numbers lerp;
  * strings that both parse as colors lerp per channel; every other string
@@ -129,6 +152,8 @@ export function interpolate(from: number | string, to: number | string, e: numbe
     if (from === to) return from
     const color = lerpColor(from, to, e)
     if (color !== null) return color
+    const inset = lerpInset(from, to, e)
+    if (inset !== null) return inset
   }
   return e < 0.5 ? from : to
 }
@@ -191,6 +216,11 @@ export interface ActiveClip {
   trackId: string
   kind: MotionTrackKind
   clip: MotionClip
+  /** Set while a transition is playing: the transition descriptor, which
+   *  side of the pair this clip is (`in` = arriving, `out` = leaving), and
+   *  u = 0..1 progress through it. An `out` clip may be reported active past
+   *  the end of its own window — the transition extends it. */
+  transition?: { transition: MotionTransition; role: 'in' | 'out'; u: number }
 }
 
 export interface CompositionStateAt {
@@ -278,14 +308,52 @@ export function frameStateAt(comp: Composition, t: number, opts?: FrameStateOpti
     }
   }
 
-  /* clips on screen */
+  /* clips on screen; transition pairing is resolved in a second pass so an
+     outgoing clip can be reported (and flagged) past its own window */
   const activeClips: ActiveClip[] = []
+  const byClip = new Map<string, ActiveClip>()
+  const clipTracks: { track: (typeof comp.tracks)[number]; clips: MotionClip[] }[] = []
   for (const track of comp.tracks) {
     if (track.muted || (track.kind !== 'clip' && track.kind !== 'audio' && track.kind !== 'caption')) continue
-    for (const clip of track.clips ?? []) {
+    const clips = track.clips ?? []
+    clipTracks.push({ track, clips })
+    for (const clip of clips) {
       if (clip.muted) continue
       if (clamped >= clip.start && clamped < clip.start + clip.duration) {
-        activeClips.push({ trackId: track.id, kind: track.kind, clip })
+        const entry: ActiveClip = { trackId: track.id, kind: track.kind, clip }
+        activeClips.push(entry)
+        byClip.set(clip.id, entry)
+      }
+    }
+  }
+  for (const { track, clips } of clipTracks) {
+    for (let i = 0; i < clips.length; i++) {
+      const clip = clips[i]!
+      const tr = clip.transition
+      if (!tr || clip.muted) continue
+      if (clamped < clip.start || clamped >= clip.start + Math.min(tr.duration, clip.duration)) continue
+      const u = (clamped - clip.start) / tr.duration
+      const incoming = byClip.get(clip.id)
+      if (incoming) incoming.transition = { transition: tr, role: 'in', u }
+      /* the outgoing shot: the clip before this one on the same track whose
+         window reaches into (or abuts) this clip's start */
+      const prev = clips
+        .slice(0, i)
+        .reverse()
+        .find((p) => !p.muted && p.start < clip.start && p.start + p.duration >= clip.start - 1e-9)
+      if (!prev) continue
+      const outEntry = byClip.get(prev.id)
+      if (outEntry) {
+        outEntry.transition = { transition: tr, role: 'out', u }
+      } else {
+        const entry: ActiveClip = {
+          trackId: track.id,
+          kind: track.kind,
+          clip: prev,
+          transition: { transition: tr, role: 'out', u },
+        }
+        activeClips.push(entry)
+        byClip.set(prev.id, entry)
       }
     }
   }

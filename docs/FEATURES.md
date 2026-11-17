@@ -1,5 +1,7 @@
 # Diazo features
 
+Status: current, updated 2026-11-16
+
 What this fork adds on top of [kgoedecke/doop](https://github.com/kgoedecke/doop), and the
 upstream pull requests it merged ahead of upstream. Resync notes are in
 [runbooks/upstream-resync.md](runbooks/upstream-resync.md) and the deploy recipe in
@@ -120,9 +122,13 @@ upstream pull requests it merged ahead of upstream. Resync notes are in
   overflow, clipped text, tap targets under 44px) and walks it with the Tab key (WCAG AA text
   contrast, visible focus, tab order). An A11y badge on the frame and the Inspector's Quality
   section show the result, stored on the frame. Agents call `check_frame`.
-- **Handoff to Stip** — a frame marked ready for dev builds a Stip change pack, previewed in the
-  Inspector and plan cards, then written into the linked repo by the desktop app's single write
-  command (`repo_write_change`). Agents call `create_handoff`.
+- **Send to Orca** (desktop app) — a ready-for-dev frame can be sent to an Orca worktree on
+  this Mac or a paired environment (the `vps` target): the desktop app creates the worktree
+  and starts a coding agent in it after a native confirmation, and the canvas watches the
+  task's live state until the PR. The agent reads its brief — the frame's PNG export, the
+  canvas's design tokens and code links — over MCP (`get_handoff`) and reports with
+  `update_dev_task`; nothing writes into the worktree and no absolute path
+  ever reaches the server ([docs/orca.md](orca.md)).
 - **Zoomed-out frame pictures** — frames too small for live documents show stored previews at
   their on-screen width. Edits keep the previous picture until its replacement loads. Unchanged
   previews survive a server restart, and moving a frame does not render it again. A neutral
@@ -138,21 +144,28 @@ upstream pull requests it merged ahead of upstream. Resync notes are in
   its designed frame (matched by route mapping or name), scored as a drift comparison, and
   rewritten in place on the next delivery. Payload and CI recipe in
   [docs/built-page.md](built-page.md).
-- **All-in-one Mac install** — `scripts/install.sh` (`curl … | sh`) sets up the local server
-  (through `install-local.sh`), a LaunchAgent that starts it at login (logs in
-  `~/Library/Logs/Diazo`), `Diazo.app` (through `install-desktop.sh`) pointed at
-  `http://127.0.0.1:4400`, and the `diazo` command (start, stop, restart, status, logs, update,
-  open, uninstall); `--app-only`, `--server-only`, `--use-local`, `--dry-run`. The app's
-  Diazo → Local Server menu (macOS, desktop 0.16) shows the server's status and starts, stops or
-  restarts it, opens its logs and switches the app to it; Settings → About shows the same status
-  ([Install](../README.md#install)).
-- **Local install on a Mac** — one `curl … | sh` runs Diazo in a single Apple `container` on
+- **All-in-one install, local or remote** — `scripts/install.sh` (`curl … | sh`) detects the
+  system and offers two modes. Local (the default, or a one-question prompt) sets up the server
+  on this machine — Apple's `container` on macOS (a LaunchAgent starts it at login), Docker or
+  Podman on Linux (a systemd user unit instead) — and the app pointed at
+  `http://127.0.0.1:4400`. `--remote <url>` installs only the app and writes its `server.json`
+  after checking the address the way the app does (https, or http on this computer) and that
+  `/api/locale-config` answers; nothing runs on the machine. Both install the `diazo` command
+  (start, stop, restart, status, logs, update, open, uninstall); `--app-only`, `--server-only`,
+  `--use-local`, `--dry-run`. The app's Diazo → Local Server menu (macOS, desktop 0.16) shows the
+  server's status and starts, stops or restarts it, opens its logs and switches the app to it;
+  Settings → About shows the same status ([Install](../README.md#install)).
+- **Local install on a Mac or Linux box** — one `curl … | sh` runs Diazo in a single container on
   `127.0.0.1:4400`, with PGlite and uploads in `~/.diazo/data` (an older `~/.doop` is kept in
-  place) and secrets generated on the Mac ([Install](../README.md#install)).
-- **Desktop app from this repo** — `scripts/install-desktop.sh` (`curl … | sh`) installs `Diazo.app`
-  from a `desktop-v*` release of this repo, checked against its SHA-256, with no Apple
-  signing needed; the app then updates itself from the same releases, signed with this fork's own
-  updater key ([Desktop app](../README.md#desktop-app-mac)).
+  place) and secrets generated on the machine; Apple's `container` on macOS, Docker or Podman on
+  Linux ([Install](../README.md#install)).
+- **Desktop app from this repo** — `scripts/install-desktop.sh` (`curl … | sh`) installs the app
+  from a `desktop-v*` release of this repo, checked against its SHA-256: `Diazo.app` on macOS
+  with no Apple signing needed, the `.deb` or `.rpm` package on Debian/Fedora-family Linux, the
+  AppImage elsewhere (`--appimage` forces it); on Windows
+  `scripts/install-desktop.ps1` (`irm … | iex`) runs the setup silently and can write the server
+  choice (`-Server`, or `DOOP_DESKTOP_SERVER`). The app then updates itself from the same
+  releases, signed with this fork's own updater key ([Desktop app](../README.md#desktop-app)).
 - **Usage meter** — every model transport reports its tokens, each resident run lands in an
   `agent_runs` ledger with its time and cost (the provider's figure, else a per-model price
   table), and a Usage tab shows the totals per run and per model. Agents call `get_usage`.
@@ -161,7 +174,7 @@ upstream pull requests it merged ahead of upstream. Resync notes are in
   the whole run back in one undo step (frames edited since need a confirmation).
 - **Component ↔ file mapping** — map a component or a frame to its file and export in the linked
   repo (`code_links`). The Inspector's Code row suggests the file from `repo_search` /
-  `repo_list`; `get_component`, `get_frame` and the Stip pack (`code-links.json`) carry the
+  `repo_list`; `get_component`, `get_frame` and a dev task's brief carry the
   mapping. Agents call `set_code_link` and `suggest_code_links`. Read-only on the repo.
 - **Token sync with the repo** — the Tokens panel reads the linked repo's CSS variables
   (`:root`, `@theme`, dark blocks as a theme) and Tailwind v3 theme, parsed without running them,
@@ -240,6 +253,16 @@ compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per bu
   shell that offers it, frame by frame with ffmpeg through the `/c/<id>/motion-render` harness.
   Built against the contract in `docs/motion-api.md` (`feat/motion-backend`); the client types in
   `src/lib/motion/contract.ts` are an adapter until that branch merges.
+- **Motion Studio pro — the director kit and the effect stack (backend)** — on top of the MVP
+  contract: a `Direction` on the composition (treatment, beats with per-shot seconds and handovers,
+  look, pass budget) that `animate_storyboard` consumes; preset tools writing editable keyframes
+  (`apply_camera_preset`, `apply_transition`, `apply_text_animation`); agent-visible render checks
+  (`get_scene_snapshot` contact sheets, `check_scene`, `critique_scene` with a bounded rubric loop);
+  and a P1 effect stack — 43 registered effects on tracks with `fx:<id>.<param>` keyframe lanes,
+  blend modes, adjustment layers gating stacks over clip windows, named looks as adjustment tracks,
+  a deterministic filmic shutter (`motionBlur`), and a WebGL2 pass in the compositor with a GLSL
+  body for every registered effect (lint rule MO-14 still guards anything unregistered). Same
+  tools on MCP and the resident agent through `execMotionPro`.
 - **Motion Studio ("Rostrum") — a page can be a film (backend, MVP)** — an ordinary page gains a
   seekable, deterministic timeline: duration/fps/size, camera tracks over the page's world,
   per-element property tracks, clips, audio and captions (contract in `shared/motion.ts`, API in
@@ -251,12 +274,28 @@ compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per bu
   `render:progress`). REST under `/api/canvases/:id/pages/:pageId/composition` (+ `/renders`,
   `/api/renders/:id` upload into `/a/` assets) behind the view/edit gates; agents get
   `get_composition`, `set_composition` (whole body or ops), `animate_storyboard`, `lint_motion`
-  and `render_composition`, resident-agent included. Renders are queued jobs: the browser renders
+  and `render_composition`, resident-agent included. `animate_storyboard` reads each shot's
+  frame for its notes (mouvement / transition / son / voix off / notes labels, FR and EN) and
+  its animatable elements — `data-doop-id` targets stamped the way comments stamp theirs — and
+  every `set_composition` reports the noted shots still without an element track, so the film
+  gets animated elements, not just camera cuts. Renders are queued jobs: the browser renders
   them (MediaRecorder/WebCodecs) or the desktop shell does deterministically — a hidden webview
   seeks the page frame by frame and a local, allowlisted `ffmpeg` encodes, all behind
-  `__DOOP_MOTION_RENDER__`. A disabled-by-default Blender bridge (`DOOP_BLENDER_BRIDGE`) can spawn
-  an allowlisted `blender-mcp` and relay a read-only tool set. Server-side and Blender renders
-  land in later phases.
+  `__DOOP_MOTION_RENDER__`. Phases 2 to 5 add transitions, camera presets and text animators,
+  `3d` clips (a glTF asset with a fallback image, driven by time, scroll or pointer), media rows
+  (speed, cuts, beats, transcript, recipe, ducking, captions), `generate_video` on OpenRouter and
+  Gemini keys, a speech engine (installed models in the desktop shell, cloud providers on the
+  user's own key, custom models and cloned voices), a Blender op relay whose write and render
+  tools need a grant in the shell, `blender` and `server` render targets — the server one under
+  60 s / 1080p / 30 fps / one-per-account caps on the instance's headless Chromium — Lottie and
+  HyperFrames import/export of the transform subset, and the motion duel (each pick animates its
+  own copy of the storyboard page).
+
+- **Speech job backend (phase 3, partial)** — persisted jobs and preferences,
+  explicit cloud estimates on connected user keys, owner-scoped desktop relay,
+  word-timed media transcripts and voice-over audio clips with their recipes.
+  REST, MCP and resident tools share one service. Installers and real local engines
+  are pending; unpinned catalog downloads are blocked. Contract: [speech-api.md](speech-api.md).
 
 ## Merged upstream PRs
 

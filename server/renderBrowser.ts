@@ -239,6 +239,9 @@ export interface RenderPage {
 
 export interface PageOptions {
   priority?: RenderPriority
+  /** hold the page this long instead of tuning.leaseMs — a caller that
+   *  knows its budget (a server render) sizes the lease to the work */
+  leaseMs?: number
 }
 
 export interface Renderer {
@@ -506,11 +509,12 @@ export function createRenderer(deps: RendererDeps): Renderer {
       })()
       return closing
     }
+    const leaseMs = options.leaseMs ?? tuning.leaseMs
     const lease = setTimeout(() => {
-      log.warn(`[renderer] a page on browser #${generation.id} outlived its ${tuning.leaseMs}ms lease; closing it`)
+      log.warn(`[renderer] a page on browser #${generation.id} outlived its ${leaseMs}ms lease; closing it`)
       void close()
-      void checkHealth(generation, new RenderTimeoutError('a page lease', tuning.leaseMs))
-    }, tuning.leaseMs)
+      void checkHealth(generation, new RenderTimeoutError('a page lease', leaseMs))
+    }, leaseMs)
     lease.unref?.()
     return { page, generation: generation.id, close }
   }

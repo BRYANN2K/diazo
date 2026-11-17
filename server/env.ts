@@ -190,6 +190,9 @@ const schema = {
   /* ------------------------------------------------ resident agents */
   DOOP_AGENT_PROVIDER: str({ choices: ['anthropic', 'azure'], default: 'anthropic' }),
   ANTHROPIC_API_KEY: str({ default: undefined }),
+  /* the Anthropic SDK merges this into every client's headers; declared so
+     custom-provider clients can strip it back out (agentModel.ts) */
+  ANTHROPIC_CUSTOM_HEADERS: str({ default: undefined }),
   AZURE_OPENAI_ENDPOINT: str({ default: undefined }),
   AZURE_OPENAI_API_KEY: str({ default: undefined }),
   AZURE_OPENAI_DEPLOYMENT: str({ default: undefined }),
@@ -268,6 +271,18 @@ const schema = {
   DOOP_IMAGE_MODEL: str({ default: 'gpt-image-2' }),
   DOOP_IMAGE_ROUTER_MODEL: str({ default: undefined }),
 
+  /* ------------------------------------------------ video generation
+     (generate_video, proposal 3.1): the person's own OpenRouter or Gemini
+     key — never the server's by default, the caller pays */
+  OPENROUTER_VIDEOS_URL: str({ default: 'https://openrouter.ai/api/v1/videos' }),
+  GEMINI_VIDEOS_URL: str({ default: 'https://generativelanguage.googleapis.com/v1beta/models' }),
+
+  /* ------------------------------------------------------------- speech */
+  DOOP_SPEECH: bool({ default: true }),
+  DOOP_ELEVENLABS: bool({ default: true }),
+  DOOP_SPEECH_URL: origin({ default: undefined }),
+  DOOP_SPEECH_TOKEN: str({ default: undefined }),
+
   /* ------------------------------------------------------ integrations */
   META_APP_ID: str({ default: undefined }),
   META_APP_SECRET: str({ default: undefined }),
@@ -322,6 +337,9 @@ const schema = {
      provider such as Cloudflare): it may fetch public URLs itself instead of
      through the DNS-pinned proxy. Never set it for a self-hosted renderer */
   REMOTE_BROWSER_ISOLATED: bool({ default: false }),
+  /* refuse `target: 'server'` motion renders outright: an instance without
+     headless Chromium to spare keeps renders on browser and desktop */
+  SERVER_RENDER_DISABLED: bool({ default: false }),
 
   /* ------------------------------------------------------ analytics */
   POSTHOG_KEY: str({ default: undefined }),

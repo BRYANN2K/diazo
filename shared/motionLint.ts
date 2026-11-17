@@ -15,10 +15,13 @@ import {
   SCENE_ATTR,
   SEEK_EVENT,
   START_ATTR,
+  TEXT_SPLITS,
+  TEXT_SPLIT_ATTR,
   parseMotionBlock,
   type Composition,
   type MotionLintIssue,
 } from './motion.ts'
+import { GL_EFFECT_IDS } from './motionFx.ts'
 
 /** the MO-* rule ids, in firing order */
 export const MO_RULES = {
@@ -33,6 +36,9 @@ export const MO_RULES = {
   SCENE_INCOMPLETE: 'MO-09',
   MOTION_BLOCK: 'MO-10',
   COMPOSITION: 'MO-11',
+  TEXT_SPLIT: 'MO-12',
+  FX_DANGLING: 'MO-13',
+  FX_UNSUPPORTED: 'MO-14',
 } as const
 
 const SCRIPT_RE = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi
@@ -50,6 +56,39 @@ const NETWORK_RE = /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource)\b/
 const GSAP_RE = /\b(?:gsap|TweenMax|TimelineMax|TweenLite|TimelineLite)\b/
 const GSAP_SRC_RE = /gsap|TweenMax/i
 const ANIMATION_DECL_RE = /(?:^|[;{])\s*animation(?:-[a-z-]+)?\s*:[^;}]+/gi
+
+/** The subtree of the element carrying `data-doop-id` — a tag-balance walk
+ *  from its opening tag (HTML in this codebase is template-authored, never
+ *  arbitrary). Void elements return the tag alone; no match returns null. */
+const VOID_TAGS = new Set([
+  'area',
+  'base',
+  'br',
+  'col',
+  'embed',
+  'hr',
+  'img',
+  'input',
+  'link',
+  'meta',
+  'source',
+  'track',
+  'wbr',
+])
+export function elementHtml(html: string, elementId: string): string | null {
+  const open = new RegExp(`<([a-zA-Z][a-zA-Z0-9]*)[^>]*data-doop-id\\s*=\\s*["']${esc(elementId)}["'][^>]*>`).exec(html)
+  if (!open) return null
+  const tag = open[1]!.toLowerCase()
+  if (open[0].endsWith('/>') || VOID_TAGS.has(tag)) return open[0]
+  const tagRe = new RegExp(`<\\/?${tag}\\b[^>]*>`, 'gi')
+  tagRe.lastIndex = open.index + open[0].length
+  let depth = 1
+  for (let m = tagRe.exec(html); m; m = tagRe.exec(html)) {
+    depth += m[0].startsWith('</') ? -1 : m[0].endsWith('/>') ? 0 : 1
+    if (depth === 0) return html.slice(open.index, m.index + m[0].length)
+  }
+  return html.slice(open.index)
+}
 
 function snippet(text: string, index: number, span = 60): string {
   const start = Math.max(0, index - 10)
@@ -91,6 +130,21 @@ export function lintMotionHtml(html: string, frameId?: string): MotionLintIssue[
           `${MOTION_BLOCK_ATTR} block does not parse as { v: 1, keyframes: [...] }`,
           snippet(body, 0, 80),
         )
+      } else {
+        /* a text animator's element must carry data-doop-split — the player
+           derives the units it animates */
+        for (const animator of block.animators ?? []) {
+          const elRe = new RegExp(`data-doop-id\\s*=\\s*["']${esc(animator.el)}["'][^>]*`)
+          const tag = html.match(elRe)?.[0] ?? ''
+          if (tag && !tag.includes(TEXT_SPLIT_ATTR)) {
+            push(
+              MO_RULES.TEXT_SPLIT,
+              'warning',
+              `animator on "${animator.el}" has no ${TEXT_SPLIT_ATTR} on the element — the player cannot derive its ${animator.split} units`,
+              tag.slice(0, 100),
+            )
+          }
+        }
       }
       continue
     }
@@ -217,6 +271,18 @@ export function lintMotionHtml(html: string, frameId?: string): MotionLintIssue[
     }
   }
 
+  /* split markers: the value must name a real split */
+  for (const m of html.matchAll(new RegExp(`${esc(TEXT_SPLIT_ATTR)}\\s*=\\s*["']([^"']*)["']`, 'g'))) {
+    if (!TEXT_SPLITS.includes(m[1] as (typeof TEXT_SPLITS)[number])) {
+      push(
+        MO_RULES.TEXT_SPLIT,
+        'warning',
+        `${TEXT_SPLIT_ATTR}="${m[1]}" is not one of ${TEXT_SPLITS.join(', ')} — the element will not split into units`,
+        snippet(html, m.index ?? 0),
+      )
+    }
+  }
+
   return issues
 }
 
@@ -262,11 +328,52 @@ export function lintComposition(comp: Composition, opts?: { frameIds?: ReadonlyS
             ? clip.source.type === 'asset'
             : track.kind === 'caption'
               ? clip.source.type === 'caption'
-              : false
+              : track.kind === 'adjustment'
+                ? clip.source.type === 'adjustment'
+                : false
       if (!allowed) push('error', `a ${clip.source.type} clip does not belong on a ${track.kind} track`)
+      if (clip.transition && clip.transition.duration > clip.duration) {
+        push(
+          'warning',
+          `clip ${clip.id}'s transition (${clip.transition.duration}s) outlives the clip (${clip.duration}s)`,
+        )
+      }
+      if (clip.transition && track.kind !== 'clip') {
+        push(
+          'warning',
+          `clip ${clip.id} has a transition but sits on a ${track.kind} track — transitions pair shots on clip tracks`,
+        )
+      }
     }
     if ((track.kind === 'camera' || track.kind === 'element') && (track.clips ?? []).length > 0) {
       push('error', `${track.kind} track ${track.id} carries clips`)
+    }
+
+    /* MO-13: an fx:<id>.<param> lane pointing at no instance on the stack
+       dangles — the value it would set is silently lost at eval time */
+    const stackIds = new Set((track.effects ?? []).map((e) => e.id))
+    for (const kf of track.keyframes ?? []) {
+      if (!kf.property.startsWith('fx:')) continue
+      const instance = kf.property.slice(3).split('.')[0]
+      if (instance && !stackIds.has(instance)) {
+        issues.push({
+          rule: 'MO-13',
+          severity: 'warning',
+          message: `keyframe ${kf.id} targets fx:${instance} but no effect ${instance} is on track ${track.id}`,
+        })
+      }
+    }
+    /* MO-14: an enabled effect the shipped renderer cannot draw — the stack
+       is valid, the pixels just will not show it */
+    for (const e of track.effects ?? []) {
+      if (e.enabled === false) continue
+      if (!GL_EFFECT_IDS.has(e.fx)) {
+        issues.push({
+          rule: 'MO-14',
+          severity: 'warning',
+          message: `effect ${e.fx} (${e.id}) on ${track.id} has no WebGL2 body — the compositor reports it instead of drawing it wrong`,
+        })
+      }
     }
   }
   return issues

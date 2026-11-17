@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import { env } from './env.ts'
+import { personAnthropicClient } from './personAnthropicClient.ts'
 import type { BuiltinAccountKind, ModelAccount } from './modelAccounts.ts'
 import { ACCOUNT_KIND_LABELS, openaiModelName, type ModelOption } from '../shared/modelMenu.ts'
 
@@ -65,7 +66,7 @@ async function fetchCatalog(url: URL, headers: Record<string, string>, signal: A
 /** Messages models with image input and room for a full turn, newest first.
  *  The SDK pages through `/v1/models` itself and honours ANTHROPIC_BASE_URL. */
 async function anthropicModels(apiKey: string, signal: AbortSignal): Promise<ModelOption[]> {
-  const client = new Anthropic({ apiKey, maxRetries: 0 })
+  const client = personAnthropicClient(apiKey, { maxRetries: 0 })
   const models: (ModelOption & { createdAt: string })[] = []
   try {
     for await (const model of client.models.list({ limit: 1000 }, { signal })) {
@@ -225,7 +226,7 @@ export async function modelCatalogFor(account: ModelAccount, curated: ModelOptio
   if (account.custom) return { models: curated, live: true }
   const kind = account.kind as BuiltinAccountKind
   const load = LOADERS[kind]
-  const label = ACCOUNT_KIND_LABELS[kind]
+  const label = kind === 'elevenlabs-key' ? 'ElevenLabs' : ACCOUNT_KIND_LABELS[kind]
   if (!load) return { models: curated, live: false }
   try {
     const models = merge(curated, await load(account, AbortSignal.timeout(8_000)))

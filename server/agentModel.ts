@@ -19,6 +19,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { withFreshToken, accountModelFor, accountVisionFor, accountWithPick, customModelFor } from './modelAccounts.ts'
 import type { AccountKind, BuiltinAccountKind, ModelAccount } from './modelAccounts.ts'
 import { customProviderFetch } from './customProviderFetch.ts'
+import { personAnthropicClient } from './personAnthropicClient.ts'
 import { isCustomProviderKind, type CustomModel, type CustomProviderConfig } from '../shared/customProvider.ts'
 import { ModelAuthError, ModelUnavailableError, effortFor, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
@@ -234,6 +235,7 @@ const BYO_LABELS: Record<BuiltinAccountKind, string> = {
   'deepseek-key': 'DeepSeek',
   'kimi-key': 'Kimi',
   'kimi-code': 'Kimi Code',
+  'elevenlabs-key': 'ElevenLabs',
 }
 
 /* the account kinds that run on the Chat Completions transport */
@@ -264,6 +266,28 @@ export interface CustomTarget {
   headers?: Record<string, string>
 }
 
+/* set by the SDK itself on every request: an env value for one of these must
+   stay — a null would strip the header outright, and a strict gateway needs
+   anthropic-version to answer at all */
+const SDK_OWN_HEADERS = new Set(['anthropic-version', 'user-agent', 'accept'])
+
+/**
+ * The header names ANTHROPIC_CUSTOM_HEADERS parses to, each nulled — except
+ * the SDK's own. The SDK merges that variable into every client's headers,
+ * where the server's own values would ride along to a custom endpoint; nulls
+ * in defaultHeaders take them back out. The endpoint's own headers are spread
+ * after these, so one it shares a name with still wins.
+ */
+function envHeaderNulls(): Record<string, null> {
+  const nulls: Record<string, null> = {}
+  for (const line of (env.ANTHROPIC_CUSTOM_HEADERS ?? '').split('\n')) {
+    const colon = line.indexOf(':')
+    const name = colon >= 0 ? line.slice(0, colon).trim() : ''
+    if (name && !SDK_OWN_HEADERS.has(name.toLowerCase())) nulls[name] = null
+  }
+  return nulls
+}
+
 /**
  * One turn on a custom provider's model, over the API type its person
  * picked. Every request goes through customProviderFetch (public addresses
@@ -275,11 +299,24 @@ export function customTurn(target: CustomTarget, model: CustomModel): AgentModel
   const budget = (req: AgentTurnRequest) => Math.min(req.maxTokens, model.maxOutputTokens ?? req.maxTokens)
   if (config.apiType === 'anthropic') {
     const client = new Anthropic({
-      apiKey: apiKey || null,
+      /* the person's key, or a sentinel when they gave none: a null key makes
+         the SDK resolve this machine's own Anthropic credentials (env vars,
+         ~/.config/anthropic profiles) and send them to the endpoint */
+      apiKey: apiKey || 'custom-provider',
+      /* ANTHROPIC_AUTH_TOKEN from the server's environment is not theirs */
+      authToken: null,
       baseURL: config.baseUrl,
       fetch: customProviderFetch,
-      /* no key: say so explicitly, or the SDK refuses to send anything */
-      defaultHeaders: { ...headers, ...(apiKey ? {} : { 'X-Api-Key': null }) },
+      defaultHeaders: {
+        /* the server's env headers must not reach an endpoint a person named */
+        ...envHeaderNulls(),
+        /* without a key, drop the sentinel's header explicitly or the SDK
+           refuses to send anything; with one, restate it so an env X-Api-Key
+           cannot smuggle the server's in */
+        ...(apiKey ? { 'X-Api-Key': apiKey } : { 'X-Api-Key': null }),
+        /* the person's own headers win over all of it */
+        ...headers,
+      },
     })
     return async (req) => {
       try {
@@ -360,10 +397,11 @@ function customModel(account: ModelAccount): AgentModel {
 
 function byoModel(account: ModelAccount): AgentModel {
   const kind = account.kind
+  if (kind === 'elevenlabs-key') throw new ModelConfigurationError('Voice connections cannot run canvas tasks.')
   if (isCustomProviderKind(kind)) return customModel(account)
   if (kind === 'anthropic-key') {
     if (!account.apiKey) throw new ModelAuthError('Reconnect your Claude API key in Settings.')
-    const client = new Anthropic({ apiKey: account.apiKey })
+    const client = personAnthropicClient(account.apiKey)
     const model = accountModelFor(account)
     return {
       provider: account.kind,
@@ -530,7 +568,10 @@ export async function pickModel(payerId?: string, pick?: RunnerPick): Promise<Ag
  */
 export async function accountTurnModels(payerId: string): Promise<{ main: AgentModel; bulk: AgentModel } | null> {
   const connections = await readConnections(payerId)
-  const account = usableAccount(connections, connections.default) ?? connections.accounts.find((a) => a.enabled) ?? null
+  const account =
+    usableAccount(connections, connections.default) ??
+    connections.accounts.find((a) => a.enabled && a.kind !== 'elevenlabs-key') ??
+    null
   if (!account) return null
   const main = byoModel(account)
   return { main, bulk: accountDescriber(account) ?? main }
