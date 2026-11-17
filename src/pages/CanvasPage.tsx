@@ -1108,7 +1108,7 @@ export function CanvasPage({
             {decisionToast && (
               <Button
                 variant="bare"
-                className="max-w-full items-center gap-2.5 whitespace-normal rounded-[12px] bg-surface px-3.5 py-2.5 text-left font-normal shadow-pop transition-shadow hover:bg-surface hover:shadow-ring-hover sm:max-w-[320px] [&_svg]:text-ink-soft"
+                className="h-auto max-w-full items-start gap-2.5 whitespace-normal rounded-[12px] bg-surface px-3.5 py-2.5 text-left font-normal shadow-pop transition-shadow hover:bg-surface hover:shadow-ring-hover sm:max-w-[320px] [&_svg]:text-ink-soft"
                 title={t('canvas.openMemory')}
                 onClick={() => {
                   useStore.getState().setPanelTab('memory')
@@ -1116,10 +1116,10 @@ export function CanvasPage({
                   setDecisionToast(null)
                 }}
               >
-                <BrainIcon className="size-4" />
-                <span>
+                <BrainIcon className="mt-0.5 size-4" />
+                <span className="min-w-0">
                   <b className="block text-[12.5px] font-medium text-ink">{t('canvas.savedToMemory')}</b>
-                  <span className="mt-[1px] block text-[12px] leading-[1.4] text-ink-soft">{decisionToast}</span>
+                  <span className="mt-[1px] line-clamp-2 text-[12px] leading-[1.4] text-ink-soft">{decisionToast}</span>
                 </span>
               </Button>
             )}
