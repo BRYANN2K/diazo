@@ -270,6 +270,52 @@ const BODY: Record<string, string | readonly string[]> = {
       w *= u_decay;
     }
     col = vec4(clamp(s.rgb + acc / max(ws, 1e-4) * u_intensity, 0., 1.), s.a);`,
+  /* Brown–Conrady radial model, aspect-corrected around the centre */
+  'lens-distortion': `vec2 c = (uv - u_center) * vec2(u_res.x / u_res.y, 1.);
+    float r2 = dot(c, c);
+    vec2 u2 = u_center + c * (1. + u_k1 * r2 + u_k2 * r2 * r2) / vec2(u_res.x / u_res.y, 1.);
+    col = (u2.x<0.||u2.x>1.||u2.y<0.||u2.y>1.) ? vec4(0.) : texture(u_tex, u2);`,
+  /* each scanline exposes a little later than the last — a linear skew
+     across the readout axis */
+  'rolling-shutter': `vec2 u2 = uv;
+    if(u_axis < .5) u2.x += (uv.y - .5) * u_amount / u_res.x;
+    else u2.y += (uv.x - .5) * u_amount / u_res.y;
+    col = texture(u_tex, u2);`,
+  /* a one-sided streak: taps spread by the speed curve behind the travel
+     direction, weights falling off linearly */
+  'whip-blur': `col = vec4(0.);
+    vec2 d = vec2(cos(radians(u_angle)), sin(radians(u_angle))) * u_amount * .3;
+    float ws = 0.;
+    for(int i=0;i<16;i++){
+      float t = float(i) / 15.;
+      float w = 1. - t;
+      col += texture(u_tex, uv - d * pow(t, u_curve)) * w;
+      ws += w;
+    }
+    col /= ws;`,
+  /* the second input (u_tex2 — self-mapped until instances bind one) is the
+     height field: two decorrelated reads give the 2D offset */
+  'displacement-map': `vec4 m4 = texture(u_tex2, uv);
+    vec4 m4b = texture(u_tex2, fract(uv + vec2(.5)));
+    float mx = u_channel < .5 ? m4.r : u_channel < 1.5 ? m4.g : doopLuma(m4.rgb);
+    float my = u_channel < .5 ? m4b.r : u_channel < 1.5 ? m4b.g : doopLuma(m4b.rgb);
+    col = texture(u_tex, uv + (vec2(mx, my) - .5) * 2. * u_amount / u_res);`,
+  /* a two-octave value-noise vector field; evolution scrolls the field's
+     phase with t, deterministic per seed — never a clock */
+  'turbulent-displace': `vec2 p = uv * u_scale * 8.;
+    vec2 q = p + vec2(u_t * u_evolution, u_t * u_evolution * .7);
+    vec2 o = vec2(
+      doopVnoise(q, uint(u_seed)) + doopVnoise(q * 2.7 + vec2(11.1), uint(u_seed) + 53u) * .5,
+      doopVnoise(q + vec2(31.7, 17.3), uint(u_seed)) + doopVnoise(q * 2.7 + vec2(47.9), uint(u_seed) + 53u) * .5);
+    col = texture(u_tex, uv + (o / 1.5 - .5) * u_amount / u_res);`,
+  /* the column (axis x) or row (axis y) at position is stretched out:
+     samples far from the slit pull toward it, near ones hold */
+  'slit-stretch': `vec2 u2 = uv;
+    float d = (u_axis < .5 ? uv.x : uv.y) - u_position;
+    float f = mix(1., 1. - u_stretch, smoothstep(0., .35, abs(d)));
+    if(u_axis < .5) u2.x = u_position + d * f;
+    else u2.y = u_position + d * f;
+    col = texture(u_tex, u2);`,
 }
 
 /* an integer hash, not a sine hash: sin()'s precision is implementation-
