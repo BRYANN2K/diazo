@@ -1188,9 +1188,12 @@ function referencesField(references: string | null): Pick<AgentTask, 'references
 }
 
 /** A structured card's kind + payload, or nothing when the row is a prompt
- *  card or its payload no longer parses (the card then reads as a plain one). */
+ *  card or its payload no longer parses (the card then reads as a plain one).
+ *  An animate card carries no payload — the kind itself is the flag, so it
+ *  alone comes back. */
 function repoCardFields(kind: string | null, payload: string | null): Pick<AgentTask, 'kind' | 'payload'> {
-  if (!kind || !payload) return {}
+  if (!kind) return {}
+  if (!payload) return kind === 'animate' ? { kind } : {}
   try {
     return { kind: kind as CardKind, payload: JSON.parse(payload) as RepoCardPayload | DriftCardPayload }
   } catch {

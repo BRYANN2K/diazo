@@ -1580,12 +1580,16 @@ export function addQueuedCard(
   scope?: unknown,
   runner?: unknown,
   references?: unknown,
+  kind?: unknown,
 ): AgentTask | undefined {
   const clean = title.trim().slice(0, MAX_CARD_CHARS)
   if (!clean || !store.getCanvas(canvasId)) return undefined
   const pipeline = normalizePipeline(agents)
   const target = normalizeScope(canvasId, scope)
   const pick = parseRunnerPick(runner)
+  /* 'animate' is the one kind a prompt card may carry — the other structured
+     kinds ('sketch', 'design-system', 'drift') have dedicated queue paths */
+  const cardKind: AgentTask['kind'] = kind === 'animate' ? 'animate' : undefined
   /* the plan's approved library references, cleaned — the card carries
      them so the design run opens them as this screen's base */
   const libRefs = cleanPlanReferences(references)
@@ -1604,7 +1608,8 @@ export function addQueuedCard(
       (t.attachments ?? []).join(',') === refs.join(',') &&
       JSON.stringify(t.scope ?? null) === JSON.stringify(target ?? null) &&
       JSON.stringify(t.references ?? null) === JSON.stringify(libRefs.length ? libRefs : null) &&
-      runnerKey(t.runner) === runnerKey(pick),
+      runnerKey(t.runner) === runnerKey(pick) &&
+      (t.kind ?? null) === (cardKind ?? null),
   )
   if (duplicate) return duplicate
   const card: AgentTask = {
@@ -1617,6 +1622,7 @@ export function addQueuedCard(
     ...(fromUserId ? { queuedByUserId: fromUserId } : {}),
     pipeline,
     stage: 0,
+    ...(cardKind ? { kind: cardKind } : {}),
     ...(refs.length > 0 ? { attachments: refs } : {}),
     ...(libRefs.length ? { references: libRefs } : {}),
     ...(target ? { scope: target } : {}),
