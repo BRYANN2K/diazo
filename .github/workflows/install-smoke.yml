@@ -142,7 +142,7 @@ jobs:
         if: failure()
         run: |
           docker logs diazo > "$RUNNER_TEMP/container.log" 2>&1 || true
-          docker inspect diazo > "$RUNNER_TEMP/container-inspect.json" 2>&1 || true
+          docker inspect diazo > "$RUNNER_TEMP/container-inspect.log" 2>&1 || true
           docker ps -a > "$RUNNER_TEMP/docker-ps.log" 2>&1 || true
           journalctl --user -u diazo.service --no-pager > "$RUNNER_TEMP/unit.log" 2>&1 || true
 
@@ -211,11 +211,13 @@ jobs:
           test -d "$HOME/.diazo/data"
           test -n "$(ls -A "$HOME/.diazo/data")"
           test "$(stat -c %a "$HOME/.diazo/diazo.env")" = 600
-          # keep-id maps the caller's uid into the container: the process runs
-          # as the runner user and the data it writes is owned by it
+          # keep-id pins the caller into the container at the image's own uid
+          # (10001): the proof is that files the server writes inside the
+          # mount land owned by the caller on the host, not a subuid
           podman inspect --format '{{.HostConfig.UsernsMode}}' diazo | grep -q keep-id
-          test "$(podman exec diazo id -u)" = "$(id -u)"
+          test "$(podman exec diazo id -u)" = "10001"
           test "$(stat -c %u "$HOME/.diazo/data")" = "$(id -u)"
+          test "$(stat -c %u "$HOME/.diazo/data/pg")" = "$(id -u)"
 
       - name: Run install.sh --server-only
         run: sh scripts/install.sh --server-only 2>&1 | tee "$RUNNER_TEMP/install.log"
@@ -248,7 +250,7 @@ jobs:
         if: failure()
         run: |
           podman logs diazo > "$RUNNER_TEMP/container.log" 2>&1 || true
-          podman inspect diazo > "$RUNNER_TEMP/container-inspect.json" 2>&1 || true
+          podman inspect diazo > "$RUNNER_TEMP/container-inspect.log" 2>&1 || true
           podman ps -a > "$RUNNER_TEMP/podman-ps.log" 2>&1 || true
           journalctl --user -u diazo.service --no-pager > "$RUNNER_TEMP/unit.log" 2>&1 || true
 
@@ -282,7 +284,8 @@ jobs:
         run: |
           dpkg -s diazo | grep -E '^(Package|Version|Status):'
           command -v doop-desktop
-          dpkg -L diazo | grep -q 'doop-desktop\.desktop$'
+          dpkg -L diazo | tee "$RUNNER_TEMP/dpkg-files.log"
+          grep -q 'share/applications/.*\.desktop$' "$RUNNER_TEMP/dpkg-files.log"
 
       - name: Install the AppImage
         run: sh scripts/install-desktop.sh --appimage 2>&1 | tee "$RUNNER_TEMP/desktop-appimage.log"
@@ -323,7 +326,22 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
 
-      - name: Start a Diazo server from the checkout
+      - name: A dead -Server address is refused and installs nothing
+        run: |
+          $env:DOOP_DESKTOP_SERVER = 'https://example.invalid'
+          $out = Get-Content -Raw scripts/install-desktop.ps1 | iex 6>&1 | Out-String
+          $out | Tee-Object "$env:RUNNER_TEMP/desktop-refused.log"
+          if ($out -notmatch 'No Diazo server answered') {
+            throw 'expected the -Server probe to refuse https://example.invalid'
+          }
+          if (Test-Path "$env:LOCALAPPDATA\Diazo\doop-desktop.exe") {
+            throw 'the app was installed even though the probe failed'
+          }
+
+      # A process spawned by an earlier step does not outlive it on the
+      # windows runner, so the server from the checkout starts in the same
+      # step that probes it.
+      - name: Install the app pointed at a local server
         env:
           PORT: '4400'
           BETTER_AUTH_URL: http://127.0.0.1:4400
@@ -349,27 +367,6 @@ jobs:
             Get-Content "$env:RUNNER_TEMP/server.err.log" -ErrorAction SilentlyContinue
             throw 'the server did not answer /healthz'
           }
-
-      - name: A dead -Server address is refused and installs nothing
-        run: |
-          $env:DOOP_DESKTOP_SERVER = 'https://example.invalid'
-          $out = Get-Content -Raw scripts/install-desktop.ps1 | iex 6>&1 | Out-String
-          $out | Tee-Object "$env:RUNNER_TEMP/desktop-refused.log"
-          if ($out -notmatch 'No Diazo server answered') {
-            throw 'expected the -Server probe to refuse https://example.invalid'
-          }
-          if (Test-Path "$env:LOCALAPPDATA\Diazo\doop-desktop.exe") {
-            throw 'the app was installed even though the probe failed'
-          }
-
-      - name: Install the app pointed at the local server
-        run: |
-          Get-ChildItem env: | Where-Object Name -match 'proxy' | ForEach-Object { Write-Host "$($_.Name)=$($_.Value)" }
-          Get-Process node -ErrorAction SilentlyContinue | Select-Object Id, ProcessName
-          try {
-            $probe = Invoke-RestMethod 'http://127.0.0.1:4400/api/locale-config' -TimeoutSec 8
-            Write-Host "locale-config: $($probe | ConvertTo-Json -Compress)"
-          } catch { Write-Host "locale-config failed before the installer runs: $_" }
           $env:DOOP_DESKTOP_SERVER = 'http://127.0.0.1:4400'
           $out = Get-Content -Raw scripts/install-desktop.ps1 | iex 6>&1 | Out-String
           $out | Tee-Object "$env:RUNNER_TEMP/desktop-install.log"
