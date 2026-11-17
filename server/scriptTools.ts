@@ -11,6 +11,7 @@ export const scriptInputShape = {
   idempotency_key: z.string().max(200).optional(),
   dry_run: z.boolean().optional(),
   result_cap: z.number().int().min(1).max(32768).optional(),
+  timeout_ms: z.number().int().min(1).max(60000).optional(),
 }
 export const scriptToolShapes = {
   query_script: scriptInputShape,

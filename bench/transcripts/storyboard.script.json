@@ -1,7 +1,7 @@
 {
   "job": "storyboard",
   "mode": "script",
-  "model": "claude-sonnet-4-6",
+  "model": "gpt-5.6-terra",
   "system": [
     "You are the Diazo Agent on one canvas. Prefer run_script: one typed pass does the work of many tool turns.",
     "Task: animate the three-frame storyboard on Page 1 into a 9-second film."
@@ -19,11 +19,17 @@
     },
     {
       "assistant": "MO-12 — trimming the caption inside the same script surface.\n\nconst { compositions, checks } = diazo\nawait compositions.patch(page.id, [{ op: 'update_clip', id: 'cap2', duration: 2.4 }])\nreturn checks.motion(page.id) /* ~160 chars */",
-      "calls": [{ "name": "run_script", "result": "{ \"ok\": true, \"run_id\": \"sr2\", \"issues\": [] }" }]
+      "calls": [
+        {
+          "name": "run_script",
+          "result": "{ \"ok\": true, \"run_id\": \"sr2\", \"issues\": [] }"
+        }
+      ]
     },
     {
       "assistant": "Seek-safe. Done — three beats, camera moves, captions, zero lint issues.",
       "calls": []
     }
-  ]
+  ],
+  "estimate": "hand-written"
 }

@@ -31,14 +31,19 @@ export async function runQualityBenchmark(input: {
   tiers: readonly [string, string]
   output: string
   driver: QualityDriver
-}): Promise<{ results: BriefResult[]; pairs: PairVerdict[] }> {
+}): Promise<{
+  results: BriefResult[]
+  pairs: PairVerdict[]
+  mismatches: { briefId: string; tier: string; repetition: number; tools: number; script: number }[]
+}> {
   if (input.briefs.length !== 12 || new Set(input.briefs.map((b) => b.id)).size !== 12)
     throw new Error('benchmark needs 12 distinct briefs')
   if (input.tiers[0] === input.tiers[1]) throw new Error('benchmark needs two distinct tiers')
   await mkdir(input.output, { recursive: true })
   const results: BriefResult[] = [],
-    pairs: PairVerdict[] = []
-  const blind: { pairId: string; first: string; second: string; modes: string[] }[] = []
+    pairs: PairVerdict[] = [],
+    mismatches: { briefId: string; tier: string; repetition: number; tools: number; script: number }[] = []
+  const blind: { pairId: string; briefId: string; kind: string; first: string; second: string; modes: string[] }[] = []
   for (const brief of input.briefs)
     for (const [tierIndex, tier] of input.tiers.entries())
       for (let repetition = 0; repetition < 3; repetition++) {
@@ -68,8 +73,18 @@ export async function runQualityBenchmark(input: {
             frames: take.frames.map((f) => f.score),
           })
         }
-        if (takes.tools.frames.length !== takes.script.frames.length)
-          throw new Error('paired runs must deliver matching frame counts')
+        /* a count gap between the paired takes loses the pair, not the run:
+           it is recorded and the rest of the benchmark still lands */
+        if (takes.tools.frames.length !== takes.script.frames.length) {
+          mismatches.push({
+            briefId: brief.id,
+            tier,
+            repetition,
+            tools: takes.tools.frames.length,
+            script: takes.script.frames.length,
+          })
+          continue
+        }
         for (let i = 0; i < takes.tools.frames.length; i++) {
           const pairId = `${brief.id}-${tierIndex}-${repetition}-${i}`
           const order = randomInt(2) ? (['tools', 'script'] as const) : (['script', 'tools'] as const)
@@ -79,7 +94,7 @@ export async function runQualityBenchmark(input: {
             bName = `${pairId}-b.png`
           await writeFile(path.join(input.output, aName), a)
           await writeFile(path.join(input.output, bName), b)
-          blind.push({ pairId, first: aName, second: bName, modes: [...order] })
+          blind.push({ pairId, briefId: brief.id, kind: brief.kind, first: aName, second: bName, modes: [...order] })
           for (const first of ['tools', 'script'] as const) {
             const second = first === 'tools' ? 'script' : 'tools'
             pairs.push({
@@ -98,17 +113,39 @@ export async function runQualityBenchmark(input: {
       }
   await writeFile(
     path.join(input.output, 'results.json'),
-    JSON.stringify({ date: new Date().toISOString(), results, pairs }, null, 2),
+    JSON.stringify({ date: new Date().toISOString(), results, pairs, mismatches }, null, 2),
   )
   // Keep the mapping separate from the human ballot. At least 24 ballots are required by the gate.
   await writeFile(path.join(input.output, 'blind-key.json'), JSON.stringify(blind, null, 2))
   await writeFile(
     path.join(input.output, 'human-ballot.json'),
     JSON.stringify(
-      blind.slice(0, 24).map(({ pairId, first, second }) => ({ pairId, first, second, winner: null })),
+      stratifiedSample(blind, 24).map(({ pairId, first, second }) => ({ pairId, first, second, winner: null })),
       null,
       2,
     ),
   )
-  return { results, pairs }
+  return { results, pairs, mismatches }
+}
+
+/** Bryan's blind sample covers every task type: each brief contributes a
+ *  shuffled pool and rounds draw one entry per brief until `size` is met —
+ *  not the first 24 pairs of the first few briefs, which was alphabetical
+ *  order dressed as sampling. */
+function stratifiedSample<T extends { briefId: string }>(entries: readonly T[], size: number): T[] {
+  const groups = new Map<string, T[]>()
+  for (const entry of entries) {
+    const group = groups.get(entry.briefId) ?? []
+    group.push(entry)
+    groups.set(entry.briefId, group)
+  }
+  for (const group of groups.values())
+    for (let i = group.length - 1; i > 0; i--) {
+      const j = randomInt(i + 1)
+      ;[group[i], group[j]] = [group[j]!, group[i]!]
+    }
+  const out: T[] = []
+  for (let round = 0; out.length < size && out.length < entries.length; round++)
+    for (const group of groups.values()) if (group[round] && out.length < size) out.push(group[round]!)
+  return out
 }

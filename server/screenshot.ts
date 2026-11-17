@@ -177,9 +177,15 @@ export function withFramePage<T>(
   )
 }
 
-export async function loadFramePage(frame: Frame, options?: PageOptions): Promise<IsolatedPage> {
+export async function loadFramePage(
+  frame: Frame,
+  options?: PageOptions & { onConsole?: (type: string, text: string) => void },
+): Promise<IsolatedPage> {
   const loaded = await openIsolatedPage(options)
   try {
+    /* console listeners must exist before setContent — errors thrown while
+       the frame's own scripts first run are the ones that matter */
+    if (options?.onConsole) loaded.page.on('console', (msg) => options.onConsole!(msg.type(), msg.text()))
     await loadFrameInto(loaded.page, frame)
     return loaded
   } catch (error) {
@@ -493,6 +499,41 @@ const SHEET_GAP = 16
 export function shotScaleFor(captureWidth: number, captureHeight: number, scale: number, maxEdge: number): number {
   const long = Math.max(captureWidth, captureHeight, 1)
   return Math.min(scale, maxEdge / long)
+}
+
+/** At most this many tiles make a full-resolution review — a 12,544 px frame
+ *  is covered whole; taller frames get a note, not an unbounded upload. */
+export const SHOT_TILE_MAX = 8
+
+/** Viewport-height slices of the frame at 1:1, for the resident agent's final
+ *  review. One render is cut into tiles no taller than SHOT_MAX_EDGE, so each
+ *  image stays inside the providers' per-side and per-file limits — a single
+ *  tall image would be refused or downscaled. The last entry carries the
+ *  truncation note when the frame outgrows SHOT_TILE_MAX tiles. */
+export async function shotTiles(
+  frame: Frame,
+  opts: RenderOptions = {},
+): Promise<{ pngs: Buffer[]; coveredHeight: number; truncated: boolean }> {
+  const png = await renderFrame(frame, 1, opts)
+  const meta = await sharp(png).metadata()
+  const width = meta.width ?? Math.max(1, Math.round(frame.width))
+  const height = meta.height ?? Math.max(1, Math.round(frame.height))
+  const count = Math.min(Math.ceil(height / SHOT_MAX_EDGE), SHOT_TILE_MAX)
+  const coveredHeight = Math.min(count * SHOT_MAX_EDGE, height)
+  const pngs = await Promise.all(
+    Array.from({ length: count }, (_, i) =>
+      sharp(png)
+        .extract({
+          left: 0,
+          top: i * SHOT_MAX_EDGE,
+          width,
+          height: Math.min(SHOT_MAX_EDGE, height - i * SHOT_MAX_EDGE),
+        })
+        .png()
+        .toBuffer(),
+    ),
+  )
+  return { pngs, coveredHeight, truncated: coveredHeight < height }
 }
 
 /** One PNG holding every frame's thumbnail in order, left to right then down. */

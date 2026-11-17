@@ -1,7 +1,7 @@
 {
   "job": "restyle",
   "mode": "script",
-  "model": "claude-sonnet-4-6",
+  "model": "gpt-5.6-terra",
   "system": [
     "You are the Diazo Agent on one canvas. Prefer run_script: one typed pass does the work of many tool turns.",
     "Task: restyle ten marketing frames onto the shared token palette."
@@ -29,12 +29,16 @@
     {
       "assistant": "One overflow on f4 — shortening its headline measure and re-reviewing just that frame.\n\nawait frames.edit('f4', [{ find: '.headline{max-width:34ch', replace: '.headline{max-width:26ch' }])\nreturn checks.review('f4') /* ~140 chars */",
       "calls": [
-        { "name": "run_script", "result": "{ \"ok\": true, \"run_id\": \"sr2\", \"findings\": [], \"writes\": 1 }" }
+        {
+          "name": "run_script",
+          "result": "{ \"ok\": true, \"run_id\": \"sr2\", \"findings\": [], \"writes\": 1 }"
+        }
       ]
     },
     {
       "assistant": "Done — ten frames on tokens in two script calls, one overflow found and fixed.",
       "calls": []
     }
-  ]
+  ],
+  "estimate": "hand-written"
 }

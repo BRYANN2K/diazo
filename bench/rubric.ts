@@ -118,8 +118,10 @@ export function gateVerdict(
   if (humans.length < 24) reasons.push('blind human sample needs at least 24 pairs')
   const resolved = (p: PairVerdict) =>
     p.winner === 'tie' ? 'tie' : p.winner === 'first' ? p.first : p.first === 'script' ? 'tools' : 'script'
+  // Match the human vote to the SAME render pair shown in the same order —
+  // keying on briefId alone compares against whichever repetition ran first.
   const disagreement = humans.filter((h) => {
-    const vision = pairs.find((v) => v.judge === 'vision' && v.briefId === h.briefId && v.first === h.first)
+    const vision = pairs.find((v) => v.judge === 'vision' && v.pairId === h.pairId && v.first === h.first)
     return !vision || resolved(vision) !== resolved(h)
   }).length
   const decided =
@@ -132,6 +134,23 @@ export function gateVerdict(
     )
       reasons.push(`${brief.briefId}: judge both presentation orders`)
   }
+  const visionPairs = pairs.filter((p) => p.judge === 'vision')
+  if (visionPairs.length >= 8 && new Set(visionPairs.map((p) => p.winner)).size === 1)
+    reasons.push(`judge returned "${visionPairs[0]!.winner}" for all ${visionPairs.length} pairs — degenerate judging`)
+  /* order consistency: judged in both orders, a pair should name the same
+     mode. A judge that answers by position never agrees with itself. */
+  const byPair = new Map<string, PairVerdict[]>()
+  for (const p of visionPairs)
+    if (p.pairId) {
+      const list = byPair.get(p.pairId) ?? []
+      list.push(p)
+      byPair.set(p.pairId, list)
+    }
+  const consistent = [...byPair.values()].filter(
+    (pair) => pair.length >= 2 && pair.every((p) => resolved(p) === resolved(pair[0]!)),
+  ).length
+  if (byPair.size >= 4 && consistent / byPair.size < 0.5)
+    reasons.push(`judge stayed consistent across orders on ${consistent}/${byPair.size} pairs — below the 50% floor`)
   const winsOrTies = decided.filter(
     (p) => p.winner === 'tie' || (p.winner === 'first') === (p.first === 'script'),
   ).length
@@ -139,4 +158,44 @@ export function gateVerdict(
     reasons.push(`blind pairs: ${winsOrTies}/${decided.length} wins-or-ties, needs at least half`)
   }
   return { pass: reasons.length === 0, reasons }
+}
+
+/** One row of `blind-key.json` — the private mapping kept out of the ballot. */
+export interface BlindKey {
+  pairId: string
+  briefId: string
+  kind?: string
+  first: string
+  second: string
+  /** [mode of file `first`, mode of file `second`] */
+  modes: string[]
+}
+
+/** One row of a filled-in `human-ballot.json` — `winner` is 'a', 'b' or 'tie'. */
+export interface HumanBallotVote {
+  pairId: string
+  winner: string | null
+}
+
+/** Resolve Bryan's ballot into PairVerdicts through the blind key: 'a' picks
+ *  the mode behind file `first`, 'b' the mode behind `second`. Ballot rows
+ *  left blank or naming no key entry are skipped. */
+export function ingestHumanBallot(blindKey: readonly BlindKey[], ballot: readonly HumanBallotVote[]): PairVerdict[] {
+  const byId = new Map(blindKey.map((entry) => [entry.pairId, entry]))
+  const out: PairVerdict[] = []
+  for (const vote of ballot) {
+    const entry = byId.get(vote.pairId)
+    const pick = vote.winner === 'a' ? 0 : vote.winner === 'b' ? 1 : vote.winner === 'tie' ? -1 : undefined
+    if (!entry || pick === undefined) continue
+    const first = entry.modes[0]
+    if (first !== 'tools' && first !== 'script') continue
+    out.push({
+      pairId: entry.pairId,
+      briefId: entry.briefId,
+      first,
+      winner: pick < 0 ? 'tie' : pick === 0 ? 'first' : 'second',
+      judge: 'human',
+    })
+  }
+  return out
 }

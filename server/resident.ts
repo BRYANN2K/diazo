@@ -28,7 +28,7 @@ import {
 } from './agentModel.ts'
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
-import { inspectFrame, renderFrame } from './screenshot.ts'
+import { inspectFrame, renderFrame, shotTiles } from './screenshot.ts'
 import { imageSize } from './imageSize.ts'
 import { byteSize, recordToolCall } from './toolCalls.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName, withoutMentions } from '../shared/agents.ts'
@@ -915,14 +915,16 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             },
           ]
         : []
+      /* script mode is opt-in per task: the four script tools and the
+         script guide only reach the model when the work asks for them */
+      const scriptsArmed = env.DOOP_AGENT_SCRIPTS && /\bscript mode\b|\bmode script\b/i.test(workText)
       const runTools = [
         /* a batched run serving several people is not offered the tools
            that spend or read what only one of them owns */
         ...TOOLS.filter(
           (tool) =>
             (!runState.mixedRequesters || !REQUESTER_OWNED_TOOLS.has(tool.name)) &&
-            (!['query_script', 'run_script'].includes(tool.name) ||
-              (env.DOOP_AGENT_SCRIPTS && /\bscript mode\b|\bmode script\b/i.test(workText))),
+            (!(SCRIPT_TOOL_NAMES as readonly string[]).includes(tool.name) || scriptsArmed),
         ),
         ...(repoLink ? REPO_TOOLS : []),
         ...(cards.some((c) => c.kind === 'drift') ? DRIFT_TOOLS : []),
@@ -941,7 +943,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           prompt: kickoff,
           system: [
             systemFor(role),
-            SCRIPT_GUIDE,
+            ...(scriptsArmed ? [SCRIPT_GUIDE] : []),
             ...guidelinesBlock.map((b) => b.text),
             ...skillsBlock.map((b) => b.text),
             ...fontsBlock.map((b) => b.text),
@@ -990,6 +992,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                 maxTokens: 16000,
                 system: [
                   { text: systemFor(role), cache: true },
+                  ...(scriptsArmed ? [{ text: SCRIPT_GUIDE }] : []),
                   ...guidelinesBlock,
                   ...skillsBlock,
                   ...fontsBlock,
@@ -3247,14 +3250,34 @@ async function frameImageBlocks(
   f: Frame,
   fullResolution = false,
 ): Promise<NonNullable<Exclude<Anthropic.ToolResultBlockParam['content'], string>>> {
-  const cropped = !fullResolution && f.height > MAX_SHOT_HEIGHT
-  const scale = fullResolution ? 1 : Math.min(1, 7000 / f.width)
+  type Blocks = NonNullable<Exclude<Anthropic.ToolResultBlockParam['content'], string>>
+  if (fullResolution) {
+    /* one tall image would blow the providers' per-side limit; review the
+       frame as viewport-height tiles at 1:1 instead, bounded to SHOT_TILE_MAX */
+    const { pngs, coveredHeight, truncated } = await shotTiles(f)
+    const blocks: Blocks = []
+    for (const [i, png] of pngs.entries()) {
+      blocks.push({ type: 'text', text: `${f.width}×${Math.round(f.height)} px at 1:1 — tile ${i + 1}/${pngs.length}` })
+      blocks.push({
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/png', data: png.toString('base64') },
+      })
+    }
+    if (truncated)
+      blocks.push({
+        type: 'text',
+        text: `Note: this frame is ${Math.round(f.height)}px tall — the tiles show the top ${coveredHeight}px only.`,
+      })
+    return blocks
+  }
+  const cropped = f.height > MAX_SHOT_HEIGHT
+  const scale = Math.min(1, 7000 / f.width)
   const big = Math.max(f.width, Math.min(f.height, MAX_SHOT_HEIGHT)) * scale > 2000
   const buf = await renderFrame(f, scale, {
-    ...(fullResolution ? {} : { maxHeight: MAX_SHOT_HEIGHT }),
+    maxHeight: MAX_SHOT_HEIGHT,
     ...(big ? { type: 'jpeg' as const, quality: 80 } : {}),
   })
-  const blocks: NonNullable<Exclude<Anthropic.ToolResultBlockParam['content'], string>> = [
+  const blocks: Blocks = [
     {
       type: 'image',
       source: {
@@ -3387,7 +3410,11 @@ async function execToolInner(
       case 'query_script':
       case 'run_script':
       case 'revert_script_run': {
-        const raw = block.input as Record<string, unknown>
+        const parsed = z
+          .object(scriptToolShapes[block.name])
+          .safeParse({ canvas_id: canvasId, ...(block.input as Record<string, unknown>) })
+        if (!parsed.success) return fail(`invalid ${block.name} input: ${parsed.error.issues[0]?.message}`)
+        const raw = parsed.data as Record<string, unknown>
         if (raw.canvas_id !== undefined && raw.canvas_id !== canvasId) return fail('scripts are bound to this canvas')
         const caller = {
           canvasId,

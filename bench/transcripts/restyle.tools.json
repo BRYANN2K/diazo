@@ -1,7 +1,7 @@
 {
   "job": "restyle",
   "mode": "tools",
-  "model": "claude-sonnet-4-6",
+  "model": "gpt-5.6-terra",
   "system": [
     "You are the Diazo Agent on one canvas. Build what the kickoff asks, review visually, iterate until it looks right.",
     "Task: restyle ten marketing frames onto the shared token palette."
@@ -11,100 +11,213 @@
     {
       "assistant": "Surveying the canvas and the token set first.",
       "calls": [
-        { "name": "get_canvas", "result": "{ \"frames\": [10 frames listed, ~900 chars] }" },
-        { "name": "get_tokens", "result": "{ \"tokens\": [12 tokens with light/dark values, ~800 chars] }" }
+        {
+          "name": "get_canvas",
+          "result": "{ \"frames\": [10 frames listed, ~900 chars] }"
+        },
+        {
+          "name": "get_tokens",
+          "result": "{ \"tokens\": [12 tokens with light/dark values, ~800 chars] }"
+        }
       ]
     },
     {
       "assistant": "Frame 1 — reading before rewriting.",
       "calls": [
-        { "name": "get_frame", "result": "{ \"html\": \"<!DOCTYPE html>… 5,800 chars …\" }" },
-        { "name": "get_frame_screenshot", "result": "[image 800x600]" }
+        {
+          "name": "get_frame",
+          "result": "{ \"html\": \"<!DOCTYPE html>… 5,800 chars …\" }"
+        },
+        {
+          "name": "get_frame_screenshot",
+          "result": "[image 800x600]"
+        }
       ]
     },
     {
       "assistant": "Frame 1 restyled onto tokens. <!DOCTYPE html>… 5,600 chars of rewritten markup …",
-      "calls": [{ "name": "set_frame_html", "result": "{ \"ok\": true, \"frame\": { \"id\": \"f1\" } }" }]
+      "calls": [
+        {
+          "name": "set_frame_html",
+          "result": "{ \"ok\": true, \"frame\": { \"id\": \"f1\" } }"
+        }
+      ]
     },
     {
       "assistant": "Frame 2 — reading before rewriting.",
-      "calls": [{ "name": "get_frame", "result": "{ \"html\": \"… 4,900 chars …\" }" }]
+      "calls": [
+        {
+          "name": "get_frame",
+          "result": "{ \"html\": \"… 4,900 chars …\" }"
+        }
+      ]
     },
     {
       "assistant": "Frame 2 restyled. <!DOCTYPE html>… 4,700 chars …",
-      "calls": [{ "name": "set_frame_html", "result": "{ \"ok\": true }" }]
+      "calls": [
+        {
+          "name": "set_frame_html",
+          "result": "{ \"ok\": true }"
+        }
+      ]
     },
     {
       "assistant": "Frame 3 — reading.",
-      "calls": [{ "name": "get_frame", "result": "{ \"html\": \"… 6,100 chars …\" }" }]
+      "calls": [
+        {
+          "name": "get_frame",
+          "result": "{ \"html\": \"… 6,100 chars …\" }"
+        }
+      ]
     },
     {
       "assistant": "Frame 3 restyled. <!DOCTYPE html>… 5,900 chars …",
-      "calls": [{ "name": "set_frame_html", "result": "{ \"ok\": true }" }]
+      "calls": [
+        {
+          "name": "set_frame_html",
+          "result": "{ \"ok\": true }"
+        }
+      ]
     },
     {
       "assistant": "Frame 4 — reading.",
-      "calls": [{ "name": "get_frame", "result": "{ \"html\": \"… 4,200 chars …\" }" }]
+      "calls": [
+        {
+          "name": "get_frame",
+          "result": "{ \"html\": \"… 4,200 chars …\" }"
+        }
+      ]
     },
     {
       "assistant": "Frame 4 restyled. <!DOCTYPE html>… 4,000 chars …",
-      "calls": [{ "name": "set_frame_html", "result": "{ \"ok\": true }" }]
+      "calls": [
+        {
+          "name": "set_frame_html",
+          "result": "{ \"ok\": true }"
+        }
+      ]
     },
     {
       "assistant": "Frame 5 — reading.",
-      "calls": [{ "name": "get_frame", "result": "{ \"html\": \"… 5,000 chars …\" }" }]
+      "calls": [
+        {
+          "name": "get_frame",
+          "result": "{ \"html\": \"… 5,000 chars …\" }"
+        }
+      ]
     },
     {
       "assistant": "Frame 5 restyled. <!DOCTYPE html>… 4,800 chars …",
-      "calls": [{ "name": "set_frame_html", "result": "{ \"ok\": true }" }]
+      "calls": [
+        {
+          "name": "set_frame_html",
+          "result": "{ \"ok\": true }"
+        }
+      ]
     },
     {
       "assistant": "Frame 6 — reading.",
-      "calls": [{ "name": "get_frame", "result": "{ \"html\": \"… 5,400 chars …\" }" }]
+      "calls": [
+        {
+          "name": "get_frame",
+          "result": "{ \"html\": \"… 5,400 chars …\" }"
+        }
+      ]
     },
     {
       "assistant": "Frame 6 restyled. <!DOCTYPE html>… 5,200 chars …",
-      "calls": [{ "name": "set_frame_html", "result": "{ \"ok\": true }" }]
+      "calls": [
+        {
+          "name": "set_frame_html",
+          "result": "{ \"ok\": true }"
+        }
+      ]
     },
     {
       "assistant": "Frame 7 — reading.",
-      "calls": [{ "name": "get_frame", "result": "{ \"html\": \"… 3,900 chars …\" }" }]
+      "calls": [
+        {
+          "name": "get_frame",
+          "result": "{ \"html\": \"… 3,900 chars …\" }"
+        }
+      ]
     },
     {
       "assistant": "Frame 7 restyled. <!DOCTYPE html>… 3,700 chars …",
-      "calls": [{ "name": "set_frame_html", "result": "{ \"ok\": true }" }]
+      "calls": [
+        {
+          "name": "set_frame_html",
+          "result": "{ \"ok\": true }"
+        }
+      ]
     },
     {
       "assistant": "Frame 8 — reading.",
-      "calls": [{ "name": "get_frame", "result": "{ \"html\": \"… 4,600 chars …\" }" }]
+      "calls": [
+        {
+          "name": "get_frame",
+          "result": "{ \"html\": \"… 4,600 chars …\" }"
+        }
+      ]
     },
     {
       "assistant": "Frame 8 restyled. <!DOCTYPE html>… 4,400 chars …",
-      "calls": [{ "name": "set_frame_html", "result": "{ \"ok\": true }" }]
+      "calls": [
+        {
+          "name": "set_frame_html",
+          "result": "{ \"ok\": true }"
+        }
+      ]
     },
     {
       "assistant": "Frame 9 — reading.",
-      "calls": [{ "name": "get_frame", "result": "{ \"html\": \"… 5,200 chars …\" }" }]
+      "calls": [
+        {
+          "name": "get_frame",
+          "result": "{ \"html\": \"… 5,200 chars …\" }"
+        }
+      ]
     },
     {
       "assistant": "Frame 9 restyled. <!DOCTYPE html>… 5,000 chars …",
-      "calls": [{ "name": "set_frame_html", "result": "{ \"ok\": true }" }]
+      "calls": [
+        {
+          "name": "set_frame_html",
+          "result": "{ \"ok\": true }"
+        }
+      ]
     },
     {
       "assistant": "Frame 10 — reading.",
-      "calls": [{ "name": "get_frame", "result": "{ \"html\": \"… 4,400 chars …\" }" }]
+      "calls": [
+        {
+          "name": "get_frame",
+          "result": "{ \"html\": \"… 4,400 chars …\" }"
+        }
+      ]
     },
     {
       "assistant": "Frame 10 restyled. <!DOCTYPE html>… 4,200 chars …",
-      "calls": [{ "name": "set_frame_html", "result": "{ \"ok\": true }" }]
+      "calls": [
+        {
+          "name": "set_frame_html",
+          "result": "{ \"ok\": true }"
+        }
+      ]
     },
     {
       "assistant": "Spot-checking three of the ten renders for token coverage and overflow.",
-      "calls": [{ "name": "get_frame_screenshot", "result": "[image contact sheet 3 frames]" }]
+      "calls": [
+        {
+          "name": "get_frame_screenshot",
+          "result": "[image contact sheet 3 frames]"
+        }
+      ]
     },
     {
       "assistant": "All ten sit on the token palette now — no overflows on the spot-check. Done.",
       "calls": []
     }
-  ]
+  ],
+  "estimate": "hand-written"
 }

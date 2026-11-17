@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { replay, report, type Transcript } from '../scripts/bench-agent-cost.ts'
-import { gateVerdict, median, MEASURES } from '../bench/rubric.ts'
+import { gateVerdict, ingestHumanBallot, median, MEASURES } from '../bench/rubric.ts'
 
 const TRANSCRIPTS = path.join(__dirname, '..', 'bench', 'transcripts')
 const transcripts = readdirSync(TRANSCRIPTS)
@@ -81,4 +81,71 @@ describe('quality-gate scaffold (AC-22/23)', () => {
 
 it('fails the gate when measurements or the human sample are missing', () => {
   expect(gateVerdict([], [], []).pass).toBe(false)
+})
+
+describe('quality gate: pairs and judging', () => {
+  const frame = () => ({ frameId: 'f', measures: Object.fromEntries(MEASURES.map((m) => [m, 1])), errors: [] })
+  const tools = [{ briefId: 'b1', kind: 'landing', mode: 'tools' as const, frames: [frame()] }]
+  const script = [{ briefId: 'b1', kind: 'landing', mode: 'script' as const, frames: [frame()] }]
+
+  it('matches human votes to the same pair, not just the same brief', () => {
+    /* vision says script wins p-one in both orders, ties p-two */
+    const vision = [
+      { pairId: 'p-one', briefId: 'b1', first: 'tools' as const, winner: 'second' as const, judge: 'vision' as const },
+      { pairId: 'p-one', briefId: 'b1', first: 'script' as const, winner: 'first' as const, judge: 'vision' as const },
+      { pairId: 'p-two', briefId: 'b1', first: 'tools' as const, winner: 'tie' as const, judge: 'vision' as const },
+      { pairId: 'p-two', briefId: 'b1', first: 'script' as const, winner: 'tie' as const, judge: 'vision' as const },
+    ]
+    /* Bryan picks tools on p-one: same pairId, real disagreement → his 24
+       votes decide instead of the model → zero script wins → fail */
+    const humans = Array.from({ length: 24 }, () => ({
+      pairId: 'p-one',
+      briefId: 'b1',
+      first: 'tools' as const,
+      winner: 'first' as const,
+      judge: 'human' as const,
+    }))
+    expect(gateVerdict(tools, script, [...vision, ...humans]).pass).toBe(false)
+    /* Bryan agrees with the model on the same pair → the model's four
+       pairs decide → script wins-or-ties all → pass */
+    const agreeing = vision.filter((v) => v.pairId !== 'p-one' || v.first === 'tools')
+    const aligned = Array.from({ length: 24 }, () => ({
+      pairId: 'p-one',
+      briefId: 'b1',
+      first: 'tools' as const,
+      winner: 'second' as const,
+      judge: 'human' as const,
+    }))
+    expect(gateVerdict(tools, script, [...agreeing, ...aligned]).pass).toBe(true)
+  })
+
+  it('rejects a judge that gives the same verdict on every pair', () => {
+    const flat = Array.from({ length: 24 }, (_, i) => ({
+      pairId: `p${i}`,
+      briefId: 'b1',
+      first: 'tools' as const,
+      winner: 'tie' as const,
+      judge: 'vision' as const,
+    }))
+    const verdict = gateVerdict(tools, script, flat)
+    expect(verdict.pass).toBe(false)
+    expect(verdict.reasons.join(' ')).toContain('degenerate')
+  })
+
+  it('resolves a human ballot through the blind key only', () => {
+    const blind = [
+      { pairId: 'p1', briefId: 'b1', first: 'p1-a.png', second: 'p1-b.png', modes: ['script', 'tools'] },
+      { pairId: 'p2', briefId: 'b1', first: 'p2-a.png', second: 'p2-b.png', modes: ['tools', 'script'] },
+    ]
+    const verdicts = ingestHumanBallot(blind, [
+      { pairId: 'p1', winner: 'a' },
+      { pairId: 'p2', winner: 'b' },
+      { pairId: 'p3', winner: 'a' }, // unknown pair — dropped
+      { pairId: 'p1', winner: null }, // blank — dropped
+    ])
+    expect(verdicts).toEqual([
+      { pairId: 'p1', briefId: 'b1', first: 'script', winner: 'first', judge: 'human' },
+      { pairId: 'p2', briefId: 'b1', first: 'tools', winner: 'second', judge: 'human' },
+    ])
+  })
 })

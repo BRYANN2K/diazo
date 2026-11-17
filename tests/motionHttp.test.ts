@@ -455,7 +455,7 @@ describe('the MCP tools', () => {
     })
     expect(story.isError).toBe(false)
     const storyData = JSON.parse(story.text) as {
-      composition: Composition
+      revision: number
       shots: {
         frameId: string
         notes: { text: string; id?: string }[]
@@ -464,7 +464,6 @@ describe('the MCP tools', () => {
       storyboard?: { noted: number; pending: { frameId: string }[]; animated: number }
     }
     expect(storyData.shots).toHaveLength(2)
-    expect(storyData.composition.tracks[0]?.kind).toBe('camera')
 
     /* the shot whose frame carries notes reports them, along with the
        elements an element track can animate — each a data-doop-id the frame
@@ -486,6 +485,7 @@ describe('the MCP tools', () => {
     })
     const comp = (JSON.parse(got.text) as { composition: Composition }).composition
     expect(comp.duration).toBe(8)
+    expect(comp.tracks[0]?.kind).toBe('camera')
     expect(comp.tracks[0]?.keyframes?.every((k) => (k.easing as { type: string }).type === 'hold')).toBe(true)
 
     const patched = await mcpCall(ownerKey, 'set_composition', {

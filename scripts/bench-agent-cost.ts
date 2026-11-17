@@ -3,13 +3,15 @@
  * model from recorded transcripts and prices each run.
  *
  * A transcript (bench/transcripts/<job>.<mode>.json) is the assistant side of
- * a real run: one entry per model turn with the text it wrote and the tool
- * calls it made. Replaying never calls a provider — the stub pops the next
- * recorded turn, the harness feeds the recorded tool results back, and token
- * counts are estimated at ~4 characters per token over the exact text the
- * conversation carries. Conversation caching (AC-3) is simulated the way
- * runAnthropicTurn applies it: turn one writes the cache, every later turn
- * reads everything before its newest message back.
+ * a run: one entry per model turn with the text it wrote and the tool calls
+ * it made. Every current transcript is hand-written — `"estimate":
+ * "hand-written"` marks it, and this script prints its costs as estimates.
+ * Replaying never calls a provider — the stub pops the next recorded turn,
+ * the harness feeds the recorded tool results back, and token counts are
+ * estimated at ~4 characters per token over the exact text the conversation
+ * carries. Caching (AC-3) is simulated as the billing works: turn one pays
+ * input price on the prefix, every later turn reads everything before its
+ * newest message back at the model's cached-input rate.
  *
  *   bun run bench:agent-cost            # all jobs, both modes
  *   bun run bench:agent-cost landing    # one job
@@ -34,6 +36,9 @@ export interface Transcript {
   mode: 'tools' | 'script'
   /** priced with shared/modelPrices.ts */
   model: string
+  /** 'hand-written' marks a transcript written by hand, not recorded from a
+   *  provider run — its costs are estimates, never quoted as measured runs */
+  estimate?: 'hand-written' | 'recorded'
   /** system block texts, joined in order */
   system: string[]
   /** rough size of the tool definitions the provider saw, in characters */
@@ -116,8 +121,10 @@ if (files.length === 0) {
 console.log('job          mode    turns  calls   input  cache-read cache-write  output      cost')
 console.log('─'.repeat(88))
 const byJob = new Map<string, { mode: string; r: ReturnType<typeof report> }[]>()
+let handWritten = 0
 for (const file of files) {
   const t = JSON.parse(readFileSync(path.join(TRANSCRIPTS, file), 'utf8')) as Transcript
+  if (t.estimate === 'hand-written') handWritten++
   const r = report(t)
   const row = [
     t.job.padEnd(12),
@@ -136,13 +143,18 @@ for (const file of files) {
   byJob.set(t.job, list)
 }
 console.log('─'.repeat(88))
+if (handWritten)
+  console.log(
+    `${handWritten} of ${files.length} transcripts are hand-written — costs are estimates at ~4 chars/token, not measured runs`,
+  )
 for (const [job, runs] of byJob) {
   const tools = runs.find((r) => r.mode === 'tools')?.r
   const script = runs.find((r) => r.mode === 'script')?.r
   if (!tools || !script || tools.cost === undefined || script.cost === undefined) continue
   const saved = tools.cost - script.cost
+  const tag = handWritten ? ' estimated' : ''
   console.log(
-    `${job}: script saves ${money(saved).trim()} of ${money(tools.cost).trim()} (${Math.round((saved / tools.cost) * 100)}%), ` +
+    `${job}: script saves${tag} ${money(saved).trim()} of ${money(tools.cost).trim()} (${Math.round((saved / tools.cost) * 100)}%), ` +
       `${tools.turns} -> ${script.turns} turns`,
   )
 }

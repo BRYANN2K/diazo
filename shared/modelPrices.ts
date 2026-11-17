@@ -42,11 +42,12 @@ const ANTHROPIC: Record<string, ModelPrice> = {
 
 /** OpenAI and Google list rates; cached input as the providers bill it. */
 const OTHERS: Record<string, ModelPrice> = {
-  'gpt-5-mini': { input: 0.25, output: 2, cacheRead: 0.025, cacheWrite: 0 },
-  'gpt-5-nano': { input: 0.05, output: 0.4, cacheRead: 0.005, cacheWrite: 0 },
-  'gpt-5': { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 0 },
-  'gemini-2.5-pro': { input: 1.25, output: 10, cacheRead: 0.31, cacheWrite: 0 },
-  'gemini-2.5-flash': { input: 0.3, output: 2.5, cacheRead: 0.075, cacheWrite: 0 },
+  'gpt-5.6-terra': { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2 },
+  'gpt-5-mini': { input: 0.25, output: 2, cacheRead: 0.025, cacheWrite: 0.25 },
+  'gpt-5-nano': { input: 0.05, output: 0.4, cacheRead: 0.005, cacheWrite: 0.05 },
+  'gpt-5': { input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 1.25 },
+  'gemini-2.5-pro': { input: 1.25, output: 10, cacheRead: 0.31, cacheWrite: 1.25 },
+  'gemini-2.5-flash': { input: 0.3, output: 2.5, cacheRead: 0.075, cacheWrite: 0.3 },
 }
 
 export const MODEL_PRICES: Readonly<Record<string, ModelPrice>> = { ...ANTHROPIC, ...OTHERS }
