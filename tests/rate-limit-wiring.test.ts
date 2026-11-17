@@ -59,6 +59,8 @@ afterEach(() => {
 })
 
 describe('configurable tool rate limits', () => {
+  /* connect() cold-imports the whole MCP tool graph — the 5s default is
+     routinely too small for it */
   it('applies a lowered MCP_UPLOADS_PER_MIN to upload_asset', async () => {
     vi.stubEnv('MCP_UPLOADS_PER_MIN', '2')
     const { client, canvasId, close } = await connect()
@@ -76,5 +78,5 @@ describe('configurable tool rate limits', () => {
     } finally {
       await close()
     }
-  })
+  }, 30_000)
 })
