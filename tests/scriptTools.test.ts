@@ -1,4 +1,5 @@
 import { SCRIPT_TOOL_COVERAGE } from '../shared/scriptToolCoverage.ts'
+import { SCRIPT_TOOL_NAMES } from '../server/scriptTools.ts'
 import { sdkPaths } from '../server/scriptSdk.ts'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
@@ -7,7 +8,7 @@ vi.mock('../server/db/persist.ts', () => ({ saveCanvas: () => {}, saveFrame: () 
 import { buildMcpServer } from '../server/mcp.ts'
 import { reloadEnv } from '../server/env.ts'
 import { getSdkDocs } from '../server/scriptTools.ts'
-import { guideTopic } from '../server/guide.ts'
+import { DOOP_GUIDE, guideTopic } from '../server/guide.ts'
 async function connect(profile?: 'code') {
   const server = buildMcpServer('Owner', 'owner', undefined, profile)
   const client = new Client({ name: 'scripts-test', version: '1' })
@@ -26,7 +27,7 @@ afterEach(() => {
   vi.unstubAllEnvs()
   reloadEnv()
 })
-it('serves five compact code tools and keeps the full default profile', async () => {
+it('serves six compact code tools and keeps the full default profile', async () => {
   const code = await connect('code')
   const full = await connect()
   try {
@@ -36,10 +37,14 @@ it('serves five compact code tools and keeps the full default profile', async ()
       'get_guide',
       'get_sdk_docs',
       'query_script',
+      'revert_script_run',
       'run_script',
     ])
     expect(JSON.stringify(tools).length).toBeLessThan(12000)
-    expect((await full.client.listTools()).tools.length).toBeGreaterThan(85)
+    const defaultTools = (await full.client.listTools()).tools
+    expect(defaultTools.length).toBeGreaterThan(85)
+    /* script tools stay opt-in: no default-profile client ever sees them */
+    for (const name of SCRIPT_TOOL_NAMES) expect(defaultTools.map((t) => t.name)).not.toContain(name)
   } finally {
     await code.close()
     await full.close()
@@ -64,15 +69,19 @@ it('serves namespace docs and a bounded core guide with a final screenshot rule'
     expect(docs.methods.length).toBeGreaterThan(0)
     expect(docs.examples).toHaveLength(2)
   }
-  expect(guideTopic('diazo-instructions').length).toBeLessThan(10000)
+  /* tool-mode agents get the whole guide back — no script-era excerpt */
+  expect(guideTopic('diazo-instructions')).toBe(DOOP_GUIDE)
   expect(guideTopic('scripts')).toContain('full-resolution screenshot')
 })
 
 it('accounts for every MCP tool and every named SDK mirror', async () => {
   const { client, close } = await connect()
   try {
-    const names = (await client.listTools()).tools.map((t) => t.name).sort()
-    expect(Object.keys(SCRIPT_TOOL_COVERAGE).sort()).toEqual(names)
+    /* the coverage map names every tool any profile can expose: the default
+       set plus the script tools only the code profile adds */
+    const names = (await client.listTools()).tools.map((t) => t.name)
+    const anyProfile = new Set([...names, ...SCRIPT_TOOL_NAMES])
+    expect(Object.keys(SCRIPT_TOOL_COVERAGE).sort()).toEqual([...anyProfile].sort())
     const paths = new Set(sdkPaths().map((p) => p.path))
     for (const entry of Object.values(SCRIPT_TOOL_COVERAGE)) {
       if ('sdk' in entry) expect(paths.has(entry.sdk)).toBe(true)

@@ -664,10 +664,48 @@ Then request one full-resolution screenshot for every delivered frame and inspec
 Default limits: 30 seconds, 64 MB, 200 SDK calls, 40 frame writes, 256 KB source, 8 KB returned result (32 KB maximum).
 Failure automatically rolls back. Use an idempotency key when retrying; dry_run computes planned changes without changing the canvas. revert_script_run undoes a successful run and refuses conflicting later edits.`
 
+/** The guide's `## ` sections keyed by lowercase heading, for topic slices
+ *  that pull the real section instead of a byte-range excerpt. */
+const GUIDE_SECTIONS = (() => {
+  const map = new Map<string, string>()
+  for (const part of DOOP_GUIDE.split(/^(?=## )/m)) {
+    const heading = /^## (.+)\n/.exec(part)?.[1]?.trim().toLowerCase()
+    if (heading) map.set(heading, part.trimEnd() + '\n')
+  }
+  return map
+})()
+
+const pick = (...headings: string[]) =>
+  headings
+    .map((h) => GUIDE_SECTIONS.get(h) ?? '')
+    .filter(Boolean)
+    .join('\n')
+
+/** The compact guide a `code`-profile client or an explicit `core` ask gets:
+ *  a pointer to the topics plus the two texts that govern script runs. */
+const CORE_GUIDE = `Diazo canvas workflow. Read canvas guidelines before designing. Read get_guide(reference) for the full reference, design for design rules, streaming for the edit workflow, or scripts for bounded programs.
+${SCRIPT_GUIDE}
+${DESIGN_QUALITY}`
+
 export function guideTopic(topic: string): string {
   if (topic === 'scripts') return SCRIPT_GUIDE
-  if (topic === 'reference') return DOOP_GUIDE
-  if (topic === 'design') return DESIGN_QUALITY + '\n' + DOOP_GUIDE.slice(0, 7000)
-  if (topic === 'streaming') return DOOP_GUIDE.slice(0, 9000)
-  return `Diazo canvas workflow. Read canvas guidelines before designing. Read get_guide(reference) for the full reference, design for design rules, streaming for the edit workflow, or scripts for bounded programs.\n${SCRIPT_GUIDE}\n${DESIGN_QUALITY}`
+  if (topic === 'core') return CORE_GUIDE
+  if (topic === 'design')
+    return (
+      DESIGN_QUALITY +
+      '\n\n' +
+      pick(
+        'design brief — before your first frame',
+        'design quality',
+        'images — search first, then upload',
+        'style guides — read before designing',
+        'memory references — the look to match',
+        'redesigns — audit first, then two drafts',
+      )
+    )
+  if (topic === 'streaming')
+    return pick('streaming — how to write designs', 'frames and html', 'prototypes — make frames clickable')
+  /* diazo-instructions, doop-instructions, reference — the guide itself,
+     whole, exactly as tool-mode agents were promised it */
+  return DOOP_GUIDE
 }

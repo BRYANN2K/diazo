@@ -521,6 +521,9 @@ export function buildMcpServer(
   loadToolTargets(server, () => ({ ownerId, ownerName: owner }))
   registerFramePreview(server)
   for (const name of SCRIPT_TOOL_NAMES) {
+    /* script tools exist only for clients that asked for the code profile —
+       default tool-mode agents keep the curated tool set and never see them */
+    if (profile !== 'code') break
     if (!env.DOOP_AGENT_SCRIPTS && (name === 'query_script' || name === 'run_script')) continue
     server.registerTool(
       name,
@@ -4137,7 +4140,14 @@ export function buildMcpServer(
   )
 
   if (profile === 'code') {
-    const allowed = new Set(['get_guide', 'get_sdk_docs', 'query_script', 'run_script', 'get_frame_screenshot'])
+    const allowed = new Set([
+      'get_guide',
+      'get_sdk_docs',
+      'query_script',
+      'run_script',
+      'revert_script_run',
+      'get_frame_screenshot',
+    ])
     const registered = (server as unknown as { _registeredTools: Record<string, { remove: () => void }> })
       ._registeredTools
     for (const [name, tool] of Object.entries(registered)) if (!allowed.has(name)) tool.remove()
