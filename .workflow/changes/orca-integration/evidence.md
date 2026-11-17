@@ -70,8 +70,9 @@ Beyond the AC list:
   `effort` needs `model`); `update_dev_task` verifies the requester still
   has canvas access; dev-task rows die with their canvas
   (`persist.deleteCanvas`) and with the requester's account
-  (`purgeUserData`); a poll ends a task only on the worktree's
-  `programStatus` outcome — the per-turn `agentState: done` never does
+  (`purgeUserData`); a poll ends a task only on the main agent's
+  `mainAgent.outcome` — real Orca reports `programStatus.state` as just
+  `working`/`done`, and the per-turn `agentState: done` never does
   (`pollStateOf` returns null for it, `mergedPollState` case pinned);
   `ORCA_CLI_COMMAND` is documented in `docs/orca.md` (binary resolution
   order: `DOOP_ORCA_CLI`, `ORCA_CLI_COMMAND`, install paths, `PATH`).
@@ -96,6 +97,13 @@ Beyond the AC list:
 - **Test hygiene** — the route suite's `deviceOnline` helper now waits for
   the device to register before returning the claim promise (the launch
   POST used to race it and could flake to 409 under parallel load).
+- **Round 3, against real `worktree ps --json`** — the launch answer is
+  whitelisted through `launch_reply` (Orca's `<repoId>::<abs path>` id
+  overran the report's `max(120)` and leaked a local path); `worktreeId`
+  left the report contract and `TrackedTask`; a `truncated` page reports
+  nothing for missing identities rather than a false `found:false` cancel;
+  an `ok` launch only moves `queued` to `starting`, so a replayed report
+  cannot drag a `working`/`pr_open` row back.
 
 Checks run 2026-11-17:
 
@@ -106,3 +114,15 @@ Checks run 2026-11-17:
 - `bunx vitest run tests/devTasks.test.ts tests/devTaskRoutes.test.ts` —
   28/28.
 - `cargo test --locked -j 2` in `desktop/src-tauri` — 108/108.
+
+Round 3, rebased on `origin/dev` (the `docs/FEATURES.md` conflict kept
+both bullets):
+
+- `bun run typecheck`, `bun run lint`, `bun run format:check`,
+  `bun run doc-lint` — clean.
+- `bunx vitest run tests/devTask*.test.ts` — 31/31 (failure→failed,
+  success→done, replayed `ok` launch keeps `working`/`pr_open`, a
+  path-shaped worktree id no longer fails the route's schema).
+- `cd desktop/src-tauri && cargo test --locked` — 117/117 (fixture now
+  mirrors the real `mainAgent`/`programStatus` nesting; `launch_reply`
+  carries no path; a truncated `ps` is not a vanished worktree).
