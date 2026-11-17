@@ -128,7 +128,9 @@ describe('embedded bundle boot (scripts/build-embedded-server.ts)', () => {
       ...process.env,
       NODE_ENV: 'production',
       PORT: String(port),
-      DOOP_LISTEN_HOST: '127.0.0.1',
+      /* blank, not absent — DOOP_EMBEDDED alone must bind loopback even
+         when the shell forgot (or exported) DOOP_LISTEN_HOST */
+      DOOP_LISTEN_HOST: '',
       DOOP_DATA_DIR: dataDir,
       DOOP_EMBEDDED: '1',
       DOOP_INSTALL: 'desktop',

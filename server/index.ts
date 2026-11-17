@@ -11,6 +11,7 @@ import { dataDir, distDir } from './paths.ts'
 import { acquireDataLock } from './dataLock.ts'
 import { sweepBrowserProfiles } from './browserGuard.ts'
 import { startDailyBackups } from './backup.ts'
+import { listenHost } from './listenHost.ts'
 import {
   catalogEntry,
   changeInstances,
@@ -4575,7 +4576,11 @@ const onListening = () => {
   for (const extension of extensions) extension.startWorker?.()
 }
 
-/* the embedded install binds loopback only; unset keeps the container
+/* the embedded install binds loopback even when the shell forgot to pass
+   DOOP_LISTEN_HOST (server/listenHost.ts); unset keeps the container
    behaviour of listening on every interface */
-if (env.DOOP_LISTEN_HOST) server.listen(PORT, env.DOOP_LISTEN_HOST, onListening)
-else server.listen(PORT, onListening)
+{
+  const host = listenHost()
+  if (host) server.listen(PORT, host, onListening)
+  else server.listen(PORT, onListening)
+}
