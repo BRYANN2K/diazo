@@ -229,8 +229,10 @@ function paintSceneFx(ctx: CanvasRenderingContext2D, comp: Composition, t: numbe
   if (!out) return [...drops, ...ok.map((e) => ({ fx: e.fx, reason: 'effect pass failed' as const }))]
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, comp.width, comp.height)
-  ctx.drawImage(out, 0, 0)
-  return drops
+  ctx.drawImage(out.canvas, 0, 0)
+  /* a program that failed to build (missing or uncompilable body) is a drop
+     too — the pixels stayed as the 2D pass left them and the caller reports it */
+  return [...drops, ...out.failed.map((fx) => ({ fx, reason: 'effect pass failed' as const }))]
 }
 
 /* the shutter cost bound: each sample re-rasterises the moving frames, so
