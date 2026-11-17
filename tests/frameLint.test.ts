@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { lintDocKey } from '../shared/lintDocument.ts'
 import { Client, startServer, type Server } from './harness.ts'
 
 /* The lint write path end to end: PUT /api/frames/:id/lint validates the
@@ -88,5 +89,30 @@ describe('frame lint', () => {
     const res = await stranger.put(`/api/frames/${frameId}/lint`, { lint: { ...LINT, score: 1 } })
     expect(res.status).toBe(403)
     expect((await frame()).lint.score).toBe(100)
+  })
+
+  it('stores a verdict that names the document the frame shows', async () => {
+    const f = await frame()
+    const doc = lintDocKey(f)
+    const res = await client.put(`/api/frames/${frameId}/lint`, { lint: { ...LINT, score: 64, doc } })
+    expect(res.status).toBe(200)
+    expect((await frame()).lint).toMatchObject({ score: 64, doc })
+  })
+
+  it('refuses a late verdict for a document the frame moved on from', async () => {
+    const before = await frame()
+    const stale = lintDocKey(before)
+    const patched = await client.patch(`/api/frames/${frameId}`, { html: '<p>moved on</p>' })
+    expect(patched.status).toBe(200)
+    const res = await client.put(`/api/frames/${frameId}/lint`, { lint: { ...LINT, score: 12, doc: stale } })
+    expect(res.status).toBe(409)
+    expect((await frame()).lint.score).toBe(64)
+  })
+
+  it('refuses a verdict scored at another size', async () => {
+    const f = await frame()
+    const doc = lintDocKey({ ...f, width: f.width + 100 })
+    const res = await client.put(`/api/frames/${frameId}/lint`, { lint: { ...LINT, score: 12, doc } })
+    expect(res.status).toBe(409)
   })
 })

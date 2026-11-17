@@ -1770,7 +1770,7 @@ export const FrameView = memo(function FrameView({
                Below 180px on screen (a container query on that width) the
                editor chips drop their words and move to the front, so on a
                zoomed-out canvas it is the name and badges that get cut off */
-              className="@container/title pointer-events-auto absolute bottom-full left-0 flex origin-bottom-left cursor-default select-none items-center gap-2 overflow-hidden whitespace-nowrap text-[12px] font-semibold text-ink-soft"
+              className="@container/title pointer-events-auto absolute bottom-full left-0 flex origin-bottom-left cursor-default select-none items-center gap-2 overflow-hidden whitespace-nowrap text-[12px] font-semibold text-ink-soft group-data-[selected]:text-signal"
               style={{
                 width: 'calc(100% * var(--zoom, 1))',
                 transform: `scale(calc(1 / var(--zoom, 1))) translateY(-${LABEL_GAP}px)`,

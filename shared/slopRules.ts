@@ -37,6 +37,9 @@ export interface FrameLint {
   engine: 'dom' | 'static'
   /** the element walk hit its cap — a very deep document may not be fully checked */
   truncated?: boolean
+  /** the document scored (`lintDocKey`: HTML hash and frame size); a verdict
+   *  without one, or for another document, is not current */
+  doc?: string
 }
 
 export const SLOP_RULES_VERSION = 1

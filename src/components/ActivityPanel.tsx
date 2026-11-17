@@ -50,6 +50,7 @@ import { PromptBar } from './PromptBar'
 import { taskFrameId } from '../lib/taskFrame'
 import { useOpenThreadCount } from '../lib/comments'
 import { useT } from '@/lib/i18n'
+import { useFitLevel } from '@/hooks/use-fit-level'
 
 const emptyNote = 'px-4 py-6 text-center text-[12px] text-ink-faint'
 
@@ -101,6 +102,14 @@ export function ActivityPanel({
   const openThreads = useOpenThreadCount()
   const working = useStore((s) => s.tasks.filter((t) => t.agentName && !t.endedAt && !t.failedAt).length)
   const t = useT()
+  /* the head folds to fit the panel's width: first the tabs not in view drop
+     their labels, then Connect AI, then the open tab itself */
+  const extraTab = tab === 'comments' || (canEdit && (tab === 'memory' || tab === 'usage')) ? tab : ''
+  const { measure: measureHead, level: headLevel } = useFitLevel<HTMLElement>(
+    3,
+    [canEdit, extraTab, tab, working > 0, Boolean(onConnect), t('panels.activityChat')].join('|'),
+  )
+  const fold = (value: string) => (value === tab ? headLevel >= 3 : headLevel >= 1)
 
   /* refresh relative timestamps and running durations */
   useEffect(() => {
@@ -123,13 +132,23 @@ export function ActivityPanel({
         {/* AgentPanelHead: Chat, Agents and Activity as icon + label tabs on a
             gliding surface, the rest (Comments, Memory, Usage) behind More,
             and Connect AI moved here from the top bar */}
-        <PanelHeader className="gap-1 pr-1.5">
+        <PanelHeader ref={measureHead} className="gap-1 pr-1.5">
           <PanelTabs aria-label={t('panels.activityPanelAria')} className="min-w-0 flex-none">
-            <PanelIconTab value="chat" icon={<MessageSquareIcon />} title={t('panels.activityChatTitle')}>
+            <PanelIconTab
+              value="chat"
+              compact={fold('chat')}
+              icon={<MessageSquareIcon />}
+              title={t('panels.activityChatTitle')}
+            >
               {t('panels.activityChat')}
             </PanelIconTab>
             {canEdit && (
-              <PanelIconTab value="tasks" icon={<SparkIcon />} title={t('panels.activityAgents')}>
+              <PanelIconTab
+                value="tasks"
+                compact={fold('tasks')}
+                icon={<SparkIcon />}
+                title={t('panels.activityAgents')}
+              >
                 {t('panels.activityAgents')}
                 {working > 0 && (
                   <em className="ml-1.5 text-caption font-normal not-italic text-agent-ink">{working}</em>
@@ -137,30 +156,45 @@ export function ActivityPanel({
               </PanelIconTab>
             )}
             {canEdit && (
-              <PanelIconTab value="activity" icon={<PulseIcon />} title={t('panels.activityActivity')}>
+              <PanelIconTab
+                value="activity"
+                compact={fold('activity')}
+                icon={<PulseIcon />}
+                title={t('panels.activityActivity')}
+              >
                 {t('panels.activityActivity')}
               </PanelIconTab>
             )}
             {/* a tab picked from More joins the strip while it is open */}
             {tab === 'comments' && (
-              <PanelIconTab value="comments" icon={<CommentIcon />} title={t('panels.activityCommentsTitle')}>
+              <PanelIconTab
+                value="comments"
+                compact={fold('comments')}
+                icon={<CommentIcon />}
+                title={t('panels.activityCommentsTitle')}
+              >
                 {t('panels.activityComments')}
               </PanelIconTab>
             )}
             {canEdit && tab === 'memory' && (
-              <PanelIconTab value="memory" icon={<BookOpenIcon />} title={t('panels.activityMemoryTitle')}>
+              <PanelIconTab
+                value="memory"
+                compact={fold('memory')}
+                icon={<BookOpenIcon />}
+                title={t('panels.activityMemoryTitle')}
+              >
                 {t('panels.activityMemory')}
               </PanelIconTab>
             )}
             {canEdit && tab === 'usage' && (
-              <PanelIconTab value="usage" icon={<CreditCardIcon />} title={t('usage.tabTitle')}>
+              <PanelIconTab value="usage" compact={fold('usage')} icon={<CreditCardIcon />} title={t('usage.tabTitle')}>
                 {t('usage.tab')}
               </PanelIconTab>
             )}
           </PanelTabs>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <IconButton size="sm" aria-label={t('panels.activityMore')} className="relative size-7 flex-none">
+              <IconButton size="sm" aria-label={t('panels.activityMore')} className="relative size-6 flex-none">
                 <MoreHorizontalIcon className="size-4" />
                 {openThreads > 0 && (
                   <span className="absolute -top-0.5 -right-0.5 grid h-[14px] min-w-[14px] place-items-center rounded-full bg-signal px-[3px] font-mono text-[8px] font-medium text-white">
@@ -194,9 +228,15 @@ export function ActivityPanel({
             </DropdownMenuContent>
           </DropdownMenu>
           {onConnect && (
-            <Button size="sm" className="ml-auto h-7 min-w-0 shrink gap-1 px-2" onClick={onConnect}>
+            <Button
+              size="sm"
+              className="ml-auto h-7 shrink-0 gap-1 px-1.75"
+              onClick={onConnect}
+              aria-label={headLevel >= 2 ? t('canvas.connectAi') : undefined}
+              title={headLevel >= 2 ? t('canvas.connectAi') : undefined}
+            >
               <PlugIcon className="size-3.5 text-ink-2" />
-              {t('canvas.connectAi')}
+              {headLevel < 2 && t('canvas.connectAi')}
             </Button>
           )}
         </PanelHeader>
@@ -422,7 +462,8 @@ function ActivityList() {
       {activity.length === 0 && <div className={emptyNote}>{t('panels.activityEmpty')}</div>}
       {activity.map((a) => (
         <div key={a.id} className="flex animate-[chip-in_0.25s_ease] gap-2.5 px-3.5 py-2 text-[12px] leading-[1.45]">
-          <Dot className="mt-[5px]" style={{ background: a.actorColor }} />
+          {/* anything an agent does wears the agent orange, people their own colour */}
+          <Dot className="mt-[5px]" style={{ background: a.actorKind === 'agent' ? 'var(--agent)' : a.actorColor }} />
           <div className="min-w-0">
             <div>
               <span className="font-medium">

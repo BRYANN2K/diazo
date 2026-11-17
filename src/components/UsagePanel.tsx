@@ -9,6 +9,7 @@ import { RunReplayModal } from './RunReplayModal'
 import { PanelBody } from './ui/panel'
 import { Button } from './ui/button'
 import { SyncIcon } from './ui/icons'
+import { modelNameForId } from '../../shared/agentRunner'
 
 function elapsed(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000))
@@ -75,20 +76,32 @@ export function UsagePanel({ canvasId }: { canvasId: string }) {
         {notes.length > 0 && <ListMeta>{notes.join(' · ')}</ListMeta>}
       </ListItem>
       <ListSection>{t('usage.byModel')}</ListSection>
-      {report.byModel.map((m) => (
-        <ListItem key={m.model}>
-          <ListTitle className="truncate">{m.model}</ListTitle>
-          <ListSummary>
-            {formatCost(m.unpriced && m.costUsd === 0 ? undefined : m.costUsd)}
-            {' · '}
-            {t('usage.tokensInOut', { input: formatTokens(m.inputTokens), output: formatTokens(m.outputTokens) })}
-          </ListSummary>
-          <ListMeta>
-            {t('usage.runCount', { count: m.runs })}
-            {m.cacheReadTokens > 0 && ` · ${t('usage.cached', { count: formatTokens(m.cacheReadTokens) })}`}
-          </ListMeta>
-        </ListItem>
-      ))}
+      {/* per model: its name, its share of the spend as an agent-orange bar
+          and its cost, tokens and runs on the line under it (Usage frame) */}
+      {report.byModel.map((m) => {
+        const share = total.costUsd > 0 ? Math.min(1, m.costUsd / total.costUsd) : 0
+        return (
+          <ListItem key={m.model}>
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(48px,40%)_auto] items-center gap-3">
+              <ListTitle className="truncate" title={m.model}>
+                {modelNameForId(m.model)}
+              </ListTitle>
+              <span aria-hidden className="h-1.5 overflow-hidden rounded-full bg-well">
+                <span className="block h-full rounded-full bg-agent" style={{ width: `${share * 100}%` }} />
+              </span>
+              <span className="font-mono text-label tabular-nums text-ink">
+                {formatCost(m.unpriced && m.costUsd === 0 ? undefined : m.costUsd)}
+              </span>
+            </div>
+            <ListMeta>
+              {t('usage.tokensInOut', { input: formatTokens(m.inputTokens), output: formatTokens(m.outputTokens) })}
+              {' · '}
+              {t('usage.runCount', { count: m.runs })}
+              {m.cacheReadTokens > 0 && ` · ${t('usage.cached', { count: formatTokens(m.cacheReadTokens) })}`}
+            </ListMeta>
+          </ListItem>
+        )
+      })}
       <ListSection>{t('usage.runs')}</ListSection>
       {report.runs.map((run) => (
         <RunRow key={run.id} run={run} onOpen={() => setOpenRun(run.id)} />

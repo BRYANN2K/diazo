@@ -92,6 +92,7 @@ import {
   SearchIcon,
 } from './ui/icons'
 import { t as translate, useT } from '@/lib/i18n'
+import { useFitLevel } from '@/hooks/use-fit-level'
 
 /* the tree indents 16px per level; frame rows sit at depth 0 */
 const INDENT = 16
@@ -261,6 +262,13 @@ export function LayersPanel({
   const pickedRows = useMemo(() => new Set(pickedKeys.split('\n')), [pickedKeys])
   const setLayersOpen = useStore((s) => s.setLayersOpen)
   const t = useT()
+  /* the tabs fold to fit: first the ones not in view drop their labels, then
+     the open one (LayersIsland) */
+  const { measure: measureStrip, level: stripLevel } = useFitLevel<HTMLDivElement>(
+    2,
+    [tab, hasLibraries, t('panels.layersTitle')].join('|'),
+  )
+  const fold = (value: string) => (value === tab ? stripLevel >= 2 : stripLevel >= 1)
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   /* the row being dragged and where it would land; the pointer handlers are
@@ -548,20 +556,36 @@ export function LayersPanel({
       <PanelTabsRoot value={tab} onValueChange={(next) => setTab(next as typeof tab)} className="flex-none">
         <PanelHeader className="h-auto border-b-0 px-1.5 pt-1.5 pb-0">
           <PanelTabs
+            ref={measureStrip}
             aria-label={t('panels.layersTabsAria')}
             className="flex-1 [&>[role=tab]]:flex-1 [&>[role=tab]]:justify-center"
           >
-            <PanelIconTab value="layers" icon={<LayersIcon />} title={t('panels.layersTitle')}>
+            <PanelIconTab value="layers" compact={fold('layers')} icon={<LayersIcon />} title={t('panels.layersTitle')}>
               {t('panels.layersTitle')}
             </PanelIconTab>
-            <PanelIconTab value="components" icon={<ComponentIcon />} title={t('components.title')}>
+            <PanelIconTab
+              value="components"
+              compact={fold('components')}
+              icon={<ComponentIcon />}
+              title={t('panels.layersTabAssets')}
+            >
               {t('panels.layersTabAssets')}
             </PanelIconTab>
-            <PanelIconTab value="tokens" icon={<BracesIcon />} title={t('panels.layersTabTokens')}>
+            <PanelIconTab
+              value="tokens"
+              compact={fold('tokens')}
+              icon={<BracesIcon />}
+              title={t('panels.layersTabTokens')}
+            >
               {t('panels.layersTabTokens')}
             </PanelIconTab>
             {hasLibraries && (
-              <PanelIconTab value="library" icon={<LibraryIcon />} title={t('library.panelTab')}>
+              <PanelIconTab
+                value="library"
+                compact={fold('library')}
+                icon={<LibraryIcon />}
+                title={t('library.panelTab')}
+              >
                 {t('library.panelTab')}
               </PanelIconTab>
             )}

@@ -12,6 +12,10 @@ export const models: Catalog['models'] = {
   modelFor: 'Modelo de {name}',
   apiKeyAria: 'Chave de API',
   chatgptName: 'ChatGPT',
+  connectedCaption: {
+    one: '{count} · roda na sua própria conta',
+    other: '{count} · cada uma roda na sua própria conta',
+  },
   connectedTitle: 'Conectadas',
   addConnection: 'Adicionar um agente',
   noConnections: 'Nada conectado ainda. Conecte uma abaixo e o Diazo Agent roda nela.',

@@ -8,6 +8,7 @@
 import type { Actor, Frame } from '../shared/types.ts'
 import { lintSnapshot, lintStaticHtml, type FrameLint, type SlopSnapshot } from '../shared/slopRules.ts'
 import { SLOP_COLLECTOR_SOURCE } from '../shared/slopCollect.ts'
+import { lintDocKey } from '../shared/lintDocument.ts'
 import * as actions from './actions.ts'
 import { loadFramePage, rendererAvailable } from './screenshot.ts'
 import { store } from './store.ts'
@@ -28,23 +29,28 @@ async function lintFrameDom(frame: Frame): Promise<FrameLint> {
 }
 
 /** Score one frame. Browser lint when a renderer exists, static rules as the
- *  fallback — never throws for a bad document. */
+ *  fallback — never throws for a bad document. The verdict names the
+ *  document it scored (`doc`). */
 export async function lintFrame(frame: Frame): Promise<FrameLint> {
+  const doc = lintDocKey(frame)
   if (rendererAvailable()) {
     try {
-      return await lintFrameDom(frame)
+      return { ...(await lintFrameDom(frame)), doc }
     } catch (error) {
       console.warn(`[lint] rendered lint failed for frame ${frame.id}, falling back to static rules`, error)
     }
   }
-  return lintStaticHtml(frame.html)
+  return { ...lintStaticHtml(frame.html), doc }
 }
 
-/** Lint a frame, persist the result on it and broadcast `frame:lint`. */
+/** Lint a frame, persist the result on it and broadcast `frame:lint`. A
+ *  frame written while it rendered keeps its verdict: this one scored the
+ *  previous document, and the next pass scores the new one. */
 export async function lintAndStore(frameId: string, actor: Actor): Promise<FrameLint | undefined> {
   const frame = store.getFrame(frameId)
   if (!frame) return undefined
   const lint = await lintFrame(frame)
-  actions.setFrameLint(frameId, lint, actor)
+  const now = store.getFrame(frameId)
+  if (now && lintDocKey(now) === lint.doc) actions.setFrameLint(frameId, lint, actor)
   return lint
 }

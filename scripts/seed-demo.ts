@@ -4,14 +4,18 @@
  *
  *   npx tsx scripts/seed-demo.ts        # boots a fresh demo, seeds it, keeps it running
  *
- * It starts, all on this machine: a scripted stand-in for the model API
+ * It starts, all on this machine: a scripted stand-in for the model APIs
  * (scripts/demo-model.ts), the server on a fresh PGlite in a temp folder
- * (:4400) with a demo Claude key routed to that stand-in, the Vite web app
- * (:4300), and a fake desktop device that serves a small demo repo, so the
- * repo features (token sync, frame → code) have a linked project. Then it
- * seeds through the REST API, the way the app and agents do. Nothing is
- * sent to a model provider and no real account or data is used.
- * Sign in at http://localhost:4300 with DEMO_EMAIL / DEMO_PASSWORD.
+ * (DEMO_API_PORT, default 4410) with demo Claude, OpenAI and OpenRouter keys
+ * routed to that stand-in, the Vite web app (DEMO_WEB_PORT, default 4310),
+ * and a fake desktop device that serves a small demo repo, so the repo
+ * features (token sync, frame → code) have a linked project. Then it seeds
+ * through the REST API, the way the app and agents do. Nothing is sent to a
+ * model provider and no real account or data is used. The ports are not
+ * 4400 / 4300, where a local Diazo or `bun run dev` answers, and the seed
+ * refuses to start when either already answers, so it never writes into an
+ * instance it did not start.
+ * Sign in at http://localhost:<DEMO_WEB_PORT> with DEMO_EMAIL / DEMO_PASSWORD.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -19,6 +23,7 @@ import { mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, st
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { lintDocKey, type LintDocument } from '../shared/lintDocument.ts'
 import { startDemoModel } from './demo-model.ts'
 import {
   DASHBOARD,
@@ -31,13 +36,22 @@ import {
   PRICING,
   PRICING_V2,
   REPO_FILES,
+  SCENE,
   SKILL,
   TOKENS,
 } from './demo-content.ts'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-export const API = 'http://localhost:4400'
-export const WEB = 'http://localhost:4300'
+
+function port(name: string, fallback: number): number {
+  const value = Number(process.env[name] || fallback)
+  if (!Number.isInteger(value) || value < 1 || value > 65_535) throw new Error(`${name} is not a port: ${value}`)
+  return value
+}
+export const API_PORT = port('DEMO_API_PORT', 4410)
+export const WEB_PORT = port('DEMO_WEB_PORT', 4310)
+export const API = `http://localhost:${API_PORT}`
+export const WEB = `http://localhost:${WEB_PORT}`
 export const DEMO_EMAIL = 'maya@fieldnote.example'
 export const DEMO_PASSWORD = 'fieldnote-demo-only'
 
@@ -192,6 +206,9 @@ export async function seedDemo(dataDir: string): Promise<Seeded> {
     name: 'Maya Lindqvist',
   })
   await c.json('POST', '/api/model-account/anthropic-key', { apiKey: 'sk-ant-demo-local-stand-in-only' })
+  /* two more connections, so Settings shows a row per provider */
+  await c.json('POST', '/api/model-account/openai-key', { apiKey: 'sk-demo-openai-local-stand-in-only' })
+  await c.json('POST', '/api/model-account/openrouter-key', { apiKey: 'sk-or-demo-local-stand-in-only' })
   /* the welcome canvas every new account gets: not part of the demo */
   const listed = await c.json<{ id: string }[] | { canvases: { id: string }[] }>('GET', '/api/canvases')
   for (const old of Array.isArray(listed) ? listed : listed.canvases) await c.json('DELETE', `/api/canvases/${old.id}`)
@@ -287,10 +304,39 @@ export async function seedDemo(dataDir: string): Promise<Seeded> {
   await c.json('POST', `/api/canvases/${app.id}/repo`, { linkId, name: 'fieldnote-web', deviceId })
   const stopDevice = startDevice(c, repoDir, linkId, deviceId)
 
-  /* frame checks on the mobile screen (it has small tap targets on purpose) */
-  await c.json('POST', `/api/frames/${mobile.id}/checks`, { force: true }).catch((e: unknown) => {
-    console.warn('[seed] frame checks:', e instanceof Error ? e.message : e)
+  /* frame checks on the mobile screen (it has small tap targets on purpose),
+     and on the landing, so the "A11y" badge has verdicts to show */
+  for (const id of [mobile.id, landing.id]) {
+    await c.json('POST', `/api/frames/${id}/checks`, { force: true }).catch((e: unknown) => {
+      console.warn('[seed] frame checks:', e instanceof Error ? e.message : e)
+    })
+  }
+
+  /* two open threads (one with a reply) and a resolved one: the Comments tab
+     and the canvas pins all have something to draw */
+  const productPage = (app.pages ?? [{ id: `${app.id}:page1`, name: 'Page 1' }])[0]!
+  const heroNote = await c.json<{ id: string }>('POST', `/api/frames/${landing.id}/comments`, {
+    text: 'The hero type still feels a size too loud next to the nav — can we try 56?',
+    x: 430,
+    y: 340,
+    snippet: '',
   })
+  await c.json('POST', `/api/comments/${heroNote.id}/replies`, {
+    text: 'Trying it — the measure stays under 60 characters either way.',
+  })
+  await c.json('POST', `/api/canvases/${app.id}/comments`, {
+    pageId: productPage.id,
+    x: 760,
+    y: 470,
+    text: 'This spread is the shape for the next sprint.',
+  })
+  const resolved = await c.json<{ id: string }>('POST', `/api/frames/${pricing.id}/comments`, {
+    text: 'Yearly price first, monthly behind the toggle.',
+    x: 210,
+    y: 300,
+    snippet: '',
+  })
+  await c.json('POST', `/api/comments/${resolved.id}/resolve`)
 
   /* a scoped card: the agent reworks the pricing page (a run to replay) */
   await c.json('POST', `/api/canvases/${app.id}/cards`, {
@@ -306,11 +352,12 @@ export async function seedDemo(dataDir: string): Promise<Seeded> {
   /* a duel: one onboarding brief, two models, on a page of its own */
   const appPages = app.pages ?? [{ id: `${app.id}:page1`, name: 'Page 1' }]
   const duelPage = { id: `${app.id}:duel`, name: 'Onboarding duel' }
+  const motionPage = { id: `${app.id}:motion`, name: 'Launch film' }
   await c.json('PUT', `/api/canvases/${app.id}/pages`, {
-    pages: [{ ...appPages[0]!, name: 'Product' }, duelPage],
+    pages: [{ ...appPages[0]!, name: 'Product' }, duelPage, motionPage],
     expectedPages: appPages,
   })
-  const duel = await c.json<{ id: string }>('POST', `/api/canvases/${app.id}/duels`, {
+  const duel = await c.json<{ id: string; entries: { frameId: string }[] }>('POST', `/api/canvases/${app.id}/duels`, {
     pageId: duelPage.id,
     brief: 'Onboarding step 1 for new Fieldnote teams: name the workspace and pick the team size.',
     picks: [
@@ -324,11 +371,155 @@ export async function seedDemo(dataDir: string): Promise<Seeded> {
     'the duel runs',
   )
 
+  /* Motion Studio on its own page: one scene frame and a small timeline —
+     camera drift, a title fading up, a caption clip */
+  const scene = await frame(c, app.id, {
+    name: 'Scene — Intro',
+    x: 0,
+    y: 0,
+    width: 1280,
+    height: 720,
+    html: SCENE,
+    pageId: motionPage.id,
+  })
+  await c.json('PUT', `/api/canvases/${app.id}/pages/${motionPage.id}/composition`, {
+    duration: 8,
+    fps: 30,
+    width: 1280,
+    height: 720,
+    tracks: [
+      {
+        id: 'camera',
+        kind: 'camera',
+        keyframes: [
+          { id: 'cam-a', property: 'zoom', t: 0, value: 1, easing: 'linear' },
+          { id: 'cam-b', property: 'zoom', t: 8, value: 1.12, easing: 'ease-in-out' },
+        ],
+      },
+      {
+        id: 'title',
+        kind: 'element',
+        name: 'Title fade up',
+        frameId: scene.id,
+        elementId: 'title',
+        keyframes: [
+          { id: 't-op-0', property: 'opacity', t: 0, value: 0, easing: 'linear' },
+          { id: 't-op-1', property: 'opacity', t: 1, value: 1, easing: 'linear' },
+          { id: 't-y-0', property: 'y', t: 0, value: 24, easing: 'ease-out' },
+          { id: 't-y-1', property: 'y', t: 1, value: 0, easing: 'linear' },
+        ],
+      },
+      {
+        id: 'sub',
+        kind: 'element',
+        name: 'Sub fade in',
+        frameId: scene.id,
+        elementId: 'sub',
+        keyframes: [
+          { id: 's-op-0', property: 'opacity', t: 0.8, value: 0, easing: 'linear' },
+          { id: 's-op-1', property: 'opacity', t: 1.8, value: 1, easing: 'linear' },
+        ],
+      },
+      {
+        id: 'captions',
+        kind: 'caption',
+        name: 'Captions',
+        clips: [
+          {
+            id: 'cap-1',
+            start: 2.2,
+            duration: 2.8,
+            source: { type: 'caption', text: 'Every interview, searchable.' },
+          },
+          { id: 'cap-2', start: 5.4, duration: 2.2, source: { type: 'caption', text: 'Fieldnote' } },
+        ],
+      },
+    ],
+  })
+
+  /* a second duel, left undecided beside the settled one */
+  await c.json('POST', `/api/canvases/${app.id}/duels`, {
+    pageId: duelPage.id,
+    brief: 'Empty state for a workspace with no interviews yet.',
+    picks: [
+      { provider: 'anthropic-key', model: 'claude-sonnet-5' },
+      { provider: 'anthropic-key', model: 'claude-haiku-4-5-20251001' },
+    ],
+  })
+  await until(
+    () => c.json<{ runs?: { outcome: string }[] }>('GET', `/api/canvases/${app.id}/usage`),
+    (u) => (u.runs ?? []).filter((r) => r.outcome === 'done').length >= 5,
+    'the second duel runs',
+  )
+
+  /* settling the first duel is a design decision — the distiller turns it
+     into the pending rule card the Memory panel shows */
+  await c
+    .json('POST', `/api/canvases/${app.id}/duels/${duel.id}/pick`, { frameId: duel.entries[0]!.frameId })
+    .catch((e: unknown) => console.warn('[seed] duel pick:', e instanceof Error ? e.message : e))
+
   /* a chat ask answered with a plan */
   await c.json('POST', `/api/canvases/${app.id}/chat`, {
     text: 'Plan a three-step onboarding for new teams, reusing our tokens and the UI kit.',
   })
   await new Promise((r) => setTimeout(r, 6000))
+
+  /* the anti-slop lint a client computes inside the iframe, written straight
+     for the demo: the landing trips errors, the dashboard warnings only, the
+     pricing is clean — one badge of each tone. Written last, after every run
+     that rewrites a frame, as passes with computed styles of the document
+     each frame shows now (`doc`): a client keeps such a verdict instead
+     of scoring it again */
+  const checkedAt = Date.now()
+  const docOf = async (frameId: string) => lintDocKey(await c.json<LintDocument>('GET', `/api/frames/${frameId}`))
+  await c.json('PUT', `/api/frames/${landing.id}/lint`, {
+    lint: {
+      score: 52,
+      errors: 3,
+      warnings: 4,
+      issues: [
+        { ruleId: 'AS-TYP-01', severity: 'error', message: 'Heading skips a level', detail: 'h1 after h3' },
+        { ruleId: 'AS-COL-02', severity: 'error', message: 'Text contrast below AA', detail: '2.7:1' },
+        { ruleId: 'AS-GRD-01', severity: 'error', message: 'Gradient behind a button', detail: 'linear-gradient' },
+        { ruleId: 'AS-SPC-03', severity: 'warning', message: 'Off-grid spacing', detail: '13px' },
+        { ruleId: 'AS-ICO-02', severity: 'warning', message: 'Emoji in chrome', detail: 'fire icon' },
+        { ruleId: 'AS-TYP-02', severity: 'warning', message: 'A third typeface appears once', detail: 'Poppins' },
+        { ruleId: 'AS-SPC-01', severity: 'warning', message: 'Dense paragraph', detail: '92 words' },
+      ],
+      checkedAt,
+      version: 1,
+      engine: 'dom',
+      doc: await docOf(landing.id),
+    },
+  })
+  await c.json('PUT', `/api/frames/${dashboard.id}/lint`, {
+    lint: {
+      score: 84,
+      errors: 0,
+      warnings: 3,
+      issues: [
+        { ruleId: 'AS-SPC-03', severity: 'warning', message: 'Off-grid spacing', detail: '13px' },
+        { ruleId: 'AS-TYP-03', severity: 'warning', message: 'Label set in all caps', detail: 'RECENT' },
+        { ruleId: 'AS-COL-04', severity: 'warning', message: 'Two accent hues compete', detail: 'amber + green' },
+      ],
+      checkedAt,
+      version: 1,
+      engine: 'dom',
+      doc: await docOf(dashboard.id),
+    },
+  })
+  await c.json('PUT', `/api/frames/${pricing.id}/lint`, {
+    lint: {
+      score: 100,
+      errors: 0,
+      warnings: 0,
+      issues: [],
+      checkedAt,
+      version: 1,
+      engine: 'dom',
+      doc: await docOf(pricing.id),
+    },
+  })
 
   return {
     client: c,
@@ -368,9 +559,27 @@ export function chromePath(): string | undefined {
   }
 }
 
-async function waitFor(url: string, ms = 90_000): Promise<void> {
+/* a listener may bind IPv4 or IPv6 alone (Vite on macOS takes ::1 only) */
+const LOOPBACKS = ['127.0.0.1', '[::1]', 'localhost']
+
+/** Whether anything answers HTTP on a local port, on any loopback address. */
+async function answers(port: number): Promise<boolean> {
+  const probes = LOOPBACKS.map(async (host) => {
+    try {
+      await fetch(`http://${host}:${port}/`, { signal: AbortSignal.timeout(1500) })
+      return true
+    } catch {
+      return false
+    }
+  })
+  return (await Promise.all(probes)).some(Boolean)
+}
+
+async function waitFor(url: string, ms = 90_000, exited?: () => string | null): Promise<void> {
   const deadline = Date.now() + ms
   for (;;) {
+    const gone = exited?.()
+    if (gone) throw new Error(`${gone} exited before ${url} answered`)
     try {
       if ((await fetch(url)).ok) return
     } catch {
@@ -386,18 +595,37 @@ export interface Demo extends Seeded {
 }
 
 export async function startDemo(): Promise<Demo> {
+  /* never seed into an instance this script did not start */
+  for (const taken of [API_PORT, WEB_PORT]) {
+    if (await answers(taken))
+      throw new Error(`port ${taken} already answers; stop what runs there or set DEMO_API_PORT / DEMO_WEB_PORT`)
+  }
   const dataDir = mkdtempSync(path.join(tmpdir(), 'redoop-demo-'))
   const model = await startDemoModel(writeFrame)
   const chrome = chromePath()
+  /* every provider URL the server could call points at the stand-in, and
+     every other provider key is blank: the fake keys never leave this machine */
   const env = {
     ...process.env,
-    PORT: '4400',
-    VITE_PORT: '4300',
+    PORT: String(API_PORT),
+    VITE_PORT: String(WEB_PORT),
     BETTER_AUTH_URL: WEB,
     DATABASE_URL: '',
-    ANTHROPIC_API_KEY: '',
-    OPENAI_API_KEY: '',
+    /* the distiller reads env.ANTHROPIC_API_KEY, not the model account: a
+       demo key routed to the stand-in turns Memory proposals on */
+    ANTHROPIC_API_KEY: 'sk-ant-demo-local-stand-in-only',
     ANTHROPIC_BASE_URL: model.url,
+    OPENAI_API_KEY: '',
+    OPENAI_MODELS_URL: `${model.url}/openai/v1/models`,
+    OPENAI_RESPONSES_URL: `${model.url}/openai/v1/responses`,
+    OPENROUTER_CHAT_URL: `${model.url}/openrouter/v1/chat/completions`,
+    AZURE_OPENAI_API_KEY: '',
+    GEMINI_API_KEY: '',
+    ARK_API_KEY: '',
+    PEXELS_API_KEY: '',
+    REMOTE_BROWSER_URL: '',
+    REMOTE_BROWSER_TOKEN: '',
+    DOOP_UPDATE_CHECK: 'false',
     POSTHOG_KEY: '',
     VITE_POSTHOG_KEY: '',
     SMTP_HOST: '',
@@ -412,7 +640,7 @@ export async function startDemo(): Promise<Demo> {
       env,
       stdio: ['ignore', log, log],
     }),
-    spawn(path.join(ROOT, 'node_modules/.bin/vite'), ['--port', '4300', '--strictPort'], {
+    spawn(path.join(ROOT, 'node_modules/.bin/vite'), ['--port', String(WEB_PORT), '--strictPort'], {
       cwd: ROOT,
       env,
       stdio: ['ignore', 'ignore', 'inherit'],
@@ -422,9 +650,14 @@ export async function startDemo(): Promise<Demo> {
     for (const child of children) child.kill()
     model.server.close()
   }
+  const names = ['the demo server', 'the web app']
+  const exited = () => {
+    const at = children.findIndex((child) => child.exitCode !== null || child.signalCode !== null)
+    return at < 0 ? null : (names[at] ?? 'a child process')
+  }
   try {
-    await waitFor(`${API}/healthz`)
-    await waitFor(WEB)
+    await waitFor(`${API}/healthz`, 90_000, exited)
+    await waitFor(WEB, 90_000, exited)
     const seeded = await seedDemo(dataDir)
     return {
       ...seeded,

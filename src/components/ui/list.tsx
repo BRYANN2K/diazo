@@ -10,7 +10,7 @@ function ListSection({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="list-section"
       className={cn(
-        'flex items-center justify-between gap-2 px-4 pb-1.5 pt-3 text-caption/3.5 font-extrabold uppercase tracking-[0.08em] text-ink-faint',
+        'flex min-h-[26px] items-center justify-between gap-2 px-4 pb-1 pt-3 text-caption font-medium text-ink-3',
         className,
       )}
       {...props}
@@ -23,7 +23,7 @@ function ListHint({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-slot="list-hint"
-      className={cn('border-b border-line-soft px-4 pb-3 pt-0.5 text-xs leading-[1.5] text-ink-faint', className)}
+      className={cn('border-b border-line-soft px-4 pb-3 pt-0.5 text-caption text-ink-3', className)}
       {...props}
     />
   )
