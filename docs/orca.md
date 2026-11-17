@@ -65,7 +65,9 @@ The split of trust:
   finished task.
 - `poll` carries a trimmed `worktree ps` row: `{ found, status?, agentState?,
 outcome?, lastAssistantMessage?, linkedPR?, orcaSessionId?, branch?,
-workspaceStatus?, devUrl? }`. `found:false` maps to `cancelled`; a `linkedPR`
+workspaceStatus?, devUrl? }`. `found:false` maps to `cancelled` — and is
+  only ever sent on a full page: a `truncated` `ps` answer reports nothing
+  for a missing identity rather than risk a false cancel. A `linkedPR`
   maps to `pr_open`; `outcome` `failure`/`interruption` to `failed`,
   `cancellation` to `cancelled`, `success` to `done` — the main agent's
   `mainAgent.outcome` is the only pull-side value that may end a task (its
@@ -139,7 +141,7 @@ control characters, and `--environment` values must come from
 | `orca_status`       | `orca status`, `orca host list`, `orca account list`                         | none         |
 | `orca_resolve_repo` | `orca repo list` matched to a repo-link grant (path, else git remote key)    | none         |
 | `orca_launch_task`  | `orca worktree create --name=… --repo=id:… --agent=… --prompt=… --comment=…` | native       |
-| `orca_poll`         | `orca worktree ps --limit 100`, filtered to identities this shell launched   | none         |
+| `orca_poll`         | `orca worktree ps --limit=100`, filtered to identities this shell launched   | none         |
 | `orca_ports`        | `orca ports --worktree identity:<key>`, trimmed to `{ port, url, process }`  | none         |
 | `orca_activate`     | `orca worktree activate --worktree identity:<key>`                           | none         |
 | `orca_untrack`      | drops the task's identity once the server saw a terminal state               | none         |

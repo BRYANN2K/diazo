@@ -949,6 +949,29 @@ fn poll_row(identity: &str, row: Option<&Value>) -> Value {
     })
 }
 
+/// One poll's trimmed report rows for the watched identities. `worktree
+/// ps` pages at `--limit`: on a `truncated` answer an absent row only
+/// means "past the limit", never "gone" — emitting `found: false` there
+/// would end a live task as cancelled, so nothing is reported for it.
+fn poll_rows(
+    watched: &BTreeMap<String, TrackedTask>,
+    rows: &[Value],
+    truncated: bool,
+) -> Vec<Value> {
+    watched
+        .keys()
+        .filter_map(|identity| {
+            let row = rows.iter().find(|r| {
+                r.pointer("/identity/key").and_then(Value::as_str) == Some(identity.as_str())
+            });
+            if truncated && row.is_none() {
+                return None;
+            }
+            Some(poll_row(identity, row))
+        })
+        .collect()
+}
+
 /// `orca_poll` — `worktree ps --json` trimmed to the identities this shell
 /// launched on the named environment (absent = this Mac) for the server
 /// the shell currently opens. Rows for watched-but-gone identities come
@@ -979,15 +1002,11 @@ pub async fn orca_poll(app: AppHandle, environment: Option<String>) -> Result<Va
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
-        let trimmed: Vec<Value> = watched
-            .keys()
-            .map(|identity| {
-                let row = rows.iter().find(|r| {
-                    r.pointer("/identity/key").and_then(Value::as_str) == Some(identity.as_str())
-                });
-                poll_row(identity, row)
-            })
-            .collect();
+        let truncated = out
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let trimmed = poll_rows(&watched, &rows, truncated);
         /* stamp `ended` under the lock — entries whose row ended keep
            reporting until prune_ended retires them */
         edit_tasks(&app, |tasks| ((), mark_ended(tasks, &trimmed, millis())))?;
@@ -1418,6 +1437,27 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
         let text = reply.to_string();
         assert!(!text.contains("worktreeId"));
         assert!(!text.contains("/Users/") && !text.contains("secret"));
+    }
+
+    #[test]
+    fn a_truncated_ps_is_not_a_vanished_worktree() {
+        /* `worktree ps` pages at --limit: on a truncated answer an absent
+           row only means "past the limit", never "gone" — reporting
+           found:false would end the task as cancelled for good */
+        let watched = BTreeMap::from([(
+            "wt2:vps:inst-9".to_string(),
+            tracked_task(Some("vps"), "https://a"),
+        )]);
+        let present = json!([{ "identity": {"key": "wt2:vps:inst-9"}, "status": "active" }]);
+        let rows = poll_rows(&watched, present.as_array().unwrap(), true);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["found"], true);
+        /* truncated page without the row: nothing is reported at all */
+        assert!(poll_rows(&watched, &[], true).is_empty());
+        /* the full list without the row is a real disappearance */
+        let gone = poll_rows(&watched, &[], false);
+        assert_eq!(gone.len(), 1);
+        assert_eq!(gone[0]["found"], false);
     }
 
     #[cfg(unix)]
