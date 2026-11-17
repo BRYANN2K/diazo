@@ -1910,7 +1910,7 @@ export function buildMcpServer(
       const c = canvasFor(canvas_id, 'edit')
       if (!c) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
-      const out = setCompositionData(c, page_id, { composition, ops, expected_revision }, actorFrom(agent_name))
+      const out = await setCompositionData(c, page_id, { composition, ops, expected_revision }, actorFrom(agent_name))
       if (!out.ok) return err(out.error)
       return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
     },
@@ -1921,7 +1921,7 @@ export function buildMcpServer(
     {
       title: 'Turn a page of frames into a film',
       description:
-        'Build a Motion Studio composition from the frames already laid out on a page: one shot per frame in reading order (top-to-bottom rows, left-to-right), a camera track that cuts between shots at shot_seconds each. Call it AFTER planning the story from the brief — this is the deterministic half; refine the result with set_composition ops to turn cuts into camera moves (change hold easings), add captions, clips and element animation, then lint_motion before render_composition.',
+        'Build a Motion Studio composition from the frames already laid out on a page: one shot per frame in reading order (top-to-bottom rows, left-to-right), a camera track that cuts between shots at shot_seconds each. The result describes every shot: the notes its frame carries (elements labelled mouvement, transition, son, voix off, notes — or the English words — plus the notes bar they may share, as panelId) and its animatable elements (headlines, text, images, key UI — each a data-doop-id an element track can target). Call it AFTER planning the story from the brief. The notes are the intent and the minimum, not a script: direct the film with set_composition ops — element tracks and camera keyframes (entrances/exits, stagger, pulses, parallax, transitions across the cuts), voice-over on a caption track + caption clips you add, music/SFX you cannot source on a muted caption lane named "Audio TODO", notes blocks hidden via their ids. Every write reports the noted shots still missing element animation — fix them before finishing. lint_motion before render_composition.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
@@ -1939,7 +1939,7 @@ export function buildMcpServer(
       const c = canvasFor(canvas_id, 'edit')
       if (!c) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
-      const out = animateStoryboard(
+      const out = await animateStoryboard(
         c,
         page_id,
         { shot_seconds, margin, fps, width, height, frame_ids },

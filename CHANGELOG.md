@@ -51,6 +51,7 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 
 ### Fixed
 
+- Animate storyboard animates the shots, not just the camera: it reads each frame's shot notes (mouvement / transition / son / voix off / notes, FR and EN) and animatable elements — stamping `data-doop-id`s the way comments do — and `set_composition` reports the noted shots still without an element track until the film is done.
 - Uploaded assets survive a container restart on the k3s deploy (persistent volume for `/app/data`).
 - A delivered card run is recorded as done, not stopped.
 - Duel entries are labelled by model name, not by raw id, and no duel card shows when a list answer is not a list.

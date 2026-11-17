@@ -1872,7 +1872,7 @@ function currentStatus(canvasId: string, actor: Actor): string {
   return actions.getTasks(canvasId).find((t) => t.agentName === actor.name && !t.endedAt && !t.queuedBy)?.status ?? ''
 }
 
-const TOOLS: Anthropic.Tool[] = [
+export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'set_status',
     description:
@@ -2506,7 +2506,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'set_composition',
     description:
-      "Write a page's Motion Studio timeline — composition for a whole timeline ({duration, fps, width, height, tracks}) or ops for a surgical patch (set_meta, add_track, remove_track, update_track, move_track, set_camera, add_keyframe, update_keyframe, remove_keyframe, add_clip, update_clip, remove_clip). The room sees the change live.",
+      "Write a page's Motion Studio timeline — composition for a whole timeline ({duration, fps, width, height, tracks}) or ops for a surgical patch (set_meta, add_track, remove_track, update_track, move_track, set_camera, add_keyframe, update_keyframe, remove_keyframe, add_clip, update_clip, remove_clip). The room sees the change live. When the page's frames carry shot notes, the result's storyboard field reports every noted shot still without an element track — animate it before finishing.",
     input_schema: {
       type: 'object',
       properties: {
@@ -2521,7 +2521,7 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: 'animate_storyboard',
     description:
-      'Turn the frames laid out on a page into a Motion Studio composition: one shot per frame in reading order, a camera track cutting between shots at shot_seconds each. Plan the story from the brief first, call this once, then refine with set_composition ops — turn cuts into camera moves, add captions and clips — and lint_motion before render_composition.',
+      'Turn the frames laid out on a page into a Motion Studio composition: one shot per frame in reading order, a camera track cutting between shots at shot_seconds each. Every shot in the result lists the notes its frame carries (elements labelled mouvement, transition, son, voix off, notes — or the English words — plus the notes bar they may share, as panelId) and its animatable elements (headlines, text, images, key UI — each a data-doop-id an element track can target). Plan the story from the brief first, call this once. The notes are the intent and the minimum, not a script: direct the film with set_composition ops — element tracks and camera keyframes (entrances/exits, stagger, pulses, parallax, transitions across the cuts), voice-over on a caption track + caption clips you add, music/SFX you cannot source on a muted caption lane named "Audio TODO", notes blocks hidden via their ids — and lint_motion before render_composition. Each write reports the noted shots still without an element track: fix them before finishing.',
     input_schema: {
       type: 'object',
       properties: {
@@ -3613,7 +3613,7 @@ export async function execTool(
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
         const raw = block.input as Record<string, unknown>
-        const out = setCompositionData(
+        const out = await setCompositionData(
           canvas,
           String(raw.page_id ?? ''),
           { composition: raw.composition, ops: raw.ops, expected_revision: raw.expected_revision },
@@ -3627,7 +3627,7 @@ export async function execTool(
         if (!canvas) return fail('canvas not found')
         const raw = block.input as Record<string, unknown>
         const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
-        const out = animateStoryboard(
+        const out = await animateStoryboard(
           canvas,
           String(raw.page_id ?? ''),
           {
