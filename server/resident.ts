@@ -146,6 +146,8 @@ import type { FrameLint } from '../shared/slopRules.ts'
 const MAX_TURNS = 24
 /* a redesign card delivers an audit doc plus TWO draft frames in one run */
 const MAX_REDESIGN_TURNS = 40
+/* an animate run directs a whole film — storyboard, per-shot compositions, lint */
+const MAX_MOTION_TURNS = 40
 /* a sweep hands a card down its pipeline in place; the cap is a backstop
    against a card that somehow keeps requeueing itself */
 const MAX_SWEEP_RUNS = 24
@@ -481,6 +483,9 @@ function completeHtml(value: unknown): string | undefined {
 
 const REDESIGN_RE =
   /\b(redesign|re-?style|same style|match (?:the )?(?:style|design)|copy (?:the )?(?:style|design)|design of)\b/i
+/* an animate card's prompt names its tool in every locale — a stable marker
+   where the redesign ask is natural language */
+const MOTION_RE = /\banimate_storyboard\b/
 
 function strategyFor(text: string, frames: NonNullable<ReturnType<typeof store.getCanvas>>['frames']): string {
   const isRedesign = REDESIGN_RE.test(text)
@@ -921,7 +926,11 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
               text: 'Note: your model cannot view images. screenshot_frame returns a text confirmation, not pixels, and image search results describe rather than show. Verify layout by re-reading get_frame_html and checking inspect_frame instead.',
             },
           ]
-      const maxTurns = REDESIGN_RE.test(workText) ? MAX_REDESIGN_TURNS : MAX_TURNS
+      const maxTurns = MOTION_RE.test(workText)
+        ? MAX_MOTION_TURNS
+        : REDESIGN_RE.test(workText)
+          ? MAX_REDESIGN_TURNS
+          : MAX_TURNS
       if (model.runHarness) {
         const result = await model.runHarness({
           canvasId,
