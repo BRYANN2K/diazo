@@ -575,6 +575,20 @@
       "when": 1794947557041,
       "tag": "0082_drop_handoff_change_id",
       "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1794949213180,
+      "tag": "0083_tool_calls",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1794949227100,
+      "tag": "0084_script_runs",
+      "breakpoints": true
     }
   ]
 }

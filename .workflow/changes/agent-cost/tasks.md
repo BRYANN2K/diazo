@@ -20,7 +20,7 @@ Bryan approved the `quickjs-emscripten` dependency and the `script_runs` migrati
 - [x] 9. `shared/scriptSdk.d.ts` and `server/scriptSdk.ts` for `canvas`, `frames`, `tokens`, `checks`, each function calling the existing action behind its role gate. (AC-9, AC-10, AC-11)
 - [x] 10. `frames.outline`, `frames.styles`, `frames.edit` (batched, by source offset — `server/scriptDom.ts` splices source so untouched markup stays byte-identical), `frames.replaceValues`, `frames.stream`. (AC-16)
 - [x] 11. `checks.measure` on the existing check page in `server/frameChecks.ts`. (AC-17)
-- [x] 12. Migration 0073 and `server/scriptRuns.ts`: the run record, the activity line, write tagging, `revert_script_run` (`restoreScriptState` in `server/actions.ts`), automatic revert on failure. (AC-12, AC-13)
+- [x] 12. Migration 0084 and `server/scriptRuns.ts`: the run record, the activity line, write tagging, `revert_script_run` (`restoreScriptState` in `server/actions.ts`), automatic revert on failure. (AC-12, AC-13)
 - [x] 13. `server/scriptRunner.ts`: limits, idempotency key, dry run (a cloned draft canvas), result cap, `DOOP_AGENT_SCRIPTS`. (AC-8, AC-14, AC-18, AC-20)
 - [x] 14. Register `query_script`, `run_script`, `get_sdk_docs`, `revert_script_run` on the MCP server and in the Diazo Agent; parity test covers them dynamically (`scriptTools.test.ts` also lists every MCP tool as mirrored or excluded in `shared/scriptToolCoverage.ts`). (AC-6, AC-11)
 - [x] 15. Guide section "Scripts" (`SCRIPT_GUIDE` + `guideTopic` in `server/guide.ts`) and the Diazo Agent's rule for when to look at a render (full-resolution review per delivered frame).

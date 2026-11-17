@@ -432,7 +432,7 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   approvals, web imports, image generation, repo access stay out) and `AGENT_GUIDELINE_WRITES` /
   `AGENT_LIBRARY_WRITES` apply unchanged. Edits go through `server/scriptDom.ts` by source offset so
   untouched markup stays byte-identical; `frames.stream` appends top-level sections through the room
-  so viewers still watch the build. Each run writes one `script_runs` row (migration 0073): source
+  so viewers still watch the build. Each run writes one `script_runs` row (migration 0084): source
   and hash, actor, SDK calls, writes, outcome, plus the before/after slices `restoreScriptState`
   (`server/actions.ts`) restores as one undo — automatic on a failed or limited run — and the
   recorded response a repeated `idempotency_key` replays; `dry_run` executes against a cloned draft

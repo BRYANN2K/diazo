@@ -35,7 +35,7 @@ import { scriptRunDeps } from '../server/scriptRuns.ts'
 
 beforeEach(async () => {
   await holder.client.exec('DROP TABLE IF EXISTS script_runs')
-  await holder.client.exec(await readFile('server/db/migrations/0082_script_runs.sql', 'utf8'))
+  await holder.client.exec(await readFile('server/db/migrations/0084_script_runs.sql', 'utf8'))
 })
 afterAll(async () => {
   await holder.client.close()

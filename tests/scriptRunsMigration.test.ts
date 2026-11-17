@@ -4,7 +4,7 @@ import { expect, it } from 'vitest'
 it('stores script audits and enforces per-canvas idempotency keys', async () => {
   const db = new PGlite()
   try {
-    await db.exec(await readFile('server/db/migrations/0082_script_runs.sql', 'utf8'))
+    await db.exec(await readFile('server/db/migrations/0084_script_runs.sql', 'utf8'))
     await db.exec(
       `INSERT INTO script_runs (id, canvas_id, owner_id, idempotency_key, created_at, record) VALUES
        ('a','canvas','u','key',1,'{"outcome":"ok"}'),

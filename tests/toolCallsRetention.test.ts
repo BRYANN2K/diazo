@@ -16,7 +16,7 @@ import { pruneToolCalls, TOOL_CALL_KEEP_DAYS, TOOL_CALL_KEEP_PER_CANVAS } from '
 
 beforeEach(async () => {
   await holder.client.exec('DROP TABLE IF EXISTS tool_calls')
-  await holder.client.exec(await readFile('server/db/migrations/0081_tool_calls.sql', 'utf8'))
+  await holder.client.exec(await readFile('server/db/migrations/0083_tool_calls.sql', 'utf8'))
 })
 afterAll(async () => {
   await holder.client.close()
