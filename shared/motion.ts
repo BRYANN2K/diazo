@@ -1147,6 +1147,13 @@ export function parseTrack(input: unknown, duration: number): ParseResult<Motion
     }
     if (input.blend !== null) track.blend = input.blend as BlendMode
   }
+  /* same renderer limits the add_track/add_effect ops enforce — a whole-body
+     set_composition reparses through here, so refusing at parse time keeps an
+     undrawn effect stack or blend out of the model */
+  if (input.kind !== 'camera' && input.kind !== 'adjustment' && track.effects?.length) {
+    return bad(`effects only draw on camera and adjustment tracks, not ${input.kind} tracks`)
+  }
+  if (track.blend != null) return bad('track blend is not drawn yet')
   if (input.keyframes !== undefined) {
     if (!Array.isArray(input.keyframes)) return bad('track.keyframes must be an array')
     if (input.keyframes.length > MOTION_LIMITS.MAX_KEYFRAMES_PER_TRACK) {

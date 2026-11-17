@@ -54,6 +54,26 @@ describe('parseCompositionBody', () => {
       }).ok,
     ).toBe(false)
   })
+  it('rejects what the ops refuse: effects off camera/adjustment and track blends', () => {
+    /* a whole-body write reparses every track — it must not sneak in the
+       stacks the add_track/add_effect/set_blend ops refuse op by op */
+    const fx = { id: 'e1', fx: 'vignette', params: {} }
+    for (const kind of ['element', 'clip', 'audio', 'caption'] as const) {
+      const r = parseCompositionBody({ ...body(), tracks: [{ id: 't', kind, effects: [fx] }] })
+      expect(r.ok).toBe(false)
+      expect(!r.ok && r.error).toContain(`not ${kind} tracks`)
+    }
+    const camFx = parseCompositionBody({ ...body(), tracks: [{ id: 'c', kind: 'camera', effects: [fx] }] })
+    expect(camFx.ok).toBe(true)
+    const adjFx = parseCompositionBody({ ...body(), tracks: [{ id: 'c', kind: 'adjustment', effects: [fx] }] })
+    expect(adjFx.ok).toBe(true)
+    const blended = parseCompositionBody({ ...body(), tracks: [{ id: 'c', kind: 'camera', blend: 'multiply' }] })
+    expect(blended.ok).toBe(false)
+    expect(!blended.ok && blended.error).toBe('track blend is not drawn yet')
+    /* null blend stays a legal clear */
+    const cleared = parseCompositionBody({ ...body(), tracks: [{ id: 'c', kind: 'camera', blend: null }] })
+    expect(cleared.ok).toBe(true)
+  })
 })
 
 describe('easing + evaluation', () => {
