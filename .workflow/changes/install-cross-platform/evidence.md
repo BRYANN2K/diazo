@@ -54,3 +54,41 @@ the contract awaits the owner's sign-off.
   "drives the container, the unit and the app through the diazo command".
 - AC-9 (checks): the three test files cover every listed stub and case; all
   green (77/77) plus typecheck, lint, format:check and shellcheck clean.
+
+## Review fixes (2026-11-17)
+
+The eight review fixes are applied in five commits on this branch, each with
+its regression test; 92 tests in the three installer files pass (one skips:
+the ps1 parse check needs `pwsh`), plus `bun run typecheck`, `lint`,
+`format:check`, `doc-lint` and `shellcheck` clean. The test files now allow
+60s per test since each spawns real installer processes; on this Mac a single
+exec costs ~50ms, so a full install run exceeds the 5s default.
+
+- AppImage scoping: detection and cleanup match `Diazo_*_amd64.AppImage`
+  (`install-desktop.sh`, `install.sh app_installed`); a foreign AppImage
+  survives install, update and uninstall ("never deletes another vendor's
+  AppImage…" and the foreign-file status check).
+- Linux uid/data: `run_args` adds `--user $(id -u):$(id -g)` for Docker,
+  `--userns=keep-id` for Podman, `HOME=/app/data` and `:Z` under SELinux
+  (tests assert the flags, Enforcing vs Permissive). **Unverified:** a real
+  Ubuntu/Docker or Fedora/rootless Podman run — none is available on this
+  Mac.
+- `install-desktop.ps1`: `$Input` renamed, `throw` + one catch instead of
+  `exit`, install folder from the Uninstall key's `InstallLocation` with
+  `%LOCALAPPDATA%\Diazo` default, `/D=` only when `DOOP_DESKTOP_DIR` is set,
+  server.rs-style normalize/probe. **Unverified:** a real run — `pwsh` is
+  not installed on this Mac; the suite parses it under pwsh where one exists.
+- Remote update: `DIAZO_UPDATE=1` marks the replay so a server picked in the
+  app survives `diazo update`; explicit `--remote` still replaces it
+  ("keeps a server picked in the app on update; --remote replaces it").
+- server.rs parity: loopback is `IpAddr::is_loopback` semantics (four
+  numeric octets of 127.0.0.0/8, `::1`, `localhost`), the probe follows
+  redirects and writes the origin that answered, re-checked
+  ("saves the origin a redirect lands on…", the loopback and host tests).
+- rpm/zypper: `rpm -U` and `zypper … --allow-unsigned-rpm` with tests on
+  both paths.
+- Remote uninstall: skips runtime detection and `install-local.sh`
+  ("uninstalls the app and the command in remote mode, touching no
+  container"); an unknown `mode=` dies before anything is touched
+  ("refuses a recorded mode it does not know"); `server.json` stays
+  `{"url":…}` (asserted verbatim in the remote test).
