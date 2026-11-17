@@ -21,7 +21,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { REPO_POLL_MS, type RepoLink } from '../shared/localRepo.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
-import { DEV_TASK_LAUNCH_TTL_MS, type DevTaskBrief, type DevTaskState } from '../shared/devTasks.ts'
+import { DEV_TASK_LAUNCH_TTL_MS, devTaskSlug, type DevTaskBrief, type DevTaskState } from '../shared/devTasks.ts'
 
 /**
  * Dev tasks against an in-memory PGlite: the launch job really rides the
@@ -78,6 +78,9 @@ async function launch(frameIds: string[], extra: Partial<Parameters<typeof creat
   const job = await claim
   return { task, job }
 }
+
+/** The task id reduced to what devTaskSlug's suffix keeps — [a-z0-9]. */
+const idSlug = (id: string) => id.toLowerCase().replace(/[^a-z0-9]/g, '')
 
 const row = async (id: string) => (await db.select().from(frameDevTasks).where(eq(frameDevTasks.id, id)))[0]
 
@@ -147,8 +150,8 @@ describe('createDevTask', () => {
       args: {
         devTask: {
           taskId: task.id,
-          worktreeName: `doop-new-screen-${task.id.toLowerCase()}`,
-          branch: `doop/new-screen-${task.id.toLowerCase()}`,
+          worktreeName: `doop-new-screen-${idSlug(task.id)}`,
+          branch: `doop/new-screen-${idSlug(task.id)}`,
           agent: 'claude',
           model: 'opus',
           effort: 'high',
@@ -380,6 +383,68 @@ describe('applyAgentUpdate', () => {
     const out = await applyAgentUpdate(owner.id, { task_id: task.id, state: 'working' as never })
     expect(out.ok).toBe(false)
     expect((await row(task.id))?.state).toBe('cancelled')
+  })
+})
+
+describe('devTaskSlug', () => {
+  /* the desktop shell's valid_branch (desktop/src-tauri/src/orca.rs):
+     [A-Za-z0-9._/-], no '..', no leading '-'/'/', no trailing '/'/'.'/'-' */
+  const branchOk = (branch: string) =>
+    branch.length > 0 &&
+    branch.length <= 200 &&
+    [...branch].every((c) => /[A-Za-z0-9._/-]/.test(c)) &&
+    !branch.includes('..') &&
+    !'-/'.includes(branch[0]!) &&
+    !'/.-'.includes(branch.at(-1)!)
+
+  const titles = [
+    'Checkout screen',
+    '',
+    '   ',
+    '—',
+    'Ünïcödé ✨ frame',
+    'a'.repeat(80),
+    'trailing dash—',
+    '..dots..',
+    'slash/inside',
+    'Version 2.0 (final)',
+  ]
+  const ids = [
+    'abcDEF1234',
+    'abcdef123-', // the draw Fable caught: nanoid's '-' lands last
+    '----------',
+    '__________',
+    '-_-_-_-_-_',
+    'a/b.c d',
+    'XYZ-123_zy',
+    '',
+    'x'.repeat(40),
+    /* nanoid's real alphabet at many deterministic positions */
+    ...Array.from({ length: 64 }, (_, i) =>
+      Array.from(
+        { length: 10 },
+        (__, k) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-'[(i * 17 + k * 29) % 64],
+      ).join(''),
+    ),
+  ]
+
+  it('keeps doop/<slug> inside the shell’s branch rules for every input', () => {
+    for (const title of titles)
+      for (const id of ids) {
+        const branch = `doop/${devTaskSlug(title, id)}`
+        expect(branchOk(branch), `${JSON.stringify(title)} / ${JSON.stringify(id)} -> ${branch}`).toBe(true)
+      }
+  })
+
+  it('strips the id to [a-z0-9] so the suffix can never end in a dash', () => {
+    expect(devTaskSlug('Billing screen', 'abcdef123-')).toBe('billing-screen-abcdef123')
+    expect(devTaskSlug('Billing screen', '_AbC-Def_')).toBe('billing-screen-abcdef')
+    expect(devTaskSlug('', 'x1')).toBe('task-x1')
+    expect(devTaskSlug('—', 'ab12')).toBe('task-ab12')
+    /* an all-punctuation id still yields a valid, non-empty slug */
+    expect(devTaskSlug('Checkout', '----____')).toBe('checkout-x')
+    /* two launches of one frame still differ */
+    expect(devTaskSlug('Checkout', 'id00000001')).not.toBe(devTaskSlug('Checkout', 'id00000002'))
   })
 })
 

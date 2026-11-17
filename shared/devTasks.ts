@@ -112,9 +112,9 @@ export interface DevTaskDrift {
  *  nothing here is a shell string. */
 export interface DevTaskLaunchArgs {
   taskId: string
-  /** Orca worktree name — `doop-<changeId>` */
+  /** Orca worktree name — `doop-<slug>` (devTaskSlug) */
   worktreeName: string
-  /** git branch — `doop/<changeId>` */
+  /** git branch — `doop/<slug>` */
   branch: string
   agent: string
   model?: string
@@ -254,7 +254,9 @@ export interface DevTaskBrief {
 }
 
 /** A slug for the launch's worktree name and branch: the title kebab-cased
- *  plus the task id so two launches of one frame still differ. */
+ *  plus the task id so two launches of one frame still differ. The id drops
+ *  to [a-z0-9] — nanoid's alphabet carries '-' and '_', and a branch ending
+ *  in '-' is one the shell's valid_branch refuses. */
 export function devTaskSlug(title: string, taskId: string): string {
   const slug = title
     .toLowerCase()
@@ -264,7 +266,8 @@ export function devTaskSlug(title: string, taskId: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 48)
     .replace(/-+$/g, '')
-  return `${slug || 'task'}-${taskId.toLowerCase()}`
+  const id = taskId.toLowerCase().replace(/[^a-z0-9]/g, '')
+  return `${slug || 'task'}-${id || 'x'}`
 }
 
 /** What `get_handoff` answers: the stored brief plus enough context to know
