@@ -266,6 +266,23 @@ export interface CustomTarget {
 }
 
 /**
+ * The header names ANTHROPIC_CUSTOM_HEADERS parses to, each nulled. The SDK
+ * merges that variable into every client's headers, where the server's own
+ * values would ride along to a custom endpoint; nulls in defaultHeaders take
+ * them back out. The endpoint's own headers are spread after these, so one
+ * it shares a name with still wins.
+ */
+function envHeaderNulls(): Record<string, null> {
+  const nulls: Record<string, null> = {}
+  for (const line of (env.ANTHROPIC_CUSTOM_HEADERS ?? '').split('\n')) {
+    const colon = line.indexOf(':')
+    const name = colon >= 0 ? line.slice(0, colon).trim() : ''
+    if (name) nulls[name] = null
+  }
+  return nulls
+}
+
+/**
  * One turn on a custom provider's model, over the API type its person
  * picked. Every request goes through customProviderFetch (public addresses
  * only, DNS pinned, no redirects), and the output budget is held to what the
@@ -276,11 +293,23 @@ export function customTurn(target: CustomTarget, model: CustomModel): AgentModel
   const budget = (req: AgentTurnRequest) => Math.min(req.maxTokens, model.maxOutputTokens ?? req.maxTokens)
   if (config.apiType === 'anthropic') {
     const client = new Anthropic({
-      apiKey: apiKey || null,
+      /* the person's key, or a sentinel when they gave none: a null key makes
+         the SDK resolve this machine's own Anthropic credentials (env vars,
+         ~/.config/anthropic profiles) and send them to the endpoint */
+      apiKey: apiKey || 'custom-provider',
+      /* ANTHROPIC_AUTH_TOKEN from the server's environment is not theirs */
+      authToken: null,
       baseURL: config.baseUrl,
       fetch: customProviderFetch,
-      /* no key: say so explicitly, or the SDK refuses to send anything */
-      defaultHeaders: { ...headers, ...(apiKey ? {} : { 'X-Api-Key': null }) },
+      /* env headers and the sentinel nulled out — the keyless null said
+         explicitly, or the SDK refuses to send anything; the person's key is
+         restated so an env X-Api-Key cannot smuggle the server's in, and
+         their own headers win over all of it */
+      defaultHeaders: {
+        ...envHeaderNulls(),
+        ...(apiKey ? { 'X-Api-Key': apiKey } : { 'X-Api-Key': null }),
+        ...headers,
+      },
     })
     return async (req) => {
       try {
