@@ -116,6 +116,9 @@ const undoKey = (kind: ScriptEntityUndo['kind'], id: string) => `${kind}:${id}`
 function undoCopy(kind: ScriptEntityUndo['kind'], entity: unknown): unknown {
   const projected = scriptUndoProjection(kind, entity)
   if (projected === null || typeof projected !== 'object') return projected
+  /* an array copied through Object.entries comes back an object — it would
+     never equal the live value under canonical JSON again */
+  if (Array.isArray(projected)) return structuredClone(projected)
   const copy: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(projected as Record<string, unknown>)) {
     copy[key] = value !== null && typeof value === 'object' ? structuredClone(value) : value

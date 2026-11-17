@@ -134,6 +134,28 @@ it('reports a later edit as unreverted while restoring what it can', async () =>
   expect(rows.get(result.run_id)!.record.outcome).toBe('reverted_partial')
 })
 
+it('reverts a token theme change like any other write', async () => {
+  actions.setTokenThemes(caller.canvasId, ['light', 'dark'], caller.actor)
+  const result = await executeScript({ script: `await diazo.tokens.themes(['light', 'dark', 'sepia'])` }, caller, true)
+  expect(result.ok).toBe(true)
+  expect(store.getCanvas(caller.canvasId)!.tokenThemes).toEqual(['light', 'dark', 'sepia'])
+  const out = await revertScriptRun(result.run_id, caller)
+  expect(out.unreverted).toEqual([])
+  expect(out.restored).toEqual(['tokenThemes'])
+  expect(store.getCanvas(caller.canvasId)!.tokenThemes).toEqual(['light', 'dark'])
+})
+
+it('a failed run leaves no token theme write behind', async () => {
+  const result = await executeScript(
+    { script: `await diazo.tokens.themes(['sepia']); throw new Error('boom')` },
+    caller,
+    true,
+  )
+  expect(result).toMatchObject({ ok: false, error: 'boom' })
+  expect(result.unreverted ?? []).toEqual([])
+  expect(store.getCanvas(caller.canvasId)!.tokenThemes).toBeUndefined()
+})
+
 it('bounds multibyte results, records full bytes and validates a raised cap', async () => {
   const result = await executeScript({ script: `return 'é'.repeat(9000)`, result_cap: 100 }, caller, false)
   expect(result.truncated).toBe(true)
