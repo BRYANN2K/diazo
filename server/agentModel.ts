@@ -19,6 +19,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { withFreshToken, accountModelFor, accountVisionFor, accountWithPick, customModelFor } from './modelAccounts.ts'
 import type { AccountKind, BuiltinAccountKind, ModelAccount } from './modelAccounts.ts'
 import { customProviderFetch } from './customProviderFetch.ts'
+import { personAnthropicClient } from './personAnthropicClient.ts'
 import { isCustomProviderKind, type CustomModel, type CustomProviderConfig } from '../shared/customProvider.ts'
 import { ModelAuthError, ModelUnavailableError, effortFor, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
 import type { StopReason, TurnBlock } from './openaiAgent.ts'
@@ -394,9 +395,7 @@ function byoModel(account: ModelAccount): AgentModel {
   if (isCustomProviderKind(kind)) return customModel(account)
   if (kind === 'anthropic-key') {
     if (!account.apiKey) throw new ModelAuthError('Reconnect your Claude API key in Settings.')
-    /* the person's key only: a null authToken keeps the server's
-       ANTHROPIC_AUTH_TOKEN from being sent beside it */
-    const client = new Anthropic({ apiKey: account.apiKey, authToken: null })
+    const client = personAnthropicClient(account.apiKey)
     const model = accountModelFor(account)
     return {
       provider: account.kind,
