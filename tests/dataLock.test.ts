@@ -2,6 +2,7 @@ import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { Worker } from 'node:worker_threads'
 import { afterEach, describe, expect, it } from 'vitest'
 import { acquireDataLock, DataDirInUseError } from '../server/dataLock.ts'
 
@@ -53,9 +54,12 @@ function livePid(): number {
   return child.pid!
 }
 
+const workers: Worker[] = []
+
 afterEach(() => {
   for (const l of held.splice(0)) l.release()
   for (const c of children.splice(0)) c.kill('SIGKILL')
+  for (const w of workers.splice(0)) void w.terminate()
   for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true })
 })
 
@@ -118,6 +122,41 @@ describe('server/dataLock.ts', () => {
        holder left behind */
     writeLock(dir, { pid, host: os.hostname() }, 90_000)
     expect(() => lock(dir)).not.toThrow()
+  })
+
+  it('detects a contender that replaced the fresh lock mid-write', async () => {
+    const dir = tmpdir()
+    /* a dead holder two simultaneous boots both reclaim */
+    writeLock(dir, { pid: deadPid(), host: os.hostname() })
+    const rival = livePid()
+    /* the other boot: the moment our fresh lock lands, it overwrites the
+       file with its own live holder. Without the post-write re-read we
+       would claim a dir the rival just took */
+    const worker = new Worker(
+      `const { parentPort, workerData } = require('node:worker_threads')
+       const fs = require('node:fs')
+       const os = require('node:os')
+       const buf = new Int32Array(new SharedArrayBuffer(4))
+       parentPort.postMessage('polling')
+       for (;;) {
+         try {
+           const h = JSON.parse(fs.readFileSync(workerData.file, 'utf8'))
+           if (h.pid === workerData.targetPid) {
+             fs.writeFileSync(
+               workerData.file,
+               JSON.stringify({ pid: workerData.rivalPid, host: os.hostname() }),
+             )
+             process.exit(0)
+           }
+         } catch {}
+         Atomics.wait(buf, 0, 0, 1)
+       }`,
+      { eval: true, workerData: { file: lockFile(dir), targetPid: process.pid, rivalPid: rival } },
+    )
+    workers.push(worker)
+    /* wait until the contender is polling, so it cannot miss the window */
+    await new Promise((resolve) => worker.once('message', resolve))
+    expect(() => acquireDataLock(dir)).toThrow(DataDirInUseError)
   })
 
   it('refuses a foreign-host lock while its heartbeat is fresh, reclaims it once stale', () => {

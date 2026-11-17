@@ -26,6 +26,11 @@ const HEARTBEAT_MS = 15_000
    comfortably outlast HEARTBEAT_MS so a live holder never looks stale */
 const STALE_MS = 60_000
 
+/* how long the lock's writer waits before trusting its create: long
+   enough for a contender's in-flight unlink to land, short enough to
+   stay invisible at boot */
+const CONFIRM_SETTLE_MS = 25
+
 interface LockHolder {
   pid?: number
   host?: string
@@ -43,11 +48,17 @@ export function acquireDataLock(dir: string): Lock {
   for (;;) {
     try {
       fs.writeFileSync(file, holder(), { flag: 'wx' })
-      break
+      /* winning the create does not end the race: a contender that read the
+         same dead holder can still land a remove() on our fresh file and
+         write its own. Settle so that in-flight unlink is visible, then
+         confirm the file on disk still names us — finding another pid
+         means the other boot won and contest() gets the verdict */
+      settleForConfirm()
+      if (readHolder(file)?.pid === process.pid) break
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-      contest(file)
     }
+    contest(file)
   }
 
   const heartbeat = setInterval(() => {
@@ -127,6 +138,12 @@ function pidAlive(pid: number): boolean {
     /* EPERM = exists, owned by someone else; ESRCH = gone */
     return (error as NodeJS.ErrnoException).code === 'EPERM'
   }
+}
+
+/** A synchronous pause — acquireDataLock stays sync for its boot call
+ *  site, and a worker-free Atomics.wait is the only blocking sleep. */
+function settleForConfirm(): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, CONFIRM_SETTLE_MS)
 }
 
 function statLock(file: string): fs.Stats | null {
