@@ -21,7 +21,9 @@
 #   -Uninstall          remove the app (sign-in, server choice and data stay)
 #   -DryRun             print what would be done, change nothing
 #   DOOP_DESKTOP_REPO (BRYANN2K/diazo), DOOP_DESKTOP_RELEASES (base URL of the
-#   release downloads), DOOP_DESKTOP_DIR (the app's install folder)
+#   release downloads), DOOP_DESKTOP_DIR (the app's install folder, passed to
+#   the setup as /D=; by default the folder the uninstall registry key names,
+#   or %LOCALAPPDATA%\Diazo on a first install)
 
 [CmdletBinding()]
 param(
@@ -38,56 +40,87 @@ $Repo = if ($env:DOOP_DESKTOP_REPO) { $env:DOOP_DESKTOP_REPO } else { 'BRYANN2K/
 $Releases = if ($env:DOOP_DESKTOP_RELEASES) { $env:DOOP_DESKTOP_RELEASES } else { "https://github.com/$Repo/releases/download" }
 $BundleId = 'dev.bryann2k.diazo'
 $AppData = Join-Path $env:APPDATA $BundleId
-$InstallDir = if ($env:DOOP_DESKTOP_DIR) { $env:DOOP_DESKTOP_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\Diazo' }
+# Tauri's per-user NSIS puts the app in %LOCALAPPDATA%\<productName> and writes
+# its folder to the Uninstall key's InstallLocation
+$UninstallKeys = @(
+  'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Diazo',
+  'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Diazo'
+)
 $RefusedHosts = @('doop.design', 'www.doop.design')
 
 function Say($Message) { Write-Host "diazo: $Message" }
-function Die($Message) {
-  Write-Host "diazo: error: $Message" -ForegroundColor Red
-  exit 1
-}
+# Throw, never `exit`: under `irm | iex` an exit would close the person's
+# PowerShell window. The one top-level catch prints the message.
+function Die($Message) { throw $Message }
 
 # ------------------------------------------------------------- the address
 # The typed address as the origin it names, checked as the app's server.rs
 # checks it: https, or plain http on this computer only; never the original
 # doop service.
-function Normalize-Server([string]$Input) {
-  $Input = $Input.Trim()
-  if ($Input -eq '') { Die 'Enter the address of a Diazo server.' }
-  if ($Input -notmatch '://') { $Input = "https://$Input" }
+function Normalize-Server([string]$Address) {
+  $Address = $Address.Trim()
+  if ($Address -eq '') { Die 'Enter the address of a Diazo server.' }
+  if ($Address -notmatch '://') { $Address = "https://$Address" }
   $uri = $null
-  if (-not [uri]::TryCreate($Input, [System.UriKind]::Absolute, [ref]$uri)) {
-    Die "`"$Input`" is not a web address."
+  if (-not [uri]::TryCreate($Address, [System.UriKind]::Absolute, [ref]$uri)) {
+    Die "`"$Address`" is not a web address."
   }
   if ($uri.Scheme -ne 'http' -and $uri.Scheme -ne 'https') {
     Die 'The address must start with https:// or http://.'
   }
-  if ($uri.Host -eq '') { Die "`"$Input`" is not a web address." }
+  if ($uri.Host -eq '') { Die "`"$Address`" is not a web address." }
   if ($uri.UserInfo -ne '') { Die 'The address must not contain a user name or password.' }
   $host_ = $uri.Host.ToLowerInvariant()
-  $loopback = $host_ -eq 'localhost' -or $host_ -eq '::1' -or $host_ -match '^127\.'
+  # [uri] keeps an IPv6 literal's brackets; the bare host is what is checked
+  $bare = $host_.TrimStart('[').TrimEnd(']')
+  # the host goes raw into server.json: a domain name or an IPv6 literal,
+  # nothing else
+  if ($host_ -match ':|\[') {
+    if ($bare -notmatch '^[0-9a-f:.]+$') { Die "`"$Address`" is not a valid host name." }
+  } elseif ($host_ -notmatch '^[a-z0-9.-]+$') { Die "`"$Address`" is not a valid host name." }
+  # What server.rs's `secure` accepts for plain http: `localhost`, or an IP
+  # literal that parses as loopback — 127.0.0.0/8 or ::1. A name like
+  # 127.example.com is a name, not the address.
+  $ip = $null
+  $loopback = $host_ -eq 'localhost' -or
+    ([System.Net.IPAddress]::TryParse($bare, [ref]$ip) -and [System.Net.IPAddress]::IsLoopback($ip))
   if ($uri.Scheme -ne 'https' -and -not $loopback) {
     Die "$($uri.Scheme)://$host_ is not secure. Use an https:// address; plain http:// only works for a server on this computer."
   }
-  if ($RefusedHosts -contains $host_) {
-    Die "$host_ is the original doop service, not a Diazo server. Use the doop app for it."
+  if ($RefusedHosts -contains $bare) {
+    Die "$bare is the original doop service, not a Diazo server. Use the doop app for it."
   }
-  $origin = "$($uri.Scheme)://$host_"
+  $shown = if ($bare -match ':') { "[$bare]" } else { $host_ }
+  $origin = "$($uri.Scheme)://$shown"
   if (-not $uri.IsDefaultPort) { $origin = "$($origin):$($uri.Port)" }
   return $origin
 }
 
 # Every Diazo server answers this public route, so a typo or another site is
-# caught before server.json is written.
+# caught before server.json is written. As server.rs does: redirects are
+# followed, and the origin that actually answered — checked again the same
+# way — is the one returned.
 function Probe-Server([string]$Origin) {
   try {
-    $answer = Invoke-RestMethod -Uri "$Origin/api/locale-config" -TimeoutSec 8
+    $response = Invoke-WebRequest -Uri "$Origin/api/locale-config" -TimeoutSec 8 -UseBasicParsing
   } catch {
     Die "No Diazo server answered at $Origin. Check the address and try again."
   }
-  if (-not ($answer.PSObject.Properties.Name -contains 'defaultLocale')) {
+  $body = $null
+  try { $body = $response.Content | ConvertFrom-Json } catch { $body = $null }
+  if (-not ($body -and ($body.defaultLocale -is [string]))) {
     Die "No Diazo server answered at $Origin. Check the address and try again."
   }
+  # where the request actually landed: ResponseUri on PowerShell 5.1,
+  # RequestMessage.RequestUri on PowerShell 7
+  $answered = $null
+  if ($response.BaseResponse.ResponseUri) {
+    $answered = $response.BaseResponse.ResponseUri.AbsoluteUri
+  } elseif ($response.BaseResponse.RequestMessage) {
+    $answered = $response.BaseResponse.RequestMessage.RequestUri.AbsoluteUri
+  }
+  if (-not $answered) { $answered = "$Origin/api/locale-config" }
+  return (Normalize-Server $answered)
 }
 
 # Points the app at $Origin (the data folder's server.json, read at launch).
@@ -121,8 +154,8 @@ function Download-Checked([string]$Asset, [string]$Target) {
   $base = "$Releases/desktop-v$Version"
   Say "downloading Diazo $Version"
   try {
-    Invoke-WebRequest -Uri "$base/$Asset" -OutFile $Target
-    Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile "$Target.sums"
+    Invoke-WebRequest -Uri "$base/$Asset" -OutFile $Target -UseBasicParsing
+    Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile "$Target.sums" -UseBasicParsing
   } catch {
     Die "could not download $base/$Asset (is desktop-v$Version released?)"
   }
@@ -139,6 +172,18 @@ function Download-Checked([string]$Asset, [string]$Target) {
 }
 
 # ------------------------------------------------------------- the app
+# The folder the app is installed in, or will be: DOOP_DESKTOP_DIR, else the
+# uninstall key's InstallLocation (quoted in the registry), else the Tauri
+# per-user default %LOCALAPPDATA%\Diazo.
+function Find-InstallDir {
+  if ($env:DOOP_DESKTOP_DIR) { return $env:DOOP_DESKTOP_DIR }
+  foreach ($key in $UninstallKeys) {
+    $item = Get-ItemProperty $key -ErrorAction SilentlyContinue
+    if ($item -and $item.InstallLocation) { return $item.InstallLocation.Trim('"') }
+  }
+  return (Join-Path $env:LOCALAPPDATA 'Diazo')
+}
+
 function Installed-Version {
   $exe = Join-Path $InstallDir 'doop-desktop.exe'
   if (Test-Path $exe) {
@@ -161,6 +206,8 @@ $wantDryRun = $DryRun -or $env:DOOP_DESKTOP_DRY_RUN
 
 $work = $null
 try {
+  $InstallDir = Find-InstallDir
+
   if ($wantUninstall) {
     Quit-App
     $uninstaller = Get-ChildItem $InstallDir -Filter '*ninstall*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -189,7 +236,7 @@ try {
     if (Test-Path $file) {
       try { $current = (Get-Content $file -Raw | ConvertFrom-Json).url } catch { $current = $null }
     }
-    if ($current -ne $origin) { Probe-Server $origin }
+    if ($current -ne $origin) { $origin = Probe-Server $origin }
   }
 
   if ($wantDryRun) {
@@ -210,10 +257,16 @@ try {
     Download-Checked $asset $package
     Quit-App
     Say "running the installer silently"
-    Start-Process -FilePath $package -ArgumentList '/S' -Wait
+    # /D= sets the install folder: it must be the last switch and is never
+    # quoted, so a folder with spaces still parses
+    $arguments = '/S'
+    if ($env:DOOP_DESKTOP_DIR) { $arguments = "/S /D=$InstallDir" }
+    Start-Process -FilePath $package -ArgumentList $arguments -Wait
     Say "Diazo $Version is installed: $InstallDir"
   }
   if ($origin) { Choose-Server $origin }
+} catch {
+  Write-Host "diazo: error: $_" -ForegroundColor Red
 } finally {
   if ($work -and (Test-Path $work)) { Remove-Item -Recurse -Force $work }
 }

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /* scripts/install-desktop.sh against stub `uname`, `curl`, `pgrep`,
    `osascript`, `xattr`, `open`, `minisign`, `sudo` and the package commands
@@ -12,6 +12,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
    URL's path below releases/download/, and every stub logs to calls.log. */
 
 const SCRIPT = path.resolve(import.meta.dirname, '..', 'scripts', 'install-desktop.sh')
+
+/* real installer runs: a machine with slow exec needs more than the 5s default */
+vi.setConfig({ testTimeout: 60000 })
 const RELEASES = 'https://github.com/BRYANN2K/diazo/releases/download'
 const CONF = path.resolve(import.meta.dirname, '..', 'desktop', 'src-tauri', 'tauri.conf.json')
 const PUBKEY = (JSON.parse(readFileSync(CONF, 'utf8')) as { plugins: { updater: { pubkey: string } } }).plugins.updater
@@ -512,5 +515,60 @@ describe('install-desktop.sh on Linux', () => {
     expect(out).toMatch(/Diazo_0\.15\.0_amd64\.deb|_amd64\.deb/)
     expect(calls()).toBe('')
     expect(existsSync(path.join(home, '.local'))).toBe(false)
+  })
+})
+
+/* install-desktop.ps1 needs Windows to really run (registry, Start-Process),
+   but its invariants check out anywhere, and it parses under pwsh where one
+   is installed (the CI runners have it). */
+describe('install-desktop.ps1', () => {
+  const ps1Path = path.resolve(import.meta.dirname, '..', 'scripts', 'install-desktop.ps1')
+  const ps1 = readFileSync(ps1Path, 'utf8')
+  const pwsh = spawnSync('sh', ['-c', 'command -v pwsh || true']).stdout.toString().trim()
+
+  it.skipIf(!pwsh)('parses under PowerShell', () => {
+    const result = spawnSync(
+      pwsh,
+      [
+        '-NoProfile',
+        '-Command',
+        '$t=$null;$e=$null;[void][System.Management.Automation.Language.Parser]::ParseFile($env:PS1_UNDER_TEST,[ref]$t,[ref]$e);$e|ForEach-Object{$_.Message};exit($e.Count)',
+      ],
+      { env: { ...process.env, PS1_UNDER_TEST: ps1Path } },
+    )
+    expect(result.status, result.stdout.toString() + result.stderr.toString()).toBe(0)
+  })
+
+  it('never names a parameter $Input and never exits the session it runs in', () => {
+    /* $Input is PowerShell's automatic pipeline variable; naming a function
+       parameter after it made -Server silently read the pipeline instead.
+       `exit` under `irm | iex` closes the person's window: errors throw and
+       the one top-level catch prints them */
+    expect(ps1).not.toMatch(/\$Input\b/)
+    expect(ps1).not.toMatch(/^\s*exit\b/m)
+    expect(ps1).toContain('throw $Message')
+    expect(ps1).toMatch(/\} catch \{[\s\S]*Write-Host "diazo: error:/)
+  })
+
+  it('finds the install folder in the uninstall registry key', () => {
+    /* Tauri's per-user NSIS defaults to %LOCALAPPDATA%\Diazo and records the
+       real folder in the Uninstall key's InstallLocation; DOOP_DESKTOP_DIR
+       is handed to the setup as /D= */
+    expect(ps1).toMatch(/Uninstall\\Diazo/)
+    expect(ps1).toContain('InstallLocation')
+    expect(ps1).toContain('LOCALAPPDATA')
+    expect(ps1).toContain('/D=')
+  })
+
+  it('checks a server like server.rs, and writes only {"url":…}', () => {
+    /* plain http only for an address on this computer: localhost or an IP
+       literal that parses as loopback — a name is not the address */
+    expect(ps1).toContain('IsLoopback')
+    /* the origin a redirect lands on is the one written (server.rs's probe) */
+    expect(ps1).toContain('ResponseUri')
+    expect(ps1).toContain('RequestMessage')
+    expect(ps1).toContain('defaultLocale')
+    expect(ps1).toMatch(/url = \$Origin/)
+    expect(ps1).toContain('server.json')
   })
 })
