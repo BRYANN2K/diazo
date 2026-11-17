@@ -1,6 +1,13 @@
 import sharp from 'sharp'
 import { describe, expect, it } from 'vitest'
-import { contactSheet, SHEET_CELL, SHEET_COLS, SHOT_MAX_EDGE, shotScaleFor } from '../server/screenshot.ts'
+import {
+  contactSheet,
+  SHEET_CELL,
+  SHEET_COLS,
+  SHOT_MAX_EDGE,
+  shotScaleFor,
+  watchPageConsole,
+} from '../server/screenshot.ts'
 import type { Frame } from '../shared/types.ts'
 
 /* AC-5: a screenshot's long edge is bounded (1568 by default, max_edge when
@@ -67,4 +74,24 @@ describe('contactSheet', () => {
     expect(meta.width).toBe(SHEET_CELL.width + 32)
     expect(meta.height).toBe(SHEET_CELL.height + 32)
   })
+})
+
+it('forwards pageerror exceptions into console errors', () => {
+  const handlers: Record<string, (...args: unknown[]) => void> = {}
+  const fakePage = {
+    on: (event: string, fn: (...args: unknown[]) => void) => {
+      handlers[event] = fn
+      return fakePage
+    },
+  }
+  const seen: [string, string][] = []
+  watchPageConsole(fakePage as never, (type, text) => seen.push([type, text]))
+  handlers['console']!({ type: () => 'warning', text: () => 'w' })
+  /* an uncaught exception in the frame's own script is a pageerror, not a
+     console message — it must still land as an error */
+  handlers['pageerror']!(new Error('frame script exploded'))
+  expect(seen).toEqual([
+    ['warning', 'w'],
+    ['error', 'frame script exploded'],
+  ])
 })

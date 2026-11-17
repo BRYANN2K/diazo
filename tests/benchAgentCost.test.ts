@@ -149,3 +149,79 @@ describe('quality gate: pairs and judging', () => {
     ])
   })
 })
+
+describe('quality gate: AC-25 stratified human sample', () => {
+  const frame = () => ({ frameId: 'f', measures: Object.fromEntries(MEASURES.map((m) => [m, 1])), errors: [] })
+  const landing = {
+    tools: [{ briefId: 'b1', kind: 'landing', mode: 'tools' as const, frames: [frame()] }],
+    script: [{ briefId: 'b1', kind: 'landing', mode: 'script' as const, frames: [frame()] }],
+  }
+  const app = {
+    tools: [{ briefId: 'b2', kind: 'app', mode: 'tools' as const, frames: [frame()] }],
+    script: [{ briefId: 'b2', kind: 'app', mode: 'script' as const, frames: [frame()] }],
+  }
+  const vision = [
+    {
+      pairId: 'v1',
+      briefId: 'b1',
+      kind: 'landing',
+      first: 'tools' as const,
+      winner: 'tie' as const,
+      judge: 'vision' as const,
+    },
+    {
+      pairId: 'v1',
+      briefId: 'b1',
+      kind: 'landing',
+      first: 'script' as const,
+      winner: 'tie' as const,
+      judge: 'vision' as const,
+    },
+    {
+      pairId: 'v2',
+      briefId: 'b2',
+      kind: 'app',
+      first: 'tools' as const,
+      winner: 'tie' as const,
+      judge: 'vision' as const,
+    },
+    {
+      pairId: 'v2',
+      briefId: 'b2',
+      kind: 'app',
+      first: 'script' as const,
+      winner: 'tie' as const,
+      judge: 'vision' as const,
+    },
+  ]
+  const human = (i: number, briefId: string, kind: string) => ({
+    pairId: `h${briefId}${i}`,
+    briefId,
+    kind,
+    first: 'tools' as const,
+    winner: 'tie' as const,
+    judge: 'human' as const,
+  })
+
+  it('counts the 24-pair sample in total, stratified across kinds', () => {
+    /* 24 human votes — all on landing; the app kind went unsampled */
+    const humansLanding = Array.from({ length: 24 }, (_, i) => human(i, 'b1', 'landing'))
+    const all = [...vision, ...humansLanding]
+    expect(gateVerdict(landing.tools, landing.script, all).pass).toBe(true)
+    const appVerdict = gateVerdict(app.tools, app.script, all)
+    expect(appVerdict.pass).toBe(false)
+    expect(appVerdict.reasons.join(' ')).toMatch(/app/)
+    /* split the same 24 across both kinds — both gates pass */
+    const stratified = [...humansLanding.slice(0, 12), ...Array.from({ length: 12 }, (_, i) => human(i, 'b2', 'app'))]
+    expect(gateVerdict(app.tools, app.script, [...vision, ...stratified]).pass).toBe(true)
+    expect(gateVerdict(landing.tools, landing.script, [...vision, ...stratified]).pass).toBe(true)
+  })
+
+  it('needs 24 human pairs across all kinds, not inside each kind', () => {
+    /* 23 in total is under the bar even though this kind holds them all */
+    const short = Array.from({ length: 23 }, (_, i) => human(i, 'b1', 'landing'))
+    const verdict = gateVerdict(landing.tools, landing.script, [...vision, ...short])
+    expect(verdict.pass).toBe(false)
+    expect(verdict.reasons.join(' ')).toContain('24 pairs in total')
+  })
+})

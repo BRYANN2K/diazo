@@ -100,6 +100,7 @@ export async function runQualityBenchmark(input: {
             pairs.push({
               pairId,
               briefId: brief.id,
+              kind: brief.kind,
               first,
               judge: 'vision',
               winner: await input.driver.judge({

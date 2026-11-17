@@ -64,6 +64,9 @@ export interface BriefResult {
 export interface PairVerdict {
   pairId?: string
   briefId: string
+  /** the brief's kind — the runner and the blind key carry it so the gate
+   *  can stratify the human sample across kinds */
+  kind?: string
   /** which mode was shown first in this judging pass */
   first: 'tools' | 'script'
   /** 'a' | 'b' | 'tie' — resolved to a mode by the caller that knows the order */
@@ -88,7 +91,10 @@ export function median(scores: FrameScore[], measure: Measure): number | undefin
   return values.length % 2 ? values[mid] : (values[mid - 1]! + values[mid]!) / 2
 }
 
-/** AC-22's quality verdict for one brief kind, from both modes' results. */
+/** AC-24's quality verdict for one brief kind, from both modes' results.
+ *  `pairs` is the FULL pair set across every kind: AC-25's human sample is
+ *  24 pairs in total, stratified so no kind goes unsampled — while the
+ *  wins-or-ties decision still uses only this kind's pairs. */
 export function gateVerdict(
   tools: BriefResult[],
   script: BriefResult[],
@@ -114,27 +120,40 @@ export function gateVerdict(
     if (candidate.frames.some((f) => f.errors.length) && baseline.every((r) => r.frames.every((f) => !f.errors.length)))
       reasons.push(`${candidate.briefId}: new error-level findings`)
   }
-  const humans = pairs.filter((p) => p.judge === 'human')
-  if (humans.length < 24) reasons.push('blind human sample needs at least 24 pairs')
+  const briefIds = new Set([...tools, ...script].map((r) => r.briefId))
+  const briefKind = new Map([...tools, ...script].map((r) => [r.briefId, r.kind]))
+  const kindOf = (p: PairVerdict) => p.kind ?? briefKind.get(p.briefId)
+  /* AC-25: the human sample is at least 24 pairs in total — not per kind. */
+  const humansAll = pairs.filter((p) => p.judge === 'human')
+  if (humansAll.length < 24) reasons.push('blind human sample needs at least 24 pairs in total')
+  const sampled = new Set(humansAll.map(kindOf).filter((k): k is string => !!k))
+  /* a kind the ballot never drew stays unsampled — this verdict fails it */
+  for (const kind of new Set([...tools, ...script].map((r) => r.kind)))
+    if (!sampled.has(kind)) reasons.push(`blind human sample does not cover kind "${kind}"`)
+  /* the decisions below only see this kind's own pairs */
+  const own = pairs.filter((p) => briefIds.has(p.briefId))
+  const humans = own.filter((p) => p.judge === 'human')
   const resolved = (p: PairVerdict) =>
     p.winner === 'tie' ? 'tie' : p.winner === 'first' ? p.first : p.first === 'script' ? 'tools' : 'script'
   // Match the human vote to the SAME render pair shown in the same order —
   // keying on briefId alone compares against whichever repetition ran first.
-  const disagreement = humans.filter((h) => {
+  const disagreement = humansAll.filter((h) => {
     const vision = pairs.find((v) => v.judge === 'vision' && v.pairId === h.pairId && v.first === h.first)
     return !vision || resolved(vision) !== resolved(h)
   }).length
+  /* >30% model–human disagreement on the whole sample → Bryan's picks on
+     this kind's briefs decide; otherwise the vision model's pairs do */
   const decided =
-    humans.length && disagreement / humans.length > 0.3 ? humans : pairs.filter((p) => p.judge === 'vision')
+    humansAll.length && disagreement / humansAll.length > 0.3 ? humans : own.filter((p) => p.judge === 'vision')
   for (const brief of tools) {
     if (
       !['tools', 'script'].every((first) =>
-        pairs.some((p) => p.briefId === brief.briefId && p.judge === 'vision' && p.first === first),
+        own.some((p) => p.briefId === brief.briefId && p.judge === 'vision' && p.first === first),
       )
     )
       reasons.push(`${brief.briefId}: judge both presentation orders`)
   }
-  const visionPairs = pairs.filter((p) => p.judge === 'vision')
+  const visionPairs = own.filter((p) => p.judge === 'vision')
   if (visionPairs.length >= 8 && new Set(visionPairs.map((p) => p.winner)).size === 1)
     reasons.push(`judge returned "${visionPairs[0]!.winner}" for all ${visionPairs.length} pairs — degenerate judging`)
   /* order consistency: judged in both orders, a pair should name the same
@@ -192,6 +211,7 @@ export function ingestHumanBallot(blindKey: readonly BlindKey[], ballot: readonl
     out.push({
       pairId: entry.pairId,
       briefId: entry.briefId,
+      ...(entry.kind ? { kind: entry.kind } : {}),
       first,
       winner: pick < 0 ? 'tie' : pick === 0 ? 'first' : 'second',
       judge: 'human',

@@ -185,13 +185,21 @@ export async function loadFramePage(
   try {
     /* console listeners must exist before setContent — errors thrown while
        the frame's own scripts first run are the ones that matter */
-    if (options?.onConsole) loaded.page.on('console', (msg) => options.onConsole!(msg.type(), msg.text()))
+    if (options?.onConsole) watchPageConsole(loaded.page, options.onConsole)
     await loadFrameInto(loaded.page, frame)
     return loaded
   } catch (error) {
     await loaded.close()
     throw error
   }
+}
+
+/** Route console messages AND uncaught page exceptions into one callback —
+ *  `pageerror` is a different event, and it is where a broken frame script
+ *  actually surfaces; listening to console alone misses it. */
+export function watchPageConsole(page: Pick<Page, 'on'>, onConsole: (type: string, text: string) => void): void {
+  page.on('console', (msg) => onConsole(msg.type(), msg.text()))
+  page.on('pageerror', (error) => onConsole('error', error instanceof Error ? error.message : String(error)))
 }
 
 async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
