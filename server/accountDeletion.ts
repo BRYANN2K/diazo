@@ -1,6 +1,12 @@
 import { eq } from 'drizzle-orm'
 import { db } from './db/index.ts'
-import { linearOAuthStates, liveActivities, liveActivityStarters, slackOAuthStates } from './db/schema.ts'
+import {
+  frameDevTasks,
+  linearOAuthStates,
+  liveActivities,
+  liveActivityStarters,
+  slackOAuthStates,
+} from './db/schema.ts'
 import { store } from './store.ts'
 import { removeMember as leaveWorkspace, workspaceIdsFor } from './workspaces.ts'
 
@@ -30,6 +36,10 @@ export async function purgeUserData(userId: string): Promise<{ deletedCanvases: 
       store.removeMember(canvas.id, userId)
     }
   }
+  /* dev tasks on canvases that outlive the account (shared, workspace):
+     the stored handoff packs must not — the rows on deleted canvases
+     already went with them */
+  await db.delete(frameDevTasks).where(eq(frameDevTasks.requestedByUserId, userId))
   for (const workspaceId of workspaceIdsFor(userId)) await leaveWorkspace(workspaceId, userId)
   await db.delete(liveActivities).where(eq(liveActivities.userId, userId))
   await db.delete(liveActivityStarters).where(eq(liveActivityStarters.userId, userId))

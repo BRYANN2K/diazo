@@ -11,6 +11,7 @@ import {
   cancelDevTask,
   createDevTask,
   devTaskFor,
+  failStaleDevTasks,
   mergedPollState,
   pollStateOf,
   wireDevTasks,
@@ -19,9 +20,9 @@ import { buildMcpServer } from '../server/mcp.ts'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import type { HandoffPack } from '../shared/handoff.ts'
-import type { RepoLink } from '../shared/localRepo.ts'
+import { REPO_POLL_MS, type RepoLink } from '../shared/localRepo.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
-import type { DevTaskState } from '../shared/devTasks.ts'
+import { DEV_TASK_LAUNCH_TTL_MS, type DevTaskState } from '../shared/devTasks.ts'
 
 /**
  * Dev tasks against an in-memory PGlite: the launch job really rides the
@@ -37,7 +38,13 @@ vi.mock('../server/db/index.ts', async () => {
   const schema = await import('../server/db/schema.ts')
   return { db: drizzle(new PGlite(), { schema }) }
 })
-vi.mock('../server/db/persist.ts', () => ({ saveCanvas: () => {}, saveFrame: () => {}, saveActivity: () => {} }))
+vi.mock('../server/db/persist.ts', () => ({
+  saveCanvas: () => {},
+  saveFrame: () => {},
+  saveActivity: () => {},
+  saveMember: () => {},
+  deleteMember: () => {},
+}))
 
 const owner = { id: 'owner-1', name: 'Owner' }
 const LINK: RepoLink = { id: 'link-1', name: 'proj', deviceId: 'dev-a', createdAt: 0, lastUsedAt: 0 }
@@ -138,8 +145,11 @@ describe('createDevTask', () => {
       effort: 'high',
       environment: 'vps',
       hostLabel: 'vps',
-      requestedByUserId: owner.id,
     })
+    /* the room's task never carries the requester's user id or device id */
+    expect(task.requestedBy).toBe('Owner')
+    expect(task).not.toHaveProperty('requestedByUserId')
+    expect(task).not.toHaveProperty('deviceId')
     expect(job).toMatchObject({
       linkId: LINK.id,
       op: 'dev_task',
@@ -195,7 +205,9 @@ describe('applyDeviceReport', () => {
     })
     expect(started.ok && started.task.state).toBe('starting')
     expect(started.ok && started.task.orcaIdentity).toBe('wt2:mac:i1')
-    expect(started.ok && started.task.deviceId).toBe(DEVICE)
+    /* the device is bound (a wrong-device poll below is refused) — its id
+       itself never leaves the server */
+    expect(started.ok && started.task).not.toHaveProperty('deviceId')
 
     const working = await applyDeviceReport(owner.id, task.id, {
       deviceId: DEVICE,
@@ -250,6 +262,54 @@ describe('applyDeviceReport', () => {
     /* and a worktree that vanished cannot resurrect a finished task */
     const gone = await applyDeviceReport(owner.id, task.id, { deviceId: DEVICE, poll: { found: false } })
     expect(gone.ok && gone.task.state).toBe('done')
+  })
+
+  it('ignores launch reports once the row is terminal', async () => {
+    const { task } = await launch([frame.id])
+    await applyDeviceReport(owner.id, task.id, {
+      deviceId: DEVICE,
+      launch: { ok: true, orcaIdentity: 'wt2:mac:i1' },
+    })
+    await applyAgentUpdate(owner.id, { task_id: task.id, state: 'done' })
+    /* a late or replayed launch answer must not drag done back to starting,
+       nor stamp a fresh identity on the finished row */
+    const late = await applyDeviceReport(owner.id, task.id, {
+      deviceId: DEVICE,
+      launch: { ok: true, orcaIdentity: 'wt2:mac:replayed', branch: 'doop/other' },
+    })
+    expect(late.ok && late.task.state).toBe('done')
+    expect(late.ok && late.task.orcaIdentity).toBe('wt2:mac:i1')
+    /* nor may a declined confirmation cancel a completed task */
+    const declined = await applyDeviceReport(owner.id, task.id, {
+      deviceId: DEVICE,
+      launch: { ok: false, cancelled: true },
+    })
+    expect(declined.ok && declined.task.state).toBe('done')
+  })
+
+  it('a report settles only its own task’s bridge request', async () => {
+    /* two launches in flight: reporting one must not burn the other's job */
+    const a = await launch([frame.id])
+    const b = await launch([frame.id])
+    const aJob = a.job as { id: string }
+    const bJob = b.job as { id: string }
+    /* a failing report on A wearing B's requestId: B stays claimable */
+    const stolen = await applyDeviceReport(owner.id, a.task.id, {
+      deviceId: DEVICE,
+      requestId: bJob.id,
+      launch: { ok: false, error: 'create blew up' },
+    })
+    expect(stolen.ok && stolen.task.state).toBe('failed')
+    expect((await devTaskFor(b.task.id))?.state).toBe('queued')
+    /* and B's own request still settles its launch */
+    const launched = await applyDeviceReport(owner.id, b.task.id, {
+      deviceId: DEVICE,
+      requestId: bJob.id,
+      launch: { ok: true, orcaIdentity: 'wt2:mac:i-b' },
+    })
+    expect(launched.ok && launched.task.state).toBe('starting')
+    /* A's own request was never settled — the launch TTL fails it, not B's report */
+    expect(aJob.id).not.toBe(bJob.id)
   })
 })
 
@@ -310,6 +370,9 @@ describe('state mapping', () => {
       [{ state: 'pr_open', agentState: 'pr_open' }, 'done', 'done'],
       [{ state: 'queued' }, 'starting', 'starting'],
       [{ state: 'working' }, null, 'working'],
+      /* a programStatus outcome ends the task — the agent's per-turn
+         "done" agentState never does (pollStateOf returns null for it) */
+      [{ state: 'working' }, 'done', 'done'],
     ]
     for (const [rowLike, next, expected] of cases) {
       expect(mergedPollState({ ...base, ...rowLike } as typeof base, next), JSON.stringify(rowLike)).toBe(expected)
@@ -326,6 +389,75 @@ describe('cancel', () => {
     const done = await launch([frame.id])
     await applyAgentUpdate(owner.id, { task_id: done.task.id, state: 'done' })
     expect((await cancelDevTask(done.task.id))?.state).toBe('done')
+  })
+
+  it('a cancelled queued task withdraws its unclaimed bridge job', async () => {
+    /* the device is online but not long-polling: the dev_task request sits
+       in the pending map, unclaimed */
+    const registered = localRepo.poll(owner.id, DEVICE, [LINK.id])
+    localRepo.dropWaiter(owner.id, DEVICE)
+    await registered
+    const task = await createDevTask({
+      canvasId: canvas.id,
+      frameIds: [frame.id],
+      frameRevision: null,
+      pack: fakePack(),
+      link: LINK,
+      userId: owner.id,
+      userName: owner.name,
+      agent: 'claude',
+    })
+    expect((await devTaskFor(task.id))?.state).toBe('queued')
+    await cancelDevTask(task.id)
+    /* the next poll must not hand the cancelled launch to the desktop */
+    vi.useFakeTimers()
+    try {
+      const claim = localRepo.poll(owner.id, DEVICE, [LINK.id])
+      await vi.advanceTimersByTimeAsync(REPO_POLL_MS + 1_000)
+      expect(await claim).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+    /* and the withdrawn job's resolve cannot flunk the cancelled row */
+    expect((await devTaskFor(task.id))?.state).toBe('cancelled')
+  })
+
+  it('a launch already claimed cannot be withdrawn, but the row stays cancelled', async () => {
+    const { task } = await launch([frame.id]) // the device claimed the job
+    await cancelDevTask(task.id)
+    const late = await applyDeviceReport(owner.id, task.id, {
+      deviceId: DEVICE,
+      launch: { ok: true, orcaIdentity: 'wt2:mac:i9' },
+    })
+    expect(late.ok && late.task.state).toBe('cancelled')
+  })
+})
+
+describe('failStaleDevTasks', () => {
+  it('fails orphaned queued rows only', async () => {
+    /* a queued row older than the launch TTL: its bridge request died with
+       the process that held it, so no device can ever claim it */
+    const { task: stale } = await launch([frame.id])
+    await db
+      .update(frameDevTasks)
+      .set({ createdAt: Date.now() - DEV_TASK_LAUNCH_TTL_MS - 1_000 })
+      .where(eq(frameDevTasks.id, stale.id))
+    /* a fresh queued row and an aged starting one are left alone */
+    const { task: young } = await launch([frame.id])
+    const { task: started } = await launch([frame.id])
+    await applyDeviceReport(owner.id, started.id, { deviceId: DEVICE, launch: { ok: true } })
+    await db
+      .update(frameDevTasks)
+      .set({ createdAt: Date.now() - DEV_TASK_LAUNCH_TTL_MS - 1_000 })
+      .where(eq(frameDevTasks.id, started.id))
+
+    const failed = await failStaleDevTasks()
+    expect(failed).toBe(1)
+    expect((await devTaskFor(stale.id))?.state).toBe('failed')
+    expect((await devTaskFor(stale.id))?.finishedAt).toBeTypeOf('number')
+    expect((await devTaskFor(young.id))?.state).toBe('queued')
+    expect((await devTaskFor(started.id))?.state).toBe('starting')
+    expect(broadcasts.some((b) => (b.msg as { task?: { id?: string } }).task?.id === stale.id)).toBe(true)
   })
 })
 
@@ -368,6 +500,30 @@ describe('MCP tools', () => {
     expect(broadcasts.length).toBeGreaterThan(before)
     expect(broadcasts.at(-1)?.msg).toMatchObject({ type: 'dev-task', task: { id: task.id, state: 'pr_open' } })
     const denied = await mcp.call('update_dev_task', { task_id: 'nope' })
+    expect(denied.isError).toBe(true)
+    await mcp.close()
+  })
+
+  it('update_dev_task refuses once the requester lost canvas access', async () => {
+    /* member access is live-checked: launching is not a lifetime pass */
+    store.addMember(canvas.id, 'user-2', owner.id)
+    const claim = localRepo.poll('user-2', DEVICE, [LINK.id])
+    const task = await createDevTask({
+      canvasId: canvas.id,
+      frameIds: [frame.id],
+      frameRevision: null,
+      pack: fakePack(),
+      link: LINK,
+      userId: 'user-2',
+      userName: 'Agent Two',
+      agent: 'claude',
+    })
+    await claim
+    const mcp = await mcpFor('user-2')
+    const ok = await mcp.call('update_dev_task', { task_id: task.id, state: 'needs_input', summary: 'hold on' })
+    expect(ok.isError).toBeUndefined()
+    store.removeMember(canvas.id, 'user-2')
+    const denied = await mcp.call('update_dev_task', { task_id: task.id, state: 'needs_input' })
     expect(denied.isError).toBe(true)
     await mcp.close()
   })

@@ -52,7 +52,7 @@ import { renderFrame } from './screenshot.ts'
 import { lintAndStore } from './lint.ts'
 import { checkAndStore, checkOutcomeForAgent } from './frameChecks.ts'
 import { buildHandoffPack, HandoffError } from './handoff.ts'
-import { applyAgentUpdate, devTasksForCanvas, handoffFor } from './devTasks.ts'
+import { applyAgentUpdate, devTaskFor, devTasksForCanvas, handoffFor } from './devTasks.ts'
 import { DEV_TASK_PUSH_STATES, DEV_TASK_SUMMARY_CHARS } from '../shared/devTasks.ts'
 import {
   CodeLinkError,
@@ -2962,6 +2962,10 @@ export function buildMcpServer(
     },
     async (input) => {
       if (!ownerId) return err('this connection is not signed in to a Diazo account')
+      /* the requester must still be able to open the canvas the task lives
+         on — being the launch's account is not enough once access is gone */
+      const task = await devTaskFor(input.task_id)
+      if (task && !canvasFor(task.canvasId, 'view')) return noCanvas(task.canvasId)
       const outcome = await applyAgentUpdate(ownerId, input)
       if (!outcome.ok) return err(outcome.error)
       return text({ ok: true, task: outcome.task })

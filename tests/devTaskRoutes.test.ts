@@ -47,11 +47,17 @@ async function approve(frame: { id: string; updatedAt: number }) {
   expect(res.status, await res.text()).toBe(200)
 }
 
-/** Start the device's long-poll and wait until the server sees it online. */
-async function deviceOnline(deviceId = DEVICE, grants = [LINK_ID]) {
-  const claimed = owner.post('/api/local-repo/poll', { deviceId, grants })
-  await until(async () => (await (await owner.get(`/api/canvases/${canvasId}/repo`)).json()).online as boolean)
-  return claimed
+/** Start the device's long-poll and wait until the server sees it online —
+ *  the claim answer itself keeps flying in `claimed`; fail loudly rather
+ *  than let the launch POST 409 on a device that never registered. */
+async function deviceOnline(deviceId = DEVICE, grants = [LINK_ID], client: Client = owner) {
+  const claimed = client.post('/api/local-repo/poll', { deviceId, grants })
+  claimed.catch(() => {}) // the open long-poll may outlive the test server
+  for (let i = 0; i < 120; i++) {
+    if ((await (await client.get(`/api/canvases/${canvasId}/repo`)).json()).online) return { claimed }
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  throw new Error('the test device never came online')
 }
 
 async function linkProject() {
@@ -94,6 +100,23 @@ describe('POST /api/frames/:id/dev-tasks', () => {
     expect(
       (await owner.post(`/api/frames/${frame.id}/dev-tasks`, { agent: 'claude', environment: 'bad env!' })).status,
     ).toBe(400)
+    /* model/effort fail at the door now, not inside the shell's argv check */
+    expect(
+      (await owner.post(`/api/frames/${frame.id}/dev-tasks`, { agent: 'claude', model: 'bad model!' })).status,
+    ).toBe(400)
+    expect((await owner.post(`/api/frames/${frame.id}/dev-tasks`, { agent: 'claude', model: '-x' })).status).toBe(400)
+    expect((await owner.post(`/api/frames/${frame.id}/dev-tasks`, { agent: 'claude', effort: 'high' })).status).toBe(
+      400,
+    )
+    expect(
+      (
+        await owner.post(`/api/frames/${frame.id}/dev-tasks`, {
+          agent: 'claude',
+          model: 'opus-5',
+          effort: 'x-high',
+        })
+      ).status,
+    ).not.toBe(400)
   })
 
   it('refuses a frame that is not ready for dev and a canvas without a live link', async () => {
@@ -117,7 +140,7 @@ describe('POST /api/frames/:id/dev-tasks', () => {
     const room = await listen(owner)
     const frame = await makeFrame('Checkout screen')
     await approve(frame)
-    const claimed = deviceOnline()
+    const { claimed } = await deviceOnline()
 
     const res = await owner.post(`/api/frames/${frame.id}/dev-tasks`, { agent: 'claude', environment: 'vps' })
     const { task } = await res.json()
@@ -162,7 +185,10 @@ describe('POST /api/frames/:id/dev-tasks', () => {
     })
     const after = await report.json()
     expect(report.status, JSON.stringify(after)).toBe(200)
-    expect(after.task).toMatchObject({ state: 'starting', orcaIdentity: 'wt2:vps:inst-9', deviceId: DEVICE })
+    expect(after.task).toMatchObject({ state: 'starting', orcaIdentity: 'wt2:vps:inst-9' })
+    /* the device binding is enforced server-side, never broadcast */
+    expect(after.task).not.toHaveProperty('deviceId')
+    expect(after.task).not.toHaveProperty('requestedByUserId')
 
     /* polls then move it along */
     for (const [poll, state] of [
@@ -196,7 +222,7 @@ describe('POST /api/frames/:id/dev-tasks', () => {
   it('a poll carries the dev-server URL, and only http(s) links land', async () => {
     const frame = await makeFrame('Dev server')
     await approve(frame)
-    const claimed = deviceOnline()
+    const { claimed } = await deviceOnline()
     const { task } = await (await owner.post(`/api/frames/${frame.id}/dev-tasks`, { agent: 'claude' })).json()
     const { request } = await claimed.then((r) => r.json())
     await owner.post(`/api/dev-tasks/${task.id}/report`, {
@@ -237,10 +263,29 @@ describe('POST /api/frames/:id/dev-tasks', () => {
     expect(prTask.state).toBe('pr_open')
   }, 30_000)
 
+  it('rate limits launches: each POST builds a pack', async () => {
+    /* a fresh requester gets a fresh counter — pack builds are the
+       expensive part, five a minute is the budget */
+    const launcher = await new Client(server).signUp('devtask-launcher@test.dev', 'Launcher')
+    await owner.post(`/api/canvases/${canvasId}/members`, { email: 'devtask-launcher@test.dev' })
+    const link = 'a4f6c1e2-0000-4000-8000-0000000000a1'
+    const device = 'b5e7d2f3-0000-4000-8000-0000000000b2'
+    await launcher.post(`/api/canvases/${canvasId}/repo`, { linkId: link, name: 'proj', deviceId: device })
+    await deviceOnline(device, [link], launcher)
+    const frame = await makeFrame('Rate limited')
+    await approve(frame)
+    for (let i = 0; i < 5; i++) {
+      const res = await launcher.post(`/api/frames/${frame.id}/dev-tasks`, { agent: 'claude' })
+      expect(res.status, `launch ${i + 1}`).toBe(200)
+    }
+    const sixth = await launcher.post(`/api/frames/${frame.id}/dev-tasks`, { agent: 'claude' })
+    expect(sixth.status).toBe(429)
+  }, 60_000)
+
   it('report is requester-and-device scoped', async () => {
     const frame = await makeFrame('Scoped')
     await approve(frame)
-    const claimed = deviceOnline()
+    const { claimed } = await deviceOnline()
     const { task } = await (await owner.post(`/api/frames/${frame.id}/dev-tasks`, { agent: 'codex' })).json()
     const { request } = await claimed.then((r) => r.json())
 
@@ -269,7 +314,7 @@ describe('cancel and list', () => {
     const room = await listen(owner)
     const frame = await makeFrame('Stoppable')
     await approve(frame)
-    const claimed = deviceOnline()
+    const { claimed } = await deviceOnline()
     const { task } = await (await owner.post(`/api/frames/${frame.id}/dev-tasks`, { agent: 'codex' })).json()
     const { request } = await claimed.then((r) => r.json())
     await owner.post(`/api/dev-tasks/${task.id}/report`, {

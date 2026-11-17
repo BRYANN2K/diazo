@@ -44,6 +44,7 @@ import {
   createDevTask,
   devTaskFor,
   devTasksForCanvas,
+  failStaleDevTasks,
   wireDevTasks,
 } from './devTasks.ts'
 import { DEV_TASK_AGENTS, DEV_TASK_SUMMARY_CHARS } from '../shared/devTasks.ts'
@@ -481,6 +482,10 @@ setInterval(() => {
 
 actions.wire(broadcast, agentTouch)
 wireDevTasks(broadcast)
+/* a `queued` dev task's launch job lives in this process's memory — after a
+   restart nothing can claim it, so it is failed like an expired one */
+void failStaleDevTasks()
+setInterval(() => void failStaleDevTasks(), 60_000).unref()
 wireRenderJobs(broadcast)
 /* after the room has been told: email for the people who were not in it */
 onCanvasEvent(commentNotifications.onCanvasEvent)
@@ -1310,17 +1315,40 @@ app.delete('/api/canvases/:id/repo', async (req, res) => {
    commands. Status comes back through the report route and the coding
    agent's own update_dev_task; every stored change broadcasts `dev-task`. */
 
-const devTaskCreateSchema = z.object({
-  agent: z.enum(DEV_TASK_AGENTS),
-  model: z.string().min(1).max(60).optional(),
-  effort: z.string().min(1).max(30).optional(),
-  /* an Orca environment name (`vps`); the shell re-checks it against
-     `orca host list` before passing --environment */
-  environment: z
-    .string()
-    .regex(/^[a-z0-9][a-z0-9._-]{0,59}$/i)
-    .optional(),
-})
+const devTaskCreateSchema = z
+  .object({
+    agent: z.enum(DEV_TASK_AGENTS),
+    /* the same charset the shell's valid_flag_value enforces, checked now
+       so a bad value fails before the row exists */
+    model: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9._:-]{0,59}$/i)
+      .optional(),
+    effort: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9._:-]{0,29}$/i)
+      .optional(),
+    /* an Orca environment name (`vps`); the shell re-checks it against
+       `orca host list` before passing --environment */
+    environment: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9._-]{0,59}$/i)
+      .optional(),
+  })
+  .refine((d) => !d.effort || d.model)
+
+/* a launch builds a handoff pack (frame renders, possibly a model call)
+   before the device's native confirm gates it — bound that build rate
+   like the importer's */
+const devTaskLaunchHits = new Map<string, number[]>()
+function takeDevTaskLaunchSlot(userId: string): boolean {
+  const now = Date.now()
+  const hits = (devTaskLaunchHits.get(userId) ?? []).filter((t) => now - t < 60_000)
+  if (hits.length >= 5) return false
+  hits.push(now)
+  devTaskLaunchHits.set(userId, hits)
+  return true
+}
 
 app.post('/api/frames/:id/dev-tasks', async (req, res) => {
   const frame = requireFrame(req, res, req.params.id, 'edit')
@@ -1334,6 +1362,8 @@ app.post('/api/frames/:id/dev-tasks', async (req, res) => {
   const device = localRepo.deviceFor(req.user!.id)
   if (!link || !device || !device.grants.has(link.id))
     return res.status(409).json({ error: "the linked project isn't reachable — open the Diazo desktop app holding it" })
+  if (!takeDevTaskLaunchSlot(req.user!.id))
+    return res.status(429).json({ error: 'too many dev task launches — wait a minute' })
   try {
     const codeLinks = await listCodeLinks(c.id).catch(() => [])
     const pack = await buildHandoffPack(c.id, {

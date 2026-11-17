@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { and, desc, eq, getTableColumns, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, getTableColumns, inArray, lt, sql } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { frameDevTasks } from './db/schema.ts'
 import { env } from './env.ts'
@@ -32,10 +32,10 @@ import {
  * the report route, the coding agent pushes through update_dev_task over
  * MCP, and every stored change broadcasts `dev-task` to the room.
  *
- * Two status sources merge into one row, last writer wins with one
- * exception: the agent's own `pr_open`/`done`/`failed` push outranks the
- * device's `worktree ps` read — a chat agent reports "done" per turn, so
- * the pull side can never be trusted to end a task on its own.
+ * Two status sources merge into one row: the agent's own `pr_open` /
+ * `done` / `failed` push outranks the device's `worktree ps` read, and a
+ * poll ends a task only on the worktree's `programStatus` outcome — an
+ * agent's per-turn "done" is a finished turn, not a finished task.
  */
 
 type Broadcast = (canvasId: string, msg: ServerMessage, excludeClientId?: string) => void
@@ -74,8 +74,6 @@ function toTask(row: StatusRow): DevTask {
     frameRevision: row.frameRevision,
     duelId: row.duelId,
     requestedBy: row.requestedByName,
-    requestedByUserId: row.requestedByUserId,
-    deviceId: row.deviceId,
     runner: row.runner,
     agent: row.agent,
     model: row.model,
@@ -166,8 +164,8 @@ export function mergedPollState(task: StatusRow, next: DevTaskState | null): Dev
   return next
 }
 
-/** The launch answer against the row — a fresh launch revives a task the
- *  bridge expiry failed, but never a cancelled one. */
+/** The launch answer against the row — never a terminal one: a late or
+ *  replayed report must not move a `done` task back to `starting`. */
 function launchState(task: StatusRow, launch: DevTaskLaunchReport): DevTaskState {
   if (launch.cancelled) return 'cancelled'
   if (launch.ok === false) return 'failed'
@@ -320,9 +318,10 @@ export async function applyDeviceReport(userId: string, taskId: string, report: 
     return { ok: false, status: 409, error: 'another device owns this task' }
   if (report.requestId) {
     /* finishing the bridge entry stops it expiring into a false failure;
-       the entry must have been claimed by this very device */
+       the entry must be this task's own `dev_task` job, claimed by this
+       very device — a report cannot settle a different launch's request */
     const launch = report.launch
-    localRepo.finish(report.requestId, userId, report.deviceId, {
+    localRepo.finishDevTask(report.requestId, userId, report.deviceId, taskId, {
       ok: launch ? launch.ok && !launch.cancelled : true,
       ...(launch?.cancelled ? { error: 'cancelled' } : launch?.error ? { error: launch.error } : {}),
     })
@@ -330,8 +329,10 @@ export async function applyDeviceReport(userId: string, taskId: string, report: 
   const set: Partial<typeof frameDevTasks.$inferInsert> = {}
   if (!row.deviceId) set.deviceId = report.deviceId
 
+  /* a terminal row is frozen to launch reports — a late or replayed one
+     must not drag a `done` task back to `starting` */
   const launch = report.launch
-  if (launch) {
+  if (launch && !isTerminal(row.state)) {
     set.state = launchState(row, launch)
     if (launch.orcaIdentity) set.orcaIdentity = launch.orcaIdentity.slice(0, 120)
     if (launch.branch) set.branch = launch.branch.slice(0, 200)
@@ -429,5 +430,33 @@ export async function cancelDevTask(taskId: string): Promise<DevTask | undefined
   const row = await devTaskRow(taskId)
   if (!row) return undefined
   if (isTerminal(row.state)) return toTask(row)
-  return patch(taskId, { state: 'cancelled', finishedAt: Date.now() })
+  const task = await patch(taskId, { state: 'cancelled', finishedAt: Date.now() })
+  /* a still-queued launch must not be claimable after the cancel — the
+     row reads first, so the withdrawal's resolve lands on a task that is
+     already terminal and failUnlaunched leaves it alone */
+  if (row.state === 'queued') localRepo.withdrawDevTask(row.requestedByUserId, taskId)
+  return task
+}
+
+/* ------------------------------------------------------------------ */
+/* stale rows                                                           */
+/* ------------------------------------------------------------------ */
+
+/** A `queued` row's bridge request lives in process memory: a server
+ *  restart orphans it, and no device can ever claim the job again. Swept
+ *  once at boot and then every minute — a live request expires on its own
+ *  TTL, so this only ever catches orphans. */
+export async function failStaleDevTasks(now = Date.now()): Promise<number> {
+  const rows = await db
+    .update(frameDevTasks)
+    .set({
+      state: 'failed',
+      summary: 'the launch job was lost when the server restarted — open the desktop app and send it again',
+      finishedAt: now,
+      updatedAt: now,
+    })
+    .where(and(eq(frameDevTasks.state, 'queued'), lt(frameDevTasks.createdAt, now - DEV_TASK_LAUNCH_TTL_MS)))
+    .returning(STATUS_COLUMNS)
+  for (const row of rows) announce(toTask(row))
+  return rows.length
 }

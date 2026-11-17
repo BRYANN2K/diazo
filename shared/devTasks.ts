@@ -66,11 +66,10 @@ export interface DevTask {
   frameRevision: number | null
   /** groups duel contestants (phase 3); null for a solo launch */
   duelId: string | null
-  /** display name and id of the person who clicked Send to Orca */
+  /** display name of the person who clicked Send to Orca — their user id
+   *  and the answering device id stay server-side (the room, share-link
+   *  viewers included, needs neither) */
   requestedBy: string
-  requestedByUserId: string
-  /** the desktop install that answered the launch; null until it reports */
-  deviceId: string | null
   /** the runner that owns execution — 'orca' today, room for others */
   runner: string
   agent: string
