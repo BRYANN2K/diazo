@@ -23,7 +23,6 @@ import { components } from './components'
 import { actions } from './actions'
 import { lint } from './lint'
 import { checks } from './checks'
-import { handoff } from './handoff'
 import { built } from './built'
 import { usage } from './usage'
 import { replay } from './replay'
@@ -59,7 +58,6 @@ export const en = {
   actions,
   lint,
   checks,
-  handoff,
   built,
   usage,
   replay,
