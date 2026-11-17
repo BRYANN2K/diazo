@@ -45,6 +45,8 @@ vi.mock('../server/screenshot.ts', () => ({
   rendererAvailable: () => true,
   loadFramePage: async () => ({ page, close: async () => {} }),
   renderFrame: vi.fn(),
+  /* motionRender's renderDeps reads openIsolatedPage when its module loads */
+  openIsolatedPage: vi.fn(),
 }))
 import { renderFrame } from '../server/screenshot.ts'
 import { store } from '../server/store.ts'

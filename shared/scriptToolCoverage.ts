@@ -141,6 +141,123 @@ export const SCRIPT_TOOL_COVERAGE: Record<string, { sdk: string } | { excluded: 
   render_composition: {
     sdk: 'compositions.render',
   },
+  add_effect: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  apply_camera_preset: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  apply_look: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  apply_text_animation: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  apply_transition: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  check_scene: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  critique_scene: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  get_direction: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  get_scene_snapshot: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  list_looks: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  list_motion_effects: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  list_motion_presets: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  remove_effect: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  set_direction: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  set_effects: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  set_motion_blur: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  update_effect: {
+    excluded: 'Motion or scene editing stays in the dedicated MCP tools.',
+  },
+  build_captions: {
+    excluded: 'Media or video editing stays in the dedicated MCP tools.',
+  },
+  duck_audio: {
+    excluded: 'Media or video editing stays in the dedicated MCP tools.',
+  },
+  export_composition: {
+    excluded: 'Media or video editing stays in the dedicated MCP tools.',
+  },
+  generate_video: {
+    excluded: 'Media or video editing stays in the dedicated MCP tools.',
+  },
+  insert_clip: {
+    excluded: 'Media or video editing stays in the dedicated MCP tools.',
+  },
+  list_media: {
+    excluded: 'Media or video editing stays in the dedicated MCP tools.',
+  },
+  list_video_models: {
+    excluded: 'Media or video editing stays in the dedicated MCP tools.',
+  },
+  set_media: {
+    excluded: 'Media or video editing stays in the dedicated MCP tools.',
+  },
+  suggest_cuts: {
+    excluded: 'Media or video editing stays in the dedicated MCP tools.',
+  },
+  blender_add_light: {
+    excluded: 'The Blender scene workflow is outside the bounded canvas SDK.',
+  },
+  blender_get_object: {
+    excluded: 'The Blender scene workflow is outside the bounded canvas SDK.',
+  },
+  blender_get_scene: {
+    excluded: 'The Blender scene workflow is outside the bounded canvas SDK.',
+  },
+  blender_render_frame: {
+    excluded: 'The Blender scene workflow is outside the bounded canvas SDK.',
+  },
+  blender_set_material: {
+    excluded: 'The Blender scene workflow is outside the bounded canvas SDK.',
+  },
+  get_blender_result: {
+    excluded: 'The Blender scene workflow is outside the bounded canvas SDK.',
+  },
+  estimate_speech: {
+    excluded: 'Speech generation and transcription stays in the dedicated MCP tools.',
+  },
+  generate_voiceover: {
+    excluded: 'Speech generation and transcription stays in the dedicated MCP tools.',
+  },
+  get_transcript: {
+    excluded: 'Speech generation and transcription stays in the dedicated MCP tools.',
+  },
+  list_speech_engines: {
+    excluded: 'Speech generation and transcription stays in the dedicated MCP tools.',
+  },
+  list_voices: {
+    excluded: 'Speech generation and transcription stays in the dedicated MCP tools.',
+  },
+  transcribe_clip: {
+    excluded: 'Speech generation and transcription stays in the dedicated MCP tools.',
+  },
+  update_dev_task: {
+    excluded: 'Dev-task reporting stays in the dedicated MCP tool.',
+  },
   export_frame: {
     excluded: 'External resource, generation, upload or export; requires its dedicated tool.',
   },
@@ -250,6 +367,9 @@ export const SCRIPT_TOOL_COVERAGE: Record<string, { sdk: string } | { excluded: 
     excluded: 'Images must return through a dedicated screenshot tool; SDK checks return numbers.',
   },
   create_handoff: {
+    excluded: 'External resource, generation, upload or export; requires its dedicated tool.',
+  },
+  get_handoff: {
     excluded: 'External resource, generation, upload or export; requires its dedicated tool.',
   },
   suggest_code_links: {

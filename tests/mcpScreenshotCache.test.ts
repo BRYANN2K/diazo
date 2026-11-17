@@ -6,10 +6,10 @@ import type { Canvas, Frame } from '../shared/types'
 const mocks = vi.hoisted(() => ({ renderFrame: vi.fn(), openIsolatedPage: vi.fn() }))
 /* motionRender's renderDeps reads openIsolatedPage when its module loads —
    the mock must carry it even though these tests only drive renderFrame */
-vi.mock('../server/screenshot.ts', () => ({
-  renderFrame: mocks.renderFrame,
-  openIsolatedPage: mocks.openIsolatedPage,
-}))
+vi.mock('../server/screenshot.ts', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../server/screenshot.ts')>()
+  return { ...mod, renderFrame: mocks.renderFrame, openIsolatedPage: mocks.openIsolatedPage }
+})
 
 import { buildMcpServer } from '../server/mcp.ts'
 import { getImage } from '../server/previews.ts'

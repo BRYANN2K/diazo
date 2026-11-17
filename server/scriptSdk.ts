@@ -190,6 +190,18 @@ function mutate<T>(ctx: ScriptRunContext, fn: () => T): T {
   return value
 }
 
+/** The motion write tools await inside the call — frame html loads lazily and
+ *  element stamps land after. The canvas is loaded first so a deferred html
+ *  never reads as a script write; the undo window is then the awaited call. */
+async function mutateAsync<T>(ctx: ScriptRunContext, fn: () => Promise<T>): Promise<T> {
+  if (ctx.active === false) throw new SdkError('limit', 'wall limit reached', 'wall')
+  await store.load(ctx.canvasId)
+  const snap = undoSnapshot(store.getCanvas(ctx.canvasId)!)
+  const value = await fn()
+  undoDiff(ctx, snap, store.getCanvas(ctx.canvasId)!)
+  return value
+}
+
 function roleOf(ctx: ScriptRunContext): CanvasRole | null {
   const canvas = store.getCanvas(ctx.canvasId)
   return canvas ? canvasRole(ctx.userId, canvas) : null
@@ -1132,7 +1144,7 @@ const HANDLERS: Record<string, Entry> = {
         canvas.compositions = [...(canvas.compositions ?? []).filter((c) => c.pageId !== pageId), comp]
         return { ok: true, revision: comp.revision, shots: shots.length }
       }
-      const out = mutate(ctx, () =>
+      const out = await mutateAsync(ctx, () =>
         motion.animateStoryboard(
           canvasOf(ctx),
           pageId,
@@ -1148,8 +1160,8 @@ const HANDLERS: Record<string, Entry> = {
         ),
       )
       if (!out.ok) throw invalid(String(out.error))
-      const v = out.data as { revision?: number; shots?: number }
-      return { ok: true, revision: v.revision ?? 0, shots: v.shots ?? 0 }
+      const v = out.data as { revision?: number; shots?: unknown[] }
+      return { ok: true, revision: v.revision ?? 0, shots: v.shots?.length ?? 0 }
     },
   },
   'compositions.patch': {
@@ -1171,7 +1183,7 @@ const HANDLERS: Record<string, Entry> = {
         Object.assign(comp, applied.value, { revision: comp.revision + 1 })
         return { ok: true, revision: comp.revision }
       }
-      const out = mutate(ctx, () =>
+      const out = await mutateAsync(ctx, () =>
         motion.setCompositionData(
           canvasOf(ctx),
           pageId,
