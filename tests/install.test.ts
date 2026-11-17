@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { stubPath } from './stubPath'
 
 /* scripts/install.sh, the all-in-one install, against stub `uname`,
    `sw_vers`, `container`, `docker`, `podman`, `systemctl`, `launchctl`,
@@ -21,7 +22,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
    (its container calls go to the stubs) and a stand-in install-desktop.sh
    that logs its arguments and makes or removes Diazo.app: that script has
    its own tests (installDesktop.test.ts). Nothing is installed and no
-   container is started; every stub logs to calls.log. */
+   container is started; every stub logs to calls.log. PATH holds only the
+   stub dir and symlinks to basic tools (stubPath): a runner's real docker,
+   podman or systemctl can never answer where a test removed the stub. */
 
 const SCRIPTS = path.resolve(import.meta.dirname, '..', 'scripts')
 const SCRIPT = path.join(SCRIPTS, 'install.sh')
@@ -37,6 +40,7 @@ let bin: string
 let lib: string
 let apps: string
 let links: string
+let testPath: string
 
 function stub(name: string, body: string) {
   const file = path.join(bin, name)
@@ -46,7 +50,7 @@ function stub(name: string, body: string) {
 
 function baseEnv(env: Record<string, string>) {
   return {
-    PATH: `${bin}:/usr/bin:/bin:/usr/sbin`,
+    PATH: testPath,
     HOME: home,
     TMPDIR: root,
     STUB_DIR: root,
@@ -104,6 +108,7 @@ beforeEach(() => {
   apps = path.join(root, 'Applications')
   links = path.join(home, '.local', 'bin')
   for (const dir of [home, bin, lib, apps]) mkdirSync(dir, { recursive: true })
+  testPath = stubPath(bin)
   /* lib/ is also what the stub curl serves as the raw scripts */
   copyFileSync(SCRIPT, path.join(lib, 'install.sh'))
   copyFileSync(path.join(SCRIPTS, 'install-local.sh'), path.join(lib, 'install-local.sh'))

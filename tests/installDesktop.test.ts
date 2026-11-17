@@ -4,12 +4,16 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { stubPath } from './stubPath'
 
 /* scripts/install-desktop.sh against stub `uname`, `curl`, `pgrep`,
    `osascript`, `xattr`, `open`, `minisign`, `sudo` and the package commands
    (`apt`, `dpkg`, `dnf`, `zypper`, `rpm`) on PATH: nothing is downloaded and
    no app is launched. The stub `curl` serves files from serve/, keyed by the
-   URL's path below releases/download/, and every stub logs to calls.log. */
+   URL's path below releases/download/, and every stub logs to calls.log.
+   PATH holds only the stub dir and symlinks to basic tools (stubPath): a
+   runner's own package tools can never answer where a test removed the
+   stub. */
 
 const SCRIPT = path.resolve(import.meta.dirname, '..', 'scripts', 'install-desktop.sh')
 
@@ -25,6 +29,7 @@ let home: string
 let bin: string
 let serve: string
 let apps: string
+let testPath: string
 
 function stub(name: string, body: string) {
   const file = path.join(bin, name)
@@ -35,7 +40,7 @@ function stub(name: string, body: string) {
 function run(args: string[], env: Record<string, string> = {}): Promise<{ code: number | null; out: string }> {
   const child = spawn('sh', [SCRIPT, ...args], {
     env: {
-      PATH: `${bin}:/usr/bin:/bin`,
+      PATH: testPath,
       HOME: home,
       TMPDIR: root,
       STUB_DIR: root,
@@ -125,6 +130,7 @@ beforeEach(() => {
   serve = path.join(root, 'serve')
   apps = path.join(root, 'Applications')
   for (const dir of [home, bin, serve, apps]) mkdirSync(dir, { recursive: true })
+  testPath = stubPath(bin)
   stub('uname', 'case $1 in -s) echo "${STUB_OS:-Darwin}" ;; -m) echo "${STUB_ARCH:-arm64}" ;; esac')
   stub(
     'curl',

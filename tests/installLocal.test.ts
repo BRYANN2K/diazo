@@ -14,11 +14,14 @@ import {
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { stubPath } from './stubPath'
 
 /* scripts/install-local.sh against stub `uname`, `sw_vers`, `container`,
    `docker`, `podman` and `curl` on PATH: the whole flow runs on any CI
    runner, and no real container is ever started. The stubs log each call to
-   calls.log. */
+   calls.log. PATH holds only the stub dir and symlinks to basic tools
+   (stubPath): a runner's real docker, podman or systemctl can never answer
+   where a test removed the stub. */
 
 const SCRIPT = path.resolve(import.meta.dirname, '..', 'scripts', 'install-local.sh')
 
@@ -28,6 +31,7 @@ vi.setConfig({ testTimeout: 60000 })
 let root: string
 let home: string
 let bin: string
+let testPath: string
 
 function stub(name: string, body: string) {
   const file = path.join(bin, name)
@@ -40,7 +44,7 @@ function run(args: string[], env: Record<string, string> = {}): Promise<{ code: 
      prompt finds no /dev/tty and cannot block */
   const child = spawn('sh', [SCRIPT, ...args], {
     env: {
-      PATH: `${bin}:/usr/bin:/bin`,
+      PATH: testPath,
       HOME: home,
       TMPDIR: root,
       DOOP_HEALTH_TIMEOUT: '4',
@@ -71,6 +75,7 @@ beforeEach(() => {
   home = path.join(root, 'home')
   bin = path.join(root, 'bin')
   spawnSync('mkdir', ['-p', home, bin])
+  testPath = stubPath(bin)
   stub('uname', 'case $1 in -s) echo "${STUB_OS:-Darwin}" ;; -m) echo "${STUB_ARCH:-arm64}" ;; esac')
   stub('sw_vers', 'echo 26.0')
   stub('curl', 'exit 0')

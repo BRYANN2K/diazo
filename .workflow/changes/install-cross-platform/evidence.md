@@ -92,3 +92,23 @@ exec costs ~50ms, so a full install run exceeds the 5s default.
   container"); an unknown `mode=` dies before anything is touched
   ("refuses a recorded mode it does not know"); `server.json` stays
   `{"url":…}` (asserted verbatim in the remote test).
+
+## CI fix (run 44160792868, shard 2)
+
+Five tests failed on the ubuntu runner only: a stub adds a command but
+cannot hide one, so with `/usr/bin` on PATH the runner's real docker,
+podman and systemctl answered where a test meant "not installed".
+
+- `tests/stubPath.ts` builds the PATH the scripts run under: the stub dir
+  plus a `core/` dir of symlinks to everyday tools (resolved on the host's
+  PATH). Runtimes, package managers and init tools are never linked, so
+  removing a stub really removes the command.
+- All three installer suites run under it; `installDesktop.test.ts` had the
+  same latent leak (host apt/dnf/zypper could answer for its package picks).
+- `sleep`, `pgrep` and `pkill` joined the allowlist — real uses in
+  `install-local.sh`'s health wait and `install-desktop.sh`'s app stop that
+  would degrade silently, not fail, if absent.
+- Verified: 91 tests pass locally (pwsh parse check skips); `typecheck`,
+  `lint`, `format:check` clean. **Unverified locally:** a Linux/Docker run
+  (`bun run test:linux`) — no Docker daemon or VM image available on this
+  Mac; the ubuntu rerun is the check.
