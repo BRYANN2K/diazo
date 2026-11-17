@@ -2,9 +2,10 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { gunzipSync } from 'node:zlib'
 import type { PGlite } from '@electric-sql/pglite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { backupNow, startDailyBackups } from '../server/backup.ts'
+import { backupNow, backupPgDir, startDailyBackups } from '../server/backup.ts'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
 
 /**
@@ -98,13 +99,59 @@ describe('server/backup.ts', () => {
   })
 
   it('streams the dump to disk instead of buffering it whole', async () => {
-    tmpDataDir()
+    const data = tmpDataDir()
     /* a dump whose arrayBuffer() blows up: the only safe way to write it is
        its stream — buffering copies the whole data dir into memory twice */
     const blob = new Blob(['PGDATA'])
     blob.arrayBuffer = () => Promise.reject(new Error('the dump must be streamed, not buffered'))
     const { archive } = await backupNow({ dumpDataDir: async () => blob } as unknown as PGlite, 'daily')
     expect(await fs.readFile(archive, 'utf8')).toBe('PGDATA')
+    /* the archive lands by rename: no temp file is left behind */
+    expect((await fs.readdir(path.join(data, 'backups'))).filter((n) => n.endsWith('.tmp'))).toEqual([])
+  })
+
+  it('leaves no archive at all when the dump dies mid-write', async () => {
+    const data = tmpDataDir()
+    const backups = path.join(data, 'backups')
+    /* a stream that errors after its first chunk: the archive is written
+       under a temp name and renamed only once complete, so a torn write
+       can never masquerade as today's backup (or as one of the seven) */
+    const blob = new Blob(['PGDATA'])
+    blob.stream = () =>
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array([80]))
+          controller.error(new Error('torn dump'))
+        },
+      })
+    await expect(backupNow({ dumpDataDir: async () => blob } as unknown as PGlite, 'daily')).rejects.toThrow(
+      'torn dump',
+    )
+    expect((await fs.readdir(backups)).filter((n) => n.startsWith('pg-'))).toEqual([])
+  })
+
+  it('archives a quiescent pg dir without the in-memory dump', async () => {
+    const data = tmpDataDir()
+    const pg = path.join(data, 'pg')
+    await fs.mkdir(path.join(pg, 'base', '16384'), { recursive: true })
+    await fs.writeFile(path.join(pg, 'PG_VERSION'), '16\n')
+    const payload = Buffer.alloc(1500, 0x61) /* crosses a 512-block pad */
+    await fs.writeFile(path.join(pg, 'base', '16384', '12345'), payload)
+
+    const { archive, manifest } = await backupPgDir(pg, 'pre-migration')
+
+    /* the tar.gz holds the dir's real bytes, paths relative to pg's root */
+    const raw = gunzipSync(await fs.readFile(archive))
+    expect(raw.subarray(257, 262).toString('latin1')).toBe('ustar')
+    expect(raw.includes(Buffer.from('PG_VERSION'))).toBe(true)
+    expect(raw.includes(Buffer.from('base/16384/12345'))).toBe(true)
+    expect(raw.includes(payload)).toBe(true)
+    expect(path.dirname(manifest)).toBe(path.join(data, 'backups'))
+    /* neither the staging copy nor the temp archive stays behind */
+    const leftovers = (await fs.readdir(path.join(data, 'backups'))).filter(
+      (n) => n.endsWith('.work') || n.endsWith('.tmp'),
+    )
+    expect(leftovers).toEqual([])
   })
 
   it('backs up at boot when the newest archive is older than a day', async () => {

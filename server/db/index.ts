@@ -47,10 +47,11 @@ export async function initDb(): Promise<void> {
     const { drizzle } = await import('drizzle-orm/pglite')
     const dir = path.join(dataDir(), 'pg')
     fs.mkdirSync(dir, { recursive: true }) // PGlite's own mkdir isn't recursive
-    const client = new PGlite(dir)
+    /* the guard may close the client to take its pre-migration backup on a
+       quiescent dir, then reopen it — bind the client we get back */
+    const client = await guardMigrations(new PGlite(dir), dir)
     pgliteClient = client
     const pgliteDb = drizzle(client, { schema })
-    await guardMigrations(client)
     const { migrate } = await import('drizzle-orm/pglite/migrator')
     await migrate(pgliteDb, { migrationsFolder: MIGRATIONS })
     db = pgliteDb as unknown as Db
@@ -85,7 +86,7 @@ async function appliedJournal(client: PGlite): Promise<{ count: number; newest: 
   return { count: Number(rows.rows[0]?.n ?? 0), newest: Number(rows.rows[0]?.newest ?? 0) }
 }
 
-async function guardMigrations(client: PGlite): Promise<void> {
+async function guardMigrations(client: PGlite, pgDir: string): Promise<PGlite> {
   const journal = bundledJournal()
   const applied = await appliedJournal(client)
   const bundledNewest = Math.max(0, ...journal.map((entry) => entry.when))
@@ -107,7 +108,15 @@ async function guardMigrations(client: PGlite): Promise<void> {
   /* a first boot applies the whole journal to an empty database: pending,
      yes, but there is nothing to lose, so the backup can be skipped */
   if (applied.count > 0 && journal.some((entry) => entry.when > applied.newest)) {
-    const { backupNow } = await import('../backup.ts')
-    await backupNow(client, 'pre-migration')
+    /* dumpDataDir would copy the whole data dir into memory — at boot, on
+       a possibly multi-GB install, that is an OOM waiting to happen. Close
+       the client, snapshot the quiescent dir with fs.cp and stream the
+       archive, then reopen: the backup never holds more than a block */
+    const { PGlite } = await import('@electric-sql/pglite')
+    const { backupPgDir } = await import('../backup.ts')
+    await client.close()
+    await backupPgDir(pgDir, 'pre-migration')
+    return new PGlite(pgDir)
   }
+  return client
 }
