@@ -83,4 +83,14 @@ describe('server/backup.ts', () => {
     const body = JSON.parse(await fs.readFile(manifest, 'utf8')) as { assets: unknown[] }
     expect(body.assets).toEqual([])
   })
+
+  it('streams the dump to disk instead of buffering it whole', async () => {
+    tmpDataDir()
+    /* a dump whose arrayBuffer() blows up: the only safe way to write it is
+       its stream — buffering copies the whole data dir into memory twice */
+    const blob = new Blob(['PGDATA'])
+    blob.arrayBuffer = () => Promise.reject(new Error('the dump must be streamed, not buffered'))
+    const { archive } = await backupNow({ dumpDataDir: async () => blob } as unknown as PGlite, 'daily')
+    expect(await fs.readFile(archive, 'utf8')).toBe('PGDATA')
+  })
 })

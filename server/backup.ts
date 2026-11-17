@@ -1,5 +1,9 @@
+import { createWriteStream } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import type { ReadableStream } from 'node:stream/web'
 import type { PGlite } from '@electric-sql/pglite'
 import { backupsDir, dataDir } from './paths.ts'
 
@@ -30,7 +34,10 @@ export async function backupNow(client: PGlite, reason: string): Promise<{ archi
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   const archive = path.join(dir, `pg-${stamp}.tar.gz`)
   const dump = await client.dumpDataDir('gzip')
-  await fs.writeFile(archive, Buffer.from(await dump.arrayBuffer()))
+  /* streamed, not buffered: arrayBuffer() would copy the whole data dir
+     into memory twice over and a large install would OOM before the
+     migration it is being backed up for */
+  await pipeline(Readable.fromWeb(dump.stream() as ReadableStream), createWriteStream(archive))
 
   const manifest = path.join(dir, `pg-${stamp}.assets.json`)
   const assets = await listAssets(path.join(dataDir(), 'assets'))
