@@ -1,40 +1,60 @@
 import fs from 'node:fs'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 
 /**
- * One server per data directory. `<dir>/server.lock` records the holder's
- * pid, host and a heartbeat the running server refreshes; a boot that finds
- * it refuses to start instead of letting two writers corrupt PGlite's data.
+ * One server per data directory. `<dir>/server.lock` is the claim — a small
+ * JSON file created O_EXCL, refreshed by the holder's heartbeat, removed on
+ * release — and `<dir>/server.lock.sock` a unix socket the holder binds for
+ * its whole lifetime.
  *
- * Reclaiming after a crash: the holder's pid is gone. When the file was
- * written on this host the dead pid is proof enough — retake it right away.
- * When it was written under another hostname (a container sharing the
- * volume, another pid namespace), an unprobed pid says nothing, so the
- * heartbeat decides: fresh means still held, stale means abandoned.
+ * The socket is what makes the lock OS-backed rather than a guess from file
+ * dates: the kernel keeps it listening exactly while the holder runs (a
+ * suspended holder still counts — its backlog answers), so a refused
+ * connection is proof of death, not a hint. No pid is ever probed, which is
+ * what a same-pid neighbour in another container cannot fake: the probe
+ * reaches the real listener over the shared volume whoever it belongs to.
  *
- * Holding is verified too: the heartbeat re-reads the file and a server
- * that finds another holder's name where its own was exits loudly — a
- * quiet heartbeat (a suspended process, a failed utimes) must never let a
- * second boot open the directory while the first keeps writing into it.
+ * A boot that finds a claim probes the socket first. A live socket refuses
+ * the boot before it touches a byte of protected state; a provably dead one
+ * lets the boot move the claim aside and re-create it. Two contenders can
+ * both reach that step, so the O_EXCL create is the single-winner gate and
+ * the claim is only ever moved after death was proven — a live holder's
+ * claim is never unlinked out from under it.
+ *
+ * Across a network filesystem the socket cannot reach a foreign holder —
+ * connect refuses even though the remote server is alive. There the claim's
+ * host and freshness decide, and they fail closed: foreign and fresh is
+ * refused, foreign and stale is presumed abandoned, and a stolen holder
+ * notices on its next heartbeat and exits loudly. Requiring unix sockets
+ * keeps this to macOS/Linux — the platforms the embedded install targets.
  */
 
 export class DataDirInUseError extends Error {
   constructor(file: string, detail: string) {
-    super(`the data dir is already in use (${detail}). If you're sure no other Diazo server holds it, delete ${file}`)
+    super(
+      `the data dir is already in use (${detail}). If you're sure no other Diazo server holds it, delete ${file} and ${file}.sock`,
+    )
     this.name = 'DataDirInUseError'
   }
 }
 
 const HEARTBEAT_MS = 15_000
-/* a lock whose heartbeat went quiet this long ago is abandoned; it must
-   comfortably outlast HEARTBEAT_MS so a live holder never looks stale */
+/* a foreign claim whose heartbeat went quiet this long ago is abandoned; it
+   must comfortably outlast HEARTBEAT_MS so a live holder never looks stale.
+   Only foreign locks are judged by age — a local holder's liveness is the
+   socket's, not the clock's */
 const STALE_MS = 60_000
-
-/* how long the lock's writer waits before trusting its create: long
-   enough for a contender's in-flight rename to land, short enough to
-   stay invisible at boot */
-const CONFIRM_SETTLE_MS = 25
+/* after a refused probe, one pause and a second probe before the socket is
+   accepted as dead — a transient refusal must not open a reclaim race */
+const CONFIRM_DEAD_MS = 100
+/* a claim with no socket file yet gets this long to produce one: the
+   create->bind gap is milliseconds, so a claim still socketless after this
+   belongs to a dead claimant */
+const MIDCLAIM_MS = 1_000
+/* connecting and reading the holder's identity */
+const PROBE_TIMEOUT_MS = 2_000
 
 interface LockHolder {
   pid?: number
@@ -43,190 +63,261 @@ interface LockHolder {
 }
 
 interface Lock {
-  /** releases the heartbeat and removes the file (also wired to `exit`) */
+  /** closes the socket and removes the claim (also wired to `exit`) */
   release(): void
 }
 
 export interface AcquireOptions {
-  /** the heartbeat's interval — and the one interval a suspicious fresh
-   *  lock gets to prove a live holder before it is taken over. Tests
-   *  shrink it; production keeps the default. */
+  /** the heartbeat interval that refreshes the claim and re-verifies our
+   *  hold on it. Tests shrink it; production keeps the default. */
   heartbeatMs?: number
+  /** the delays that pace acquisition: the re-probe pause after a refused
+   *  connection, the window a fresh claim gets to bind its socket, and the
+   *  probe timeout. Tests shrink them. */
+  confirmMs?: number
+  midClaimMs?: number
+  probeTimeoutMs?: number
 }
 
-export function acquireDataLock(dir: string, opts: AcquireOptions = {}): Lock {
+type Probe =
+  /* a listener answered — the holder is alive whoever it is */
+  | { state: 'alive'; holder: LockHolder | null }
+  /* the kernel proved nothing listens — `missing` when there is no socket
+     file at all (a mid-claim claimant could be about to bind), `missing`
+     false when a file is there but nothing answers (a dead holder) */
+  | { state: 'dead'; missing: boolean }
+  /* timeout or an ambiguous error — death cannot be proved */
+  | { state: 'unknown'; error: Error }
+
+export async function acquireDataLock(dir: string, opts: AcquireOptions = {}): Promise<Lock> {
   const heartbeatMs = opts.heartbeatMs ?? HEARTBEAT_MS
+  const confirmMs = opts.confirmMs ?? CONFIRM_DEAD_MS
+  const midClaimMs = opts.midClaimMs ?? MIDCLAIM_MS
+  const probeTimeoutMs = opts.probeTimeoutMs ?? PROBE_TIMEOUT_MS
   fs.mkdirSync(dir, { recursive: true })
-  const file = path.join(dir, 'server.lock')
+  const claim = path.join(dir, 'server.lock')
+  const sock = `${claim}.sock`
+  const me = holder()
+
   for (;;) {
     try {
-      fs.writeFileSync(file, holder(), { flag: 'wx' })
-      /* our own clock's date, not the volume's: a filesystem clock running
-         ahead would leave the fresh lock future-dated, which every later
-         boot reads as stale */
-      try {
-        const now = new Date()
-        fs.utimesSync(file, now, now)
-      } catch {
-        /* the volume's clock it is — the heartbeat rewrites it in an interval */
-      }
-      /* winning the create does not end the race: a contender that read the
-         same dead holder can still land a rename on our fresh file and
-         write its own. Settle so that in-flight move is visible, then
-         confirm the file on disk still names us — finding another pid
-         means the other boot won and contest() gets the verdict */
-      blockMs(CONFIRM_SETTLE_MS)
-      if (readHolder(file)?.pid === process.pid) break
+      /* the single-winner gate: exactly one contender can create the claim */
+      fs.writeFileSync(claim, me, { flag: 'wx' })
+      return await hold(claim, sock, me, { heartbeatMs, probeTimeoutMs })
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
     }
-    contest(file, heartbeatMs)
+
+    for (let probe = await probeLock(sock, probeTimeoutMs); ; probe = await probeLock(sock, probeTimeoutMs)) {
+      if (probe.state === 'alive') {
+        const who = probe.holder ?? readHolder(claim)
+        throw new DataDirInUseError(
+          claim,
+          who?.pid
+            ? `process ${who.pid}${who.host && who.host !== os.hostname() ? ` on ${who.host}` : ''}`
+            : 'a live server holds the socket',
+        )
+      }
+      if (probe.state === 'unknown') {
+        throw new DataDirInUseError(claim, `the holder's state cannot be proved (${probe.error.message})`)
+      }
+      /* dead — but a socket file that vanished mid-claim or a backlog at
+         its limit can look the same for an instant; prove it twice */
+      await sleep(confirmMs)
+      probe = await probeLock(sock, probeTimeoutMs)
+      if (probe.state !== 'dead') continue
+
+      /* still dead. A foreign claim that is still being heartbeated means
+         the holder lives on another host — its socket is unreachable for
+         us, not absent, so its death cannot be proved: fail closed */
+      const seen = readClaim(claim)
+      if (seen?.holder?.host && seen.holder.host !== os.hostname() && isFresh(seen.mtimeMs)) {
+        throw new DataDirInUseError(claim, `a server on ${seen.holder.host} — its heartbeat is fresh`)
+      }
+      /* a fresh claim whose socket never existed is mid-claim: its socket
+         lands within milliseconds. Give it the window before moving it
+         aside — stealing a fresh claim whose owner is about to bind is the
+         one race left open. A dead socket FILE needs no wait: its holder
+         already bound and is gone for good */
+      if (probe.missing && seen && isFresh(seen.mtimeMs)) {
+        await sleep(midClaimMs)
+        probe = await probeLock(sock, probeTimeoutMs)
+        if (probe.state !== 'dead') continue
+        const now = readClaim(claim)
+        if (now?.raw !== seen.raw) continue /* the claim moved under us — start over */
+      }
+      moveClaimAside(claim, seen)
+      break
+    }
+  }
+}
+
+/** The claim file says nothing about liveness by itself — it is read only
+ *  after the socket proved the holder dead, or for a foreign heartbeat. */
+interface Claim {
+  raw: string
+  holder: LockHolder | null
+  mtimeMs: number
+}
+
+function readClaim(file: string): Claim | null {
+  try {
+    const stat = fs.statSync(file)
+    return { raw: fs.readFileSync(file, 'utf8'), holder: readHolder(file), mtimeMs: stat.mtimeMs }
+  } catch {
+    return null
+  }
+}
+
+/** Move the judged-dead claim aside so the create loop can retry. The
+ *  content must be exactly what was inspected: a different file means a
+ *  live claim was displaced — restore it through an atomic link when the
+ *  slot is still free, and never overwrite a newer claim to do it. */
+function moveClaimAside(file: string, seen: Claim | null): void {
+  const aside = `${file}.dead-${process.pid}-${Math.random().toString(36).slice(2)}`
+  try {
+    fs.renameSync(file, aside)
+  } catch {
+    return /* gone or already taken — the loop re-reads and retries */
+  }
+  try {
+    if (readClaim(aside)?.raw === seen?.raw) {
+      fs.unlinkSync(aside)
+      return
+    }
+    try {
+      fs.linkSync(aside, file)
+    } catch {
+      /* a newer claim landed — leave it alone */
+    }
+    fs.unlinkSync(aside)
+  } catch {
+    /* a failed delete or restore: the loop re-reads and retries */
+  }
+}
+
+/** We won the claim: bind the socket it gates, prove both still name us,
+ *  then keep the claim fresh and watched until released. */
+async function hold(
+  claim: string,
+  sock: string,
+  me: string,
+  opts: { heartbeatMs: number; probeTimeoutMs: number },
+): Promise<Lock> {
+  /* a stale socket file from the dead holder blocks the bind; only the
+     claim's winner ever removes it, and only after the socket was probed
+     dead — a live listener's file is never touched */
+  try {
+    fs.rmSync(sock, { force: true })
+  } catch {
+    /* the bind below gets the real verdict if this fails */
+  }
+  /* every probe gets the holder's identity and a hang-up: reading it is how
+     a contender (and our own verify) tells who the socket belongs to */
+  const server = net.createServer((conn) => conn.end(`${me}\n`))
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(sock, () => {
+        server.off('error', reject)
+        resolve()
+      })
+    })
+  } catch (error) {
+    /* the bind failed (a socket path the OS rejects, a dir that vanished):
+       leave no claim behind — it would only read as a dead one later */
+    try {
+      if (namesUs(claim)) fs.unlinkSync(claim)
+    } catch {
+      /* best effort — the next boot reclaims a dead claim anyway */
+    }
+    throw error
+  }
+  /* the inode the heartbeat watches: after a steal the path can carry a
+     foreign socket while ours keeps listening namelessly */
+  const sockIno = statIno(sock)
+  try {
+    /* before any protected state is touched: the claim must still name us
+       (a contender may have moved it and put it back, or taken the slot)
+       and the socket must answer as us */
+    if (!namesUs(claim)) throw new DataDirInUseError(claim, 'the claim was taken during acquisition')
+    const who = await probeIdentity(sock, opts.probeTimeoutMs)
+    if (who?.pid !== process.pid || who.host !== os.hostname()) {
+      throw new DataDirInUseError(claim, 'a rival claimed the socket during acquisition')
+    }
+  } catch (error) {
+    await closeServer(server)
+    throw error
   }
 
-  const heartbeat = setInterval(() => {
+  const beat = setInterval(() => {
+    /* a contender that could not prove our death (a foreign host on a
+       network filesystem, a stolen claim) may still have taken the dir:
+       the claim must keep naming us and the socket keep being ours — a
+       holder that loses either exits loudly rather than corrupt under a
+       second owner */
     try {
-      const now = new Date()
-      fs.utimesSync(file, now, now)
+      if (!stillOurs(claim, sock, sockIno)) {
+        console.error(`[data] lost the data-dir lock at ${claim} — another server holds it; exiting`)
+        process.exit(1)
+      }
+      fs.writeFileSync(claim, holder())
     } catch {
-      /* a failed touch is not fatal by itself — the re-read below decides */
+      /* a failed refresh is not fatal by itself — the next beat re-checks */
     }
-    /* a second boot that found our heartbeat stale claimed the dir and
-       rewrote the file (or is doing so). Writing on anyway would corrupt
-       the data under the new holder, and our exit would unlink its lock:
-       stop loudly instead — release() removes the file only while it
-       still names us */
-    if (!namesUs(file)) {
-      console.error(`[data] lost the data-dir lock at ${file} — another server holds it; exiting`)
-      process.exit(1)
-    }
-  }, heartbeatMs)
-  heartbeat.unref()
+  }, opts.heartbeatMs)
+  beat.unref()
 
   let released = false
   const release = () => {
     if (released) return
     released = true
-    clearInterval(heartbeat)
+    clearInterval(beat)
     process.off('exit', release)
     try {
-      /* unlink only while the file still names us — after a takeover it
-         belongs to a live server, and removing it would free the dir
+      /* unlink only while the claim still names us — after a takeover the
+         pair belongs to a live server, and removing it would free the dir
          under them */
-      if (namesUs(file)) fs.unlinkSync(file)
+      if (namesUs(claim)) {
+        fs.unlinkSync(claim)
+        fs.rmSync(sock, { force: true })
+      }
     } catch {
       /* already gone */
     }
+    void closeServer(server)
   }
   /* 'exit' is the one hook every shutdown path (signals, process.exit, an
-     uncaught throw) lands on; the release itself is synchronous */
+     uncaught throw) lands on; the file cleanup itself is synchronous and
+     the kernel reaps the socket with the process either way */
   process.once('exit', release)
   return { release }
 }
 
+/** Whether the claim still names us and the socket file is still the one we
+ *  bound — the two ways a theft shows up for the heartbeat. */
+function stillOurs(claim: string, sock: string, sockIno: number | null): boolean {
+  if (!namesUs(claim)) return false
+  /* the socket path must still be a file at all: a removed socket leaves
+     the dir socketless to every contender even though we keep listening */
+  if (!fs.existsSync(sock)) return false
+  const ino = statIno(sock)
+  /* when either side cannot report an inode, the existence + claim checks
+     are all the watch there is */
+  return sockIno === null || ino === null || ino === sockIno
+}
+
+function statIno(file: string): number | null {
+  try {
+    const ino = fs.statSync(file).ino
+    return ino > 0 ? ino : null
+  } catch {
+    return null
+  }
+}
+
 function holder(): string {
   return JSON.stringify({ pid: process.pid, host: os.hostname(), at: new Date().toISOString() })
-}
-
-/** Decide an existing lock's fate: throw when it is held, take it aside
- *  when the holder is verifiably gone so the create loop can retry. */
-function contest(file: string, heartbeatMs: number): void {
-  const stat = statLock(file)
-  const raw = readLock(file)
-  const holder = parseHolder(raw)
-  const ours = holder?.host === undefined || holder.host === os.hostname()
-  const pid = typeof holder?.pid === 'number' ? holder.pid : 0
-  const alive = pid > 0 && pidAlive(pid)
-
-  if (!ours) {
-    /* written elsewhere: the pid is not ours to probe, the heartbeat is */
-    if (isStale(stat)) {
-      takeLockAside(file, raw)
-      return
-    }
-    throw new DataDirInUseError(file, `a server on ${holder?.host ?? 'another host'} — its heartbeat is fresh`)
-  }
-  if (pid === 0) {
-    /* unreadable content — only a fresh file could still belong to a live,
-       older-format holder; a stale one is safe to drop */
-    if (isStale(stat)) {
-      takeLockAside(file, raw)
-      return
-    }
-    throw new DataDirInUseError(file, `an unreadable lock written ${age(stat)} ago`)
-  }
-  if (!alive) {
-    /* pid is dead on this host: the holder is gone whatever the file's age */
-    takeLockAside(file, raw)
-    return
-  }
-  /* the live pid a lock names is not another server when it is our own — a
-     container restart reruns the same low pids and Windows recycles them
-     fast — or pid 1, the pid namespace's init: a server that held the lock
-     as pid 1 took its whole container down with it, so a live pid 1 now is
-     this container's init, not a holder. The exception is a same-hostname,
-     same-pid neighbour on a shared volume (host networking, a fixed
-     `hostname:` on two containers): it reads "our own pid" on a file that
-     is still being beaten. A fresh heartbeat therefore gets one interval
-     to move the file's date — a live holder cannot stay quiet that long,
-     so an unmoved date means nobody is home */
-  if (pid === process.pid || pid === 1) {
-    if (stat !== null && !isStale(stat) && stillBeats(file, stat.mtimeMs, heartbeatMs)) {
-      throw new DataDirInUseError(file, `a live server on this host is refreshing this lock`)
-    }
-    takeLockAside(file, raw)
-    return
-  }
-  /* a live holder touches the file every heartbeat; a live pid with a
-     heartbeat that went quiet is a recycled pid the dead holder left
-     behind, not a server that still wants the directory */
-  if (isStale(stat)) {
-    takeLockAside(file, raw)
-    return
-  }
-  throw new DataDirInUseError(file, `process ${pid} on this host`)
-}
-
-/** Take a stale lock aside by rename — exactly one contender can move the
- *  file, so a boot that loses the race never unlinks a file a winning boot
- *  just wrote. The moved file is deleted only when it still holds
- *  `expected`, the holder we judged dead; different content means we
- *  renamed a live claim, which is put back. True when the path is free. */
-export function takeLockAside(file: string, expected: string | null): boolean {
-  const moved = `${file}.${process.pid}`
-  try {
-    fs.renameSync(file, moved)
-  } catch {
-    return false /* gone or already taken — the create loop gets the verdict */
-  }
-  try {
-    if (readLock(moved) === expected) {
-      fs.unlinkSync(moved)
-      return true
-    }
-    fs.renameSync(moved, file)
-  } catch {
-    /* a failed restore or delete: the create loop re-reads and retries */
-  }
-  return false
-}
-
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch (error) {
-    /* EPERM = exists, owned by someone else; ESRCH = gone */
-    return (error as NodeJS.ErrnoException).code === 'EPERM'
-  }
-}
-
-/** Give a possibly-live holder one heartbeat interval to move the file's
- *  date — the check that separates a leftover same-pid lock from a
- *  same-name neighbour that is still beating. */
-function stillBeats(file: string, mtimeMs: number, heartbeatMs: number): boolean {
-  blockMs(heartbeatMs)
-  const now = statLock(file)
-  return now !== null && now.mtimeMs !== mtimeMs
 }
 
 /** Whether the file still names this process on this host — the only proof
@@ -236,49 +327,84 @@ function namesUs(file: string): boolean {
   return holder?.pid === process.pid && holder.host === os.hostname()
 }
 
-/** A synchronous pause — acquireDataLock stays sync for its boot call
- *  site, and a worker-free Atomics.wait is the only blocking sleep. */
-function blockMs(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
-}
-
-function statLock(file: string): fs.Stats | null {
+function readHolder(file: string): LockHolder | null {
   try {
-    return fs.statSync(file)
-  } catch {
-    return null /* deleted between our write attempt and now: contest retries on it */
-  }
-}
-
-function readLock(file: string): string | null {
-  try {
-    return fs.readFileSync(file, 'utf8')
-  } catch {
-    return null
-  }
-}
-
-function parseHolder(raw: string | null): LockHolder | null {
-  try {
-    const parsed: unknown = raw === null ? null : JSON.parse(raw)
+    const parsed: unknown = JSON.parse(fs.readFileSync(file, 'utf8'))
     return typeof parsed === 'object' && parsed !== null ? (parsed as LockHolder) : null
   } catch {
     return null
   }
 }
 
-function readHolder(file: string): LockHolder | null {
-  return parseHolder(readLock(file))
+function isFresh(mtimeMs: number): boolean {
+  /* either direction counts as live-ish: a clock that stepped back after a
+     power cut leaves the claim future-dated, and waiting for our clock to
+     reach its date would refuse every boot until then */
+  return Math.abs(Date.now() - mtimeMs) <= STALE_MS
 }
 
-function isStale(stat: fs.Stats | null): boolean {
-  if (stat === null) return true
-  /* either direction counts: a clock that stepped back after a power cut
-     (no RTC, a resumed VM) leaves the lock future-dated, and waiting for
-     our clock to reach its date would refuse every boot until then */
-  return Math.abs(Date.now() - stat.mtimeMs) > STALE_MS
+/** Connect and read the identity line the holder writes before hanging up.
+ *  The verdict is the connect itself: answered means alive, refused or
+ *  missing means provably dead, everything else proves nothing. */
+function probeLock(sock: string, timeoutMs: number): Promise<Probe> {
+  return new Promise((resolve) => {
+    const conn = net.connect(sock)
+    let settled = false
+    const done = (probe: Probe) => {
+      if (settled) return
+      settled = true
+      conn.destroy()
+      resolve(probe)
+    }
+    const timer = setTimeout(() => done({ state: 'unknown', error: new Error('probe timed out') }), timeoutMs)
+    timer.unref()
+    conn.once('connect', () => {
+      let data = ''
+      conn.setEncoding('utf8')
+      conn.on('data', (chunk) => {
+        data += chunk
+      })
+      conn.once('close', () => {
+        clearTimeout(timer)
+        done({ state: 'alive', holder: parseHolder(data.trim()) })
+      })
+    })
+    conn.once('error', (error) => {
+      clearTimeout(timer)
+      const code = (error as NodeJS.ErrnoException).code
+      if (code === 'ENOENT') return done({ state: 'dead', missing: true })
+      done(
+        code === 'ECONNREFUSED' || code === 'ENOTSOCK'
+          ? { state: 'dead', missing: false }
+          : { state: 'unknown', error },
+      )
+    })
+  })
 }
 
-function age(stat: fs.Stats | null): string {
-  return stat ? `${Math.round((Date.now() - stat.mtimeMs) / 1000)}s` : 'just now'
+/** Our own verify: who the socket says the holder is. Null when it does not
+ *  answer with an identity line in time. */
+function probeIdentity(sock: string, timeoutMs: number): Promise<LockHolder | null> {
+  return probeLock(sock, timeoutMs).then((probe) => (probe.state === 'alive' ? probe.holder : null))
+}
+
+function parseHolder(raw: string): LockHolder | null {
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return typeof parsed === 'object' && parsed !== null ? (parsed as LockHolder) : null
+  } catch {
+    return null
+  }
+}
+
+function closeServer(server: net.Server): Promise<void> {
+  return new Promise((resolve) => {
+    if (!server.listening) return resolve()
+    server.close(() => resolve())
+    server.unref()
+  })
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

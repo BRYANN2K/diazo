@@ -243,7 +243,7 @@ const BUILD_ID = (() => {
    test worker and managed-storage peer delete the live profiles of the
    others. */
 if (!(env.DATABASE_URL && env.BUCKET)) {
-  acquireDataLock(dataDir())
+  await acquireDataLock(dataDir())
   sweepBrowserProfiles()
 }
 
