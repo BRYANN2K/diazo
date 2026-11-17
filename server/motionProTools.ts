@@ -370,6 +370,11 @@ export function listMotionEffects(): Outcome {
       cost: fx.cost,
       params: fx.params,
       ...(fx.gen ? { generates: true } : {}),
+      /* luma matte and displacement map bind the layer's own picture on
+         u_tex2 until instances can point at another element's texture —
+         say so, or an agent expects a matte from another layer */
+      ...(fx.needsInput ? { needs_input: true } : {}),
+      ...(fx.selfMapped ? { self_mapped: true } : {}),
     })),
     blend_modes: BLEND_MODES,
   })

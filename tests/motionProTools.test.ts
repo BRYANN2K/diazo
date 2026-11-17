@@ -220,8 +220,9 @@ describe('check_scene and critique_scene', () => {
   })
 
   it('check_scene flags what the renderer cannot draw', async () => {
-    /* legacy stacks the ops now refuse but old compositions may carry —
-       a whole-film body keeps them, the ops refuse new ones, check flags them */
+    /* legacy stacks the ops and the body parser now refuse but old
+       compositions may carry — the store keeps them, new writes refuse
+       them, check flags them */
     actions.setComposition(
       canvas.id,
       baseComp([
@@ -332,6 +333,22 @@ describe('effect stack tools', () => {
     const out = pro.applyLook(canvas, pageId, { look: ids[0]! }, actor())
     expect(out.ok).toBe(true)
     expect(comp().tracks.some((t) => t.kind === 'adjustment' && (t.effects?.length ?? 0) > 0)).toBe(true)
+  })
+
+  it('list_motion_effects marks the self-mapped effects', () => {
+    /* luma matte and displacement map read u_tex2, which is the layer's own
+       picture until instances bind another element's texture — the catalog
+       says so, or an agent plans a matte from a layer it cannot have */
+    const out = pro.listMotionEffects()
+    const effects = (
+      out as { ok: true; data: { effects: { id: string; needs_input?: boolean; self_mapped?: boolean }[] } }
+    ).data.effects
+    for (const id of ['luma-matte', 'displacement-map']) {
+      const fx = effects.find((e) => e.id === id)
+      expect(fx?.needs_input).toBe(true)
+      expect(fx?.self_mapped).toBe(true)
+    }
+    expect(effects.every((e) => e.needs_input === undefined || e.self_mapped === true)).toBe(true)
   })
 
   it('the ops themselves refuse undrawable stacks', () => {

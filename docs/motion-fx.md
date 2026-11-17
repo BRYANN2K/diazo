@@ -28,11 +28,19 @@ per effect body, uniforms resolved at `t`, no state between calls — same
 (composition, t) → same pixels. A body can name a bounded sub-pass chain
 (bloom thresholds, blurs horizontally then composites the vertical blur
 over the snapshot input on `u_tex2`; lens blur stacks three directional
-gathers). `paintAt` (2D) feeds `paintSceneFx` which
+gathers). Two effects read `u_tex2` as a source texture — luma matte and
+displacement map — and today it binds the layer's own picture until
+instances can point at another element's texture. The registry marks them
+`needsInput` + `selfMapped`, and `list_motion_effects` reports both as
+`needs_input: true` and `self_mapped: true`, so an agent does not expect a
+matte from another layer. `paintAt` (2D) feeds `paintSceneFx` which
 hands the camera track's stack plus each covered adjustment track's stack
 to GL; element-track stacks render in preview through CSS filters. The
 browser harness and `paintShutter` (deterministic K-sample motion blur) go
 through the same path, so preview, desktop and server harness agree.
+Params a spec marks `unit: 'px'` are authored in composition pixels and
+scaled by the job's `width / comp.width` ratio at render time, so a 720p
+export and the preview apply the same visual strength.
 
 ## Looks
 
