@@ -28,6 +28,8 @@ vi.mock('../server/db/persist.ts', () => ({
   saveFrameVersion: () => {},
   saveComposition: () => {},
   saveCompositionVersion: () => {},
+  saveToken: () => {},
+  deleteToken: () => {},
 }))
 vi.mock('../server/agentModel.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../server/agentModel.ts')>()),
@@ -119,9 +121,9 @@ const toolUseTurn = (calls: [string, Record<string, unknown>][]): AgentTurnResul
   })),
   stop_reason: 'tool_use',
 })
-/* a call that moves nothing: a read on a page that does not exist fails
-   without changing the canvas — the flat line the watch counts */
-const flatCall: [string, Record<string, unknown>] = ['get_composition', { page_id: 'nope' }]
+/* a call that moves nothing: a read that lands, changes nothing and
+   repeats — the flat line the watch counts */
+const flatCall: [string, Record<string, unknown>] = ['get_prototype', {}]
 const flatTurn = () => toolUse(flatCall[0], flatCall[1])
 /* a turn that moves something: every rename counts as an arrangement write */
 const progressTurn = (frameId: string, n: number) => toolUse('update_frame', { frame_id: frameId, name: `s${n}` })
@@ -389,6 +391,139 @@ describe('an animate run’s room to work', () => {
     /* a dead job is still time: one first look, then eight repeats */
     expect(run).toHaveBeenCalledTimes(9)
     expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('keeps waiting on a live job — the wait ends with the job, not at turn nine', async () => {
+    /* the job stays running but inside its claim TTL: each poll stamps
+       the watch fresh, so waiting on it is movement */
+    mocks.runSpeechTool.mockImplementation(async () => ({
+      job: { id: 'j1', state: 'running', progress: 0, updatedAt: Date.now() },
+    }))
+    const { model, run } = scriptedModel([
+      ...Array.from({ length: 12 }, () => toolUse('get_transcript', { job_id: 'j1' })),
+      doneTurn,
+    ])
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* twelve live polls, then the last word and its mutation nudge — a
+       run stopped while its job was alive would have ended at nine */
+    expect(run).toHaveBeenCalledTimes(14)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/without changing a frame or a token/i)
+  })
+
+  it('ends the wait on a job that outlives its claim TTL', async () => {
+    /* a "running" job untouched for longer than the ops' own timeout is
+       presumed dead — polling it is still time like any other repeat */
+    const stale = Date.now() - 11 * 60_000
+    mocks.runSpeechTool.mockResolvedValue({ job: { id: 'j1', state: 'running', progress: 0, updatedAt: stale } })
+    const { model, run } = scriptedModel(Array.from({ length: 30 }, () => toolUse('get_transcript', { job_id: 'j1' })))
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* one first look, then eight polls of a dead job */
+    expect(run).toHaveBeenCalledTimes(9)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('ends a loop that refiles the same voice-over — a new job id is not new work', async () => {
+    /* every filing lands a fresh job id; the filing CALL is what counts,
+       and it repeats */
+    let filings = 0
+    mocks.runSpeechTool.mockImplementation(async () => ({
+      job: { id: `j${++filings}`, state: 'queued', progress: 0, updatedAt: Date.now() },
+    }))
+    const { model, run } = scriptedModel(
+      Array.from({ length: 30 }, () => toolUse('generate_voiceover', { text: 'the same line', voice: 'emma' })),
+    )
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* one first filing, then eight repeats of the same call */
+    expect(run).toHaveBeenCalledTimes(9)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('ends a move loop that slides the same frame back and forth', async () => {
+    const { model, run } = scriptedModel(
+      Array.from({ length: 30 }, (_, i) => toolUse('update_frame', { frame_id: frameId, x: i % 2 ? 100 : 0 })),
+    )
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* x:0 and x:100 each land once as new ground; after that the run only
+       revisits arrangements the canvas has already shown */
+    expect(run).toHaveBeenCalledTimes(10)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('ends a rename loop that flips the same frame name back and forth', async () => {
+    const { model, run } = scriptedModel(
+      Array.from({ length: 30 }, (_, i) =>
+        toolUse('update_frame', { frame_id: frameId, name: i % 2 ? 'beta' : 'alpha' }),
+      ),
+    )
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    expect(run).toHaveBeenCalledTimes(10)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('ends a token loop that writes the same value back and forth', async () => {
+    actions.createTokens(canvasId, [{ name: '--accent', type: 'color', value: '#ff0000' }], {
+      name: 'ann',
+      kind: 'user',
+      color: '#000',
+    })
+    const { model, run } = scriptedModel(
+      Array.from({ length: 30 }, (_, i) =>
+        toolUse('set_tokens', {
+          tokens: [{ name: '--accent', type: 'color', value: i % 2 ? '#00ff00' : '#ff0000' }],
+        }),
+      ),
+    )
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    expect(run).toHaveBeenCalledTimes(10)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('delivers a film whose only write is its direction — direction is film content', async () => {
+    /* the film exists before the run, so only the direction write can
+       move it */
+    actions.setComposition(canvasId, { duration: 12, fps: 30, width: 1280, height: 720, tracks: [] }, pageId, {
+      name: 'ann',
+      kind: 'user',
+      color: '#000',
+    })
+    const { model, run } = scriptedModel([
+      toolUse('set_direction', { page_id: pageId, direction: { treatment: 'slow documentary pans' } }),
+      doneTurn,
+    ])
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').endedAt).toBeTypeOf('number'), { timeout: 15_000 })
+    /* the direction moved the film: the card delivers instead of failing
+       on "without changing a frame or a token" */
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(cardById(canvasId, 'c1').failureReason).toBeUndefined()
+  })
+
+  it('names a stall made of refused calls for what it was', async () => {
+    /* an invalid composition body is refused every time — validation
+       errors are not "read nothing new" */
+    const { model, run } = scriptedModel(
+      Array.from({ length: 30 }, () =>
+        toolUse('set_composition', { page_id: pageId, composition: { tracks: 'nope' } }),
+      ),
+    )
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    expect(run).toHaveBeenCalledTimes(9)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/the last 8 turns were all refused/i)
   })
 
   it('counts a first try at each distinct call as movement — a repeat is still time', async () => {

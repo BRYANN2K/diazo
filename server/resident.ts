@@ -76,13 +76,12 @@ import {
 } from './motionTools.ts'
 import { execMotionPro } from './motionProTools.ts'
 import { listRenderJobs } from './motionJobs.ts'
-import type { Direction } from '../shared/motion.ts'
+import type { Composition, Direction } from '../shared/motion.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
 import { canvasesFor } from './workspaces.ts'
 import { previewFrame } from './componentPreview.ts'
 import { prototypeReport, setPrototypeStart } from './prototypeTools.ts'
-import type { Composition } from '../shared/motion.ts'
 import {
   describeInspiration,
   INSPIRATION_NO_MATCH_NOTE,
@@ -337,10 +336,17 @@ interface RunState {
   arrangeWrites: number
   /** drift findings posted as comments: a drift card's delivery */
   driftFindings?: number
-  /** the speech jobs and Blender ops this run filed or polled, id → last
-   *  state seen: a poll that watches a job move is progress, a frozen job
-   *  is still time */
+  /** the speech jobs and Blender ops this run polled, id → last state
+   *  seen: a poll that watches a job move is progress, a frozen job is
+   *  still time */
   jobStates?: Map<string, string>
+  /** polls of a still-living job so far — the marker that makes waiting
+   *  on live work read as movement turn after turn */
+  jobWaits?: number
+  /** ids of frames whose arrangement (name, page, spot, size, lock) the
+   *  run wrote — the signature signs their current arrangement, so an
+   *  A/B move or rename alternates instead of rising forever */
+  arrangedFrames?: Set<string>
   /* ---- chat runs only ---- */
   /** the asks this chat run claimed, oldest first */
   chatAsks?: ChatMessage[]
@@ -477,17 +483,13 @@ function lintBlockedFrameIds(runState: RunState): string[] {
 }
 
 /** What a composition IS, without the bookkeeping a no-op write still bumps
- *  (revision, updatedAt, updatedBy): the timeline the viewer would get. A
- *  write loop that lands nothing leaves this hash unmoved. */
+ *  (revision, createdAt, updatedAt, updatedBy): the timeline the viewer
+ *  would get. Signing by removal means a new field — direction, motionBlur,
+ *  the next one — signs itself. A write loop that lands nothing leaves this
+ *  hash unmoved. */
 function compositionSig(c: Composition): string {
-  return JSON.stringify({
-    duration: c.duration,
-    fps: c.fps,
-    width: c.width,
-    height: c.height,
-    posterTime: c.posterTime ?? null,
-    tracks: c.tracks,
-  })
+  const { revision, createdAt, updatedAt, updatedBy, ...body } = c
+  return JSON.stringify(body)
 }
 
 /** What a frame IS to the watch: its document and size, hashed — never
@@ -498,6 +500,39 @@ function compositionSig(c: Composition): string {
 function frameSig(frame: Frame | undefined): string {
   if (!frame) return ''
   return htmlLoaded(frame) ? contentHash(`${frame.width}x${frame.height}\n${frame.html}`) : `u${frame.updatedAt}`
+}
+
+/** What a frame's place on the canvas IS to the watch: name, page, spot,
+ *  size and lock — the things update_frame can move. Never the write
+ *  stamp: an A/B move or rename loop alternates this signature instead
+ *  of minting a new one. */
+function arrangementSig(canvas: Canvas | undefined, frame: Frame | undefined): string {
+  if (!canvas || !frame) return ''
+  return [frame.name, framePageId(canvas, frame), frame.x, frame.y, frame.width, frame.height, !!frame.locked].join(
+    '\u0000',
+  )
+}
+
+/** The page list as content — order, ids and names — so a rename or
+ *  reorder loop alternates a signature the run has already shown. */
+function pagesSig(canvasId: string): string {
+  const canvas = store.getCanvas(canvasId)
+  return canvas
+    ? pageList(canvas)
+        .map((p) => `${p.id} ${p.name}`)
+        .join('\n')
+    : ''
+}
+
+/** The canvas's tokens and theme names as content — never their write
+ *  stamps, or an A/B token loop would look new forever. */
+function tokensSig(canvasId: string): string {
+  return contentHash(
+    JSON.stringify({
+      tokens: store.getTokens(canvasId).map(({ updatedAt: _stamp, updatedBy: _by, ...t }) => t),
+      themes: store.getTokenThemes(canvasId),
+    }),
+  )
 }
 
 /** The canvas's compositions as the watch sees them: id → content
@@ -511,12 +546,16 @@ function filmSigs(canvasId: string): string[] {
  *  CONTENT (html and size — a write stamp would make an A/B/A/B toggle
  *  look new forever), an open rewrite draft's growth, newly screenshotted
  *  frames, lint verdicts that differ (the document hash, not the
- *  timestamp), token, arrangement, drift and image writes, answered
- *  comment threads, a composition's CONTENT (the notes check's pending
- *  set, not its pass count — it rises on the rounds that saw no progress),
- *  the speech jobs and Blender ops the run is watching, and render-job
- *  progress. */
+ *  timestamp), the CONTENT an arrangement or token write left (a counter
+ *  would have the defect updatedAt had — it rises on every write, so an
+ *  A/B loop looks new forever), answered comment threads, a composition's
+ *  CONTENT (the notes check's pending set, not its pass count — it rises
+ *  on the rounds that saw no progress), the speech jobs and Blender ops
+ *  the run is watching, and render-job progress. Image and drift writes
+ *  are not signed here: each lands a new id no content signature could
+ *  go still on — the call key is what stops a repeated one. */
 function motionSignature(canvasId: string, runState: RunState): string {
+  const canvas = store.getCanvas(canvasId)
   return JSON.stringify({
     frames: [...runState.mutatedFrames].sort().map((id) => `${id}@${frameSig(store.getFrame(id))}`),
     drafts: [...runState.rewriteDrafts].map(([id, html]) => `${id}:${html.length}`).sort(),
@@ -526,7 +565,13 @@ function motionSignature(canvasId: string, runState: RunState): string {
     lint: [...(runState.lintResults ?? [])]
       .map(([id, lint]) => `${id}:${lint.doc ?? ''}:${lint.errors}:${lint.warnings}`)
       .sort(),
-    writes: [runState.tokenWrites, runState.arrangeWrites, runState.driftFindings ?? 0, runState.imagesGenerated],
+    writes: {
+      arranged: [...(runState.arrangedFrames ?? [])]
+        .sort()
+        .map((id) => `${id}@${arrangementSig(canvas, store.getFrame(id))}`),
+      pages: pagesSig(canvasId),
+      tokens: tokensSig(canvasId),
+    },
     threads: [runState.repliedThreads.size, runState.awaitingThreads.size],
     compositions: filmSigs(canvasId),
     jobs: [...(runState.jobStates ?? [])].map(([id, state]) => `${id}=${state}`).sort(),
@@ -537,17 +582,33 @@ function motionSignature(canvasId: string, runState: RunState): string {
   })
 }
 
-/** Remember a speech job or Blender op the run filed or polled, so the
- *  signature sees it move — the tool descriptions tell the model to poll
+/* how long waiting on a live job counts as movement: the ops' own claim
+   TTL — a job untouched longer is presumed dead, so polling it is still
+   time like any other repeat */
+const JOB_WAIT_CAP_MS = 10 * 60_000
+
+/** Remember a speech job or Blender op the run polled, so the signature
+ *  sees it move — the tool descriptions tell the model to poll
  *  get_transcript / get_blender_result, and waiting on live work must not
- *  read as a stall. Only a job that stops moving does. */
+ *  read as a stall. A job still inside its claim TTL is alive, so each
+ *  poll gets a fresh stamp and counts; a job in a final state or past the
+ *  cap goes still like any other repeat. Filing calls are not watched:
+ *  each returns a new job id that would look new forever — the filing
+ *  call is already counted once by its key. */
 function watchJob(runState: RunState, kind: 'speech' | 'blender', out: unknown): void {
   const job = ((out as { job?: unknown }).job ?? (out as { op?: unknown }).op) as
     { id?: unknown; state?: unknown; progress?: unknown; updatedAt?: unknown } | undefined
   if (typeof job?.id !== 'string' || typeof job.state !== 'string') return
+  const alive =
+    (job.state === 'queued' || job.state === 'running') &&
+    typeof job.updatedAt === 'number' &&
+    Date.now() - job.updatedAt < JOB_WAIT_CAP_MS
+  /* a live job stamps each poll with the wait count — polls can land in
+     the same millisecond, so the clock cannot mark them */
+  const waited = alive ? `:${(runState.jobWaits = (runState.jobWaits ?? 0) + 1)}` : ''
   ;(runState.jobStates ??= new Map()).set(
     `${kind}:${job.id}`,
-    `${job.state}:${job.progress ?? ''}:${job.updatedAt ?? ''}`,
+    `${job.state}:${job.progress ?? ''}:${job.updatedAt ?? ''}${waited}`,
   )
 }
 
@@ -559,7 +620,16 @@ function watchJob(runState: RunState, kind: 'speech' | 'blender', out: unknown):
    film — a check re-run against changed content is new ground, a poll of
    the same state is not. */
 const MOTION_FRAME_READS = new Set(['inspect_frame', 'get_frame_html', 'screenshot_frame', 'check_frame', 'lint_frame'])
-const MOTION_FILM_READS = new Set(['get_composition', 'lint_motion', 'export_composition', 'list_media'])
+const MOTION_FILM_READS = new Set([
+  'get_composition',
+  'lint_motion',
+  'export_composition',
+  'list_media',
+  'get_direction',
+  'get_scene_snapshot',
+  'check_scene',
+  'critique_scene',
+])
 
 /** The content a film read sees: the page's composition body plus the
  *  content hash of every frame on it (lint covers frame HTML too). */
@@ -994,29 +1064,39 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     let stallReason: string | undefined
     let stillTurns = 0
     let stillCalls = 0
+    /* a stall made of refused calls is not "read nothing new" — the run
+       was working through validation errors. Track refused streaks so
+       the stop reason can say so */
+    let refusedCalls = 0
+    let refusedStreak = 0
+    let turnAllRefused = false
     /* the watch: a call is movement when it leaves the canvas in a state
        never seen before — a write loop that rewrites the same timeline is
        still — or when it calls something the run had not tried: a new read
-       target, a job being filed or watched, a write the canvas cannot
+       target, a job being filed or polled, a write the canvas cannot
        show. The first call always counts (claiming the card is itself an
        act). */
     let movedThisTurn = true
     const seenMotionSigs = new Set<string>()
     const seenMotionCalls = new Set<string>()
     const motionMoved = (block: Anthropic.ToolUseBlockParam, failed: boolean): boolean => {
-      const sig = motionSignature(canvasId, runState)
+      /* a signature or call key embeds whole documents — the sets keep
+         their hashes, or a long run on a long film holds tens of MB */
+      const sig = contentHash(motionSignature(canvasId, runState))
       const fresh = !seenMotionSigs.has(sig)
       seenMotionSigs.add(sig)
       /* a call that coincides with a state move is still a first try —
          note its target even then, so repeating it counts as a repeat */
-      const key = failed ? undefined : motionCallKey(block, canvasId)
+      const key = failed ? undefined : contentHash(motionCallKey(block, canvasId))
       const newCall = key !== undefined && !seenMotionCalls.has(key)
       if (key) seenMotionCalls.add(key)
       return fresh || newCall
     }
-    const motionStall = (limit: number, unit: 'turns' | 'tool calls') => {
+    const motionStall = (limit: number, unit: 'turns' | 'tool calls', refusedAll = false) => {
       stalledRun = true
-      stallReason = `the last ${limit} ${unit} changed nothing on the canvas and read nothing new`
+      stallReason = refusedAll
+        ? `the last ${limit} ${unit} were all refused`
+        : `the last ${limit} ${unit} changed nothing on the canvas and read nothing new`
       console.log(`[resident] animate run ending: ${stallReason} canvas=${canvasId}`)
     }
 
@@ -1151,8 +1231,11 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             /* the harness shows tool calls rather than turns — the watch
                feeds on each call against the wider call window */
             if (motionRun && !stalledRun) {
+              if (result.is_error === true) refusedCalls += 1
+              else refusedCalls = 0
               if (motionMoved(block, result.is_error === true)) stillCalls = 0
-              else if (++stillCalls >= MOTION_STALL_CALLS) motionStall(MOTION_STALL_CALLS, 'tool calls')
+              else if (++stillCalls >= MOTION_STALL_CALLS)
+                motionStall(MOTION_STALL_CALLS, 'tool calls', refusedCalls >= MOTION_STALL_CALLS)
             }
             return result
           },
@@ -1173,10 +1256,15 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             if (movedThisTurn) {
               movedThisTurn = false
               stillTurns = 0
-            } else if (++stillTurns >= MOTION_STALL_TURNS) {
-              motionStall(MOTION_STALL_TURNS, 'turns')
-              break
+              refusedStreak = 0
+            } else {
+              refusedStreak = turnAllRefused ? refusedStreak + 1 : 0
+              if (++stillTurns >= MOTION_STALL_TURNS) {
+                motionStall(MOTION_STALL_TURNS, 'turns', refusedStreak >= MOTION_STALL_TURNS)
+                break
+              }
             }
+            turnAllRefused = false
           }
           /* the status showing when the connection dropped, so a recovered
              run picks its narration back up instead of staying "reconnecting" */
@@ -1271,6 +1359,9 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                 },
               },
             )
+            /* a turn whose calls all failed was refused work, not flat
+               ground — the streak names the stall for what it was */
+            turnAllRefused = results.every((r) => r.is_error === true)
             messages.push({ role: 'user', content: results })
             continue
           }
@@ -4167,11 +4258,7 @@ export async function execTool(
         const f = store.getFrame(input.frame_id)
         if (!canvas || !f || f.canvasId !== canvasId) return fail('frame not found on this canvas')
         /* the store updates the frame object in place, so what it was is read first */
-        const arrangement = (frame: typeof f) =>
-          [frame.name, framePageId(canvas, frame), frame.x, frame.y, frame.width, frame.height, !!frame.locked].join(
-            '\u0000',
-          )
-        const before = { width: f.width, height: f.height, arrangement: arrangement(f) }
+        const before = { width: f.width, height: f.height, arrangement: arrangementSig(canvas, f) }
         const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
         const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
         const updated = updateFrameMeta(
@@ -4198,7 +4285,12 @@ export async function execTool(
           lint = await lintNote(frame.id, actor, runState)
         }
         /* a save that changed nothing has not delivered anything */
-        if (arrangement(frame) !== before.arrangement) runState.arrangeWrites += 1
+        if (arrangementSig(canvas, frame) !== before.arrangement) {
+          runState.arrangeWrites += 1
+          /* the run touched this frame's place — the watch signs the
+             arrangement itself, so an A/B loop reads as revisits */
+          ;(runState.arrangedFrames ??= new Set()).add(frame.id)
+        }
         return ok(
           `frame ${frame.id} is now "${frame.name}" on page ${framePageId(canvas, frame)} at (${Math.round(frame.x)}, ${Math.round(frame.y)}), ${Math.round(frame.width)}x${Math.round(frame.height)}${frame.locked ? ', locked' : ''}${lint}`,
         )
@@ -4487,7 +4579,10 @@ export async function execTool(
         }
         try {
           const out = await runSpeechTool(block.name, canvas, runState.askerId!, block.input)
-          watchJob(runState, 'speech', out)
+          /* only the poll is watched: a filing call returns a new job id
+             every time, which the signature would read as forever-new —
+             the filing call is already counted once by its key */
+          if (block.name === 'get_transcript') watchJob(runState, 'speech', out)
           return ok(JSON.stringify(out))
         } catch (error) {
           return fail(error instanceof Error ? error.message : 'speech tool failed')
@@ -4508,7 +4603,9 @@ export async function execTool(
         }
         try {
           const out = await runBlenderTool(block.name, canvas, runState.askerId!, block.input)
-          watchJob(runState, 'blender', out)
+          /* same as speech: only the poll watches a job, a filing call is
+             counted once by its key */
+          if (block.name === 'get_blender_result') watchJob(runState, 'blender', out)
           return ok(JSON.stringify(out))
         } catch (error) {
           return fail(error instanceof Error ? error.message : 'blender tool failed')
