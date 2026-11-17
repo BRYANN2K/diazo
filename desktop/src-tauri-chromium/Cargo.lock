@@ -1224,6 +1224,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rfd",
+ "ring",
  "rustls",
  "serde",
  "serde_json",
