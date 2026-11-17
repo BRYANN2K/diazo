@@ -1,5 +1,5 @@
 #!/bin/sh
-# diazo-local: run Diazo on this Mac in one container, with Apple's `container`.
+# diazo-local: run Diazo on this computer in one container.
 #
 #   curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install-local.sh | sh
 #
@@ -7,6 +7,10 @@
 # uploads in ~/.diazo/data, its secrets in ~/.diazo/diazo.env (generated here,
 # mode 600). Published on 127.0.0.1 only. Re-running it updates the image and
 # restarts the container; data and secrets are kept.
+#
+# The container runtime depends on the system: Apple's `container` on macOS
+# (Apple silicon, macOS 26 or later), Docker on Linux, or Podman there when
+# Docker is missing; each lives behind one small function set below.
 #
 # An install made before the rename (redoop) lives in ~/.doop, with doop.env
 # and a container named doop. That folder is used where it is: nothing is
@@ -20,11 +24,14 @@
 # Settings (environment; the DOOP_ names are kept so existing setups still
 # apply): DOOP_HOME (~/.diazo, or ~/.doop when only that one exists), DOOP_PORT
 # (4400), DOOP_IMAGE, DOOP_NAME (diazo), DOOP_REF (branch built by --build),
-# DOOP_HEALTH_TIMEOUT (s).
+# DOOP_HEALTH_TIMEOUT (s), DOOP_RUNTIME (docker|podman, overrides the Linux
+# detection).
 #
 # scripts/install.sh (the all-in-one install of the server and the app) runs
-# this one for the server part and sets DIAZO_COMMAND to its `diazo` command,
-# which the messages then name, since a LaunchAgent starts the server at login.
+# this one for the server part and sets DIAZO_COMMAND to its `diazo` command
+# and DIAZO_AUTOSTART to the login-start description, which the messages then
+# name, since the server starts at login (LaunchAgent on macOS, a systemd
+# user unit on Linux).
 
 set -eu
 
@@ -67,7 +74,9 @@ ACTION=install
 BUILD=0
 ASSUME_YES=0
 KEEP_DATA=0
-# set by pick_image: the image to run and the extra `container run` flags it needs
+# the container runtime: apple (macOS), docker or podman (Linux)
+RT=
+# set by pick_image: the image to run and the extra run flags it needs
 RUN_IMAGE=
 RUN_PLATFORM=
 
@@ -91,7 +100,7 @@ Commands:
   uninstall         remove the container and image; asks before deleting the data folder
 
 Options:
-  --build           build the image on this Mac from source instead of pulling it
+  --build           build the image on this computer from source instead of pulling it
   --yes, -y         uninstall: delete the data folder without asking
   --keep-data       uninstall: keep the data folder without asking
   --stop, --uninstall, --start, --status, --logs, --update
@@ -129,17 +138,58 @@ parse_args() {
 
 # ---------------------------------------------------------------- checks
 check_platform() {
-  [ "$(uname -s)" = Darwin ] || die "the local install needs macOS (this is $(uname -s)). Elsewhere, use the hosted path: docker compose up"
-  [ "$(uname -m)" = arm64 ] || die "Apple's container runs on Apple silicon only (this Mac is $(uname -m)). Use Docker instead: docker compose up"
-  major=$(sw_vers -productVersion 2>/dev/null | cut -d. -f1)
-  if [ -n "$major" ] && [ "$major" -lt 26 ]; then
-    say "warning: Apple's container is supported on macOS 26 and later (this is $(sw_vers -productVersion))"
-  fi
+  case $(uname -s) in
+    Darwin)
+      [ "$(uname -m)" = arm64 ] || die "Apple's container runs on Apple silicon only (this Mac is $(uname -m)). On Intel, self-host with: docker compose up"
+      major=$(sw_vers -productVersion 2>/dev/null | cut -d. -f1)
+      if [ -n "$major" ] && [ "$major" -lt 26 ]; then
+        say "warning: Apple's container is supported on macOS 26 and later (this is $(sw_vers -productVersion))"
+      fi
+      ;;
+    Linux) ;;
+    MINGW* | MSYS* | CYGWIN*)
+      die "the local install does not run on Windows. Use WSL2 with Docker, or run only the app (scripts/install-desktop.ps1) pointed at a server"
+      ;;
+    *) die "the local install needs macOS or Linux (this is $(uname -s)). Elsewhere, use the hosted path: docker compose up" ;;
+  esac
 }
 
-check_container() {
-  if ! command -v container >/dev/null 2>&1; then
-    cat >&2 <<'EOF'
+# The container runtime this computer uses: apple on macOS; on Linux Docker,
+# else Podman (DOOP_RUNTIME overrides).
+pick_runtime() {
+  case $(uname -s) in
+    Darwin) RT=apple ;;
+    Linux)
+      case ${DOOP_RUNTIME:-} in
+        docker | podman) RT=$DOOP_RUNTIME ;;
+        '')
+          if command -v docker >/dev/null 2>&1; then
+            RT=docker
+          elif command -v podman >/dev/null 2>&1; then
+            RT=podman
+          else
+            cat >&2 <<'EOF'
+diazo: error: the local server runs in a container, and neither Docker nor Podman is installed.
+
+  Install Docker:   https://docs.docker.com/engine/install/
+  (or Podman:       https://podman.io/docs/installation)
+  then run this installer again.
+EOF
+            exit 1
+          fi
+          ;;
+        *) die "DOOP_RUNTIME must be docker or podman, got '$DOOP_RUNTIME'" ;;
+      esac
+      ;;
+  esac
+}
+
+check_runtime() {
+  pick_runtime
+  case $RT in
+    apple)
+      if ! command -v container >/dev/null 2>&1; then
+        cat >&2 <<'EOF'
 diazo: error: Apple's `container` CLI is not installed.
 
   1. Download the signed installer (container-<version>-installer-signed.pkg) from
@@ -147,18 +197,36 @@ diazo: error: Apple's `container` CLI is not installed.
   2. Open it and follow the steps (it installs to /usr/local/bin/container).
   3. Run this installer again.
 EOF
-    exit 1
-  fi
+        exit 1
+      fi
+      ;;
+    docker | podman)
+      command -v "$RT" >/dev/null 2>&1 || die "$RT is not installed (DOOP_RUNTIME picked it)"
+      ;;
+  esac
   command -v curl >/dev/null 2>&1 || die "curl is required"
   command -v openssl >/dev/null 2>&1 || die "openssl is required to generate the secrets"
 }
 
+# What the runtime needs before its commands work: Apple's container services
+# (first run downloads a kernel), a reachable Docker daemon, nothing for
+# Podman (it has no daemon).
 start_system() {
-  if container system status >/dev/null 2>&1; then
-    return 0
-  fi
-  say "starting Apple container services (first run downloads a Linux kernel)"
-  container system start --enable-kernel-install
+  case $RT in
+    apple)
+      if container system status >/dev/null 2>&1; then
+        return 0
+      fi
+      say "starting Apple container services (first run downloads a Linux kernel)"
+      container system start --enable-kernel-install
+      ;;
+    docker)
+      if ! docker info >/dev/null 2>&1; then
+        die "the Docker daemon is not running: start it (sudo systemctl start docker, or open Docker Desktop) and run this again"
+      fi
+      ;;
+    podman) ;;
+  esac
 }
 
 # ---------------------------------------------------------------- files
@@ -173,7 +241,7 @@ write_env_file() {
   chmod 700 "$DOOP_HOME"
   if [ ! -f "$ENV_FILE" ]; then
     cat >"$ENV_FILE" <<EOF
-# Diazo local install. Generated on this Mac; never commit or share this file.
+# Diazo local install. Generated on this computer; never commit or share this file.
 # BETTER_AUTH_URL and PORT are set by diazo-local from DOOP_PORT.
 # Add any optional setting from .env.example here (ANTHROPIC_API_KEY, SMTP_*, ...),
 # then run: diazo-local restart
@@ -194,7 +262,7 @@ ensure_key() {
 install_helper() {
   mkdir -p "$BIN_DIR"
   target="$BIN_DIR/diazo-local"
-  if [ -f "$0" ] && grep -q '^# diazo-local: run Diazo on this Mac' "$0" 2>/dev/null; then
+  if [ -f "$0" ] && grep -q '^# diazo-local: run Diazo on this computer' "$0" 2>/dev/null; then
     cmp -s "$0" "$target" || cp "$0" "$target"
   else
     curl -fsSL "$DOOP_SCRIPT_URL" -o "$target.tmp" && mv "$target.tmp" "$target"
@@ -206,8 +274,18 @@ install_helper() {
 }
 
 # ---------------------------------------------------------------- image
-# Pull the arm64 image (native). If the registry has no arm64 build, run the
-# amd64 one under Rosetta rather than building ~2 GB of image on this Mac.
+# The architecture to pull or build, as image platforms name it.
+image_platform() {
+  case $(uname -m) in
+    x86_64 | amd64) printf 'amd64' ;;
+    arm64 | aarch64) printf 'arm64' ;;
+    *) return 1 ;;
+  esac
+}
+
+# Pull the image (native platform). Apple's container falls back to the amd64
+# one under Rosetta when the registry has no arm64 build; Docker and Podman
+# pick the platform's manifest.
 pick_image() {
   if [ "$BUILD" = 1 ]; then
     build_image
@@ -216,35 +294,68 @@ pick_image() {
     return 0
   fi
   say "pulling $DOOP_IMAGE"
-  if container image pull --platform linux/arm64 "$DOOP_IMAGE"; then
+  if [ "$RT" = apple ]; then
+    if container image pull --platform linux/arm64 "$DOOP_IMAGE"; then
+      RUN_IMAGE=$DOOP_IMAGE
+      RUN_PLATFORM=
+    elif container image pull --platform linux/amd64 "$DOOP_IMAGE"; then
+      say "no arm64 image published yet: running the amd64 one under Rosetta (slower; --build makes a native one)"
+      RUN_IMAGE=$DOOP_IMAGE
+      RUN_PLATFORM=amd64
+    else
+      die "could not pull $DOOP_IMAGE (offline?). Try again, or build it here with --build"
+    fi
+  else
+    platform=$(image_platform) || die "no Diazo image for this architecture ($(uname -m)); --build builds one here"
+    "$RT" pull --platform "linux/$platform" "$DOOP_IMAGE" ||
+      die "could not pull $DOOP_IMAGE (offline?). Try again, or build it here with --build"
     RUN_IMAGE=$DOOP_IMAGE
     RUN_PLATFORM=
-  elif container image pull --platform linux/amd64 "$DOOP_IMAGE"; then
-    say "no arm64 image published yet: running the amd64 one under Rosetta (slower; --build makes a native one)"
-    RUN_IMAGE=$DOOP_IMAGE
-    RUN_PLATFORM=amd64
-  else
-    die "could not pull $DOOP_IMAGE (offline?). Try again, or build it here with --build"
   fi
 }
 
 build_image() {
+  platform=$(image_platform) || die "cannot tell this architecture ($(uname -m))"
   src=$(mktemp -d "${TMPDIR:-/tmp}/diazo-src.XXXXXX")
   say "downloading $DOOP_REPO@$DOOP_REF"
   curl -fsSL "https://codeload.github.com/$DOOP_REPO/tar.gz/refs/heads/$DOOP_REF" | tar -xz -C "$src" --strip-components 1
   say "building $LOCAL_TAG (several minutes the first time)"
-  container build --platform linux/arm64 -t "$LOCAL_TAG" "$src"
+  case $RT in
+    apple) container build --platform "linux/$platform" -t "$LOCAL_TAG" "$src" ;;
+    *) "$RT" build --platform "linux/$platform" -t "$LOCAL_TAG" "$src" ;;
+  esac
   rm -rf "$src"
 }
 
 # ---------------------------------------------------------------- container
-exists() { container inspect "$DOOP_NAME" >/dev/null 2>&1; }
+exists() {
+  case $RT in
+    apple) container inspect "$DOOP_NAME" >/dev/null 2>&1 ;;
+    *) "$RT" inspect "$DOOP_NAME" >/dev/null 2>&1 ;;
+  esac
+}
 
 remove_container() {
   if exists; then
-    container stop "$DOOP_NAME" >/dev/null 2>&1 || true
-    container delete --force "$DOOP_NAME" >/dev/null
+    case $RT in
+      apple)
+        container stop "$DOOP_NAME" >/dev/null 2>&1 || true
+        container delete --force "$DOOP_NAME" >/dev/null
+        ;;
+      *)
+        "$RT" stop "$DOOP_NAME" >/dev/null 2>&1 || true
+        "$RT" rm -f "$DOOP_NAME" >/dev/null
+        ;;
+    esac
   fi
+}
+
+# The inspect output of a container, used to recognize this installer's own.
+inspect_container() {
+  case $RT in
+    apple) container inspect "$1" 2>/dev/null ;;
+    *) "$RT" inspect "$1" 2>/dev/null ;;
+  esac
 }
 
 # The pre-rename installer's container (named doop, on the same port and the
@@ -252,7 +363,7 @@ remove_container() {
 # so a container someone else named doop is left alone.
 remove_legacy_container() {
   [ "$DOOP_NAME" != "$LEGACY_NAME" ] || return 0
-  info=$(container inspect "$LEGACY_NAME" 2>/dev/null) || return 0
+  info=$(inspect_container "$LEGACY_NAME") || return 0
   case $info in
     *"$LEGACY_IMAGE"* | *"$LEGACY_TAG"*) ;;
     *)
@@ -261,23 +372,77 @@ remove_legacy_container() {
       ;;
   esac
   say "replacing the pre-rename container '$LEGACY_NAME'"
-  container stop "$LEGACY_NAME" >/dev/null 2>&1 || true
-  container delete --force "$LEGACY_NAME" >/dev/null
+  case $RT in
+    apple)
+      container stop "$LEGACY_NAME" >/dev/null 2>&1 || true
+      container delete --force "$LEGACY_NAME" >/dev/null
+      ;;
+    *)
+      "$RT" stop "$LEGACY_NAME" >/dev/null 2>&1 || true
+      "$RT" rm -f "$LEGACY_NAME" >/dev/null
+      ;;
+  esac
 }
 
-# The `container run` invocation, one argument per line (the tests read it).
-run_args() {
-  printf '%s\n' run --detach --name "$DOOP_NAME" \
-    --publish "127.0.0.1:$DOOP_PORT:4400" \
-    --volume "$DATA_DIR:/app/data" \
-    --env-file "$ENV_FILE" \
-    --env "BETTER_AUTH_URL=http://localhost:$DOOP_PORT" \
-    --env "TRUSTED_ORIGINS=http://127.0.0.1:$DOOP_PORT" \
-    --env PORT=4400 \
-    --env DOOP_INSTALL=local
-  if [ "$RUN_PLATFORM" = amd64 ]; then
-    printf '%s\n' --platform linux/amd64 --rosetta
+# SELinux relabels the mounted data folder when it enforces (Fedora and
+# RHEL-family): without :Z the container gets "permission denied" on /app/data.
+selinux_enforcing() {
+  if command -v getenforce >/dev/null 2>&1; then
+    [ "$(getenforce 2>/dev/null)" = Enforcing ]
+  elif [ -r /sys/fs/selinux/enforce ]; then
+    [ "$(cat /sys/fs/selinux/enforce 2>/dev/null)" = 1 ]
+  else
+    return 1
   fi
+}
+
+# The `run` invocation, one argument per line (the tests read it). Docker and
+# Podman share their flags; the container also gets a restart policy there,
+# since the systemd unit only runs at login and a crash should not idle it.
+#
+# The image runs as uid 10001, which cannot write a host-mounted data folder
+# on Linux: Docker does not remap a bind mount's ownership (Apple's
+# `container` does), and rootless Podman maps it through subuids. So the
+# container runs as the person instead — `--user` for Docker, keep-id for
+# Podman, which maps the caller's uid into the container and gives it a
+# passwd entry — with HOME at the data folder (Chromium and PGlite need a
+# writable one; a uid with no passwd entry has none).
+run_args() {
+  case $RT in
+    apple)
+      printf '%s\n' run --detach --name "$DOOP_NAME" \
+        --publish "127.0.0.1:$DOOP_PORT:4400" \
+        --volume "$DATA_DIR:/app/data" \
+        --env-file "$ENV_FILE" \
+        --env "BETTER_AUTH_URL=http://localhost:$DOOP_PORT" \
+        --env "TRUSTED_ORIGINS=http://127.0.0.1:$DOOP_PORT" \
+        --env PORT=4400 \
+        --env DOOP_INSTALL=local
+      if [ "$RUN_PLATFORM" = amd64 ]; then
+        printf '%s\n' --platform linux/amd64 --rosetta
+      fi
+      ;;
+    *)
+      volume="$DATA_DIR:/app/data"
+      if selinux_enforcing; then
+        volume="$volume:Z"
+      fi
+      printf '%s\n' run --detach --name "$DOOP_NAME" \
+        --restart unless-stopped \
+        --publish "127.0.0.1:$DOOP_PORT:4400" \
+        --volume "$volume" \
+        --env-file "$ENV_FILE" \
+        --env "BETTER_AUTH_URL=http://localhost:$DOOP_PORT" \
+        --env "TRUSTED_ORIGINS=http://127.0.0.1:$DOOP_PORT" \
+        --env PORT=4400 \
+        --env DOOP_INSTALL=local \
+        --env HOME=/app/data
+      case $RT in
+        docker) printf '%s\n' --user "$(id -u):$(id -g)" ;;
+        podman) printf '%s\n' --userns=keep-id ;;
+      esac
+      ;;
+  esac
   printf '%s\n' "$RUN_IMAGE"
 }
 
@@ -289,7 +454,52 @@ run_container() {
   # shellcheck disable=SC2046 # split on newlines on purpose
   set -- $(run_args)
   IFS=$old_ifs
-  container "$@" >/dev/null
+  case $RT in
+    apple) container "$@" >/dev/null ;;
+    *) "$RT" "$@" >/dev/null ;;
+  esac
+}
+
+logs_tail() {
+  case $RT in
+    apple) container logs -n 40 "$DOOP_NAME" ;;
+    *) "$RT" logs --tail 40 "$DOOP_NAME" ;;
+  esac
+}
+
+logs_follow() {
+  case $RT in
+    apple) container logs --follow "$DOOP_NAME" ;;
+    *) "$RT" logs -f "$DOOP_NAME" ;;
+  esac
+}
+
+start_existing() {
+  case $RT in
+    apple) container start "$DOOP_NAME" >/dev/null ;;
+    *) "$RT" start "$DOOP_NAME" >/dev/null ;;
+  esac
+}
+
+stop_container() {
+  case $RT in
+    apple) container stop "$DOOP_NAME" >/dev/null ;;
+    *) "$RT" stop "$DOOP_NAME" >/dev/null ;;
+  esac
+}
+
+list_containers() {
+  case $RT in
+    apple) container list --all ;;
+    *) "$RT" ps -a ;;
+  esac
+}
+
+remove_image() {
+  case $RT in
+    apple) container image delete "$1" >/dev/null 2>&1 || true ;;
+    *) "$RT" rmi "$1" >/dev/null 2>&1 || true ;;
+  esac
 }
 
 wait_healthy() {
@@ -304,7 +514,7 @@ wait_healthy() {
     waited=$((waited + 2))
   done
   say "Diazo did not answer within ${DOOP_HEALTH_TIMEOUT}s. Last log lines:"
-  container logs -n 40 "$DOOP_NAME" >&2 || true
+  logs_tail >&2 || true
   exit 1
 }
 
@@ -313,7 +523,7 @@ ready() {
   reboot="After a reboot, run: $BIN_DIR/diazo-local start"
   if [ -n "${DIAZO_COMMAND:-}" ]; then
     manage="$DIAZO_COMMAND [start|stop|restart|status|logs|update|open|uninstall]"
-    reboot="It starts again at login (LaunchAgent dev.bryann2k.diazo.server)."
+    reboot="It starts again at login (${DIAZO_AUTOSTART:-the login task})."
   fi
   cat <<EOF
 
@@ -328,7 +538,7 @@ EOF
 
 do_install() {
   check_platform
-  check_container
+  check_runtime
   start_system
   write_env_file
   install_helper
@@ -342,18 +552,20 @@ do_install() {
 }
 
 do_start() {
-  check_container
+  check_platform
+  check_runtime
   start_system
   exists || die "no '$DOOP_NAME' container yet: run the installer first"
-  container start "$DOOP_NAME" >/dev/null
+  start_existing
   wait_healthy
   ready
 }
 
 do_stop() {
-  check_container
+  check_platform
+  check_runtime
   if exists; then
-    container stop "$DOOP_NAME" >/dev/null
+    stop_container
     say "stopped (data kept in $DATA_DIR)"
   else
     say "no '$DOOP_NAME' container"
@@ -361,8 +573,9 @@ do_stop() {
 }
 
 do_status() {
-  check_container
-  container list --all
+  check_platform
+  check_runtime
+  list_containers
   if curl -fsS -o /dev/null --max-time 3 "http://127.0.0.1:$DOOP_PORT/healthz" 2>/dev/null; then
     say "answering on http://localhost:$DOOP_PORT"
   else
@@ -386,11 +599,12 @@ confirm() {
 }
 
 do_uninstall() {
-  check_container
+  check_platform
+  check_runtime
   remove_legacy_container
   remove_container
   for image in "$DOOP_IMAGE" "$LOCAL_TAG" "$LEGACY_IMAGE" "$LEGACY_TAG"; do
-    container image delete "$image" >/dev/null 2>&1 || true
+    remove_image "$image"
   done
   say "container and image removed"
   if [ -d "$DOOP_HOME" ]; then
@@ -418,8 +632,9 @@ main() {
       ;;
     status) do_status ;;
     logs)
-      check_container
-      container logs --follow "$DOOP_NAME"
+      check_platform
+      check_runtime
+      logs_follow
       ;;
     uninstall) do_uninstall ;;
   esac

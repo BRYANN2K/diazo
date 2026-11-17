@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "install-cross-platform",
+  "target": "install-cross-platform",
+  "extensions": [
+    "devops-delivery",
+    "release-management",
+    "cli-tooling",
+    "security-engineering",
+    "desktop-engineering"
+  ],
+  "target_before": null,
+  "created_at": "2026-11-17T11:57:57.668705+00:00",
+  "phase": "applied",
+  "updated_at": "2026-11-17T12:20:00.000000+00:00"
+}

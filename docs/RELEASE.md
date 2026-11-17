@@ -60,68 +60,66 @@ build, tests). The CI build uses `bun run --bun build` to match the `oven/bun` D
 where `node` commands run with Bun. Extension tests also build with both runtimes
 and run the Bun-built archive under Node, including its nested runtime dependencies.
 
-## Local install on a Mac (Apple `container`, this fork)
+## Local install on this machine (`install-local.sh`, this fork)
 
 `scripts/install-local.sh` (POSIX sh, served from `raw.githubusercontent.com` on
 `main` of `BRYANN2K/diazo` as `curl -fsSL … | sh`) runs one container, `diazo`, of
-`ghcr.io/bryann2k/diazo:main` with Apple's `container` CLI on `127.0.0.1:4400`.
-No `DATABASE_URL`: PGlite and uploads live in `~/.diazo/data`, mounted at `/app/data`;
-`BETTER_AUTH_SECRET` and `SECRETS_ENCRYPTION_KEYS` are generated on the Mac into
-`~/.diazo/diazo.env` (mode 600). An install from before the rename keeps `~/.doop` and its
-`doop.env` where they are (nothing is moved; `DOOP_HOME` overrides), and its old `doop` container
-is replaced only when it runs this fork's former image. Re-running it updates the image and
-recreates the container, keeping both. It copies itself to `<home>/bin/diazo-local` (start, stop,
-restart, status, logs, update, uninstall), with `doop-local` as a link to it. `.github/workflows/docker.yml` builds the image for `linux/amd64` and
-`linux/arm64` on native runners and merges the digests; without an arm64 manifest the script
-runs the amd64 image under Rosetta, and `--build` builds it locally. Tests:
-`installLocal.test.ts` (stub `container`, `uname`, `curl`; no container is started).
-The container also gets `TRUSTED_ORIGINS=http://127.0.0.1:<port>`, the origin the app opens;
-`--keep-data` makes `uninstall` keep the data folder without asking.
+`ghcr.io/bryann2k/diazo:main` on `127.0.0.1:4400`. The runtime depends on the system:
+Apple's `container` CLI on macOS (Apple silicon, macOS 26+), Docker on Linux, or Podman
+when Docker is missing (`DOOP_RUNTIME` overrides); each lives behind its own small
+functions in the script. No `DATABASE_URL`: PGlite and uploads live in `~/.diazo/data`,
+mounted at `/app/data`; `BETTER_AUTH_SECRET` and `SECRETS_ENCRYPTION_KEYS` are generated
+on the machine into `~/.diazo/diazo.env` (mode 600). An install from before the rename
+keeps `~/.doop` and its `doop.env` where they are (nothing is moved; `DOOP_HOME`
+overrides), and its old `doop` container is replaced only when it runs this fork's former
+image. Re-running it updates the image and recreates the container, keeping both. It
+copies itself to `<home>/bin/diazo-local` (start, stop, restart, status, logs, update,
+uninstall), with `doop-local` as a link to it. `.github/workflows/docker.yml` builds the
+image for `linux/amd64` and `linux/arm64` on native runners and merges the digests; on a
+Mac without an arm64 manifest the script runs the amd64 image under Rosetta, and
+`--build` builds it locally (on Linux, for an architecture with no published image).
+Tests: `installLocal.test.ts` (stub `container`, `docker`, `podman`, `uname`, `curl`; no
+container is started). The container also gets `TRUSTED_ORIGINS=http://127.0.0.1:<port>`,
+the origin the app opens, and `DOOP_INSTALL=local`; Docker and Podman get
+`--restart unless-stopped`. `--keep-data` makes `uninstall` keep the data folder without
+asking. On Windows it refuses and points to WSL2 or the remote install.
 
-### All in one (`scripts/install.sh`)
+## All-in-one install (`scripts/install.sh`, local or remote)
 
-`curl -fsSL …/scripts/install.sh | sh` runs `install-local.sh install` and then
-`install-desktop.sh` (the copies beside it in a checkout, else downloaded from `main`; never
-duplicated), after checking Apple silicon, macOS 26+ and `container` 1.0+ (otherwise the
-download link, an `--app-only` offer on a terminal, and nothing installed). Around them: a
-LaunchAgent `~/Library/LaunchAgents/dev.bryann2k.diazo.server.plist` (`launchctl bootout` then
-`bootstrap gui/<uid>`; at login `diazo autostart` starts the services and the container when
-`/healthz` does not answer; logs in `~/Library/Logs/Diazo`), the app's `server.json` set to
-`http://127.0.0.1:4400` unless another server is chosen (`--use-local` replaces it; the shell's
-identity migration keeps it), and the `diazo` command (this script in `<home>/bin/diazo`, the
-two installers in `<home>/lib`, linked into `/usr/local/bin` or `~/.local/bin`):
-`start|stop|restart|status|logs|update|open|uninstall [--purge]`. `update` downloads the three
-scripts again and updates what `<home>/install.conf` records. Flags: `--app-only`,
-`--server-only`, `--use-local`, `--version`, `--dry-run`, `--uninstall [--purge]`. The app's
-Diazo → Local Server menu (`local_server.rs`) needs desktop 0.16.0. Tests: `install.test.ts`
-(stub `container`, `launchctl`, `curl`, `uname`, `sw_vers`, `open`, `osascript`).
+`scripts/install.sh` (`curl -fsSL …/scripts/install.sh | sh`) detects the system and
+installs in one of two modes, asked on a terminal when no flag picks one (`--local`,
+`--remote`); on Windows it prints the `install-desktop.ps1` one-liner.
 
-## All-in-one Mac install (server + app, this fork)
+- **Local** (default): `install-local.sh install`, then `install-desktop.sh` (the
+  copies beside it in a checkout, else downloaded from `main`; never duplicated).
+  On macOS it first checks Apple silicon, macOS 26+ and `container` 1.0+ (otherwise the
+  download link, an `--app-only` offer on a terminal, and nothing installed); on Linux
+  it needs Docker or Podman. The server starts at login: the LaunchAgent
+  `~/Library/LaunchAgents/dev.bryann2k.diazo.server.plist` on macOS (`launchctl bootout`
+  then `bootstrap gui/<uid>`, idempotent; logs in `~/Library/Logs/Diazo/server.log`), or
+  the systemd user unit `~/.config/systemd/user/diazo.service` on Linux
+  (`systemctl --user enable`; logs in the journal). Both run `diazo autostart` at
+  login, which starts the container when `/healthz` does not answer.
+- **Remote** (`--remote <url>`): only the app. The address is normalized to an origin
+  as the app's `server.rs` does (https, or http on loopback only; `doop.design` is
+  refused), `<origin>/api/locale-config` must answer before anything is written, and
+  `server.json` gets the origin. No container, LaunchAgent or unit is touched.
 
-`scripts/install.sh` (`curl -fsSL https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts/install.sh | sh`)
-does not copy the two other installers: it runs `install-local.sh install`, then `install-desktop.sh` (the
-neighbouring copies in a checkout, else downloaded from `main`). The server needs Apple silicon, macOS 26+ and
-`container` 1.0+; otherwise the script prints the download link, offers `--app-only` on a terminal and exits
-with code 1 without installing anything.
-
-- A LaunchAgent, `~/Library/LaunchAgents/dev.bryann2k.diazo.server.plist` (`launchctl bootout`, then
-  `bootstrap gui/<uid>`, idempotent), runs `diazo autostart` at login: it starts the `container` services and
-  the container when `/healthz` does not answer. Logs go to `~/Library/Logs/Diazo/server.log`.
-- The app's `server.json` (`~/Library/Application Support/dev.bryann2k.diazo`) is set to
-  `http://127.0.0.1:4400` unless another server is already chosen (including one in a not-yet-migrated
-  `design.doop.desktop`); `--use-local` overrides it. The container gets
-  `TRUSTED_ORIGINS=http://127.0.0.1:4400`, since better-auth only trusts `BETTER_AUTH_URL` (`localhost`). The
-  shell's identity migration treats a folder holding only that `server.json` as empty and keeps the file.
-- The `diazo` command (the script itself, copied to `~/.diazo/bin/diazo`, with both installers in
-  `~/.diazo/lib` and a link in `/usr/local/bin` or `~/.local/bin`): `start`, `stop`, `restart`, `status`,
-  `logs`, `update`, `open`, `uninstall [--purge]`. `update` downloads the three scripts again and updates what
-  `~/.diazo/install.conf` lists (server, app or both). `diazo-local` / `doop-local` stay.
-- `--dry-run` prints the steps and changes nothing. `--uninstall` keeps data, secrets and the app's session;
-  `--purge` removes everything.
-- In the app: Diazo menu → Local Server (`local_server.rs`, desktop 0.16.0) and a status row in Settings →
-  General → About. It reaches users with the `desktop-v0.16.0` tag.
-- Tests: `tests/install.test.ts` (stubbed `container`, `launchctl`, `curl`, `uname`, `sw_vers`, `open`,
-  `osascript`) and the Rust tests in `local_server.rs`.
+Around them: the app's `server.json` set to `http://127.0.0.1:4400` in local mode
+unless another server is chosen (`--use-local` replaces it; the shell's identity
+migration keeps it), at `~/Library/Application Support/dev.bryann2k.diazo` on macOS
+and `${XDG_DATA_HOME:-~/.local/share}/dev.bryann2k.diazo` on Linux — and the `diazo`
+command (this script in `<home>/bin/diazo`, the two installers in `<home>/lib`, linked
+into `/usr/local/bin` or `~/.local/bin`):
+`start|stop|restart|status|logs|update|open|uninstall [--purge]`, routed per system.
+`update` downloads the three scripts again and
+updates what `<home>/install.conf` records (`mode`, `server`, `app`, `remote`).
+`--dry-run` prints the steps and changes nothing. `--uninstall` keeps data, secrets and
+the app's session; `--purge` removes everything. In the app: Diazo menu → Local Server
+(`local_server.rs`, desktop 0.16.0) and a status row in Settings → General → About; it
+reaches users with the `desktop-v0.16.0` tag. Tests: `tests/install.test.ts` (stubbed
+`container`, `docker`, `podman`, `systemctl`, `launchctl`, `curl`, `uname`, `sw_vers`,
+`open`, `osascript`) and the Rust tests in `local_server.rs`.
 
 ## Build identity and the update check (this fork)
 
@@ -173,8 +171,9 @@ in `.github/actions/setup-desktop`:
   `BRYANN2K/diazo` (created as `BRYANN2K/redoop`); its public half is `plugins.updater.pubkey` (and `PUBKEY` in
   `scripts/install-desktop.sh`). Shells installed from doop.design trust upstream's key and feed:
   they move over with one run of the curl installer below.
-- Mac install (`scripts/install-desktop.sh`, POSIX sh, piped from `raw.githubusercontent.com` on
-  `main` into `sh`, the README's Desktop app line): reads the version from the feed (or `--version`), downloads `Diazo_<v>_universal.app.tar.gz` from
+- App install (`scripts/install-desktop.sh`, POSIX sh, piped from `raw.githubusercontent.com` on
+  `main` into `sh`, the README's Desktop app line): detects the system and picks the asset.
+  On macOS it reads the version from the feed (or `--version`), downloads `Diazo_<v>_universal.app.tar.gz` from
   `desktop-v<v>`, checks it against `SHA256SUMS` (and its `.sig` with `minisign` when installed),
   quits a running app (`osascript`, by bundle id `dev.bryann2k.diazo`), swaps `Diazo.app` in `/Applications` or
   `~/Applications` through a staging folder on the same volume, clears `com.apple.quarantine` and
@@ -183,9 +182,20 @@ in `.github/actions/setup-desktop`:
   to do (`--force` reinstalls); `--uninstall` removes the app and keeps Application Support. A
   `doop.app` from this fork's earlier releases (its binary carries our updater key) is removed once
   `Diazo.app` is in place, never asked to quit (its bundle id is the official app's too); the
-  official doop app is never touched. Releases before 0.15.0 have no Diazo package.
+  official doop app is never touched. On Linux x86_64 it picks `Diazo_<v>_amd64.deb` on
+  Debian/Ubuntu-family systems, `Diazo-<v>-1.x86_64.rpm` on Fedora/RHEL/openSUSE-family ones
+  (the family from `/etc/os-release`, `DOOP_OS_RELEASE` overrides), else
+  `Diazo_<v>_amd64.AppImage` into `~/.local/bin` with the same `doop-desktop-appimage.desktop`
+  entry the app writes on first launch (`--appimage` forces it); packages install through
+  `apt`/`dpkg`, `dnf`/`zypper`/`rpm` under `sudo`, and Linux arm64 is refused with the releases
+  link (no package is published). On Windows (`MINGW*`/`MSYS*`/`CYGWIN*` uname) it prints the
+  `install-desktop.ps1` one-liner and exits; that script (PowerShell, `irm … | iex`) downloads
+  `Diazo_<v>_x64-setup.exe`, checks it against `SHA256SUMS` and runs it `/S`; `-Server <url>`
+  (or `DOOP_DESKTOP_SERVER`) writes `%APPDATA%\dev.bryann2k.diazo\server.json` for a remote
+  setup, validated and probed as `server.rs` does. Every asset is checked against the release's
+  `SHA256SUMS`. Releases before 0.15.0 have no Diazo package.
   Tests: `installDesktop.test.ts` (stub `curl`, `uname`, `pgrep`, `osascript`, `xattr`, `open`,
-  `minisign`).
+  `minisign`, `sudo`, `apt`, `dpkg`, `dnf`, `zypper`, `rpm`).
 - `workflow_dispatch` or a PR touching the workflow file itself -> same builds, uploaded as
   workflow artifacts instead (keeps the pipeline validated without cutting a release).
 - macOS signing/notarization: none in this repository, which has no `APPLE_*` secrets ([ADR 0007](adr/0007-ship-the-desktop-app-from-our-own-releases.md)). The workflow signs and notarizes automatically once the `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
