@@ -26,10 +26,7 @@ name: install-smoke
 on:
   workflow_dispatch:
   push:
-    # ci/install-smoke is in the list while this branch is the only place the
-    # workflow exists: workflow_dispatch needs the file on the default branch
-    # and a PR is not wanted yet. Drop it before the merge.
-    branches: [dev, staging, main, ci/install-smoke]
+    branches: [dev, staging, main]
     paths:
       - 'scripts/install*.sh'
       - 'scripts/install-desktop.ps1'
