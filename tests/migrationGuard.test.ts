@@ -57,9 +57,16 @@ describe('migration guards (server/db/index.ts)', () => {
   it('refuses a data dir written by a newer migration set', async () => {
     const dir = tmpDataDir()
     await seedMigrationsTable(dir, [{ hash: 'future', created_at: Date.now() + 1e12 }])
+    /* the guarded client is the one initDb opens and the guard closes —
+       watched on the prototype because initDb never publishes it.
+       Assert before restoring: mockReset inside mockRestore clears the
+       recorded calls */
+    const close = vi.spyOn(PGlite.prototype, 'close')
     await expect(initDb()).rejects.toThrow(/newer build/)
-    /* the guard closes the client it opened rather than leaking it */
-    await expect(pglite()!.query('select 1')).rejects.toThrow()
+    expect(close).toHaveBeenCalledOnce()
+    close.mockRestore()
+    /* and no half-initialized handle leaked to callers */
+    expect(pglite()).toBeUndefined()
   }, 120_000)
 
   it('warns and boots past a newer data dir when NODE_ENV=development', async () => {
@@ -83,6 +90,27 @@ describe('migration guards (server/db/index.ts)', () => {
     const backups = fs.readdirSync(path.join(dir, 'backups'))
     expect(backups.filter((n) => n.endsWith('.tar.gz')).length).toBeGreaterThan(0)
     expect(backups.filter((n) => n.endsWith('.assets.json')).length).toBeGreaterThan(0)
+  }, 240_000)
+
+  it('backs up a populated database that has no journal yet', async () => {
+    const dir = tmpDataDir()
+    /* a database created by the pre-migration boot DDL: real tables, real
+       rows, and no drizzle.__drizzle_migrations for appliedJournal to
+       count — the first journaled migration must still get its backup */
+    const pgDir = path.join(dir, 'pg')
+    fs.mkdirSync(pgDir, { recursive: true })
+    const seed = new PGlite(pgDir)
+    await seed.query('create table legacy_frames (id text primary key, html text)')
+    await seed.query("insert into legacy_frames values ('f1', '<p>real data</p>')")
+    await seed.close()
+
+    await initDb()
+    const backups = fs.readdirSync(path.join(dir, 'backups'))
+    expect(backups.filter((n) => n.endsWith('.tar.gz')).length).toBeGreaterThan(0)
+    expect(backups.filter((n) => n.endsWith('.assets.json')).length).toBeGreaterThan(0)
+    /* the legacy table survived the journaled migrations */
+    const rows = await pglite()!.query<{ id: string }>('select id from legacy_frames')
+    expect(rows.rows[0]?.id).toBe('f1')
   }, 240_000)
 
   it('boots an empty data dir without a backup — nothing to lose', async () => {

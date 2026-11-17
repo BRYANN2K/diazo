@@ -86,6 +86,18 @@ async function appliedJournal(client: PGlite): Promise<{ count: number; newest: 
   return { count: Number(rows.rows[0]?.n ?? 0), newest: Number(rows.rows[0]?.newest ?? 0) }
 }
 
+/** Whether the database holds user tables — what separates a populated
+ *  pre-journal database (created by the pre-migration boot DDL, real data
+ *  and no `drizzle.__drizzle_migrations` journal to count) from a freshly
+ *  initialized cluster where pending migrations have nothing to lose. */
+async function hasUserTables(client: PGlite): Promise<boolean> {
+  const rows = await client.query<{ n: number }>(
+    `select count(*)::int as n from pg_catalog.pg_tables
+     where schemaname not in ('pg_catalog', 'information_schema')`,
+  )
+  return Number(rows.rows[0]?.n ?? 0) > 0
+}
+
 async function guardMigrations(client: PGlite, pgDir: string): Promise<PGlite> {
   const journal = bundledJournal()
   const applied = await appliedJournal(client)
@@ -106,12 +118,14 @@ async function guardMigrations(client: PGlite, pgDir: string): Promise<PGlite> {
     }
   }
   /* a first boot applies the whole journal to an empty database: pending,
-     yes, but there is nothing to lose, so the backup can be skipped */
-  if (applied.count > 0 && journal.some((entry) => entry.when > applied.newest)) {
+     yes, but there is nothing to lose, so the backup can be skipped. A
+     populated one is backed up whether or not a journal counted it —
+     databases created before the journal existed hold real data too */
+  if (journal.some((entry) => entry.when > applied.newest) && (await hasUserTables(client))) {
     /* dumpDataDir would copy the whole data dir into memory — at boot, on
        a possibly multi-GB install, that is an OOM waiting to happen. Close
-       the client, snapshot the quiescent dir with fs.cp and stream the
-       archive, then reopen: the backup never holds more than a block */
+       the client, stream the quiescent dir into a tar.gz (server/backup.ts),
+       then reopen: the backup never holds more than a block */
     const { PGlite } = await import('@electric-sql/pglite')
     const { backupPgDir } = await import('../backup.ts')
     await client.close()
