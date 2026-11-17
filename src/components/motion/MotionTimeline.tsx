@@ -26,9 +26,13 @@ import { Button } from '../ui/button'
 import { IconButton } from '../ui/icon-button'
 import { Skeleton } from '../ui/skeleton'
 import { Pressable } from '../ui/pressable'
-import { MinusIcon, PauseIcon, PlayIcon, PlusIcon, SkipBackIcon, SparkIcon, XIcon } from '../ui/icons'
+import { DownloadIcon, MinusIcon, PauseIcon, PlayIcon, PlusIcon, SkipBackIcon, SparkIcon, XIcon } from '../ui/icons'
 import { Tooltip } from '../ui/tooltip'
 import { MotionExportDialog } from './MotionExportDialog'
+
+/** the island's height: the canvas lifts the zoom pill and the stage's fit
+ *  area above it while it is open (CanvasPage) */
+export const MOTION_TIMELINE_H = 232
 
 /** the label column of every lane, as 04 · Timeline editor draws it */
 const LABEL_W = 150
@@ -208,10 +212,10 @@ export function MotionTimeline({
       aria-label={t('motion.timelineAria')}
       data-slot="motion-timeline"
       className={cn(
-        '@container pointer-events-auto absolute z-[45] flex h-[232px] flex-col overflow-hidden rounded-panel bg-paper text-label text-ink shadow-panel animate-enter',
+        '@container pointer-events-auto absolute z-[45] flex flex-col overflow-hidden rounded-panel bg-paper text-label text-ink shadow-panel animate-enter',
         className,
       )}
-      style={style}
+      style={{ height: MOTION_TIMELINE_H, ...style }}
     >
       <header className="flex h-[42px] flex-none items-center gap-2 border-b border-line px-2.5 whitespace-nowrap">
         <IconButton
@@ -224,10 +228,16 @@ export function MotionTimeline({
         >
           {playing ? <PauseIcon className="size-3.5" /> : <PlayIcon className="size-3.5" />}
         </IconButton>
-        <IconButton size="sm" aria-label={t('motion.toStart')} disabled={!comp} onClick={() => seek(0)}>
+        <IconButton
+          size="sm"
+          aria-label={t('motion.toStart')}
+          disabled={!comp}
+          onClick={() => seek(0)}
+          className="@max-[360px]:hidden"
+        >
           <SkipBackIcon className="size-3.5" />
         </IconButton>
-        <span className="min-w-[68px] font-mono text-copy font-medium tabular-nums">
+        <span className="min-w-[68px] flex-none font-mono text-copy font-medium tabular-nums">
           {timecode(time, comp?.fps ?? NEW_COMPOSITION.fps)}
         </span>
         {comp && (
@@ -269,12 +279,17 @@ export function MotionTimeline({
             <span className="@max-[600px]:sr-only">{t('motion.animate')}</span>
           </Button>
         </Tooltip>
+        {/* Export folds to its glyph last, so the close ✕ stays in the strip
+            at the narrowest (a 1280 window with every panel open) */}
         {comp && (
-          <Button size="sm" onClick={() => setExporting(true)}>
-            {t('motion.export')}
-          </Button>
+          <Tooltip label={t('motion.export')}>
+            <Button size="sm" className="flex-none" onClick={() => setExporting(true)}>
+              <DownloadIcon className="hidden size-3.5 @max-[420px]:block" />
+              <span className="@max-[420px]:sr-only">{t('motion.export')}</span>
+            </Button>
+          </Tooltip>
         )}
-        <IconButton size="sm" aria-label={t('motion.close')} onClick={onClose}>
+        <IconButton size="sm" aria-label={t('motion.close')} onClick={onClose} className="flex-none">
           <XIcon className="size-4" />
         </IconButton>
       </header>
@@ -291,7 +306,7 @@ export function MotionTimeline({
         <div className="flex flex-1 flex-col items-start justify-center gap-2 px-5">
           <b className="font-display text-heading font-semibold">{t('motion.emptyTitle')}</b>
           <p className="max-w-[62ch] text-body text-ink-2">{t('motion.emptyBody')}</p>
-          <div className="mt-1 flex gap-2">
+          <div className="mt-1 flex flex-wrap gap-2">
             <Button variant="primary" onClick={() => void create({ ...NEW_COMPOSITION })}>
               {t('motion.create')}
             </Button>
@@ -419,7 +434,9 @@ function Lanes({
         </div>
       </div>
       <div className="grid h-[26px]" style={{ gridTemplateColumns: `${LABEL_W}px 1fr` }}>
-        <span className={head}>{t('motion.shots')}</span>
+        <span className={head}>
+          <span className="truncate">{t('motion.shots')}</span>
+        </span>
         <div className={lane}>
           {keys.slice(0, -1).map((k, i) => {
             const next = keys[i + 1] ?? comp.duration
@@ -437,7 +454,9 @@ function Lanes({
       </div>
       {elementTracks.map((track) => (
         <div key={track.id} className="grid h-[26px]" style={{ gridTemplateColumns: `${LABEL_W}px 1fr` }}>
-          <span className={head}>{track.name ?? `${t('motion.element')} ${track.elementId ?? ''}`}</span>
+          <span className={head} title={track.name ?? undefined}>
+            <span className="truncate">{track.name ?? `${t('motion.element')} ${track.elementId ?? ''}`}</span>
+          </span>
           <div className={lane}>
             {(track.keyframes ?? []).map((k) => (
               <span

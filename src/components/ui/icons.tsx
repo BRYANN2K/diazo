@@ -120,6 +120,7 @@ import {
   SquareDashed,
   Shield,
   Sparkles,
+  Swords,
   Square,
   Sun,
   Trash2,
@@ -254,6 +255,8 @@ export const PulseIcon = icon(Activity)
 export const ReplyIcon = icon(Reply)
 export const BellIcon = icon(Bell)
 export const SparkIcon = icon(Sparkles)
+/** the model duel: two models compared on one brief */
+export const DuelIcon = icon(Swords)
 export const SearchIcon = icon(Search)
 export const PlusIcon = icon(Plus)
 export const CollapseAllIcon = icon(ChevronsDownUp)

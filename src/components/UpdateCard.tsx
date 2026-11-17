@@ -15,9 +15,13 @@ export function UpdateCard() {
   /* the live region stays mounted so the card is announced when it appears,
      without taking focus from whatever the person is doing */
   return (
-    /* bottom right, just above the canvas's zoom pill (14px in, 36px tall),
-       so it never covers the zoom or the getting-started card on the left */
-    <div aria-live="polite" className="fixed right-3.5 bottom-[58px] z-[80] flex flex-col items-end gap-2">
+    /* bottom right, one toast's height above where toasts sit: on the canvas
+       --float-right / --float-bottom (CanvasPage) keep both clear of the open
+       panels and the zoom pill, elsewhere they sit in the window's corner */
+    <div
+      aria-live="polite"
+      className="fixed right-[var(--float-right,14px)] bottom-[calc(var(--float-bottom,0px)+58px)] z-[80] flex flex-col items-end gap-2"
+    >
       {/* the server's own "newer build" card (admins, a local install), in a
           browser and in the app alike; above the shell's when both show */}
       <ServerUpdateCard />

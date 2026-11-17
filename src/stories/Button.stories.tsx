@@ -23,7 +23,7 @@ const meta = {
         'inverse',
       ],
     },
-    size: { control: 'select', options: ['pill', 'sm', 'md', 'lg', 'bar', 'icon', 'icon-sm', 'inline'] },
+    size: { control: 'select', options: ['pill', 'sm', 'md', 'lg', 'bar', 'icon', 'icon-sm', 'inline', 'auto'] },
     block: { control: 'boolean' },
     disabled: { control: 'boolean' },
   },
@@ -102,6 +102,23 @@ export const InlineActions: Story = {
       </div>
       <Button variant="link" size="inline" className="self-start text-accent-ink">
         Codex &amp; other clients →
+      </Button>
+    </div>
+  ),
+}
+
+/** `size="auto"`: a button that holds more than a label grows with its lines instead of
+ *  spilling out of a fixed height, and wraps and shrinks inside a narrow container. */
+export const MultiLine: Story = {
+  name: 'Multi-line (auto)',
+  render: () => (
+    <div className="flex max-w-[280px] flex-col gap-3">
+      <Button size="auto">A short label</Button>
+      <Button size="auto" className="flex-col gap-0.5">
+        <span className="font-medium text-ink">Saved to Memory</span>
+        <span className="font-normal text-label text-ink-soft">
+          Primary actions use the ink button; brand blue stays for selection and focus only.
+        </span>
       </Button>
     </div>
   ),

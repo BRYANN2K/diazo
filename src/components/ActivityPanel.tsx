@@ -52,7 +52,7 @@ import { useOpenThreadCount } from '../lib/comments'
 import { useT } from '@/lib/i18n'
 import { useFitLevel } from '@/hooks/use-fit-level'
 
-const emptyNote = 'px-4 py-6 text-center text-[12px] text-ink-faint'
+const emptyNote = 'px-4 py-6 text-center text-label text-ink-faint'
 
 /* Radix mounts a tab's content on switch, so this plays once per switch */
 const tabEnter =
@@ -287,11 +287,11 @@ function RecentTasks() {
 
   return (
     <section aria-label={t('panels.activityRecentTasks')} className="flex flex-none flex-col pt-1.5 pb-1">
-      <h3 className="flex h-7 flex-none items-center px-3 text-[11.5px] font-normal text-ink-faint">
+      <h3 className="flex h-7 flex-none items-center px-3 text-caption font-normal text-ink-faint">
         {t('panels.activityRecentTasks')}
       </h3>
       {claimed.length === 0 ? (
-        <p className="px-3 pb-2 text-[12px] leading-[1.45] text-ink-faint">{t('panels.activityNoTasks')}</p>
+        <p className="px-3 pb-2 text-label leading-[1.45] text-ink-faint">{t('panels.activityNoTasks')}</p>
       ) : all ? (
         <>
           {working.length > 0 && <TaskGroup label={t('panels.activityWorkingOn')} tasks={working} />}
@@ -303,7 +303,7 @@ function RecentTasks() {
       {claimed.length > RECENT_SHOWN && (
         <Button
           variant="bare"
-          className="mx-1.5 mt-0.5 h-[26px] flex-none justify-start gap-1.5 self-start rounded-[7px] px-1.5 text-[11.5px] font-normal text-ink-soft"
+          className="mx-1.5 mt-0.5 h-[26px] flex-none justify-start gap-1.5 self-start rounded-row px-1.5 text-caption font-normal text-ink-soft"
           aria-expanded={all}
           onClick={() => setAll((v) => !v)}
         >
@@ -319,7 +319,7 @@ function RecentTasks() {
 function TaskGroup({ label, tasks }: { label: string; tasks: AgentTask[] }) {
   return (
     <>
-      <h4 className="flex h-6 flex-none items-center px-3 pt-1 text-[11px] font-normal text-ink-faint">{label}</h4>
+      <h4 className="flex h-6 flex-none items-center px-3 pt-1 text-caption font-normal text-ink-faint">{label}</h4>
       {tasks.map((t) => (
         <RecentTaskRow key={t.id} task={t} />
       ))}
@@ -369,7 +369,7 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
         }
       }}
       className={cn(
-        'mx-1.5 grid animate-[chip-in_0.25s_ease] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-[2px] rounded-[8px] px-1.5 py-2 text-[12px] leading-[18px]',
+        'mx-1.5 grid animate-[chip-in_0.25s_ease] grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-[2px] rounded-control px-1.5 py-2 text-label leading-[18px]',
         frameId && 'cursor-pointer hover:bg-sub focus-visible:bg-sub focus-visible:outline-none',
       )}
     >
@@ -382,7 +382,7 @@ function RecentTaskRow({ task }: { task: AgentTask }) {
           <em className="truncate not-italic text-ink-faint">{t('panels.activityFor', { name: task.owner })}</em>
         )}
       </span>
-      <span className="text-[11px] text-ink-faint tabular-nums">{taskTime(task)}</span>
+      <span className="text-caption text-ink-faint tabular-nums">{taskTime(task)}</span>
       <span className="col-span-2 flex min-w-0 items-center gap-[7px] pl-[22px] text-ink-soft">
         <TaskMark task={task} />
         {/* one line, with the whole text on hover: a card's status is its
@@ -461,18 +461,18 @@ function ActivityList() {
     <PanelBody className="py-2">
       {activity.length === 0 && <div className={emptyNote}>{t('panels.activityEmpty')}</div>}
       {activity.map((a) => (
-        <div key={a.id} className="flex animate-[chip-in_0.25s_ease] gap-2.5 px-3.5 py-2 text-[12px] leading-[1.45]">
+        <div key={a.id} className="flex animate-[chip-in_0.25s_ease] gap-2.5 px-3.5 py-2 text-label leading-[1.45]">
           {/* anything an agent does wears the agent orange, people their own colour */}
           <Dot className="mt-[5px]" style={{ background: a.actorKind === 'agent' ? 'var(--agent)' : a.actorColor }} />
           <div className="min-w-0">
             <div>
               <span className="font-medium">
                 {a.actorName}
-                <span className="ml-[5px] text-[11px] font-normal text-ink-faint">{a.actorKind}</span>
+                <span className="ml-[5px] text-caption font-normal text-ink-faint">{a.actorKind}</span>
               </span>{' '}
-              <span className="text-ink-soft">{a.message}</span>
+              <span className="break-words text-ink-soft">{a.message}</span>
             </div>
-            <div className="mt-0.5 text-[11px] text-ink-faint">{timeAgo(a.at)}</div>
+            <div className="mt-0.5 text-caption text-ink-faint">{timeAgo(a.at)}</div>
           </div>
         </div>
       ))}

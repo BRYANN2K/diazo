@@ -54,6 +54,10 @@ const buttonVariants = cva(
            "Select page", "Codex & other clients →"): no box, no fill, the
            caption step. Pair it with `bare` or `link`. */
         inline: 'h-auto gap-1 rounded-tag p-0 text-caption hover:bg-transparent active:scale-100',
+        /* a button holding more than a label (a title over a line of text, a
+           sentence): at least md's height, it grows with its lines, wraps,
+           starts its text on the left and gives way in a narrow row */
+        auto: 'h-auto min-h-[30px] shrink items-start justify-start whitespace-normal px-3 py-2 text-left text-body',
       },
       /* stretches to the container — the mobile default for primary actions */
       block: { true: 'w-full justify-center', false: '' },

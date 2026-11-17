@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+  </head>
+  <body>
+    <!-- the canvas chrome at its narrowest, in Portuguese: the Agents panel's
+         chat at the 260px it resizes down to, and a toast stack whose front
+         toast runs to two lines -->
+    <div id="panel" style="width: 260px; height: 640px; display: flex; flex-direction: column"></div>
+    <div id="toasts"></div>
+    <script type="module">
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { setLocale } from '/src/lib/i18n/index.ts'
+      import { useStore } from '/src/lib/store.ts'
+      import { ChatPanel } from '/src/components/ChatPanel.tsx'
+      import { Toast, ToastStack } from '/src/components/ui/toast.tsx'
+      import { TooltipProvider } from '/src/components/ui/tooltip.tsx'
+      import '/src/styles.css'
+
+      setLocale('pt-BR')
+      useStore.setState({
+        canvas: { id: 'c', role: 'edit', pages: [{ id: 'p', name: 'Página' }], frames: [] },
+        chat: [
+          {
+            id: 'm1',
+            canvasId: 'c',
+            from: 'Diazo',
+            agent: true,
+            text: 'Eis o que eu faria.',
+            at: 2,
+            plan: {
+              summary: 'Uma landing page e uma tabela de preços.',
+              screens: [{ name: 'Landing', width: 1280, height: 800, outline: 'hero, recursos, rodapé' }],
+              status: 'proposed',
+            },
+          },
+        ],
+      })
+      const h = React.createElement
+      createRoot(document.getElementById('panel')).render(h(TooltipProvider, null, h(ChatPanel, { canvasId: 'c' })))
+      createRoot(document.getElementById('toasts')).render(
+        h(
+          ToastStack,
+          null,
+          h(Toast, { key: 'old' }, 'Link copiado'),
+          h(
+            Toast,
+            { key: 'new' },
+            'Decisão salva na memória: botões primários usam a tinta, o azul fica para seleção e foco.',
+          ),
+        ),
+      )
+    </script>
+  </body>
+</html>
