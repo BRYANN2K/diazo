@@ -1,5 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import http from 'node:http'
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import type Anthropic from '@anthropic-ai/sdk'
 import {
@@ -188,6 +191,54 @@ const toolCall = {
   ],
 }
 
+/* a Messages-API turn that ends in the tool call, as an Anthropic-compatible
+   endpoint streams it */
+const anthropicToolCall = (_req: Seen, res: http.ServerResponse) => {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+  const events: [string, unknown][] = [
+    [
+      'message_start',
+      {
+        type: 'message_start',
+        message: {
+          id: 'msg_1',
+          type: 'message',
+          role: 'assistant',
+          model: 'glm-5',
+          content: [],
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { input_tokens: 1, output_tokens: 0 },
+        },
+      },
+    ],
+    [
+      'content_block_start',
+      {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'tool_use', id: 'toolu_1', name: 'report_ready', input: {} },
+      },
+    ],
+    [
+      'content_block_delta',
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } },
+    ],
+    ['content_block_stop', { type: 'content_block_stop', index: 0 }],
+    [
+      'message_delta',
+      {
+        type: 'message_delta',
+        delta: { stop_reason: 'tool_use', stop_sequence: null },
+        usage: { output_tokens: 3 },
+      },
+    ],
+    ['message_stop', { type: 'message_stop' }],
+  ]
+  for (const [event, data] of events) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+  res.end()
+}
+
 const TOOL: Anthropic.Tool = { name: 'report_ready', input_schema: { type: 'object', properties: {} } }
 
 const screenshot: Anthropic.MessageParam = {
@@ -246,51 +297,7 @@ describe('a custom provider’s turns', () => {
   })
 
   it('speaks the Messages API to an Anthropic-compatible endpoint, keyless', async () => {
-    reply = (_req, res) => {
-      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
-      const events: [string, unknown][] = [
-        [
-          'message_start',
-          {
-            type: 'message_start',
-            message: {
-              id: 'msg_1',
-              type: 'message',
-              role: 'assistant',
-              model: 'glm-5',
-              content: [],
-              stop_reason: null,
-              stop_sequence: null,
-              usage: { input_tokens: 1, output_tokens: 0 },
-            },
-          },
-        ],
-        [
-          'content_block_start',
-          {
-            type: 'content_block_start',
-            index: 0,
-            content_block: { type: 'tool_use', id: 'toolu_1', name: 'report_ready', input: {} },
-          },
-        ],
-        [
-          'content_block_delta',
-          { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } },
-        ],
-        ['content_block_stop', { type: 'content_block_stop', index: 0 }],
-        [
-          'message_delta',
-          {
-            type: 'message_delta',
-            delta: { stop_reason: 'tool_use', stop_sequence: null },
-            usage: { output_tokens: 3 },
-          },
-        ],
-        ['message_stop', { type: 'message_stop' }],
-      ]
-      for (const [event, data] of events) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-      res.end()
-    }
+    reply = anthropicToolCall
     const run = customTurn(
       {
         config: { name: 'Gateway', apiType: 'anthropic', baseUrl: `${base}/anthropic`, models: [] },
@@ -388,6 +395,65 @@ describe('a custom provider’s turns', () => {
     }
     await expect(customProviderFetch(`${base}/v1/models`)).rejects.toThrow()
     expect(seen).toHaveLength(1)
+  })
+})
+
+describe('a server with Anthropic credentials of its own', () => {
+  afterEach(() => {
+    unstubAllEnvs()
+    seen.length = 0
+  })
+
+  /* the machine (or the shell that launched the server) has Claude
+     configured: an exported token, custom headers, and a user profile on
+     disk whose cached credentials the SDK's default chain would pick up */
+  async function stubServerAnthropicEnv(): Promise<void> {
+    stubEnv('DOOP_CUSTOM_PROVIDER_PRIVATE_HOSTS', 'true')
+    stubEnv('ANTHROPIC_AUTH_TOKEN', 'server-oauth-token')
+    stubEnv('ANTHROPIC_CUSTOM_HEADERS', 'X-Server-Header: server\nAuthorization: Bearer server-header-token')
+    const dir = await mkdtemp(join(tmpdir(), 'anthropic-config-'))
+    await mkdir(join(dir, 'configs'))
+    await mkdir(join(dir, 'credentials'))
+    await writeFile(join(dir, 'configs', 'default.json'), JSON.stringify({ authentication: { type: 'user_oauth' } }))
+    /* fresh, so the chain would serve it without a refresh — and it must be
+       owner-only, or the SDK rejects the file before even reading it */
+    await writeFile(
+      join(dir, 'credentials', 'default.json'),
+      JSON.stringify({ access_token: 'profile-token', expires_at: 4_000_000_000 }),
+      { mode: 0o600 },
+    )
+    stubEnv('ANTHROPIC_CONFIG_DIR', dir)
+  }
+
+  it('keyless: nothing of the server’s reaches the custom endpoint', async () => {
+    reply = anthropicToolCall
+    await stubServerAnthropicEnv()
+    const run = customTurn(
+      { config: { name: 'Gateway', apiType: 'anthropic', baseUrl: `${base}/anthropic`, models: [] } },
+      { id: 'glm-5', vision: true },
+    )
+    await run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 1000 })
+    const headers = seen[0]!.headers
+    expect(headers['x-api-key']).toBeUndefined()
+    expect(headers.authorization).toBeUndefined()
+    expect(headers['x-server-header']).toBeUndefined()
+  })
+
+  it('keyed: only the person’s key reaches the custom endpoint', async () => {
+    reply = anthropicToolCall
+    await stubServerAnthropicEnv()
+    const run = customTurn(
+      {
+        config: { name: 'Gateway', apiType: 'anthropic', baseUrl: `${base}/anthropic`, models: [] },
+        apiKey: 'sk-person',
+      },
+      { id: 'glm-5', vision: true },
+    )
+    await run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 1000 })
+    const headers = seen[0]!.headers
+    expect(headers['x-api-key']).toBe('sk-person')
+    expect(headers.authorization).toBeUndefined()
+    expect(headers['x-server-header']).toBeUndefined()
   })
 })
 
