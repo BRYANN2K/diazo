@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { PGlite } from '@electric-sql/pglite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { backupNow } from '../server/backup.ts'
+import { backupNow, startDailyBackups } from '../server/backup.ts'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
 
 /**
@@ -24,6 +24,19 @@ function tmpDataDir(): string {
 }
 
 const fakeClient = (payload = 'pgdump') => ({ dumpDataDir: async () => new Blob([payload]) }) as unknown as PGlite
+
+/** Poll until `probe` yields — startDailyBackups' boot check is
+ *  fire-and-forget, and probe errors (a dir that does not exist yet)
+ *  just mean "not yet". */
+async function waitFor<T>(probe: () => Promise<T | undefined>, ms = 10_000): Promise<T> {
+  const deadline = Date.now() + ms
+  for (;;) {
+    const found = await probe().catch(() => undefined)
+    if (found !== undefined) return found
+    if (Date.now() > deadline) throw new Error(`waitFor timed out after ${ms}ms`)
+    await new Promise((r) => setTimeout(r, 25))
+  }
+}
 
 afterEach(async () => {
   unstubAllEnvs()
@@ -92,5 +105,45 @@ describe('server/backup.ts', () => {
     blob.arrayBuffer = () => Promise.reject(new Error('the dump must be streamed, not buffered'))
     const { archive } = await backupNow({ dumpDataDir: async () => blob } as unknown as PGlite, 'daily')
     expect(await fs.readFile(archive, 'utf8')).toBe('PGDATA')
+  })
+
+  it('backs up at boot when the newest archive is older than a day', async () => {
+    const data = tmpDataDir()
+    const backups = path.join(data, 'backups')
+    await fs.mkdir(backups, { recursive: true })
+    const stale = path.join(backups, 'pg-2020-01-01T00-00-00-000Z.tar.gz')
+    await fs.writeFile(stale, 'old')
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60_000)
+    await fs.utimes(stale, twoDaysAgo, twoDaysAgo)
+
+    startDailyBackups(fakeClient('FRESH'))
+
+    const name = await waitFor(async () =>
+      (await fs.readdir(backups)).find((n) => n.endsWith('.tar.gz') && !n.startsWith('pg-2020-01-01')),
+    )
+    expect(await fs.readFile(path.join(backups, name), 'utf8')).toBe('FRESH')
+  })
+
+  it('backs up at boot when no archive exists yet', async () => {
+    const data = tmpDataDir()
+    startDailyBackups(fakeClient('FIRST'))
+    const name = await waitFor(async () =>
+      (await fs.readdir(path.join(data, 'backups'))).find((n) => n.endsWith('.tar.gz')),
+    )
+    expect(name).toBeTruthy()
+  })
+
+  it('skips the boot backup while the newest archive is fresh', async () => {
+    const data = tmpDataDir()
+    const backups = path.join(data, 'backups')
+    await fs.mkdir(backups, { recursive: true })
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    await fs.writeFile(path.join(backups, `pg-${stamp}.tar.gz`), 'recent')
+
+    startDailyBackups(fakeClient('SHOULD-NOT-APPEAR'))
+    await new Promise((r) => setTimeout(r, 300))
+
+    const dumps = (await fs.readdir(backups)).filter((n) => n.endsWith('.tar.gz'))
+    expect(dumps).toEqual([`pg-${stamp}.tar.gz`])
   })
 })

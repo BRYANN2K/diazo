@@ -12,7 +12,8 @@ import { backupsDir, dataDir } from './paths.ts'
  * gzipped tar (`pg-<date>.tar.gz`) plus a manifest of the on-disk asset
  * files the dump does not contain (`pg-<date>.assets.json`). Written before
  * a boot applies pending migrations — a bad migration must never be
- * unrecoverable — and once a day while the server runs. The KEEP newest
+ * unrecoverable — and once a day while the server runs, catching up at
+ * boot when the newest archive is already a day old. The KEEP newest
  * pairs are kept, the rest pruned.
  *
  * PGlite-only by construction (a managed Postgres has its own backup story),
@@ -47,12 +48,31 @@ export async function backupNow(client: PGlite, reason: string): Promise<{ archi
   return { archive, manifest }
 }
 
-/** A backup a day while running; the boot-time call site covers restarts. */
+/** A backup a day while running — and one right away when the newest
+ *  archive is already a day old: an app opened for a workday never
+ *  reaches a bare 24 h interval, so without the catch-up a desktop
+ *  install's backups would only ever happen on migrating boots. */
 export function startDailyBackups(client: PGlite): void {
+  void backupOverdue(client).catch((error: unknown) => console.error('[backup] boot backup failed', error))
   const timer = setInterval(() => {
     backupNow(client, 'daily').catch((error: unknown) => console.error('[backup] daily backup failed', error))
   }, DAY_MS)
   timer.unref()
+}
+
+/** Back up when there is no archive yet, or the newest is older than a day. */
+async function backupOverdue(client: PGlite): Promise<void> {
+  let newest = 0
+  try {
+    for (const name of await fs.readdir(backupsDir())) {
+      if (!/^pg-.*\.tar\.gz$/.test(name)) continue
+      const mtime = (await fs.stat(path.join(backupsDir(), name))).mtimeMs
+      if (mtime > newest) newest = mtime
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
+  if (Date.now() - newest > DAY_MS) await backupNow(client, 'daily')
 }
 
 async function listAssets(dir: string): Promise<AssetEntry[]> {
