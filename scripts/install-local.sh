@@ -384,9 +384,29 @@ remove_legacy_container() {
   esac
 }
 
+# SELinux relabels the mounted data folder when it enforces (Fedora and
+# RHEL-family): without :Z the container gets "permission denied" on /app/data.
+selinux_enforcing() {
+  if command -v getenforce >/dev/null 2>&1; then
+    [ "$(getenforce 2>/dev/null)" = Enforcing ]
+  elif [ -r /sys/fs/selinux/enforce ]; then
+    [ "$(cat /sys/fs/selinux/enforce 2>/dev/null)" = 1 ]
+  else
+    return 1
+  fi
+}
+
 # The `run` invocation, one argument per line (the tests read it). Docker and
 # Podman share their flags; the container also gets a restart policy there,
 # since the systemd unit only runs at login and a crash should not idle it.
+#
+# The image runs as uid 10001, which cannot write a host-mounted data folder
+# on Linux: Docker does not remap a bind mount's ownership (Apple's
+# `container` does), and rootless Podman maps it through subuids. So the
+# container runs as the person instead — `--user` for Docker, keep-id for
+# Podman, which maps the caller's uid into the container and gives it a
+# passwd entry — with HOME at the data folder (Chromium and PGlite need a
+# writable one; a uid with no passwd entry has none).
 run_args() {
   case $RT in
     apple)
@@ -403,15 +423,24 @@ run_args() {
       fi
       ;;
     *)
+      volume="$DATA_DIR:/app/data"
+      if selinux_enforcing; then
+        volume="$volume:Z"
+      fi
       printf '%s\n' run --detach --name "$DOOP_NAME" \
         --restart unless-stopped \
         --publish "127.0.0.1:$DOOP_PORT:4400" \
-        --volume "$DATA_DIR:/app/data" \
+        --volume "$volume" \
         --env-file "$ENV_FILE" \
         --env "BETTER_AUTH_URL=http://localhost:$DOOP_PORT" \
         --env "TRUSTED_ORIGINS=http://127.0.0.1:$DOOP_PORT" \
         --env PORT=4400 \
-        --env DOOP_INSTALL=local
+        --env DOOP_INSTALL=local \
+        --env HOME=/app/data
+      case $RT in
+        docker) printf '%s\n' --user "$(id -u):$(id -g)" ;;
+        podman) printf '%s\n' --userns=keep-id ;;
+      esac
       ;;
   esac
   printf '%s\n' "$RUN_IMAGE"

@@ -13,7 +13,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /* scripts/install-local.sh against stub `uname`, `sw_vers`, `container`,
    `docker`, `podman` and `curl` on PATH: the whole flow runs on any CI
@@ -21,6 +21,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
    calls.log. */
 
 const SCRIPT = path.resolve(import.meta.dirname, '..', 'scripts', 'install-local.sh')
+
+/* real installer runs: a machine with slow exec needs more than the 5s default */
+vi.setConfig({ testTimeout: 60000 })
 
 let root: string
 let home: string
@@ -71,6 +74,8 @@ beforeEach(() => {
   stub('uname', 'case $1 in -s) echo "${STUB_OS:-Darwin}" ;; -m) echo "${STUB_ARCH:-arm64}" ;; esac')
   stub('sw_vers', 'echo 26.0')
   stub('curl', 'exit 0')
+  /* the health wait's own sleep: DOOP_HEALTH_TIMEOUT already bounds it */
+  stub('sleep', 'exit 0')
   stub(
     'container',
     `echo "$*" >> "$STUB_DIR/calls.log"
@@ -274,6 +279,45 @@ describe('install-local.sh on Linux', () => {
     expect(line.endsWith('ghcr.io/bryann2k/diazo:main')).toBe(true)
     expect(statSync(envFile()).mode & 0o777).toBe(0o600)
     expect(out).toMatch(/http:\/\/localhost:4400/)
+  })
+
+  it('runs as the caller under Docker so the mounted data is writable, relabelled under SELinux', async () => {
+    /* the image's uid 10001 cannot write the person's data folder: the
+       container gets the caller's uid instead, and HOME where it can write */
+    const uid = spawnSync('id', ['-u']).stdout.toString().trim()
+    const gid = spawnSync('id', ['-g']).stdout.toString().trim()
+    const { code } = await run([], { STUB_OS: 'Linux', STUB_ARCH: 'x86_64' })
+    expect(code).toBe(0)
+    const line = dockerRunLine()
+    expect(line).toContain(`--user ${uid}:${gid}`)
+    expect(line).toContain('--env HOME=/app/data')
+    expect(line).not.toContain('--userns')
+    expect(line).toContain(`--volume ${home}/.diazo/data:/app/data`)
+    expect(line).not.toContain('/app/data:Z')
+
+    /* SELinux enforcing (Fedora/RHEL): without :Z the mount is denied inside */
+    stub('getenforce', 'echo Enforcing')
+    writeFileSync(path.join(root, 'calls.log'), '')
+    expect((await run([], { STUB_OS: 'Linux' })).code).toBe(0)
+    expect(dockerRunLine()).toContain(`--volume ${home}/.diazo/data:/app/data:Z`)
+
+    /* but not when it only permits */
+    stub('getenforce', 'echo Permissive')
+    writeFileSync(path.join(root, 'calls.log'), '')
+    expect((await run([], { STUB_OS: 'Linux' })).code).toBe(0)
+    expect(dockerRunLine()).not.toContain('/app/data:Z')
+  })
+
+  it('maps the caller into the container under Podman (keep-id), not --user', async () => {
+    rmSync(path.join(bin, 'docker'))
+    expect((await run([], { STUB_OS: 'Linux', STUB_ARCH: 'x86_64' })).code).toBe(0)
+    const line =
+      calls()
+        .split('\n')
+        .find((l) => l.startsWith('podman run ')) ?? ''
+    expect(line).toContain('--userns=keep-id')
+    expect(line).toContain('--env HOME=/app/data')
+    expect(line).not.toMatch(/--user \d/)
   })
 
   it('pulls the arm64 image on arm64 Linux', async () => {
