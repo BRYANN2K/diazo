@@ -138,21 +138,28 @@ upstream pull requests it merged ahead of upstream. Resync notes are in
   its designed frame (matched by route mapping or name), scored as a drift comparison, and
   rewritten in place on the next delivery. Payload and CI recipe in
   [docs/built-page.md](built-page.md).
-- **All-in-one Mac install** — `scripts/install.sh` (`curl … | sh`) sets up the local server
-  (through `install-local.sh`), a LaunchAgent that starts it at login (logs in
-  `~/Library/Logs/Diazo`), `Diazo.app` (through `install-desktop.sh`) pointed at
-  `http://127.0.0.1:4400`, and the `diazo` command (start, stop, restart, status, logs, update,
-  open, uninstall); `--app-only`, `--server-only`, `--use-local`, `--dry-run`. The app's
-  Diazo → Local Server menu (macOS, desktop 0.16) shows the server's status and starts, stops or
-  restarts it, opens its logs and switches the app to it; Settings → About shows the same status
-  ([Install](../README.md#install)).
-- **Local install on a Mac** — one `curl … | sh` runs Diazo in a single Apple `container` on
+- **All-in-one install, local or remote** — `scripts/install.sh` (`curl … | sh`) detects the
+  system and offers two modes. Local (the default, or a one-question prompt) sets up the server
+  on this machine — Apple's `container` on macOS (a LaunchAgent starts it at login), Docker or
+  Podman on Linux (a systemd user unit instead) — and the app pointed at
+  `http://127.0.0.1:4400`. `--remote <url>` installs only the app and writes its `server.json`
+  after checking the address the way the app does (https, or http on this computer) and that
+  `/api/locale-config` answers; nothing runs on the machine. Both install the `diazo` command
+  (start, stop, restart, status, logs, update, open, uninstall); `--app-only`, `--server-only`,
+  `--use-local`, `--dry-run`. The app's Diazo → Local Server menu (macOS, desktop 0.16) shows the
+  server's status and starts, stops or restarts it, opens its logs and switches the app to it;
+  Settings → About shows the same status ([Install](../README.md#install)).
+- **Local install on a Mac or Linux box** — one `curl … | sh` runs Diazo in a single container on
   `127.0.0.1:4400`, with PGlite and uploads in `~/.diazo/data` (an older `~/.doop` is kept in
-  place) and secrets generated on the Mac ([Install](../README.md#install)).
-- **Desktop app from this repo** — `scripts/install-desktop.sh` (`curl … | sh`) installs `Diazo.app`
-  from a `desktop-v*` release of this repo, checked against its SHA-256, with no Apple
-  signing needed; the app then updates itself from the same releases, signed with this fork's own
-  updater key ([Desktop app](../README.md#desktop-app-mac)).
+  place) and secrets generated on the machine; Apple's `container` on macOS, Docker or Podman on
+  Linux ([Install](../README.md#install)).
+- **Desktop app from this repo** — `scripts/install-desktop.sh` (`curl … | sh`) installs the app
+  from a `desktop-v*` release of this repo, checked against its SHA-256: `Diazo.app` on macOS
+  with no Apple signing needed, the `.deb` or `.rpm` package on Debian/Fedora-family Linux, the
+  AppImage elsewhere (`--appimage` forces it); on Windows
+  `scripts/install-desktop.ps1` (`irm … | iex`) runs the setup silently and can write the server
+  choice (`-Server`, or `DOOP_DESKTOP_SERVER`). The app then updates itself from the same
+  releases, signed with this fork's own updater key ([Desktop app](../README.md#desktop-app)).
 - **Usage meter** — every model transport reports its tokens, each resident run lands in an
   `agent_runs` ledger with its time and cost (the provider's figure, else a per-model price
   table), and a Usage tab shows the totals per run and per model. Agents call `get_usage`.

@@ -15,9 +15,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-/* scripts/install-local.sh against stub `uname`, `sw_vers`, `container` and
-   `curl` on PATH: the whole flow runs on any CI runner, and no real container
-   is ever started. The stub `container` logs each call to calls.log. */
+/* scripts/install-local.sh against stub `uname`, `sw_vers`, `container`,
+   `docker`, `podman` and `curl` on PATH: the whole flow runs on any CI
+   runner, and no real container is ever started. The stubs log each call to
+   calls.log. */
 
 const SCRIPT = path.resolve(import.meta.dirname, '..', 'scripts', 'install-local.sh')
 
@@ -82,6 +83,31 @@ case "$1 $2" in
   "delete --force") case "$3" in doop) rm -f "$STUB_DIR/legacy" ;; *) rm -f "$STUB_DIR/exists" ;; esac ;;
 esac`,
   )
+  /* the Docker/Podman CLI of a Linux install; STUB_RT tells them apart in
+     calls.log so a test can check which runtime answered */
+  stub(
+    'docker',
+    `echo "docker $*" >> "$STUB_DIR/calls.log"
+case "$1" in
+  info) exit 0 ;;
+  pull) exit 0 ;;
+  inspect) [ -f "$STUB_DIR/exists" ] ;;
+  run) touch "$STUB_DIR/exists" ;;
+  "rm") rm -f "$STUB_DIR/exists" ;;
+  ps) exit 0 ;;
+esac`,
+  )
+  stub(
+    'podman',
+    `echo "podman $*" >> "$STUB_DIR/calls.log"
+case "$1" in
+  pull) exit 0 ;;
+  inspect) [ -f "$STUB_DIR/exists" ] ;;
+  run) touch "$STUB_DIR/exists" ;;
+  "rm") rm -f "$STUB_DIR/exists" ;;
+  ps) exit 0 ;;
+esac`,
+  )
 })
 
 afterEach(() => rmSync(root, { recursive: true, force: true }))
@@ -101,9 +127,10 @@ describe('install-local.sh', () => {
     expect(existsSync(path.join(home, '.diazo'))).toBe(false)
   })
 
-  it('refuses anything but macOS on Apple silicon', async () => {
-    expect((await run([], { STUB_OS: 'Linux' })).out).toMatch(/needs macOS/)
+  it('refuses anything but macOS on Apple silicon, or Linux', async () => {
     expect((await run([], { STUB_ARCH: 'x86_64' })).out).toMatch(/Apple silicon/)
+    expect((await run([], { STUB_OS: 'MINGW64_NT-10.0' })).out).toMatch(/Windows.*WSL2|WSL2/)
+    expect((await run([], { STUB_OS: 'FreeBSD' })).out).toMatch(/macOS or Linux/)
     expect(calls()).toBe('')
   })
 
@@ -220,5 +247,93 @@ describe('install-local.sh', () => {
     expect(other.code, other.out).toBe(0)
     expect(other.out).toMatch(/left the container 'doop' alone/)
     expect(calls()).not.toMatch(/^delete --force doop$/m)
+  })
+})
+
+/* Linux: the same container, data folder and secrets through Docker, or
+   Podman when Docker is missing; no Apple `container` call is made. */
+describe('install-local.sh on Linux', () => {
+  const dockerRunLine = () =>
+    calls()
+      .split('\n')
+      .find((line) => line.startsWith('docker run ')) ?? ''
+
+  it('runs the same container through Docker, with a restart policy', async () => {
+    const { code, out } = await run([], { STUB_OS: 'Linux', STUB_ARCH: 'x86_64' })
+    expect(code, out).toBe(0)
+    expect(calls()).toContain('docker info')
+    expect(calls()).toContain('docker pull --platform linux/amd64 ghcr.io/bryann2k/diazo:main')
+    expect(calls()).not.toMatch(/^run |system |image /m)
+    const line = dockerRunLine()
+    expect(line).toContain('--name diazo')
+    expect(line).toContain('--restart unless-stopped')
+    expect(line).toContain('--publish 127.0.0.1:4400:4400')
+    expect(line).toContain(`--volume ${home}/.diazo/data:/app/data`)
+    expect(line).toContain('--env-file')
+    expect(line).toContain('--env DOOP_INSTALL=local')
+    expect(line.endsWith('ghcr.io/bryann2k/diazo:main')).toBe(true)
+    expect(statSync(envFile()).mode & 0o777).toBe(0o600)
+    expect(out).toMatch(/http:\/\/localhost:4400/)
+  })
+
+  it('pulls the arm64 image on arm64 Linux', async () => {
+    expect((await run([], { STUB_OS: 'Linux', STUB_ARCH: 'aarch64' })).code).toBe(0)
+    expect(calls()).toContain('docker pull --platform linux/arm64 ghcr.io/bryann2k/diazo:main')
+  })
+
+  it('uses Podman when Docker is missing, and DOOP_RUNTIME overrides the pick', async () => {
+    rmSync(path.join(bin, 'docker'))
+    const { code, out } = await run([], { STUB_OS: 'Linux', STUB_ARCH: 'x86_64' })
+    expect(code, out).toBe(0)
+    expect(calls()).toMatch(/^podman run --detach --name diazo /m)
+    expect(calls()).not.toMatch(/^docker /m)
+
+    /* an explicit pick wins even beside docker */
+    stub('docker', 'echo "docker $*" >> "$STUB_DIR/calls.log"; exit 0')
+    writeFileSync(path.join(root, 'calls.log'), '')
+    expect((await run([], { STUB_OS: 'Linux', DOOP_RUNTIME: 'podman' })).code).toBe(0)
+    expect(calls()).toMatch(/^podman run /m)
+    expect(calls()).not.toMatch(/^docker run /m)
+  })
+
+  it('says what to install when neither Docker nor Podman is there', async () => {
+    rmSync(path.join(bin, 'docker'))
+    rmSync(path.join(bin, 'podman'))
+    const { code, out } = await run([], { STUB_OS: 'Linux' })
+    expect(code).not.toBe(0)
+    expect(out).toMatch(/neither Docker nor Podman/)
+    expect(out).toMatch(/docs\.docker\.com/)
+    expect(calls()).toBe('')
+  })
+
+  it('starts, stops and shows the container through the runtime', async () => {
+    expect((await run([], { STUB_OS: 'Linux' })).code).toBe(0)
+    writeFileSync(path.join(root, 'calls.log'), '')
+    expect((await run(['stop'], { STUB_OS: 'Linux' })).out).toMatch(/stopped/)
+    expect(calls()).toMatch(/^docker stop diazo$/m)
+    writeFileSync(path.join(root, 'calls.log'), '')
+    expect((await run(['start'], { STUB_OS: 'Linux' })).code).toBe(0)
+    expect(calls()).toMatch(/^docker start diazo$/m)
+    const status = await run(['status'], { STUB_OS: 'Linux' })
+    expect(calls()).toMatch(/^docker ps -a$/m)
+    expect(status.out).toMatch(/answering on http:\/\/localhost:4400/)
+  })
+
+  it('says so when the Docker daemon is down', async () => {
+    stub('docker', 'echo "docker $*" >> "$STUB_DIR/calls.log"; [ "$1" = info ] && exit 1; exit 0')
+    const { code, out } = await run([], { STUB_OS: 'Linux' })
+    expect(code).not.toBe(0)
+    expect(out).toMatch(/daemon is not running/)
+    expect(calls()).not.toMatch(/^docker run /m)
+  })
+
+  it('uninstalls the container and image through the runtime', async () => {
+    expect((await run([], { STUB_OS: 'Linux' })).code).toBe(0)
+    writeFileSync(path.join(root, 'calls.log'), '')
+    const { code, out } = await run(['uninstall', '--keep-data'], { STUB_OS: 'Linux' })
+    expect(code, out).toBe(0)
+    expect(calls()).toMatch(/^docker rm -f diazo$/m)
+    expect(calls()).toMatch(/^docker rmi ghcr\.io\/bryann2k\/diazo:main$/m)
+    expect(existsSync(envFile())).toBe(true)
   })
 })

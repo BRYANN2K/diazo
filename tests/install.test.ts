@@ -16,11 +16,12 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 /* scripts/install.sh, the all-in-one install, against stub `uname`,
-   `sw_vers`, `container`, `launchctl`, `curl`, `open` and `osascript` on PATH.
-   It runs the real install-local.sh (its container calls go to the stub) and
-   a stand-in install-desktop.sh that logs its arguments and makes or removes
-   Diazo.app: that script has its own tests (installDesktop.test.ts). Nothing
-   is installed and no container is started; every stub logs to calls.log. */
+   `sw_vers`, `container`, `docker`, `podman`, `systemctl`, `launchctl`,
+   `curl`, `open` and `osascript` on PATH. It runs the real install-local.sh
+   (its container calls go to the stubs) and a stand-in install-desktop.sh
+   that logs its arguments and makes or removes Diazo.app: that script has
+   its own tests (installDesktop.test.ts). Nothing is installed and no
+   container is started; every stub logs to calls.log. */
 
 const SCRIPTS = path.resolve(import.meta.dirname, '..', 'scripts')
 const SCRIPT = path.join(SCRIPTS, 'install.sh')
@@ -84,9 +85,12 @@ function runPiped(args: string[], env: Record<string, string> = {}) {
 const calls = () => (existsSync(path.join(root, 'calls.log')) ? readFileSync(path.join(root, 'calls.log'), 'utf8') : '')
 const clearCalls = () => writeFileSync(path.join(root, 'calls.log'), '')
 const appData = () => path.join(home, 'Library', 'Application Support', 'dev.bryann2k.diazo')
-const serverJson = () => path.join(appData(), 'server.json')
+const linuxAppData = () => path.join(home, '.local', 'share', 'dev.bryann2k.diazo')
+const serverJson = (dir: () => string = appData) => path.join(dir(), 'server.json')
 const plist = () => path.join(home, 'Library', 'LaunchAgents', 'dev.bryann2k.diazo.server.plist')
+const unit = () => path.join(home, '.config', 'systemd', 'user', 'diazo.service')
 const diazoHome = () => path.join(home, '.diazo')
+const conf = () => readFileSync(path.join(diazoHome(), 'install.conf'), 'utf8')
 
 beforeEach(() => {
   root = mkdtempSync(path.join(tmpdir(), 'diazo-all-in-one-'))
@@ -120,6 +124,7 @@ done
 case $url in
   ${RAW}/*) echo "curl $url" >> "$STUB_DIR/calls.log"; cp "$STUB_DIR/lib/\${url#${RAW}/}" "$out" ;;
   */healthz) [ -z "$STUB_DOWN" ] ;;
+  */api/locale-config) echo "curl $url" >> "$STUB_DIR/calls.log"; [ -z "$STUB_DOWN" ] && echo '{"defaultLocale":"en"}' || exit 1 ;;
   *) exit 22 ;;
 esac`,
   )
@@ -140,6 +145,41 @@ esac`,
   stub('open', 'echo "open $*" >> "$STUB_DIR/calls.log"')
   stub('osascript', 'echo "osascript $*" >> "$STUB_DIR/calls.log"')
   stub('sleep', 'exit 0')
+  /* the container runtimes and the login start of a Linux install */
+  stub(
+    'docker',
+    `echo "docker $*" >> "$STUB_DIR/calls.log"
+case "$1" in
+  info) exit 0 ;;
+  pull) exit 0 ;;
+  inspect) [ -f "$STUB_DIR/exists" ] ;;
+  run) touch "$STUB_DIR/exists" ;;
+  "rm") rm -f "$STUB_DIR/exists" ;;
+  ps) exit 0 ;;
+esac`,
+  )
+  stub(
+    'podman',
+    `echo "podman $*" >> "$STUB_DIR/calls.log"
+case "$1" in
+  pull) exit 0 ;;
+  inspect) [ -f "$STUB_DIR/exists" ] ;;
+  run) touch "$STUB_DIR/exists" ;;
+  "rm") rm -f "$STUB_DIR/exists" ;;
+  ps) exit 0 ;;
+esac`,
+  )
+  stub(
+    'systemctl',
+    `echo "systemctl $*" >> "$STUB_DIR/calls.log"
+case "$*" in
+  "--user enable"*) touch "$STUB_DIR/unit-enabled" ;;
+  "--user disable"*) rm -f "$STUB_DIR/unit-enabled" ;;
+  "--user is-enabled"*) [ -f "$STUB_DIR/unit-enabled" ] ;;
+esac
+exit 0`,
+  )
+  stub('gtk-launch', 'echo "gtk-launch $*" >> "$STUB_DIR/calls.log"')
 })
 
 afterEach(() => rmSync(root, { recursive: true, force: true }))
@@ -194,7 +234,7 @@ describe('install.sh', () => {
     expect(lstatSync(path.join(links, 'diazo')).isSymbolicLink()).toBe(true)
     expect(readlinkSync(path.join(links, 'diazo'))).toBe(path.join(diazoHome(), 'bin', 'diazo'))
     expect(out).toMatch(/add .*\.local\/bin to your PATH/)
-    expect(readFileSync(path.join(diazoHome(), 'install.conf'), 'utf8')).toBe('server=1\napp=1\n')
+    expect(conf()).toBe('mode=local\nserver=1\napp=1\nremote=\n')
   })
 
   it('updates both on a re-run, keeping the secrets and the server choice', async () => {
@@ -207,7 +247,7 @@ describe('install.sh', () => {
     expect(calls()).toMatch(/^run /m)
     expect(calls()).toMatch(/^desktop $/m)
     expect(calls()).toMatch(/launchctl bootstrap/)
-    expect(out).toMatch(/already opens this Mac's server/)
+    expect(out).toMatch(/already opens this computer's server/)
     expect(readFileSync(path.join(diazoHome(), 'diazo.env'), 'utf8')).toBe(secrets)
   })
 
@@ -245,7 +285,7 @@ describe('install.sh', () => {
     expect(existsSync(plist())).toBe(false)
     expect(existsSync(serverJson())).toBe(false)
     expect(calls()).toMatch(/^open -b dev\.bryann2k\.diazo$/m)
-    expect(readFileSync(path.join(diazoHome(), 'install.conf'), 'utf8')).toBe('server=0\napp=1\n')
+    expect(conf()).toBe('mode=local\nserver=0\napp=1\nremote=\n')
   })
 
   it('installs the server alone with --server-only', async () => {
@@ -274,7 +314,7 @@ describe('install.sh', () => {
     expect((await run([])).out).toMatch(/container is 0\.6; the server needs 1\.0 or later/)
     expect((await run([], { STUB_MACOS: '15.5' })).out).toMatch(/needs macOS 26 or later/)
     expect((await run([], { STUB_ARCH: 'x86_64' })).out).toMatch(/Apple silicon only/)
-    expect((await run([], { STUB_OS: 'Linux' })).out).toMatch(/for macOS/)
+    expect((await run([], { STUB_OS: 'FreeBSD' })).out).toMatch(/unsupported system/)
     expect(calls()).toBe('')
     expect(existsSync(diazoHome())).toBe(false)
   })
@@ -373,7 +413,7 @@ describe('the diazo command', () => {
     expect(code, out).toBe(0)
     expect(out).toMatch(/answering on http:\/\/localhost:4400/)
     expect(out).toMatch(/starts at login/)
-    expect(out).toMatch(/Diazo\.app is installed, set to http:\/\/127\.0\.0\.1:4400/)
+    expect(out).toMatch(/the Diazo app is installed, set to http:\/\/127\.0\.0\.1:4400/)
     expect(calls()).toMatch(/launchctl print gui\/\d+\/dev\.bryann2k\.diazo\.server/)
   })
 
@@ -432,5 +472,200 @@ describe('the diazo command', () => {
     expect((await diazo(['uninstall', '--purge'])).code).toBe(0)
     expect(existsSync(diazoHome())).toBe(false)
     expect(existsSync(plist())).toBe(false)
+  })
+})
+
+/* The local install on Linux: the server in Docker (or Podman), the login
+   start in a systemd user unit, the app pointed at the local server in its
+   XDG data folder. */
+describe('install.sh on Linux', () => {
+  const runLinux = (args: string[] = [], env: Record<string, string> = {}) =>
+    run(args, { STUB_OS: 'Linux', STUB_ARCH: 'x86_64', ...env })
+
+  it('installs the server in Docker, the user unit and the app set to it', async () => {
+    const { code, out } = await runLinux()
+    expect(code, out).toBe(0)
+
+    /* the same container, image and data folder through Docker */
+    const runLine = calls()
+      .split('\n')
+      .find((line) => line.startsWith('docker run ')) as string
+    expect(runLine).toContain('--restart unless-stopped')
+    expect(runLine).toContain('--publish 127.0.0.1:4400:4400')
+    expect(runLine).toContain(`--volume ${diazoHome()}/data:/app/data`)
+    expect(runLine.endsWith('ghcr.io/bryann2k/diazo:main')).toBe(true)
+    expect(calls()).toContain('docker pull --platform linux/amd64 ghcr.io/bryann2k/diazo:main')
+    expect(calls()).not.toMatch(/launchctl|osascript/)
+
+    /* the login start is the systemd user unit, not a LaunchAgent */
+    const service = readFileSync(unit(), 'utf8')
+    expect(service).toContain(`ExecStart=${diazoHome()}/bin/diazo autostart`)
+    expect(service).toContain('WantedBy=default.target')
+    expect(calls()).toContain('systemctl --user enable diazo.service')
+    expect(existsSync(plist())).toBe(false)
+    expect(out).toMatch(/systemd user unit diazo\.service/)
+
+    /* the app, set to open the local server in its XDG data folder */
+    expect(calls()).toMatch(/^desktop $/m)
+    expect(JSON.parse(readFileSync(serverJson(linuxAppData), 'utf8'))).toEqual({
+      url: 'http://127.0.0.1:4400',
+    })
+    expect(conf()).toBe('mode=local\nserver=1\napp=1\nremote=\n')
+  })
+
+  it('uses Podman when Docker is missing', async () => {
+    rmSync(path.join(bin, 'docker'))
+    const { code, out } = await runLinux()
+    expect(code, out).toBe(0)
+    expect(calls()).toMatch(/^podman run --detach --name diazo /m)
+    expect(calls()).not.toMatch(/^docker /m)
+    expect(existsSync(unit())).toBe(true)
+  })
+
+  it('says what the server needs when neither runtime is there', async () => {
+    rmSync(path.join(bin, 'docker'))
+    rmSync(path.join(bin, 'podman'))
+    const { code, out } = await runLinux()
+    expect(code).not.toBe(0)
+    expect(out).toMatch(/neither Docker nor Podman/)
+    expect(out).toMatch(/docs\.docker\.com/)
+    expect(calls()).toBe('')
+    expect(existsSync(diazoHome())).toBe(false)
+  })
+
+  it('keeps the server choice the app already has, unless --use-local', async () => {
+    mkdirSync(linuxAppData(), { recursive: true })
+    writeFileSync(serverJson(linuxAppData), '{"url":"https://diazo.example.com"}')
+    expect((await runLinux()).code).toBe(0)
+    expect(readFileSync(serverJson(linuxAppData), 'utf8')).toContain('diazo.example.com')
+    expect((await runLinux(['--use-local'])).code).toBe(0)
+    expect(JSON.parse(readFileSync(serverJson(linuxAppData), 'utf8'))).toEqual({
+      url: 'http://127.0.0.1:4400',
+    })
+  })
+
+  it('drives the container, the unit and the app through the diazo command', async () => {
+    expect((await runLinux()).code).toBe(0)
+    clearCalls()
+    const command = () => path.join(diazoHome(), 'bin', 'diazo')
+    const diazo = (args: string[], env: Record<string, string> = {}) =>
+      run(args, { STUB_OS: 'Linux', DIAZO_LIB: '', ...env }, command())
+
+    /* status: the unit's login start, the app found through its AppImage */
+    mkdirSync(path.join(home, '.local', 'bin'), { recursive: true })
+    writeFileSync(path.join(home, '.local', 'bin', 'Diazo_0.15.0_amd64.AppImage'), '')
+    const status = await diazo(['status'])
+    expect(status.code, status.out).toBe(0)
+    expect(status.out).toMatch(/systemd user unit diazo\.service/)
+    expect(calls()).toMatch(/systemctl --user is-enabled/)
+    expect(status.out).toMatch(/the Diazo app is installed/)
+
+    /* stop and start reach the runtime */
+    expect((await diazo(['stop'])).code).toBe(0)
+    expect(calls()).toMatch(/^docker stop diazo$/m)
+
+    /* uninstall removes the unit, the container and the command */
+    const removed = await diazo(['uninstall'])
+    expect(removed.code, removed.out).toBe(0)
+    expect(calls()).toMatch(/systemctl --user disable/)
+    expect(existsSync(unit())).toBe(false)
+    expect(calls()).toMatch(/^docker rm -f diazo$/m)
+    expect(existsSync(command())).toBe(false)
+    expect(existsSync(path.join(diazoHome(), 'diazo.env'))).toBe(true)
+  })
+})
+
+/* The remote install: only the app, pointed at a server that must answer
+   /api/locale-config. No container, LaunchAgent or unit is touched. */
+describe('install.sh --remote', () => {
+  it('installs only the app pointed at the server, nothing server-side', async () => {
+    const { code, out } = await run(['--remote', 'https://diazo.example.com'])
+    expect(code, out).toBe(0)
+    expect(calls()).toContain('curl https://diazo.example.com/api/locale-config')
+    expect(calls()).toMatch(/^desktop $/m)
+    expect(calls()).not.toMatch(/^run |docker |podman |launchctl|systemctl/m)
+    expect(existsSync(plist())).toBe(false)
+    expect(existsSync(unit())).toBe(false)
+    expect(JSON.parse(readFileSync(serverJson(), 'utf8'))).toEqual({ url: 'https://diazo.example.com' })
+    expect(conf()).toBe('mode=remote\nserver=0\napp=1\nremote=https://diazo.example.com\n')
+    expect(existsSync(path.join(diazoHome(), 'diazo.env'))).toBe(false)
+  })
+
+  it('normalizes the address the way the app does', async () => {
+    const { code, out } = await run(['--remote', 'DIAZO.Example.com:443/welcome?x=1'])
+    expect(code, out).toBe(0)
+    expect(JSON.parse(readFileSync(serverJson(), 'utf8'))).toEqual({ url: 'https://diazo.example.com' })
+  })
+
+  it('allows plain http on this computer only', async () => {
+    const remote = await run(['--remote', 'http://example.com'])
+    expect(remote.code).not.toBe(0)
+    expect(remote.out).toMatch(/not secure/)
+    expect(existsSync(serverJson())).toBe(false)
+    expect(existsSync(diazoHome())).toBe(false)
+
+    expect((await run(['--remote', 'http://localhost:4400'])).code).toBe(0)
+    expect(JSON.parse(readFileSync(serverJson(), 'utf8'))).toEqual({ url: 'http://localhost:4400' })
+
+    const doop = await run(['--remote', 'https://doop.design'])
+    expect(doop.code).not.toBe(0)
+    expect(doop.out).toMatch(/original doop service/)
+  })
+
+  it('fails before writing anything when no Diazo server answers', async () => {
+    const { code, out } = await run(['--remote', 'https://down.example.com'], { STUB_DOWN: '1' })
+    expect(code).not.toBe(0)
+    expect(out).toMatch(/no Diazo server answered/)
+    expect(calls()).not.toMatch(/^desktop/m)
+    expect(existsSync(serverJson())).toBe(false)
+    expect(existsSync(diazoHome())).toBe(false)
+  })
+
+  it('rejects flags that contradict a remote install', async () => {
+    expect((await run(['--remote', 'https://a.example', '--app-only'])).out).toMatch(/cannot go with/)
+    expect((await run(['--remote', 'https://a.example', '--server-only'])).out).toMatch(/cannot go with/)
+    expect((await run(['--remote', 'https://a.example', '--use-local'])).out).toMatch(/cannot go with/)
+    expect((await run(['--remote'])).code).not.toBe(0)
+  })
+
+  it('skips the probe when the app already opens that server', async () => {
+    expect((await run(['--remote', 'https://diazo.example.com'])).code).toBe(0)
+    clearCalls()
+    const again = await run(['--remote', 'https://diazo.example.com'])
+    expect(again.code, again.out).toBe(0)
+    expect(again.out).toMatch(/already opens https:\/\/diazo\.example\.com/)
+    expect(calls()).not.toMatch(/locale-config/)
+  })
+
+  it('updates what install.conf records: the app again, still remote', async () => {
+    expect((await run(['--remote', 'https://diazo.example.com'])).code).toBe(0)
+    clearCalls()
+    const command = path.join(diazoHome(), 'bin', 'diazo')
+    const { code, out } = await run(['update'], { DIAZO_LIB: '' }, command)
+    expect(code, out).toBe(0)
+    expect(calls()).toMatch(/^desktop $/m)
+    expect(calls()).not.toMatch(/^run |docker |podman |launchctl|systemctl/m)
+    expect(calls()).not.toMatch(/locale-config/)
+    expect(conf()).toBe('mode=remote\nserver=0\napp=1\nremote=https://diazo.example.com\n')
+    const start = await run(['start'], { DIAZO_LIB: '' }, command)
+    expect(start.code).not.toBe(0)
+    expect(start.out).toMatch(/remote install/)
+  })
+})
+
+describe('install.sh on Windows shells', () => {
+  it('prints the PowerShell one-liner and stops', async () => {
+    const { code, out } = await run([], { STUB_OS: 'MINGW64_NT-10.0' })
+    expect(code).not.toBe(0)
+    expect(out).toMatch(/install-desktop\.ps1 \| iex/)
+    expect(out).toMatch(/WSL2/)
+    expect(calls()).toBe('')
+  })
+
+  it('hands --remote to the PowerShell installer', async () => {
+    const { code, out } = await run(['--remote', 'https://diazo.example.com'], { STUB_OS: 'MSYS_NT-10.0' })
+    expect(code).not.toBe(0)
+    expect(out).toMatch(/\$env:DOOP_DESKTOP_SERVER='https:\/\/diazo\.example\.com'/)
+    expect(out).toMatch(/install-desktop\.ps1 \| iex/)
   })
 })

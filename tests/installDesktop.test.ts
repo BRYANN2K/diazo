@@ -6,9 +6,10 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 /* scripts/install-desktop.sh against stub `uname`, `curl`, `pgrep`,
-   `osascript`, `xattr`, `open` and `minisign` on PATH: nothing is downloaded
-   and no app is launched. The stub `curl` serves files from serve/, keyed by
-   the URL's path below releases/download/, and every stub logs to calls.log. */
+   `osascript`, `xattr`, `open`, `minisign`, `sudo` and the package commands
+   (`apt`, `dpkg`, `dnf`, `zypper`, `rpm`) on PATH: nothing is downloaded and
+   no app is launched. The stub `curl` serves files from serve/, keyed by the
+   URL's path below releases/download/, and every stub logs to calls.log. */
 
 const SCRIPT = path.resolve(import.meta.dirname, '..', 'scripts', 'install-desktop.sh')
 const RELEASES = 'https://github.com/BRYANN2K/diazo/releases/download'
@@ -75,19 +76,31 @@ function writeApp(dir: string, version: string, key = PUBKEY, kind = DIAZO) {
   writeFileSync(path.join(dir, kind.app, 'Contents', 'MacOS', 'doop-desktop'), `binary ${key} ${version}\n`)
 }
 
-/* publishes desktop-v<version> in serve/, and names it in the feed when `latest` */
+/* publishes desktop-v<version> in serve/ (the macOS tarball really packed,
+   the Linux packages as stand-ins), and names it in the feed when `latest` */
 function publish(version: string, { latest = true, corrupt = false } = {}) {
   const build = mkdtempSync(path.join(root, 'build-'))
   writeApp(build, version)
-  const asset = `Diazo_${version}_universal.app.tar.gz`
   const release = path.join(serve, `desktop-v${version}`)
   mkdirSync(release, { recursive: true })
-  spawnSync('tar', ['-czf', path.join(release, asset), '-C', build, 'Diazo.app'])
-  const sum = createHash('sha256')
-    .update(readFileSync(path.join(release, asset)))
-    .digest('hex')
-  writeFileSync(path.join(release, 'SHA256SUMS'), `${corrupt ? '0'.repeat(64) : sum}  ${asset}\n`)
-  writeFileSync(path.join(release, `${asset}.sig`), Buffer.from('signature').toString('base64'))
+  const tarball = `Diazo_${version}_universal.app.tar.gz`
+  spawnSync('tar', ['-czf', path.join(release, tarball), '-C', build, 'Diazo.app'])
+  const assets = [
+    tarball,
+    `Diazo_${version}_amd64.deb`,
+    `Diazo-${version}-1.x86_64.rpm`,
+    `Diazo_${version}_amd64.AppImage`,
+    `Diazo_${version}_x64-setup.exe`,
+  ]
+  let sums = ''
+  for (const asset of assets) {
+    const file = path.join(release, asset)
+    if (!existsSync(file)) writeFileSync(file, `fake ${asset}\n`)
+    const sum = createHash('sha256').update(readFileSync(file)).digest('hex')
+    sums += `${corrupt ? '0'.repeat(64) : sum}  ${asset}\n`
+    writeFileSync(`${file}.sig`, Buffer.from('signature').toString('base64'))
+  }
+  writeFileSync(path.join(release, 'SHA256SUMS'), sums)
   if (latest) {
     mkdirSync(path.join(serve, 'desktop-updates'), { recursive: true })
     writeFileSync(
@@ -128,6 +141,35 @@ cp "$file" "$out"`,
   stub('xattr', 'echo "xattr $*" >> "$STUB_DIR/calls.log"')
   stub('open', 'echo "open $*" >> "$STUB_DIR/calls.log"')
   stub('sleep', 'exit 0')
+  /* the Linux side: sudo runs the command, the package tools only log; a
+     deb or rpm marked installed lives in $STUB_DIR/deb|rpm-version */
+  stub('sudo', 'exec "$@"')
+  for (const tool of ['apt', 'dnf', 'zypper', 'pkill', 'gtk-launch', 'update-desktop-database']) {
+    stub(tool, `echo "${tool} $*" >> "$STUB_DIR/calls.log"`)
+  }
+  stub(
+    'dpkg',
+    `echo "dpkg $*" >> "$STUB_DIR/calls.log"
+case "$1" in
+  -s) [ -f "$STUB_DIR/deb-version" ] ;;
+  -i) echo "0.15.0" > "$STUB_DIR/deb-version" ;;
+  -r) rm -f "$STUB_DIR/deb-version" ;;
+esac`,
+  )
+  stub(
+    'dpkg-query',
+    `echo "dpkg-query $*" >> "$STUB_DIR/calls.log"
+[ -f "$STUB_DIR/deb-version" ] && cat "$STUB_DIR/deb-version"`,
+  )
+  stub(
+    'rpm',
+    `echo "rpm $*" >> "$STUB_DIR/calls.log"
+case "$1" in
+  -q) [ -f "$STUB_DIR/rpm-version" ] ;;
+  -i) echo "0.15.0" > "$STUB_DIR/rpm-version" ;;
+  -e) rm -f "$STUB_DIR/rpm-version" ;;
+esac`,
+  )
 })
 
 afterEach(() => rmSync(root, { recursive: true, force: true }))
@@ -148,10 +190,13 @@ describe('install-desktop.sh', () => {
     expect(calls()).toBe('')
   })
 
-  it('refuses anything but macOS', async () => {
-    const { code, out } = await run([], { STUB_OS: 'Linux' })
+  it('refuses a system it does not know, and prints the PowerShell line on Windows', async () => {
+    const { code, out } = await run([], { STUB_OS: 'FreeBSD' })
     expect(code).not.toBe(0)
-    expect(out).toMatch(/for macOS/)
+    expect(out).toMatch(/unsupported system/)
+    const windows = await run([], { STUB_OS: 'MINGW64_NT-10.0' })
+    expect(windows.code).not.toBe(0)
+    expect(windows.out).toMatch(/install-desktop\.ps1 \| iex/)
     expect(calls()).toBe('')
   })
 
@@ -317,5 +362,106 @@ describe('install-desktop.sh', () => {
     rmSync(path.join(root, 'running-doop'))
     expect((await run([])).out).toMatch(/already installed/)
     expect(existsSync(path.join(apps, 'doop.app'))).toBe(false)
+  })
+})
+
+/* Linux x86_64: the .deb or .rpm of the distribution's family, the AppImage
+   elsewhere or under --appimage; every asset checked against SHA256SUMS.
+   Linux arm64 gets a clear refusal. */
+describe('install-desktop.sh on Linux', () => {
+  let osReleaseN = 0
+  const osRelease = (text: string) => {
+    const file = path.join(root, `os-release-${osReleaseN++}`)
+    writeFileSync(file, text)
+    return file
+  }
+  const runLinux = (args: string[] = [], env: Record<string, string> = {}) =>
+    run(args, {
+      STUB_OS: 'Linux',
+      STUB_ARCH: 'x86_64',
+      DOOP_OS_RELEASE: osRelease('ID=ubuntu\nID_LIKE=debian\n'),
+      ...env,
+    })
+  const appimage = (version: string) => path.join(home, '.local', 'bin', `Diazo_${version}_amd64.AppImage`)
+  const desktopFile = () => path.join(home, '.local', 'share', 'applications', 'doop-desktop-appimage.desktop')
+
+  it('installs the .deb through apt on a Debian-family system', async () => {
+    publish('0.15.0')
+    const { code, out } = await runLinux()
+    expect(code, out).toBe(0)
+    expect(calls()).toContain(`curl ${RELEASES}/desktop-v0.15.0/Diazo_0.15.0_amd64.deb`)
+    expect(calls()).toMatch(/apt install -y .*Diazo_0\.15\.0_amd64\.deb/)
+    expect(calls()).not.toContain('_universal.app.tar.gz')
+    expect(out).toMatch(/checksum verified/)
+    expect(out).toMatch(/Diazo 0\.15\.0 is installed/)
+  })
+
+  it('installs the .rpm through dnf on a Fedora-family system', async () => {
+    publish('0.15.0')
+    const { code, out } = await runLinux([], { DOOP_OS_RELEASE: osRelease('ID=fedora\n') })
+    expect(code, out).toBe(0)
+    expect(calls()).toContain(`curl ${RELEASES}/desktop-v0.15.0/Diazo-0.15.0-1.x86_64.rpm`)
+    expect(calls()).toMatch(/dnf install -y .*Diazo-0\.15\.0-1\.x86_64\.rpm/)
+  })
+
+  it('installs the AppImage on other families, or under --appimage', async () => {
+    publish('0.15.0')
+    const { code, out } = await runLinux([], { DOOP_OS_RELEASE: osRelease('ID=arch\n') })
+    expect(code, out).toBe(0)
+    expect(calls()).toContain(`curl ${RELEASES}/desktop-v0.15.0/Diazo_0.15.0_amd64.AppImage`)
+    expect(existsSync(appimage('0.15.0'))).toBe(true)
+    const entry = readFileSync(desktopFile(), 'utf8')
+    expect(entry).toContain('Name=Diazo')
+    expect(entry).toContain(`Exec="${appimage('0.15.0')}"`)
+    expect(entry).toContain('StartupWMClass=doop-desktop')
+
+    /* --appimage forces it on a Debian system too */
+    writeFileSync(path.join(root, 'calls.log'), '')
+    rmSync(path.join(home, '.local', 'bin'), { recursive: true })
+    const forced = await runLinux(['--appimage'], { DOOP_DESKTOP_APPIMAGE_DIR: path.join(home, 'Applications') })
+    expect(forced.code, forced.out).toBe(0)
+    expect(existsSync(path.join(home, 'Applications', 'Diazo_0.15.0_amd64.AppImage'))).toBe(true)
+    expect(calls()).not.toMatch(/apt install/)
+  })
+
+  it('is idempotent through the AppImage filename', async () => {
+    publish('0.15.0')
+    await runLinux(['--appimage'])
+    writeFileSync(path.join(root, 'calls.log'), '')
+    expect((await runLinux(['--appimage'])).out).toMatch(/already installed/)
+    expect(calls()).not.toContain('_amd64.AppImage')
+  })
+
+  it('refuses Linux arm64 with the releases link', async () => {
+    publish('0.15.0')
+    const { code, out } = await run([], { STUB_OS: 'Linux', STUB_ARCH: 'aarch64' })
+    expect(code).not.toBe(0)
+    expect(out).toMatch(/no Linux arm64 package is published/)
+    expect(out).toMatch(/github\.com\/BRYANN2K\/diazo\/releases/)
+    expect(calls()).toBe('')
+  })
+
+  it('uninstalls the AppImage and its menu entry, keeping the data', async () => {
+    publish('0.15.0')
+    await runLinux(['--appimage'])
+    const data = path.join(home, '.local', 'share', 'dev.bryann2k.diazo')
+    mkdirSync(data, { recursive: true })
+    writeFileSync(path.join(data, 'server.json'), '{"url":"http://127.0.0.1:4400"}')
+    const { code, out } = await runLinux(['--uninstall'])
+    expect(code, out).toBe(0)
+    expect(existsSync(appimage('0.15.0'))).toBe(false)
+    expect(existsSync(desktopFile())).toBe(false)
+    expect(existsSync(path.join(data, 'server.json'))).toBe(true)
+    expect(out).toMatch(/kept/)
+  })
+
+  it('prints the steps and changes nothing with --dry-run', async () => {
+    publish('0.15.0')
+    const { code, out } = await runLinux(['--dry-run'])
+    expect(code, out).toBe(0)
+    expect(out).toMatch(/\[dry run\]/)
+    expect(out).toMatch(/Diazo_0\.15\.0_amd64\.deb|_amd64\.deb/)
+    expect(calls()).toBe('')
+    expect(existsSync(path.join(home, '.local'))).toBe(false)
   })
 })
