@@ -4,7 +4,7 @@
  *
  *   bun run build:server-bundle                            # -> out/embedded-server/
  *   bun run build:server-bundle -- --no-web                # reuse the existing dist/
- *   bun run build:server-bundle -- --os linux --cpu x64    # stage node_modules for another target (npm)
+ *   bun run build:server-bundle -- --os linux --cpu x64    # stage node_modules for another target (bun)
  *
  * Produces:
  *   out/embedded-server/
@@ -66,8 +66,19 @@ if ((targetOs === undefined) !== (targetCpu === undefined)) {
   process.exit(1)
 }
 
-/* the packages the bundle leaves out; of those, only these ship beside it */
-const EXTERNALS = ['sharp', '@electric-sql/pglite', 'pg', '@aws-sdk/client-s3']
+/* the packages the bundle leaves out; of those, only these ship beside it.
+   drizzle-orm/node-postgres must stay external too: bundling it hoists its
+   `import 'pg'` to the top of server.mjs, where it resolves eagerly — under a
+   bare install dir (no parent node_modules) the boot then dies on the missing
+   package even though the embedded path never calls it */
+const EXTERNALS = [
+  'sharp',
+  '@electric-sql/pglite',
+  'pg',
+  '@aws-sdk/client-s3',
+  'drizzle-orm/node-postgres',
+  'drizzle-orm/node-postgres/migrator',
+]
 const SHIPPED = ['sharp', '@electric-sql/pglite']
 
 /* ------------------------------------------------------------------ */
@@ -126,7 +137,8 @@ await build({
 /* 2. node_modules for the externals */
 const nodeModulesOut = path.join(outDir, 'node_modules')
 if (targetOs && targetCpu) {
-  /* another platform: npm resolves the matching optional deps (@img/*) */
+  /* another platform: `bun install --os --cpu` resolves the matching optional
+     deps (@img/*) where npm's same flags skip them entirely */
   const staged = mkdtempSync(path.join(tmpdir(), 'diazo-bundle-nm-'))
   writeFileSync(path.join(staged, 'package.json'), JSON.stringify({ name: 'embedded-server-nm', private: true }))
   const pins = SHIPPED.map((name) => {
@@ -134,11 +146,7 @@ if (targetOs && targetCpu) {
       .version
     return `${name}@${version}`
   })
-  run(
-    'npm',
-    ['install', '--no-save', '--omit=dev', '--ignore-scripts', `--os=${targetOs}`, `--cpu=${targetCpu}`, ...pins],
-    staged,
-  )
+  run('bun', ['add', '--ignore-scripts', `--os=${targetOs}`, `--cpu=${targetCpu}`, ...pins], staged)
   cpSync(path.join(staged, 'node_modules'), nodeModulesOut, { recursive: true })
   rmSync(staged, { recursive: true, force: true })
 } else {
