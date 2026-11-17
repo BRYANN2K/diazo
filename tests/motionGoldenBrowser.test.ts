@@ -72,7 +72,10 @@ describe.skipIf(!findBrowserPath())('motion golden frames', () => {
     const actual: Record<string, number[]> = {}
     for (const fx of ids) {
       const out = await render({ fx, t: 0.5 })
+      const again = await render({ fx, t: 0.5 })
       expect(out.drops, `${fx} dropped: ${JSON.stringify(out.drops)}`).toEqual([])
+      /* every body is a pure function of (t, seed): same seek, same bytes */
+      expect(again.hash, `${fx} differed on a repeated render at the same t`).toBe(out.hash)
       actual[fx] = out.grid
     }
     if (UPDATE) {
@@ -97,8 +100,9 @@ describe.skipIf(!findBrowserPath())('motion golden frames', () => {
   })
 
   it('an effect with no GLSL body is reported, not skipped', async () => {
-    /* 'bloom' is in the registry but ships no WebGL2 body in this build */
-    const out = await render({ fx: 'bloom', t: 0.5 })
-    expect(out.drops).toEqual([{ fx: 'bloom', reason: 'no shader in this build' }])
+    /* every registered effect ships a body — an unregistered id is what
+       now exercises the unsupported path */
+    const out = await render({ fx: 'not-an-effect', t: 0.5 })
+    expect(out.drops).toEqual([{ fx: 'not-an-effect', reason: 'no shader in this build' }])
   })
 })

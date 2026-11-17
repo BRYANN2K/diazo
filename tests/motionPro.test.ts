@@ -22,6 +22,7 @@ import {
   type StoryboardFrame,
 } from '../shared/motion.ts'
 import {
+  GL_EFFECT_IDS,
   MOTION_EFFECTS,
   effectCost,
   effectSeed,
@@ -29,6 +30,8 @@ import {
   enabledEffects,
   normalizeParams,
 } from '../shared/motionFx.ts'
+import { lintComposition } from '../shared/motionLint.ts'
+import { glslBodies } from '../src/lib/motion/gl.ts'
 import { MOTION_LOOKS, lookEffects } from '../shared/motionLooks.ts'
 import { curveEasing, laneSegments, trackLanes } from '../shared/motionGraph.ts'
 import { elementText, splitUnitsForFrame } from '../shared/motionText.ts'
@@ -252,6 +255,48 @@ describe('effect stack', () => {
     const clipTrack = { id: 'cc', kind: 'clip' as const, clips: [] }
     const c2 = comp({ tracks: [clipTrack] })
     expect(applyCompositionOps(c2, [{ op: 'add_clip', trackId: 'cc', clip }]).ok).toBe(false)
+  })
+})
+
+describe('gl shader coverage', () => {
+  /* the builtins every fragment source declares — params add to this set */
+  const BUILTIN = new Set(['u_tex', 'u_tex2', 'u_res', 'u_seed', 'u_t', 'u_fps'])
+  const uniform = (id: string) => `u_${id.replace(/-/g, '_')}`
+
+  it('every registered effect ships a GL body and is listed in GL_EFFECT_IDS', () => {
+    for (const spec of MOTION_EFFECTS) {
+      expect(GL_EFFECT_IDS.has(spec.id), spec.id).toBe(true)
+      expect(glslBodies(spec.id).length, spec.id).toBeGreaterThan(0)
+    }
+    expect(GL_EFFECT_IDS.size).toBe(MOTION_EFFECTS.length)
+  })
+
+  it('every spec parameter maps to a shader uniform, and bodies read nothing undeclared', () => {
+    for (const spec of MOTION_EFFECTS) {
+      const bodies = glslBodies(spec.id)
+      const used = new Set(bodies.flatMap((b) => [...b.matchAll(/\bu_[A-Za-z_]\w*/g)].map((m) => m[0])))
+      const declared = new Set(BUILTIN)
+      for (const p of spec.params) {
+        declared.add(uniform(p.id))
+        /* colors declare an alpha companion uniform alongside the vec3 */
+        if (p.kind === 'color') declared.add(`${uniform(p.id)}_a`)
+        expect(used.has(uniform(p.id)), `${spec.id}.${p.id} never reaches the shader`).toBe(true)
+      }
+      for (const u of used) {
+        expect(declared.has(u), `${spec.id} reads undeclared uniform ${u}`).toBe(true)
+      }
+    }
+  })
+
+  it('MO-14 reports nothing for a stack of all registered effects', () => {
+    const track = () => ({
+      id: 'cam',
+      kind: 'camera' as const,
+      keyframes: [],
+      effects: MOTION_EFFECTS.map((spec) => ({ id: `fx-${spec.id}`, fx: spec.id, params: spec.defaults() })),
+    })
+    const issues = lintComposition(comp({ tracks: [track()] })).filter((i) => i.rule === 'MO-14')
+    expect(issues).toEqual([])
   })
 })
 
