@@ -62,6 +62,7 @@ import {
   checkLibraryItemMotion,
   duckAudio,
   exportComposition,
+  fixPassReport,
   generateVideoClip,
   getCompositionData,
   insertClip,
@@ -74,6 +75,7 @@ import {
   videoModels,
 } from './motionTools.ts'
 import { execMotionPro } from './motionProTools.ts'
+import { listRenderJobs } from './motionJobs.ts'
 import type { Direction } from '../shared/motion.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
@@ -146,8 +148,14 @@ import type { FrameLint } from '../shared/slopRules.ts'
 const MAX_TURNS = 24
 /* a redesign card delivers an audit doc plus TWO draft frames in one run */
 const MAX_REDESIGN_TURNS = 40
-/* an animate run directs a whole film — storyboard, per-shot compositions, lint */
-const MAX_MOTION_TURNS = 40
+/* an animate run gets no turn budget — directing a film takes the room it
+   takes. This is a backstop, not a budget: it exists so a broken loop
+   cannot run forever */
+const MOTION_SAFETY_TURNS = 200
+/* consecutive turns that change nothing — no composition revision bump, no
+   frame write, no new screenshot or lint verdict that differs — before an
+   animate run is ended; reading and planning alone do not count */
+const MOTION_STALL_TURNS = 8
 /* a sweep hands a card down its pipeline in place; the cap is a backstop
    against a card that somehow keeps requeueing itself */
 const MAX_SWEEP_RUNS = 24
@@ -454,6 +462,35 @@ function verificationFrameIds(runState: RunState): string[] {
  *  the completion gate's list, alongside verification. */
 function lintBlockedFrameIds(runState: RunState): string[] {
   return deliverableFrameIds(runState).filter((id) => (runState.lintResults?.get(id)?.errors ?? 0) > 0)
+}
+
+/** Everything a productive animate turn can move, folded into one
+ *  signature so a turn that changed nothing is recognizable: a frame write
+ *  (id and write time, so a second pass over the same frame counts), an
+ *  open rewrite draft's growth, newly screenshotted frames, lint verdicts
+ *  that differ (the document hash, not the timestamp), token, arrangement,
+ *  drift and image writes, answered comment threads, a composition
+ *  revision bump, the notes check's own pass memory, and render-job
+ *  progress. */
+function motionSignature(canvasId: string, runState: RunState): string {
+  const canvas = store.getCanvas(canvasId)
+  return JSON.stringify({
+    frames: [...runState.mutatedFrames].sort().map((id) => `${id}@${store.getFrame(id)?.updatedAt ?? ''}`),
+    drafts: [...runState.rewriteDrafts].map(([id, html]) => `${id}:${html.length}`).sort(),
+    verified: [...runState.verifiedFrames].sort(),
+    verifyAsked: [...runState.verificationFrames].sort(),
+    sources: [...runState.sourceFrames].sort(),
+    lint: [...(runState.lintResults ?? [])]
+      .map(([id, lint]) => `${id}:${lint.doc ?? ''}:${lint.errors}:${lint.warnings}`)
+      .sort(),
+    writes: [runState.tokenWrites, runState.arrangeWrites, runState.driftFindings ?? 0, runState.imagesGenerated],
+    threads: [runState.repliedThreads.size, runState.awaitingThreads.size],
+    compositions: (canvas?.compositions ?? []).map((c) => `${c.id}:${c.revision}`).sort(),
+    checks: fixPassReport(canvasId).map((p) => `${p.pageId}:${p.passes}:${p.pendingKey ?? ''}`),
+    renders: listRenderJobs(canvasId)
+      .map((j) => `${j.id}:${j.status}:${j.progress}`)
+      .sort(),
+  })
 }
 
 const LINT_NOTE_ISSUES = 8
@@ -843,6 +880,22 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     let lintNudgeSent = false
     let outputLimitNudgeSent = false
     let turnsUsed = 0
+    /* an animate run has no turn budget: it ends early only when a run of
+       turns changes nothing on the canvas. A local harness shows tool calls
+       rather than turns, so the same watch feeds on each call there */
+    const motionRun = MOTION_RE.test(workText)
+    let stalledRun = false
+    let stillTurns = 0
+    let lastMotionSig: string | undefined
+    const motionStalled = () => {
+      const sig = motionSignature(canvasId, runState)
+      if (sig !== lastMotionSig) {
+        lastMotionSig = sig
+        stillTurns = 0
+        return false
+      }
+      return ++stillTurns >= MOTION_STALL_TURNS
+    }
 
     try {
       /* canvas design docs ride as a second system block with their own cache
@@ -926,11 +979,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
               text: 'Note: your model cannot view images. screenshot_frame returns a text confirmation, not pixels, and image search results describe rather than show. Verify layout by re-reading get_frame_html and checking inspect_frame instead.',
             },
           ]
-      const maxTurns = MOTION_RE.test(workText)
-        ? MAX_MOTION_TURNS
-        : REDESIGN_RE.test(workText)
-          ? MAX_REDESIGN_TURNS
-          : MAX_TURNS
+      const maxTurns = motionRun ? MOTION_SAFETY_TURNS : REDESIGN_RE.test(workText) ? MAX_REDESIGN_TURNS : MAX_TURNS
       if (model.runHarness) {
         const result = await model.runHarness({
           canvasId,
@@ -965,7 +1014,24 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                 content: 'This task has been stopped.',
                 is_error: true,
               }
-            return execTool(block, canvasId, actor, runState)
+            /* a stalled animate run takes no more calls: the model wraps up
+               with the tool results it has — a call that lands work would
+               have reset the watch before this point */
+            if (stalledRun)
+              return {
+                type: 'tool_result',
+                tool_use_id: block.id,
+                content: `The canvas has not changed for ${MOTION_STALL_TURNS} turns — the run is ending. Write your final message now, without more tool calls.`,
+                is_error: true,
+              }
+            const result = await execTool(block, canvasId, actor, runState)
+            if (motionRun && motionStalled()) {
+              stalledRun = true
+              console.log(
+                `[resident] animate run ending: ${MOTION_STALL_TURNS} tool calls without a canvas change canvas=${canvasId}`,
+              )
+            }
+            return result
           },
         })
         if (canceled()) return 'ran'
@@ -976,6 +1042,13 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       } else
         for (let turn = 0; turn < maxTurns; turn++) {
           if (canceled()) return 'ran'
+          if (motionRun && motionStalled()) {
+            stalledRun = true
+            console.log(
+              `[resident] animate run ending: ${MOTION_STALL_TURNS} turns without a canvas change canvas=${canvasId}`,
+            )
+            break
+          }
           /* the status showing when the connection dropped, so a recovered
              run picks its narration back up instead of staying "reconnecting" */
           let interruptedStatus: string | undefined
@@ -1163,7 +1236,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        unverified change does */
     const unresolvedLint =
       finished && !blockedWebsiteAccess && cards.length > 0 && lintBlockedFrameIds(runState).length > 0
-    const exhausted = !finished && !refused && !crashed
+    const exhausted = !finished && !refused && !crashed && !stalledRun
+    if (stalledRun) actions.setAgentStatus(canvasId, actor, 'No canvas change — waiting for a retry')
     if (exhausted) actions.setAgentStatus(canvasId, actor, 'Ran out of turns — waiting for a retry')
     if (blockedWebsiteAccess && !staleAccount) {
       actions.setAgentStatus(canvasId, actor, 'Website blocked — needs screenshots')
@@ -1172,7 +1246,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     if (unverifiedMutation) actions.setAgentStatus(canvasId, actor, 'Change not verified — waiting for a retry')
     if (unresolvedLint) actions.setAgentStatus(canvasId, actor, 'Lint errors remain — waiting for a retry')
     console.log(
-      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} tokenWrites=${runState.tokenWrites} arrangeWrites=${runState.arrangeWrites} verified=${runState.verifiedFrames.size}`,
+      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} stalled=${stalledRun} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} tokenWrites=${runState.tokenWrites} arrangeWrites=${runState.arrangeWrites} verified=${runState.verifiedFrames.size}`,
     )
     let summary = ''
     if (finished) {
@@ -1187,6 +1261,27 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         console.log(`[resident] summary canvas=${canvasId} ${summary.replace(/\s+/g, ' ').trim().slice(0, 500)}`)
         actions.agentSummary(canvasId, actor, summary)
       }
+    }
+    /* an animate run ended on no progress or at the backstop still closes
+       with a summary — the last words it had, or why it was ended, never a
+       bare "ran out of turns" */
+    if (!finished && motionRun && (stalledRun || exhausted)) {
+      let closing = ''
+      for (let i = messages.length - 1; i >= 0 && !closing.trim(); i--) {
+        const message = messages[i]!
+        if (message.role === 'assistant' && Array.isArray(message.content))
+          closing = message.content
+            .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+            .map((b) => b.text)
+            .join(' ')
+      }
+      summary = closing.trim()
+        ? closing
+        : stalledRun
+          ? `Stopped: the last ${MOTION_STALL_TURNS} turns changed nothing on the canvas.`
+          : `Stopped at the ${MOTION_SAFETY_TURNS}-turn safety backstop.`
+      console.log(`[resident] summary canvas=${canvasId} ${summary.replace(/\s+/g, ' ').trim().slice(0, 500)}`)
+      actions.agentSummary(canvasId, actor, summary)
     }
     if (canceled()) return 'ran'
     if (finished && !blockedWebsiteAccess && !noMutation && !unverifiedMutation && !unresolvedLint) {
@@ -1209,6 +1304,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
         reason = `${role.name} could not take this request. Retry when you are ready.`
       } else if (crashed) {
         reason = `${role.name} hit a snag before finishing. Retry when you are ready.`
+      } else if (stalledRun) {
+        reason = `${role.name} stopped after ${MOTION_STALL_TURNS} turns without a change on the canvas. Retry when you are ready.`
       } else if (exhausted) {
         reason = `${role.name} ran out of turns before finishing. Retry when you are ready.`
       } else if (noMutation) {
@@ -4023,9 +4120,10 @@ export async function execTool(
         const blocks = runState.vision
           ? await frameImageBlocks(f)
           : `Screenshot skipped: the selected model cannot view images. Frame "${f.name}" is ${f.width}×${f.height}px. Verify your work with get_frame_html and inspect_frame instead.`
-        if (runState.mutatedFrames.has(input.frame_id) || runState.verificationFrames.has(input.frame_id)) {
-          runState.verifiedFrames.add(input.frame_id)
-        }
+        /* every screenshot is a look: the completion gate only asks that
+           mutated frames land in verifiedFrames, but the run's no-progress
+           watch reads a first look at ANY frame as movement */
+        runState.verifiedFrames.add(input.frame_id)
         return ok(blocks)
       }
       case 'check_frame': {

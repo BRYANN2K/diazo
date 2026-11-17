@@ -70,6 +70,17 @@ interface FixPassState {
 const fixPasses = new Map<string, FixPassState>()
 const passKey = (canvasId: string, pageId: string) => `${canvasId}/${pageId}`
 
+/** The notes-check memory of a canvas's films, one entry per page — the
+ *  resident's no-progress watch folds it into an animate run's signature,
+ *  so the check's own view of what moved rides with the revision it tracks. */
+export function fixPassReport(canvasId: string): { pageId: string; passes: number; pendingKey?: string }[] {
+  const prefix = `${canvasId}/`
+  return [...fixPasses]
+    .filter(([key]) => key.startsWith(prefix))
+    .map(([key, state]) => ({ pageId: key.slice(prefix.length), passes: state.passes, pendingKey: state.pendingKey }))
+    .sort((a, b) => a.pageId.localeCompare(b.pageId))
+}
+
 /* re-parsing every frame of a page on every set_composition is the check's
    hot path — a frame's read is valid until its html changes */
 const SHOT_INFO_CACHE_MAX = 400
