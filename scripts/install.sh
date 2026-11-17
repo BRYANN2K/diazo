@@ -120,6 +120,10 @@ MODE=local
 MODE_GIVEN=0
 REMOTE_URL=
 REMOTE_ORIGIN=
+# 1 when --remote came from the person (flag or the prompt), 0 when
+# `diazo update` replayed the record: only an explicit one may replace a
+# server picked in the app
+REMOTE_EXPLICIT=0
 WANT_SERVER=1
 WANT_APP=1
 APP_ONLY=0
@@ -214,12 +218,14 @@ parse_args() {
         MODE=remote
         MODE_GIVEN=1
         REMOTE_URL=$2
+        REMOTE_EXPLICIT=1
         shift
         ;;
       --remote=*)
         MODE=remote
         MODE_GIVEN=1
         REMOTE_URL=${1#--remote=}
+        REMOTE_EXPLICIT=1
         ;;
       --dry-run) DRY_RUN=1 ;;
       --version)
@@ -313,6 +319,7 @@ EOF
       printf '%s' "The server's address (https://…): " >/dev/tty
       read -r REMOTE_URL </dev/tty || REMOTE_URL=
       [ -n "$REMOTE_URL" ] || die "no server address given"
+      REMOTE_EXPLICIT=1
       WANT_SERVER=0
       ;;
     *) ;;
@@ -637,6 +644,49 @@ choose_local_server() {
 }
 
 # ---------------------------------------------------------------- remote mode
+# What server.rs's `secure` accepts for plain http: `localhost`, or an IP
+# literal that parses as loopback — 127.0.0.0/8 as four numeric octets
+# (`127.example.com` or `127.1.2.3.evil.com` are a name, not the address), or
+# ::1. Anything else needs https.
+is_loopback() {
+  case $1 in
+    localhost | ::1 | 0:0:0:0:0:0:0:1) return 0 ;;
+    *:*)
+      # every IPv6 spelling of ::1: all-zero or empty groups, then a last
+      # group of 1 — the same set IpAddr::is_loopback() accepts
+      old_ifs=$IFS
+      IFS=:
+      # shellcheck disable=SC2086 # the groups, split on purpose
+      set -- $1
+      IFS=$old_ifs
+      while [ $# -gt 1 ]; do
+        case $1 in
+          '' | 0 | 00 | 000 | 0000) shift ;;
+          *) return 1 ;;
+        esac
+      done
+      case $1 in
+        1 | 01 | 001 | 0001) return 0 ;;
+        *) return 1 ;;
+      esac
+      ;;
+  esac
+  old_ifs=$IFS
+  IFS=.
+  # shellcheck disable=SC2086 # the four octets, split on purpose
+  set -- $1
+  IFS=$old_ifs
+  if [ $# -ne 4 ] || [ "$1" != 127 ]; then
+    return 1
+  fi
+  for octet do
+    case $octet in
+      '' | *[!0-9]* | 0?*) return 1 ;;
+    esac
+    [ "$octet" -le 255 ] || return 1
+  done
+}
+
 # A typed server address as the origin it names, checked the way the app's
 # server.rs checks it: https, or plain http on this computer only; never the
 # original doop service.
@@ -659,6 +709,11 @@ normalize_remote() {
     \[*\]*)
       host=$(printf '%s' "$authority" | sed -n 's/^\[\([^]]*\)\].*/\1/p')
       port=$(printf '%s' "$authority" | sed -n 's/^\[[^]]*\]:\(.*\)/\1/p')
+      # nothing but the port may follow the closing bracket
+      case ${authority#*\]} in
+        '' | :*) ;;
+        *) die "'$1' is not a web address" ;;
+      esac
       ;;
     *:*)
       host=${authority%%:*}
@@ -671,14 +726,27 @@ normalize_remote() {
   esac
   host=$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')
   [ -n "$host" ] || die "'$1' is not a web address"
+  # the host goes raw into server.json and is replayed unquoted by
+  # `diazo update`: a domain name, or a bracketed IPv6 literal, nothing else
+  case $host in
+    *:*)
+      case $host in
+        *[!0-9a-f:.]*) die "'$1' is not a valid host name" ;;
+      esac
+      ;;
+    *)
+      case $host in
+        *[!a-z0-9.-]*) die "'$1' is not a valid host name" ;;
+      esac
+      ;;
+  esac
   case $port in
     '') ;;
     *[!0-9]*) die "not a port in '$1'" ;;
+    *) [ "$port" -le 65535 ] || die "not a port in '$1'" ;;
   esac
   loopback=0
-  case $host in
-    localhost | 127.* | ::1 | 0:0:0:0:0:0:0:1) loopback=1 ;;
-  esac
+  is_loopback "$host" && loopback=1
   if [ "$scheme" != https ] && [ "$loopback" = 0 ]; then
     die "$scheme://$host is not secure. Use an https:// address; plain http:// only works for a server on this computer"
   fi
@@ -701,23 +769,33 @@ normalize_remote() {
 }
 
 # Every Diazo server answers this public route, so a typo or another site is
-# caught before anything is written.
+# caught before anything is written. Like server.rs's probe: redirects are
+# followed, and the origin that actually answered — checked again the same
+# way, so a redirect to plain http off this computer fails too — is the one
+# REMOTE_ORIGIN keeps.
 probe_remote() {
   say "checking $1/api/locale-config"
-  body=$(curl -fsS --max-time 10 "$1/api/locale-config" 2>/dev/null) ||
+  work_dir
+  answered=$(curl -fsSL --max-time 8 -o "$WORK/probe-body" -w '%{url_effective}' "$1/api/locale-config" 2>/dev/null) ||
     die "no Diazo server answered at $1; check the address and try again"
-  case $body in
+  case $(cat "$WORK/probe-body") in
     *defaultLocale*) ;;
     *) die "no Diazo server answered at $1; check the address and try again" ;;
   esac
+  REMOTE_ORIGIN=$(normalize_remote "$answered")
 }
 
-# Points the app at the remote server. The choice is explicit (--remote), so
-# it replaces another one; the same one is left alone.
+# Points the app at the remote server. An explicit --remote replaces another
+# choice; a `diazo update` replay keeps a server picked in the app, the way a
+# local-mode update already does.
 choose_remote_server() {
   current=$(current_choice)
   if [ "$current" = "$REMOTE_ORIGIN" ]; then
     say "the app already opens $REMOTE_ORIGIN"
+    return 0
+  fi
+  if [ "$REMOTE_EXPLICIT" = 0 ] && [ -n "$current" ]; then
+    say "the app keeps the server it was set to ($current); run the installer with --remote <url> to change it"
     return 0
   fi
   write_server_json "$REMOTE_ORIGIN"
@@ -758,6 +836,18 @@ record_parts() {
 conf_value() {
   [ -f "$CONF" ] || return 0
   sed -n "s/^$1=//p" "$CONF" | head -n 1
+}
+
+# The recorded mode: empty (a record from before modes existed, meaning
+# local), local or remote. Anything else was written by a newer installer;
+# replaying it would turn e.g. an embedded install into a container install,
+# so it is an error instead.
+conf_mode() {
+  mode=$(conf_value mode)
+  case $mode in
+    '' | local | remote) printf '%s' "$mode" ;;
+    *) die "$CONF records mode '$mode', which this installer does not know. Get the latest Diazo installer and run this again" ;;
+  esac
 }
 
 # ---------------------------------------------------------------- install
@@ -806,6 +896,10 @@ do_install() {
   ask_mode
   check_platform
   if [ "$MODE" = remote ]; then
+    # `diazo update` replays the recorded --remote (DIAZO_UPDATE marks the
+    # re-run): a remembered choice, not a new one, so a server picked in the
+    # app wins
+    [ "${DIAZO_UPDATE:-0}" = 1 ] && REMOTE_EXPLICIT=0
     REMOTE_ORIGIN=$(normalize_remote "$REMOTE_URL")
   fi
   if [ "$DRY_RUN" = 1 ]; then
@@ -815,8 +909,10 @@ do_install() {
   if [ "$MODE" = remote ]; then
     # the probe comes before anything is written; a server the app already
     # opens is trusted as chosen (it also lets `diazo update` run while it
-    # is down)
-    if [ "$(current_choice)" != "$REMOTE_ORIGIN" ]; then
+    # is down). An update replaying the record has nothing new to check or
+    # write against a server picked in the app.
+    current=$(current_choice)
+    if [ "$current" != "$REMOTE_ORIGIN" ] && { [ "$REMOTE_EXPLICIT" = 1 ] || [ -z "$current" ]; }; then
       probe_remote "$REMOTE_ORIGIN"
     fi
   fi
@@ -881,7 +977,8 @@ need_server() {
     macos | linux) ;;
     *) die "Diazo's local server runs on macOS and Linux" ;;
   esac
-  if [ "$(conf_value mode)" = remote ]; then
+  mode=$(conf_mode)
+  if [ "$mode" = remote ]; then
     die "this computer has no Diazo server (a remote install: the app uses $(conf_value remote))"
   fi
   if [ "$(conf_value server)" = 0 ]; then
@@ -920,7 +1017,8 @@ autostart_status() {
 }
 
 do_status() {
-  if [ "$(conf_value mode)" = remote ]; then
+  mode=$(conf_mode)
+  if [ "$mode" = remote ]; then
     say "no server on this computer (remote install: the app uses $(conf_value remote))"
   elif [ "$(conf_value server)" != 0 ]; then
     need_server
@@ -951,7 +1049,8 @@ do_open() {
 
 # What is installed, as install flags, from the record.
 part_flags() {
-  if [ "$(conf_value mode)" = remote ]; then
+  mode=$(conf_mode)
+  if [ "$mode" = remote ]; then
     printf '%s' "--remote $(conf_value remote)"
   elif [ "$(conf_value server)" = 0 ]; then
     printf '%s' --app-only
@@ -987,8 +1086,10 @@ do_update() {
   for script in install.sh install-local.sh install-desktop.sh; do
     fetch "$DIAZO_RAW/$script" "$WORK/$script" || die "could not download $DIAZO_RAW/$script (offline?)"
   done
+  # DIAZO_UPDATE tells the re-run its --remote flag is the record, not a
+  # newly typed choice: a server picked in the app must survive the update
   # shellcheck disable=SC2086 # one flag or none
-  sh "$WORK/install.sh" install --no-open $flags ${VERSION:+--version "$VERSION"}
+  DIAZO_UPDATE=1 sh "$WORK/install.sh" install --no-open $flags ${VERSION:+--version "$VERSION"}
 }
 
 # The login start: nothing when the server already answers.
@@ -1008,6 +1109,8 @@ do_uninstall() {
     macos | linux) ;;
     *) die "this installer runs on macOS and Linux" ;;
   esac
+  # an unknown recorded mode is an error before anything is touched
+  mode=$(conf_mode)
   if [ "$DRY_RUN" = 1 ]; then
     say "[dry run] would remove the autostart, the '$DOOP_NAME' container, the app and the diazo command"
     if [ "$PURGE" = 1 ]; then
@@ -1019,11 +1122,15 @@ do_uninstall() {
   unregister_autostart
   # the app first: purging the server deletes the data folder, lib/ included
   sh "$LIB/install-desktop.sh" --uninstall
+  # the server part only when this install has one: a remote or app-only
+  # install never made a container, and must not remove somebody else's
   runtime_present=0
-  case $OS in
-    macos) command -v container >/dev/null 2>&1 && runtime_present=1 ;;
-    linux) { command -v docker >/dev/null 2>&1 || command -v podman >/dev/null 2>&1; } && runtime_present=1 ;;
-  esac
+  if [ "$mode" != remote ] && [ "$(conf_value server)" != 0 ]; then
+    case $OS in
+      macos) command -v container >/dev/null 2>&1 && runtime_present=1 ;;
+      linux) { command -v docker >/dev/null 2>&1 || command -v podman >/dev/null 2>&1; } && runtime_present=1 ;;
+    esac
+  fi
   if [ "$runtime_present" = 1 ]; then
     if [ "$PURGE" = 1 ]; then
       sh "$LIB/install-local.sh" uninstall --yes

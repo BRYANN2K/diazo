@@ -13,7 +13,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /* scripts/install.sh, the all-in-one install, against stub `uname`,
    `sw_vers`, `container`, `docker`, `podman`, `systemctl`, `launchctl`,
@@ -26,6 +26,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 const SCRIPTS = path.resolve(import.meta.dirname, '..', 'scripts')
 const SCRIPT = path.join(SCRIPTS, 'install.sh')
 const RAW = 'https://raw.githubusercontent.com/BRYANN2K/diazo/main/scripts'
+
+/* every test spawns real installer shell processes; a machine with slow exec
+   (endpoint scanning, a loaded CI runner) needs far more than the 5s default */
+vi.setConfig({ testTimeout: 60000 })
 
 let root: string
 let home: string
@@ -116,15 +120,28 @@ esac
   stub('sw_vers', 'echo "${STUB_MACOS:-26.1}"')
   stub(
     'curl',
-    `out=; url=
+    `out=; url=; write=
 while [ $# -gt 0 ]; do
-  case $1 in -o) out=$2; shift ;; --proto|--retry|--max-time) shift ;; -*) ;; *) url=$1 ;; esac
+  case $1 in
+    -o) out=$2; shift ;;
+    -w) write=$2; shift ;;
+    --proto|--retry|--max-time) shift ;;
+    -*) ;;
+    *) url=$1 ;;
+  esac
   shift
 done
 case $url in
   ${RAW}/*) echo "curl $url" >> "$STUB_DIR/calls.log"; cp "$STUB_DIR/lib/\${url#${RAW}/}" "$out" ;;
   */healthz) [ -z "$STUB_DOWN" ] ;;
-  */api/locale-config) echo "curl $url" >> "$STUB_DIR/calls.log"; [ -z "$STUB_DOWN" ] && echo '{"defaultLocale":"en"}' || exit 1 ;;
+  */api/locale-config)
+    echo "curl $url" >> "$STUB_DIR/calls.log"
+    [ -n "$STUB_DOWN" ] && exit 1
+    # -o takes the body; -w answers the URL it ended at (STUB_EFFECTIVE is a
+    # redirect target, like the origin the app's reqwest probe sees)
+    if [ -n "$out" ]; then printf '%s' '{"defaultLocale":"en"}' >"$out"; else printf '%s' '{"defaultLocale":"en"}'; fi
+    [ -n "$write" ] && printf '%s' "\${STUB_EFFECTIVE:-$url}"
+    ;;
   *) exit 22 ;;
 esac`,
   )
@@ -591,8 +608,48 @@ describe('install.sh --remote', () => {
     expect(existsSync(plist())).toBe(false)
     expect(existsSync(unit())).toBe(false)
     expect(JSON.parse(readFileSync(serverJson(), 'utf8'))).toEqual({ url: 'https://diazo.example.com' })
+    /* server.json is only {"url":…}: the app's other state lives in the app */
+    expect(readFileSync(serverJson(), 'utf8')).toBe('{"url":"https://diazo.example.com"}')
     expect(conf()).toBe('mode=remote\nserver=0\napp=1\nremote=https://diazo.example.com\n')
     expect(existsSync(path.join(diazoHome(), 'diazo.env'))).toBe(false)
+  })
+
+  it('accepts loopback IPs like server.rs — a name starting with 127. is not one', async () => {
+    for (const bad of ['http://127.example.com', 'http://127.0.0.1.evil.com']) {
+      const { code, out } = await run(['--remote', bad])
+      expect(code, out).not.toBe(0)
+      expect(out).toMatch(/not secure/)
+      expect(existsSync(serverJson())).toBe(false)
+    }
+    expect((await run(['--remote', 'http://127.0.0.2:4400'])).code).toBe(0)
+    expect(JSON.parse(readFileSync(serverJson(), 'utf8'))).toEqual({ url: 'http://127.0.0.2:4400' })
+    expect((await run(['--remote', 'http://[::1]:4400'])).code).toBe(0)
+    expect(JSON.parse(readFileSync(serverJson(), 'utf8'))).toEqual({ url: 'http://[::1]:4400' })
+  })
+
+  it('rejects a host that cannot go into server.json or an unquoted replay', async () => {
+    for (const bad of ['https://ex_ample.com', 'https://a b.com', 'https://[::1'] as const) {
+      const { code, out } = await run(['--remote', bad])
+      expect(code, out).not.toBe(0)
+      expect(out).toMatch(/not a (web address|valid host name)/)
+      expect(existsSync(serverJson())).toBe(false)
+    }
+  })
+
+  it('saves the origin a redirect lands on, checked again the same way', async () => {
+    const { code, out } = await run(['--remote', 'https://diazo.example.com'], {
+      STUB_EFFECTIVE: 'https://www.diazo.example.com',
+    })
+    expect(code, out).toBe(0)
+    expect(JSON.parse(readFileSync(serverJson(), 'utf8'))).toEqual({ url: 'https://www.diazo.example.com' })
+
+    /* a redirect to plain http off this computer fails the check again */
+    const insecure = await run(['--remote', 'https://diazo.example.com'], {
+      STUB_EFFECTIVE: 'http://www.diazo.example.com',
+    })
+    expect(insecure.code, insecure.out).not.toBe(0)
+    expect(insecure.out).toMatch(/not secure/)
+    expect(JSON.parse(readFileSync(serverJson(), 'utf8'))).toEqual({ url: 'https://www.diazo.example.com' })
   })
 
   it('normalizes the address the way the app does', async () => {
@@ -654,6 +711,60 @@ describe('install.sh --remote', () => {
     const start = await run(['start'], { DIAZO_LIB: '' }, command)
     expect(start.code).not.toBe(0)
     expect(start.out).toMatch(/remote install/)
+  })
+
+  it('keeps a server picked in the app on update; --remote replaces it', async () => {
+    expect((await run(['--remote', 'https://diazo.example.com'])).code).toBe(0)
+    /* the person picked another server in the app's cog */
+    writeFileSync(serverJson(), '{"url":"https://picked.example.com"}')
+    const command = path.join(diazoHome(), 'bin', 'diazo')
+    clearCalls()
+
+    /* the re-run through downloaded scripts keeps it (no probe, no write) */
+    const updated = await run(['update'], { DIAZO_LIB: '' }, command)
+    expect(updated.code, updated.out).toBe(0)
+    expect(updated.out).toMatch(/keeps the server it was set to \(https:\/\/picked\.example\.com\)/)
+    expect(calls()).not.toMatch(/locale-config/)
+    expect(readFileSync(serverJson(), 'utf8')).toBe('{"url":"https://picked.example.com"}')
+    expect(conf()).toBe('mode=remote\nserver=0\napp=1\nremote=https://diazo.example.com\n')
+
+    /* and so does the in-process re-run an update from a checkout takes */
+    const again = await run(['update'], {}, command)
+    expect(again.code, again.out).toBe(0)
+    expect(readFileSync(serverJson(), 'utf8')).toBe('{"url":"https://picked.example.com"}')
+
+    /* only an explicit --remote replaces the choice */
+    const switched = await run(['--remote', 'https://other.example.com'])
+    expect(switched.code, switched.out).toBe(0)
+    expect(JSON.parse(readFileSync(serverJson(), 'utf8'))).toEqual({ url: 'https://other.example.com' })
+  })
+
+  it('uninstalls the app and the command in remote mode, touching no container', async () => {
+    expect((await run(['--remote', 'https://diazo.example.com'])).code).toBe(0)
+    clearCalls()
+    const command = path.join(diazoHome(), 'bin', 'diazo')
+    const { code, out } = await run(['uninstall'], { DIAZO_LIB: '' }, command)
+    expect(code, out).toBe(0)
+    expect(calls()).toMatch(/^desktop --uninstall$/m)
+    /* someone else's diazo container is not this install's to remove */
+    expect(calls()).not.toMatch(/delete --force|docker (rm|rmi|stop)|podman (rm|rmi|stop)|systemctl/)
+    expect(existsSync(command)).toBe(false)
+  })
+
+  it('refuses a recorded mode it does not know', async () => {
+    expect((await run(['--remote', 'https://diazo.example.com'])).code).toBe(0)
+    writeFileSync(
+      path.join(diazoHome(), 'install.conf'),
+      'mode=embedded\nserver=0\napp=1\nremote=https://diazo.example.com\n',
+    )
+    clearCalls()
+    const command = path.join(diazoHome(), 'bin', 'diazo')
+    for (const args of [['update'], ['status'], ['uninstall']]) {
+      const { code, out } = await run(args, { DIAZO_LIB: '' }, command)
+      expect(code, out).not.toBe(0)
+      expect(out).toMatch(/mode 'embedded'.*does not know/)
+    }
+    expect(calls()).not.toMatch(/^run |delete --force|docker |desktop /m)
   })
 })
 
