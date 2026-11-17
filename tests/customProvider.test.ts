@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import http from 'node:http'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
@@ -399,19 +399,28 @@ describe('a custom provider’s turns', () => {
 })
 
 describe('a server with Anthropic credentials of its own', () => {
-  afterEach(() => {
+  /* fake config dirs the stub writes, removed after each test */
+  const configDirs: string[] = []
+
+  afterEach(async () => {
     unstubAllEnvs()
     seen.length = 0
+    await Promise.all(configDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
   })
 
   /* the machine (or the shell that launched the server) has Claude
-     configured: an exported token, custom headers, and a user profile on
-     disk whose cached credentials the SDK's default chain would pick up */
-  async function stubServerAnthropicEnv(): Promise<void> {
+     configured: an exported token, a custom header, and a user profile on
+     disk whose cached credentials the SDK's default chain would pick up.
+     Deliberately no Authorization line in the header stub: the null that
+     strips it would also strip the bearer a leaked authToken sends, and the
+     keyless and keyed tests would pass on a leaking client. That line is
+     covered by a test of its own below */
+  async function stubServerAnthropicEnv(customHeaders = 'X-Server-Header: server'): Promise<void> {
     stubEnv('DOOP_CUSTOM_PROVIDER_PRIVATE_HOSTS', 'true')
     stubEnv('ANTHROPIC_AUTH_TOKEN', 'server-oauth-token')
-    stubEnv('ANTHROPIC_CUSTOM_HEADERS', 'X-Server-Header: server\nAuthorization: Bearer server-header-token')
+    stubEnv('ANTHROPIC_CUSTOM_HEADERS', customHeaders)
     const dir = await mkdtemp(join(tmpdir(), 'anthropic-config-'))
+    configDirs.push(dir)
     await mkdir(join(dir, 'configs'))
     await mkdir(join(dir, 'credentials'))
     await writeFile(join(dir, 'configs', 'default.json'), JSON.stringify({ authentication: { type: 'user_oauth' } }))
@@ -442,6 +451,23 @@ describe('a server with Anthropic credentials of its own', () => {
   it('keyed: only the person’s key reaches the custom endpoint', async () => {
     reply = anthropicToolCall
     await stubServerAnthropicEnv()
+    const run = customTurn(
+      {
+        config: { name: 'Gateway', apiType: 'anthropic', baseUrl: `${base}/anthropic`, models: [] },
+        apiKey: 'sk-person',
+      },
+      { id: 'glm-5', vision: true },
+    )
+    await run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 1000 })
+    const headers = seen[0]!.headers
+    expect(headers['x-api-key']).toBe('sk-person')
+    expect(headers.authorization).toBeUndefined()
+    expect(headers['x-server-header']).toBeUndefined()
+  })
+
+  it('an Authorization line in the env headers does not reach it either', async () => {
+    reply = anthropicToolCall
+    await stubServerAnthropicEnv('X-Server-Header: server\nAuthorization: Bearer server-header-token')
     const run = customTurn(
       {
         config: { name: 'Gateway', apiType: 'anthropic', baseUrl: `${base}/anthropic`, models: [] },
