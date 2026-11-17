@@ -2,12 +2,15 @@ import * as React from 'react'
 
 import { cn } from '@/lib/utils'
 
+import { Button } from './button'
+
 /* 01 Foundations · Toast: the bottom-right card that confirms something
    happened. A surface at elevation 3, a tone dot (ok, agent, danger: never
    colour alone, the text says it too), the message and at most one action.
    It enters on the soft spring from 14px below; under reduced motion it
    fades. It sits above the safe area and clear of the canvas toolbar on
-   phones. */
+   phones; on a wider screen a page may move it with --float-right and
+   --float-bottom (the canvas keeps it clear of its panels and zoom pill). */
 const TONE_DOT = {
   ok: 'bg-ok',
   agent: 'bg-agent',
@@ -16,7 +19,7 @@ const TONE_DOT = {
 
 /* where a toast sits on its own, and where a stack of them sits */
 const TOAST_PLACE =
-  'fixed bottom-[calc(76px+env(safe-area-inset-bottom))] left-1/2 z-[70] -translate-x-1/2 sm:bottom-3 sm:left-auto sm:right-3 sm:translate-x-0'
+  'fixed bottom-[calc(76px+env(safe-area-inset-bottom))] left-1/2 z-[70] -translate-x-1/2 sm:bottom-[var(--float-bottom,12px)] sm:left-auto sm:right-[var(--float-right,12px)] sm:translate-x-0 sm:transition-[right,bottom] sm:duration-150'
 
 function Toast({
   className,
@@ -28,7 +31,8 @@ function Toast({
 }: React.ComponentProps<'div'> & {
   tone?: keyof typeof TONE_DOT
   /** inside a ToastStack: 0 is the newest, in front; each layer behind
-   *  scales down 5% and rises 14px, and the fourth fades out */
+   *  takes the front toast's height, scales down 5% and rises 14px, and the
+   *  fourth fades out */
   depth?: number
 }) {
   const stacked = depth !== undefined
@@ -40,10 +44,13 @@ function Toast({
       data-tone={tone}
       data-depth={depth}
       className={cn(
-        'flex max-w-[min(360px,calc(100vw-24px))] items-center gap-2.5 rounded-card bg-surface px-3.5 py-3 text-body font-semibold text-ink shadow-pop animate-[toast-in_400ms_var(--spring-soft)_both]',
+        'flex max-w-[min(360px,calc(100vw-24px))] items-center gap-2.5 rounded-card bg-surface px-3.5 py-3 text-body font-medium text-ink shadow-pop animate-[toast-in_400ms_var(--spring-soft)_both]',
         stacked
           ? 'absolute right-0 bottom-0 origin-bottom transition-[transform,opacity] duration-slow ease-out'
           : TOAST_PLACE,
+        /* behind the front one, a toast is cut to its height, so a taller
+           front toast (two lines, a longer language) still lets it peek */
+        stacked && depth > 0 && 'h-[var(--toast-front-h)] overflow-hidden',
         className,
       )}
       style={
@@ -71,27 +78,38 @@ function ToastStack({ children, className }: { children: React.ReactNode; classN
   const toasts = React.Children.toArray(children).filter(React.isValidElement) as React.ReactElement<{
     depth?: number
   }>[]
+  const stackRef = useFrontToastHeight()
   if (toasts.length === 0) return null
   return (
-    <div data-slot="toast-stack" className={cn(TOAST_PLACE, 'h-[46px] w-[min(360px,calc(100vw-24px))]', className)}>
+    <div
+      ref={stackRef}
+      data-slot="toast-stack"
+      className={cn(TOAST_PLACE, 'h-[var(--toast-front-h,46px)] w-[min(360px,calc(100vw-24px))]', className)}
+    >
       {toasts.map((toast, i) => React.cloneElement(toast, { depth: toasts.length - 1 - i }))}
     </div>
   )
 }
 
-/** The inverted button inside a toast (“Reload”). */
-function ToastAction({ className, ...props }: React.ComponentProps<'button'>) {
-  return (
-    <button
-      type="button"
-      data-slot="toast-action"
-      className={cn(
-        'whitespace-nowrap rounded-[6px] border-0 bg-transparent px-2 py-0.75 text-label font-medium text-ink shadow-ring transition-colors duration-fast hover:bg-well hover:duration-instant',
-        className,
-      )}
-      {...props}
-    />
-  )
+/** Keeps --toast-front-h on the stack at the front toast's height (no
+ *  re-render: the toasts behind read it from CSS). Runs after every render,
+ *  since a new toast changes which one is in front. */
+function useFrontToastHeight() {
+  const ref = React.useRef<HTMLDivElement>(null)
+  React.useLayoutEffect(() => {
+    const stack = ref.current
+    const front = stack?.querySelector<HTMLElement>('[data-slot="toast"][data-depth="0"]')
+    if (!stack || !front || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => stack.style.setProperty('--toast-front-h', `${front.offsetHeight}px`))
+    observer.observe(front)
+    return () => observer.disconnect()
+  })
+  return ref
+}
+
+/** The button inside a toast (“Reload”). */
+function ToastAction(props: React.ComponentProps<typeof Button>) {
+  return <Button size="sm" data-slot="toast-action" {...props} />
 }
 
 /** Leads a toast whose action is still running (an export rendering). */
