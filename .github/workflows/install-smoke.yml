@@ -213,8 +213,10 @@ jobs:
           test "$(stat -c %a "$HOME/.diazo/diazo.env")" = 600
           # keep-id pins the caller into the container at the image's own uid
           # (10001): the proof is that files the server writes inside the
-          # mount land owned by the caller on the host, not a subuid
-          podman inspect --format '{{.HostConfig.UsernsMode}}' diazo | grep -q keep-id
+          # mount land owned by the caller on the host, not a subuid.
+          # podman 4.x reports the mode in an annotation (UsernsMode stays
+          # "private"), newer podman fills UsernsMode — check both.
+          podman inspect diazo --format '{{.HostConfig.UsernsMode}} {{index .Config.Annotations "io.podman.annotations.userns"}}' | grep -q keep-id
           test "$(podman exec diazo id -u)" = "10001"
           test "$(stat -c %u "$HOME/.diazo/data")" = "$(id -u)"
           test "$(stat -c %u "$HOME/.diazo/data/pg")" = "$(id -u)"
