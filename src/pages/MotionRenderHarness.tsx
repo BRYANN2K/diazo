@@ -13,6 +13,9 @@ declare global {
     __doopMotionCapture?: () => string
     /** resolves once the stage is ready to be seeked */
     __doopMotionReady?: Promise<void>
+    /** the scene effects the last seek could not draw — the render reports
+     *  them instead of silently shipping a film without its look */
+    __doopMotionFxStatus?: { fx: string; reason: string }[]
     /** the agent's eyes: a contact sheet of the film at `times`, with the
      *  luminance/motion stats each cell carries (motion-pro) */
     __doopMotionSheet?: (opts: { times: number[]; columns?: number; maxSide?: number; labels?: boolean }) => Promise<{
@@ -91,7 +94,7 @@ export function MotionRenderHarness({ canvasId }: { canvasId: string }) {
     window.__doopMotionSeek = async (t: number) => {
       await window.__doopMotionReady
       const ctx = canvasRef.current?.getContext('2d')
-      if (film && ctx) await paintShutter(ctx, film.comp, film.stage, start + t)
+      window.__doopMotionFxStatus = film && ctx ? await paintShutter(ctx, film.comp, film.stage, start + t) : []
     }
     window.__doopMotionCapture = () => canvasRef.current?.toDataURL('image/png') ?? ''
     window.__doopMotionSheet = async ({ times, columns, maxSide, labels }) => {
@@ -122,9 +125,11 @@ export function MotionRenderHarness({ canvasId }: { canvasId: string }) {
         motionEnergy: [],
       }
       let prev: Float32Array | undefined
+      const fxDrops = new Map<string, { fx: string; reason: string }>()
       for (let i = 0; i < cells; i++) {
         const t = times[i]!
-        await paintShutter(ctx, comp, stage, start + t)
+        for (const d of await paintShutter(ctx, comp, stage, start + t)) fxDrops.set(`${d.fx}:${d.reason}`, d)
+        window.__doopMotionFxStatus = [...fxDrops.values()]
         const col = i % cols
         const row = Math.floor(i / cols)
         const dx = col * cellW * scaleDown
@@ -182,6 +187,17 @@ export function MotionRenderHarness({ canvasId }: { canvasId: string }) {
           const doc = iframe.contentDocument
           if (!doc) continue
           await doc.fonts?.ready?.catch(() => {})
+          /* the backdrop the text actually sits on: the nearest ancestor
+             (or the element itself) with a painted background — an element's
+             own transparent background would grade contrast against the
+             wrong colour */
+          const backdrop = (el: Element): string => {
+            for (let node: Element | null = el; node; node = node.parentElement) {
+              const bg = doc.defaultView?.getComputedStyle(node).backgroundColor ?? ''
+              if (bg && bg !== 'transparent' && !/^rgba?\([^)]*,\s*0(?:\.0+)?\s*\)$/.test(bg)) return bg
+            }
+            return film!.stage.ground
+          }
           for (const el of doc.querySelectorAll('[data-doop-id]')) {
             const text = (el.textContent ?? '').trim()
             if (!text) continue
@@ -198,7 +214,7 @@ export function MotionRenderHarness({ canvasId }: { canvasId: string }) {
               fontSize: Number.parseFloat(cs.fontSize) || 0,
               fontWeight: cs.fontWeight,
               color: cs.color,
-              background: cs.backgroundColor,
+              background: backdrop(el),
               text: text.slice(0, 120),
             })
           }

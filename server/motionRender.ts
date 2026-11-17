@@ -239,11 +239,20 @@ export function zipStore(entries: { name: string; data: Buffer }[]): Buffer {
 /* -- the in-page driver -------------------------------------------------- */
 
 /** One capture step, evaluated inside the harness page. `__doopMotionSeek`
- *  takes seconds (src/pages/MotionRenderHarness.tsx). */
+ *  takes seconds (src/pages/MotionRenderHarness.tsx). The seek also leaves
+ *  `__doopMotionFxStatus`: the scene effects it could not draw — a frame
+ *  that arrives without its look fails the render, it does not ship. */
 const SEEK_CAPTURE = `async (t) => {
   await window.__doopMotionSeek(t);
-  return window.__doopMotionCapture();
+  return { png: window.__doopMotionCapture(), fx: window.__doopMotionFxStatus ?? [] };
 }`
+
+/** the first frame whose paint dropped scene effects throws — a film that
+ *  cannot draw its look is a failed render, not a degraded one */
+const fxError = (fx: unknown): Error | null =>
+  Array.isArray(fx) && fx.length
+    ? new Error(`the film's effect stack could not be drawn: ${fx.map((d) => `${d.fx} (${d.reason})`).join(', ')}`)
+    : null
 
 /* The deterministic webm driver: WebCodecs encodes every seeked frame at
  * an explicit microsecond timestamp — nothing is paced by the wall clock
@@ -278,7 +287,7 @@ const WEBM_FRAME = `async ({ t, ts, key }) => {
   s.encoder.encode(frame, { keyFrame: key });
   frame.close();
   if (window.__doopWebmError) throw new Error(window.__doopWebmError);
-  return s.pending.splice(0);
+  return { pending: s.pending.splice(0), fx: window.__doopMotionFxStatus ?? [] };
 }`
 
 const WEBM_FLUSH = `async () => {
@@ -313,8 +322,10 @@ async function capturePngseq(
   let bytes = 0
   try {
     for (let i = 0; i < frames; i++) {
-      const dataUrl = (await page.evaluate(`(${SEEK_CAPTURE})(${i / job.fps})`)) as string
-      const data = base64Bytes(dataUrl)
+      const capture = (await page.evaluate(`(${SEEK_CAPTURE})(${i / job.fps})`)) as { png: string; fx: unknown }
+      const drop = fxError(capture.fx)
+      if (drop) throw drop
+      const data = base64Bytes(capture.png)
       bytes += data.length
       if (bytes > MOTION_LIMITS.RENDER_MAX_BYTES) throw new Error('the sequence is over the upload limit')
       await zip.add(`frame-${String(i).padStart(pad, '0')}.png`, data)
@@ -354,10 +365,12 @@ async function captureWebm(
   /* a forced keyframe every two seconds keeps each cluster decodable */
   const keyEvery = Math.max(1, Math.round(job.fps * 2))
   for (let i = 0; i < frames; i++) {
-    const emitted = (await page.evaluate(
+    const step = (await page.evaluate(
       `(${WEBM_FRAME})(${JSON.stringify({ t: i / job.fps, ts: i * frameUs, key: i % keyEvery === 0 })})`,
-    )) as { type: 'key' | 'delta'; ts: number; data: string }[]
-    collect(emitted)
+    )) as { pending: { type: 'key' | 'delta'; ts: number; data: string }[]; fx: unknown }
+    const drop = fxError(step.fx)
+    if (drop) throw drop
+    collect(step.pending)
     if (i % 30 === 0) patchRenderJob(job, { progress: (i / frames) * 0.9 }, CLAIMANT)
   }
   collect((await page.evaluate(`(${WEBM_FLUSH})()`)) as { type: 'key' | 'delta'; ts: number; data: string }[])

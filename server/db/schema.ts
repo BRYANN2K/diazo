@@ -41,6 +41,7 @@ import type {
 import type {
   BlenderEngine,
   Composition,
+  Direction,
   MotionTrack,
   RenderFormat,
   RenderStatus,
@@ -1389,6 +1390,8 @@ export const compositions = pgTable(
     height: integer('height').notNull(),
     posterTime: doublePrecision('poster_time'),
     tracks: jsonb('tracks').$type<MotionTrack[]>().notNull(),
+    direction: jsonb('direction').$type<Direction>(),
+    motionBlur: jsonb('motion_blur').$type<NonNullable<Composition['motionBlur']>>(),
     revision: integer('revision').notNull(),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),

@@ -114,14 +114,23 @@ export async function prepareStage(
   return { frames: drawn, fallback: fitCamera(frames, comp.width, comp.height), ground: opts.ground }
 }
 
-/** Paint the film at `t` onto `ctx`, sized `comp.width × comp.height`. */
+/** an effect the paint could not draw, with the reason — the render and
+ *  check surfaces report them so an effect never drops silently */
+export interface FxDrop {
+  fx: string
+  reason: 'no WebGL2 context' | 'no shader in this build' | 'effect pass failed'
+}
+
+/** Paint the film at `t` onto `ctx`, sized `comp.width × comp.height`.
+ *  Returns the scene effects that could not be drawn (empty when every
+ *  effect landed or the stack was empty). */
 export async function paintAt(
   ctx: CanvasRenderingContext2D,
   comp: Composition,
   stage: FilmStage,
   t: number,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<FxDrop[]> {
   const frameBlocks = new Map<string, readonly FrameMotionKeyframe[]>()
   for (const entry of stage.frames) if (entry.motionKfs.length > 0) frameBlocks.set(entry.frame.id, entry.motionKfs)
   const state = frameStateAt(comp, t, { resolveEasing, frameBlocks })
@@ -167,7 +176,7 @@ export async function paintAt(
     }
   })
   ctx.setTransform(1, 0, 0, 1, 0, 0)
-  paintSceneFx(ctx, comp, t)
+  return paintSceneFx(ctx, comp, t)
 }
 
 /** the stack the whole scene sees at t: the camera track's effects, plus each
@@ -204,64 +213,78 @@ function sceneStackAt(
   return out
 }
 
-/** draw the scene-level stack through the WebGL2 pass; when no GL context or
- *  an effect has no GLSL body the pixels stay as the 2D pass left them and
- *  the caller's checks list the gap */
-function paintSceneFx(ctx: CanvasRenderingContext2D, comp: Composition, t: number) {
+/** draw the scene-level stack through the WebGL2 pass and say what could
+ *  not be drawn: an effect with no GLSL body, a missing GL context, or a
+ *  failed pass — the pixels stay as the 2D pass left them and the caller
+ *  reports the gap instead of shipping a film without its look */
+function paintSceneFx(ctx: CanvasRenderingContext2D, comp: Composition, t: number): FxDrop[] {
   const stack = sceneStackAt(comp, t)
-  if (stack.length === 0) return
-  const { ok } = supportedStack(stack)
-  if (ok.length === 0) return
+  if (stack.length === 0) return []
+  const { ok, unsupported } = supportedStack(stack)
+  const drops: FxDrop[] = unsupported.map((e) => ({ fx: e.fx, reason: 'no shader in this build' }))
+  if (ok.length === 0) return drops
   const gl = fxGl()
-  if (!gl) return
-  const seed = comp.tracks.reduce((h, tr) => h + tr.id.length * 31, 7)
-  const out = gl.apply(ctx.canvas, comp.width, comp.height, ok, t, seed)
-  if (!out) return
+  if (!gl) return [...drops, ...ok.map((e) => ({ fx: e.fx, reason: 'no WebGL2 context' as const }))]
+  const out = gl.apply(ctx.canvas, comp.width, comp.height, ok, t, comp.fps)
+  if (!out) return [...drops, ...ok.map((e) => ({ fx: e.fx, reason: 'effect pass failed' as const }))]
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, comp.width, comp.height)
   ctx.drawImage(out, 0, 0)
+  return drops
 }
+
+/* the shutter cost bound: each sample re-rasterises the moving frames, so
+   a blurred frame costs K paints — over ~16 samples the gain is invisible,
+   the render bill is not */
+const MAX_SHUTTER_SAMPLES = 16
 
 /** `paintAt` with the filmic shutter: when the composition carries
  *  `motionBlur`, the frame is the mean of K seeks spread across the shutter
- *  window — `t - shutter/2` to `t + shutter/2` of one frame interval. It is
- *  still one deterministic function of (comp, t): no accumulation across
- *  calls, same samples every time. shutter 0 (or unset) is the hard shutter. */
+ *  window — `t - shutter/2` to `t + shutter/2` of one frame interval. The
+ *  accumulation runs in float (getImageData summed into a Float32Array and
+ *  divided once), so static pixels come out bit-identical to a hard shutter
+ *  instead of drifting on 8-bit 'lighter' rounding. Still one deterministic
+ *  function of (comp, t): no accumulation across calls, same samples every
+ *  time. shutter 0 (or unset) is the hard shutter. Returns the union of the
+ *  sub-seeks' undrawn effects. */
 export async function paintShutter(
   ctx: CanvasRenderingContext2D,
   comp: Composition,
   stage: FilmStage,
   t: number,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<FxDrop[]> {
   const mb = comp.motionBlur
   const shutter = mb && Number.isFinite(mb.shutter) ? Math.min(Math.max(mb.shutter, 0), 360) : 0
   if (shutter <= 0) {
-    await paintAt(ctx, comp, stage, t, signal)
-    return
+    return paintAt(ctx, comp, stage, t, signal)
   }
-  const K = Math.min(Math.max(Math.round(mb?.samples ?? 8), 2), 64)
+  const K = Math.min(Math.max(Math.round(mb?.samples ?? 8), 2), MAX_SHUTTER_SAMPLES)
   const window = (shutter / 360) * (1 / comp.fps)
   const off = document.createElement('canvas')
   off.width = comp.width
   off.height = comp.height
   const offCtx = off.getContext('2d')
   if (!offCtx) {
-    await paintAt(ctx, comp, stage, t, signal)
-    return
+    return paintAt(ctx, comp, stage, t, signal)
   }
-  ctx.save()
-  ctx.globalCompositeOperation = 'lighter'
-  ctx.fillStyle = '#000'
-  ctx.fillRect(0, 0, comp.width, comp.height)
+  const pixels = comp.width * comp.height * 4
+  const acc = new Float32Array(pixels)
+  const drops = new Map<string, FxDrop>()
   for (let k = 0; k < K; k++) {
     const sub = t - window / 2 + (window * (k + 0.5)) / K
     offCtx.setTransform(1, 0, 0, 1, 0, 0)
     offCtx.clearRect(0, 0, comp.width, comp.height)
-    await paintAt(offCtx, comp, stage, sub, signal)
+    for (const d of await paintAt(offCtx, comp, stage, sub, signal)) drops.set(`${d.fx}:${d.reason}`, d)
     if (signal?.aborted) break
-    ctx.globalAlpha = 1 / K
-    ctx.drawImage(off, 0, 0)
+    const data = offCtx.getImageData(0, 0, comp.width, comp.height).data
+    for (let i = 0; i < pixels; i++) acc[i]! += data[i]!
   }
-  ctx.restore()
+  /* the sum is exact — float32 holds uint8 × 16 without rounding, so the
+     divide is the only rounding step and it lands where the mean does */
+  const mean = new Uint8ClampedArray(pixels)
+  for (let i = 0; i < pixels; i++) mean[i] = acc[i]! / K
+  ctx.setTransform(1, 0, 0, 1, 0, 0)
+  ctx.putImageData(new ImageData(mean, comp.width, comp.height), 0, 0)
+  return [...drops.values()]
 }

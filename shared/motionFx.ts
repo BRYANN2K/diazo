@@ -2,9 +2,9 @@
  * shared/motionFx.ts — the effect registry (motion-pro P1). Every effect
  * id the timeline can name lives here once: its params, their ranges and
  * defaults, a GPU cost estimate, and which surfaces can draw it. The GLSL
- * ES 3.00 modules that implement them sit in src/lib/motion/gl/shaders.ts;
- * the algorithms are ported from EffectCraft (MIT/Apache — see
- * THIRD-PARTY-LICENSES.md) under Diazo ids.
+ * ES 3.00 bodies that implement them sit in src/lib/motion/gl.ts;
+ * EffectCraft's modules informed the family and parameter names
+ * (MIT/Apache — see THIRD-PARTY-LICENSES) under Diazo ids.
  *
  * Seek-safety: every effect is a pure function of (pixels in, params, t).
  * Noise and grain are seeded from the instance — `seed ?? hash(id)` — and
@@ -499,6 +499,11 @@ export function effectSeed(effect: EffectInstance): number {
 export function enabledEffects(track: MotionTrack): EffectInstance[] {
   return (track.effects ?? []).filter((e) => e.enabled !== false)
 }
+
+/** the whole-film effect budget — the preview's rule of thumb (six layers
+ *  × three mid-cost passes ≈ 36) and the cap a server render refuses to
+ *  exceed; check_scene reports it as `cost_cap` */
+export const EFFECT_COST_CAP = 36
 
 /** the cost estimate of a stack — the check's per-layer GPU budget */
 export function effectCost(track: MotionTrack): number {

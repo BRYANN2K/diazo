@@ -13,7 +13,7 @@
  * taps, luminance ops, hash noise) — no code is copied.
  */
 
-import { GL_EFFECT_IDS, effectSpec } from '../../../shared/motionFx.ts'
+import { GL_EFFECT_IDS, effectSeed, effectSpec } from '../../../shared/motionFx.ts'
 import type { EffectInstance } from '../../../shared/motion.ts'
 
 const QUAD_VERT = `#version 300 es
@@ -55,10 +55,10 @@ const BODY: Record<string, string> = {
     vec2 u2 = .5 + c * (1. + u_amount * r2);
     col = (u2.x<0.||u2.x>1.||u2.y<0.||u2.y>1.) ? vec4(0.) : texture(u_tex, u2);`,
   'film-grain': `vec4 s = texture(u_tex, uv);
-    float g = fract(sin(dot(uv*u_res + mod(u_seed,4096.), vec2(12.9898,78.233)))*43758.5453) - .5;
+    float g = doopHashf(uvec2(gl_FragCoord.xy), uint(u_seed)) - .5;
     col = vec4(clamp(s.rgb + g*u_amount*(u_monochrome>0.5?1.:1.), 0.,1.), s.a);`,
   noise: `vec4 s = texture(u_tex, uv);
-    vec3 n = vec3(fract(sin(dot(uv*u_res+mod(u_seed,4096.), vec2(12.9898,78.233)))*43758.5453));
+    vec3 n = vec3(doopHashf(uvec2(gl_FragCoord.xy), uint(u_seed)));
     col = vec4(mix(s.rgb, n, u_amount), s.a);`,
   scanlines: `vec4 s = texture(u_tex, uv);
     float l = .5 + .5*sin(uv.y*u_res.y*3.14159/max(u_spacing,1.));
@@ -103,13 +103,14 @@ const BODY: Record<string, string> = {
     col = vec4(texture(u_tex, uv+d).r, texture(u_tex, uv).g, texture(u_tex, uv-d).b,
       texture(u_tex, uv).a);`,
   'block-shift': `vec2 u2 = uv;
-    float band = floor(uv.y * u_rows);
-    float h = fract(sin(band*91.17 + mod(u_seed,4096.))*43758.5453);
+    float h = doopHashf(uvec2(uint(floor(uv.y * u_rows)), 0u), uint(u_seed));
     if(h < u_amount) u2.x = fract(u2.x + (h - .5) * u_shift);
     col = texture(u_tex, u2);`,
   'scan-jitter': `vec2 u2 = uv;
-    float row = floor(uv.y * u_res.y / max(u_band,1.));
-    u2.x = fract(u2.x + (fract(sin(row*57.31+mod(u_seed,4096.)+floor(u_t*30.))*43758.5453)-.5)*u_jitter/u_res.x);
+    uint row = uint(floor(uv.y * u_res.y / max(u_band,1.)));
+    uint frame = uint(floor(u_t * u_fps));
+    float h = doopHashf(uvec2(row, frame), uint(u_seed));
+    u2.x = fract(u2.x + (h - .5)*u_jitter/u_res.x);
     col = texture(u_tex, u2);`,
   'light-leak': `vec4 s = texture(u_tex, uv);
     vec2 d = normalize(u_to - u_from); float l = clamp(dot(uv-u_from,d),0.,1.);
@@ -117,12 +118,28 @@ const BODY: Record<string, string> = {
     col = vec4(clamp(s.rgb + u_color*leak, 0.,1.), s.a);`,
 }
 
+/* an integer hash, not a sine hash: sin()'s precision is implementation-
+ * defined across GPUs, so a float hash renders a different film on a
+ * different card — uint arithmetic is exact everywhere. lowbias32
+ * (Chris Wellons' constant set) mixed down to 24 bits so the float it
+ * becomes is still exact */
+const HASH_GLSL = `
+uint doopHash(uint x) {
+  x ^= x >> 16u; x *= 0x7feb352du; x ^= x >> 15u; x *= 0x846ca68bu; x ^= x >> 16u;
+  return x;
+}
+float doopHashf(uvec2 p, uint seed) {
+  uint h = doopHash((p.x * 0x9E3779B9u) ^ doopHash(p.y + 0x85EBCA6Bu) ^ doopHash(seed));
+  return float(h & 0x00FFFFFFu) * (1.0 / 16777216.0);
+}`
+
 const FRAG = (body: string, params: readonly { id: string; kind: string }[]) => `#version 300 es
 precision highp float;
 uniform sampler2D u_tex;
 uniform vec2 u_res;
 uniform float u_seed;
 uniform float u_t;
+uniform float u_fps;
 ${params
   .map(
     (p) =>
@@ -131,6 +148,7 @@ ${params
   .join('\n')}
 in vec2 uv;
 out vec4 col;
+${HASH_GLSL}
 void main(){
 ${body}
 }`
@@ -250,7 +268,14 @@ export class FxGl {
       return null
     }
     const uniforms = new Map<string, WebGLUniformLocation | null>()
-    for (const name of ['u_tex', 'u_res', 'u_seed', 'u_t', ...spec.params.map((p) => `u_${p.id.replace(/-/g, '_')}`)]) {
+    for (const name of [
+      'u_tex',
+      'u_res',
+      'u_seed',
+      'u_t',
+      'u_fps',
+      ...spec.params.map((p) => `u_${p.id.replace(/-/g, '_')}`),
+    ]) {
       uniforms.set(name, gl.getUniformLocation(prog, name))
     }
     const entry = { prog, uniforms }
@@ -304,14 +329,16 @@ export class FxGl {
   }
 
   /** Run `stack` over `src` and return the composited canvas, or null when the
-   * context is unavailable — callers then paint the stack in 2D or report it. */
+   * context is unavailable — callers then paint the stack in 2D or report it.
+   * `fps` is the film's own frame rate, the clock the seeded time-jitters
+   * quantize to (not a hard-coded 30). */
   apply(
     src: TexImageSource,
     w: number,
     h: number,
     stack: readonly (EffectInstance & { paramsAt?: Record<string, number | string | boolean> })[],
     t: number,
-    seedBase: number,
+    fps: number,
   ): HTMLCanvasElement | null {
     const gl = this.gl
     if (!gl || stack.length === 0) return null
@@ -343,9 +370,13 @@ export class FxGl {
       const ures = p.uniforms.get('u_res')
       if (ures) gl.uniform2f(ures, w, h)
       const useed = p.uniforms.get('u_seed')
-      if (useed) gl.uniform1f(useed, (inst.seed ?? seedBase) % 4096)
+      /* the documented seed: the instance's own `seed`, else a hash of its
+         id — same instance, same noise at every seek */
+      if (useed) gl.uniform1f(useed, effectSeed(inst) % 4096)
       const ut = p.uniforms.get('u_t')
       if (ut) gl.uniform1f(ut, t)
+      const ufps = p.uniforms.get('u_fps')
+      if (ufps) gl.uniform1f(ufps, fps)
       const params = { ...spec.defaults(), ...inst.params, ...inst.paramsAt }
       for (const param of spec.params) {
         const loc = p.uniforms.get(`u_${param.id.replace(/-/g, '_')}`)

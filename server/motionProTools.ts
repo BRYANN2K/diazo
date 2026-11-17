@@ -14,6 +14,7 @@
 
 import * as actions from './actions.ts'
 import { store } from './store.ts'
+import { resetCritiques } from './motionSnapshot.ts'
 import { elementHtml } from '../shared/motionLint.ts'
 import { elementText, expandTextAnimator } from '../shared/motionText.ts'
 import { cameraPreset, CAMERA_PRESETS, isCameraPreset, cameraPresetNote } from '../shared/motionPresets.ts'
@@ -86,6 +87,8 @@ export function setDirection(canvas: Canvas, pageId: string, direction: unknown,
     actor,
   )
   if (!applied.ok) return fail(applied.error ?? 'direction rejected')
+  /* a new treatment is a new run: the critique pass budget restarts */
+  resetCritiques(canvas.id, pageId)
   return ok({ composition: applied.composition, direction: applied.composition.direction ?? null })
 }
 
@@ -265,6 +268,9 @@ export async function applyTextAnimation(
   const frame = store.getFrame(input.frame_id ?? '')
   if (!frame || frame.pageId !== pageId) return fail(`no frame ${input.frame_id} on page ${pageId}`)
   if (!loaded.frames.some((f) => f.id === frame.id)) return fail(`no frame ${input.frame_id} on page ${pageId}`)
+  /* a stream or reveal is writing this frame live — stamping on top of it
+     would silently lose one side's bytes */
+  if (actions.isFrameStreaming(frame.id)) return fail(`frame ${frame.id} is mid-stream — try again once it settles`)
   const elementId = input.element_id
   if (!elementId) return fail('element_id is required')
   const subtree = elementHtml(frame.html, elementId)
@@ -280,31 +286,39 @@ export async function applyTextAnimation(
   const text = elementText(frame.html, elementId)
   if (!text?.trim()) return fail(`element ${elementId} has no flat text to animate`)
 
-  const animator: FrameTextAnimator = {
+  const start = num(input.start ?? 0, 'start', 0, Number.MAX_SAFE_INTEGER)
+  if (typeof start !== 'number') return fail(start.error)
+  const duration = num(input.duration ?? 0.6, 'duration', 0, Number.MAX_SAFE_INTEGER)
+  if (typeof duration !== 'number' || duration <= 0) return fail('duration must be a positive number of seconds')
+  const stagger = num(input.stagger ?? 0.04, 'stagger', 0, Number.MAX_SAFE_INTEGER)
+  if (typeof stagger !== 'number') return fail(stagger.error)
+
+  const candidate: FrameTextAnimator = {
     el: elementId,
     split: split as TextSplit,
     preset: input.preset as FrameTextAnimator['preset'],
-    start: input.start ?? 0,
-    duration: input.duration ?? 0.6,
-    stagger: input.stagger ?? 0.04,
+    start,
+    duration,
+    stagger,
   }
-  if (input.order !== undefined) {
-    if (!['forward', 'center', 'random'].includes(input.order)) {
-      return fail('order must be forward, center or random')
-    }
-    animator.order = input.order as TextOrder
-  }
-  if (input.seed !== undefined) {
-    if (typeof input.seed !== 'number' || !Number.isInteger(input.seed) || input.seed < 0) {
-      return fail('seed must be a non-negative integer')
-    }
-    animator.seed = input.seed
+  if (input.order !== undefined) candidate.order = input.order as TextOrder
+  if (input.seed !== undefined) candidate.seed = input.seed as number
+  /* the same validator the runtime's block parser uses — on the resident
+     path the fields arrive untyped, so nothing reaches the frame without
+     passing parseTextAnimator's rules */
+  const checked = parseMotionBlock(JSON.stringify({ v: 1, keyframes: [], animators: [candidate] }))
+  const animator = checked?.animators?.[0]
+  if (!animator) {
+    return fail(
+      'invalid animator — start must be ≥ 0, duration > 0, stagger ≥ 0, order forward|center|random, seed a non-negative integer',
+    )
   }
   const expanded = expandTextAnimator(animator, text)
   if (expanded.units.length === 0) return fail(`the ${split} split produces no units on that text`)
 
   /* fold the animator into the frame's motion block — existing spec is
-     kept, a missing block is created */
+     kept, a missing block is created. Function replacers everywhere: a
+     `$&`/`$$` inside the markup must not be read as a replacement pattern */
   let html = frame.html
   let block: { v: 1; keyframes: unknown[]; animators: FrameTextAnimator[] } = { v: 1, keyframes: [], animators: [] }
   let replaced = false
@@ -319,7 +333,7 @@ export async function applyTextAnimation(
   if (!replaced) {
     block.animators.push(animator)
     const script = `<script type="application/json" ${MOTION_BLOCK_ATTR}>${JSON.stringify(block)}</script>`
-    html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, `${script}</body>`) : html + script
+    html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, () => `${script}</body>`) : html + script
   }
   /* stamp the split the animator needs (MO-12) unless the element has one */
   if (!attrSplit) {
@@ -327,9 +341,11 @@ export async function applyTextAnimation(
     const selfClosing = subtree[openEnd - 1] === '/'
     const stamped =
       subtree.slice(0, openEnd - (selfClosing ? 1 : 0)) + ` data-doop-split="${split}"` + subtree.slice(openEnd)
-    html = html.replace(subtree, stamped)
+    html = html.replace(subtree, () => stamped)
   }
-  const next = await actions.commitElementStamps(frame, html, [], actor.name, actor.kind)
+  /* an ordinary design write: a frame version in the history, a broadcast,
+     and the agent's reveal/activity treatment like any other markup edit */
+  const next = actions.updateFrame(frame.id, { html }, actor)
   if (!next) return fail('the frame is gone or mid-stream — try again')
   return ok({
     frame_id: frame.id,
@@ -378,6 +394,13 @@ export function addEffect(
   if ('error' in comp) return comp
   const track = comp.tracks.find((t) => t.id === input.track_id)
   if (!track) return fail(`no track ${input.track_id}`)
+  /* the raster/GL pass only reads camera and adjustment stacks — an effect
+     anywhere else would sit undrawn, so the write is refused */
+  if (track.kind !== 'camera' && track.kind !== 'adjustment') {
+    return fail(
+      `effects only draw on camera and adjustment tracks — ${track.kind} track ${track.id} would never render`,
+    )
+  }
   const spec = effectSpec(input.fx ?? '')
   if (!spec) return fail(`no effect ${input.fx} — list_motion_effects names the registry`)
   const bad = spec.validate(input.params ?? {})
@@ -410,6 +433,8 @@ export function updateEffect(
   if (!track) return fail(`no track ${input.track_id}`)
   const effect = track.effects?.find((e) => e.id === input.effect_id)
   if (!effect) return fail(`no effect ${input.effect_id} on track ${input.track_id}`)
+  /* per-effect blend is parsed but never drawn — refuse storing one */
+  if (input.blend != null) return fail('effect blend is not drawn yet — only clearing it is allowed')
   const spec = effectSpec(effect.fx)
   if (input.params && spec) {
     const bad = spec.validate({ ...effect.params, ...input.params })
@@ -458,6 +483,11 @@ export function setEffects(
   if ('error' in comp) return comp
   const track = comp.tracks.find((t) => t.id === input.track_id)
   if (!track) return fail(`no track ${input.track_id}`)
+  if (track.kind !== 'camera' && track.kind !== 'adjustment' && (input.effects ?? []).length > 0) {
+    return fail(
+      `effects only draw on camera and adjustment tracks — ${track.kind} track ${track.id} would never render`,
+    )
+  }
   const wanted = input.effects ?? []
   if (!Array.isArray(wanted) || wanted.length > 20) return fail('effects must be an array of at most 20')
   const seen = new Set<string>()
@@ -467,6 +497,7 @@ export function setEffects(
     seen.add(raw.id)
     const spec = effectSpec(raw.fx)
     if (!spec) return fail(`no effect ${raw.fx} — list_motion_effects names the registry`)
+    if (raw.blend != null) return fail('effect blend is not drawn yet — leave blend unset')
     const bad = spec.validate(raw.params ?? {})
     if (bad) return fail(bad)
   }

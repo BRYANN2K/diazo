@@ -188,8 +188,12 @@ describe('effect stack', () => {
     expect(added[0]!.id).toBeTruthy()
     c = apply(c, { op: 'add_effect', trackId: 'cam', effect: { id: 'gr', fx: 'film-grain', params: { amount: 0.2 } } })
     expect(c.tracks[0]!.effects).toHaveLength(2)
-    c = apply(c, { op: 'update_effect', trackId: 'cam', effectId: 'gr', enabled: false, blend: 'add' })
-    expect(c.tracks[0]!.effects![1]).toMatchObject({ enabled: false, blend: 'add' })
+    c = apply(c, { op: 'update_effect', trackId: 'cam', effectId: 'gr', enabled: false })
+    expect(c.tracks[0]!.effects![1]).toMatchObject({ enabled: false })
+    /* per-effect blend is not drawn — writing one refuses loudly instead
+       of storing a field nothing renders; clearing one stays legal */
+    const blended = applyCompositionOps(c, [{ op: 'update_effect', trackId: 'cam', effectId: 'gr', blend: 'add' }])
+    expect(blended.ok).toBe(false)
     c = apply(c, { op: 'update_effect', trackId: 'cam', effectId: 'gr', blend: null })
     expect(c.tracks[0]!.effects![1]!.blend).toBeUndefined()
     c = apply(c, { op: 'reorder_effects', trackId: 'cam', effectIds: ['gr', c.tracks[0]!.effects![0]!.id] })
@@ -215,12 +219,15 @@ describe('effect stack', () => {
     expect(applyCompositionOps(withTwo, [{ op: 'reorder_effects', trackId: 'cam', effectIds: ['a'] }]).ok).toBe(false)
   })
 
-  it('set_blend writes and clears a layer blend mode', () => {
-    let c = comp({ tracks: [track()] })
-    c = apply(c, { op: 'set_blend', trackId: 'cam', blend: 'overlay' })
-    expect(c.tracks[0]!.blend).toBe('overlay')
-    c = apply(c, { op: 'set_blend', trackId: 'cam', blend: null })
-    expect(c.tracks[0]!.blend).toBeUndefined()
+  it('set_blend refuses a mode no renderer draws, but clears a stored one', () => {
+    /* a blend on a track composites nowhere — the write fails loudly
+       rather than sitting in the model as a no-op; a blend already stored
+       (legacy film) can still be cleared */
+    const c = comp({ tracks: [{ ...track(), blend: 'overlay' as const }] })
+    const written = applyCompositionOps(c, [{ op: 'set_blend', trackId: 'cam', blend: 'multiply' }])
+    expect(written.ok).toBe(false)
+    const cleared = apply(c, { op: 'set_blend', trackId: 'cam', blend: null })
+    expect(cleared.tracks[0]!.blend).toBeUndefined()
     expect(applyCompositionOps(c, [{ op: 'set_blend', trackId: 'cam', blend: 'wobbly' as never }]).ok).toBe(false)
   })
 

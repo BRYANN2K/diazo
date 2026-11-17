@@ -140,6 +140,29 @@ describe('composition REST + access gates', () => {
     const comp = (await (await again.get(compUrl())).json()).composition as Composition
     expect(comp).toMatchObject({ canvasId, pageId, duration: 6 })
   }, 30_000)
+
+  it('keeps direction and motionBlur through a reboot', async () => {
+    const patch = await owner.patch(compUrl(), {
+      ops: [
+        { op: 'set_direction', direction: { treatment: 'slow noir', look: 'noir', passes: 4 } },
+        { op: 'set_motion_blur', motionBlur: { shutter: 180, samples: 8 } },
+      ],
+    })
+    expect(patch.status).toBe(200)
+    const live = (await patch.json()).composition as Composition
+    expect(live.direction).toMatchObject({ treatment: 'slow noir', look: 'noir', passes: 4 })
+    expect(live.motionBlur).toMatchObject({ shutter: 180, samples: 8 })
+
+    const dataDir = server.dataDir
+    server.stop({ keepData: true })
+    await server.stopped
+    server = await startServer({}, dataDir)
+    const again = new Client(server)
+    again.cookies = owner.cookies
+    const comp = (await (await again.get(compUrl())).json()).composition as Composition
+    expect(comp.direction).toMatchObject({ treatment: 'slow noir', look: 'noir', passes: 4 })
+    expect(comp.motionBlur).toMatchObject({ shutter: 180, samples: 8 })
+  }, 30_000)
 })
 
 describe('phase 2: versions, export, gif/pngseq, scene-time comments', () => {

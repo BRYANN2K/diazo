@@ -19,7 +19,7 @@ import { guardPublicPageRequests } from './publicUrl.ts'
 import { mintRenderToken, renderCookieName, revokeRenderToken } from './motionRender.ts'
 import { lintComposition, lintMotionHtml, motionLintSummary } from '../shared/motionLint.ts'
 import { frameStateAt } from '../shared/motionRuntime.ts'
-import { effectCost, effectSpec } from '../shared/motionFx.ts'
+import { EFFECT_COST_CAP, effectCost, effectSpec, GL_EFFECT_IDS } from '../shared/motionFx.ts'
 import { CRITIQUE_PASS_DEFAULT, CRITIQUE_PASS_MAX, type Composition, type MotionLintIssue } from '../shared/motion.ts'
 import { store } from './store.ts'
 import { canvasPages, pageFrames } from '../shared/pages.ts'
@@ -141,10 +141,12 @@ export async function sceneSnapshot(
   if (!canvasPages(canvas).some((p) => p.id === pageId)) return fail(`no page ${pageId} on this canvas`)
   const comp = store.getComposition(canvas.id, pageId)
   if (!comp) return fail(`page ${pageId} has no composition — nothing to show`)
-  const times =
-    input.times?.length && input.times.every((t) => Number.isFinite(t) && t >= 0 && t <= comp.duration)
-      ? input.times.slice(0, 24)
-      : beatTimes(comp)
+  /* a caller-provided `times` is validated, not silently replaced with the
+     beats — an out-of-range time must surface as a bad call */
+  if (input.times?.length && !input.times.every((t) => Number.isFinite(t) && t >= 0 && t <= comp.duration)) {
+    return fail(`times must be finite seconds within [0, ${comp.duration}]`)
+  }
+  const times = input.times?.length ? input.times.slice(0, 24) : beatTimes(comp)
   const driven = await driveHarness(comp, {
     times,
     columns: input.columns,
@@ -196,25 +198,166 @@ function hasMotionInside(comp: Composition, t: number, d: number): boolean {
   return false
 }
 
-/** a measured text box at shot time: world rect → output rect through the
- *  camera — the safe-zone and legibility checks' shared projection */
+/** a measured text box at shot time: the frame's own rotation carries it
+ *  to world space, then the camera transform (translate → inverse rotate →
+ *  zoom, the same order the compositor draws) to output space. Returns the
+ *  projected corners' bounding box. */
 function boxAt(
   box: TextBox,
-  frame: { x: number; y: number },
-  camera: { x: number; y: number; zoom: number },
+  frame: { x: number; y: number; width: number; height: number; rotation?: number },
+  camera: { x: number; y: number; zoom: number; rotation?: number },
   out: { width: number; height: number },
 ): { x: number; y: number; w: number; h: number } {
-  return {
-    x: (frame.x + box.x - camera.x) * camera.zoom + out.width / 2,
-    y: (frame.y + box.y - camera.y) * camera.zoom + out.height / 2,
-    w: box.w * camera.zoom,
-    h: box.h * camera.zoom,
+  const fc = ((frame.rotation ?? 0) * Math.PI) / 180
+  const fcx = frame.x + frame.width / 2
+  const fcy = frame.y + frame.height / 2
+  const cc = (-(camera.rotation ?? 0) * Math.PI) / 180
+  const [fcos, fsin, ccos, csin] = [Math.cos(fc), Math.sin(fc), Math.cos(cc), Math.sin(cc)]
+  const project = (px: number, py: number): [number, number] => {
+    const wx = fcx + fcos * (px - frame.width / 2) - fsin * (py - frame.height / 2)
+    const wy = fcy + fsin * (px - frame.width / 2) + fcos * (py - frame.height / 2)
+    const dx = wx - camera.x
+    const dy = wy - camera.y
+    return [
+      (ccos * dx - csin * dy) * camera.zoom + out.width / 2,
+      (csin * dx + ccos * dy) * camera.zoom + out.height / 2,
+    ]
   }
+  const pts = [
+    project(box.x, box.y),
+    project(box.x + box.w, box.y),
+    project(box.x, box.y + box.h),
+    project(box.x + box.w, box.y + box.h),
+  ]
+  const xs = pts.map((p) => p[0])
+  const ys = pts.map((p) => p[1])
+  const x = Math.min(...xs)
+  const y = Math.min(...ys)
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y }
 }
+
+/* -- contrast (WCAG 2.x ratio on the sampled colours) -- */
+
+const CONTRAST_AA = 4.5 /* normal text */
+const CONTRAST_AA_LARGE = 3 /* ≥24px effective, or ≥18.66px bold */
+
+function srgb(v: number): number {
+  const c = v / 255
+  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+}
+
+/** a css colour as [r,g,b,a]: '#rgb', '#rrggbb', 'rgb()' or 'rgba()' */
+export function parseColor(input: string): [number, number, number, number] | undefined {
+  const s = input.trim().toLowerCase()
+  if (s.startsWith('#')) {
+    const hex = s.slice(1)
+    const v =
+      hex.length === 3
+        ? [...hex].map((ch) => parseInt(ch + ch, 16))
+        : hex.length === 6
+          ? [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16))
+          : []
+    if (v.length !== 3 || v.some((n) => !Number.isFinite(n))) return undefined
+    return [v[0]!, v[1]!, v[2]!, 1]
+  }
+  const m = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s/]+([\d.]+%?))?\s*\)$/.exec(s)
+  if (!m) return undefined
+  const a = m[4] === undefined ? 1 : m[4].endsWith('%') ? parseFloat(m[4]) / 100 : parseFloat(m[4])
+  return [Number(m[1]), Number(m[2]), Number(m[3]), Number.isFinite(a) ? Math.min(a, 1) : 1]
+}
+
+/** WCAG contrast of `fg` text over the `bg` backdrop it sits on — the
+ *  text's own alpha is composited onto the backdrop first */
+export function contrastRatio(fg: string, bg: string): number | undefined {
+  const f = parseColor(fg)
+  const b = parseColor(bg)
+  if (!f || !b) return undefined
+  const lum = (r: number, g: number, bl: number) => 0.2126 * srgb(r) + 0.7152 * srgb(g) + 0.0722 * srgb(bl)
+  const lf = lum(f[0] * f[3] + (1 - f[3]) * b[0], f[1] * f[3] + (1 - f[3]) * b[1], f[2] * f[3] + (1 - f[3]) * b[2])
+  const lb = lum(b[0], b[1], b[2])
+  return (Math.max(lf, lb) + 0.05) / (Math.min(lf, lb) + 0.05)
+}
+
+const fontWeightNum = (w: string): number => (w === 'bold' ? 700 : Number.parseInt(w, 10) || 400)
 
 const ACTION_SAFE = 0.05 /* broadcast convention: keep action inside 90% */
 const TITLE_SAFE = 0.1 /* and titles inside 80% */
 const MIN_TEXT_PX = 14 /* an effective text height under this reads small */
+
+export interface LegibilityItem {
+  element_id: string
+  frame_id: string
+  t: number
+  font_px_effective: number
+  under_minimum: boolean
+  small: boolean
+  contrast: number | null
+  contrast_min: number
+  low_contrast: boolean
+}
+
+/** the safe-zone and legibility numbers for the measured text boxes, per
+ *  shot: a box counts only while the camera keeps its projected rect on the
+ *  raster — off-screen text is another shot's content, never a violation.
+ *  Exported so the checks are unit-testable without a renderer. */
+export function measureChecks(
+  comp: Composition,
+  shots: { t: number; duration: number }[],
+  boxes: TextBox[],
+  frameById: Map<string, { x: number; y: number; width: number; height: number; rotation?: number }>,
+): { legItems: LegibilityItem[]; violations: unknown[] } {
+  const legItems: LegibilityItem[] = []
+  const violations: unknown[] = []
+  for (const shot of shots) {
+    const state = frameStateAt(comp, shot.t + shot.duration / 2)
+    const camera = state.camera ?? { x: 0, y: 0, zoom: 1, rotation: 0 }
+    for (const box of boxes) {
+      const frame = frameById.get(box.frameId)
+      if (!frame) continue
+      const rect = boxAt(box, frame, camera, comp)
+      if (rect.x >= comp.width || rect.x + rect.w <= 0 || rect.y >= comp.height || rect.y + rect.h <= 0) {
+        continue
+      }
+      const cx = rect.x + rect.w / 2
+      const cy = rect.y + rect.h / 2
+      const inTitleSafe =
+        cx > comp.width * TITLE_SAFE &&
+        cx < comp.width * (1 - TITLE_SAFE) &&
+        cy > comp.height * TITLE_SAFE &&
+        cy < comp.height * (1 - TITLE_SAFE)
+      const inActionSafe =
+        cx > comp.width * ACTION_SAFE &&
+        cx < comp.width * (1 - ACTION_SAFE) &&
+        cy > comp.height * ACTION_SAFE &&
+        cy < comp.height * (1 - ACTION_SAFE)
+      if (!inTitleSafe) {
+        violations.push({
+          element_id: box.elementId,
+          frame_id: box.frameId,
+          t: shot.t,
+          zone: inActionSafe ? 'title' : 'action',
+          edge: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.w), h: Math.round(rect.h) },
+        })
+      }
+      const effPx = box.fontSize * camera.zoom
+      const contrast = contrastRatio(box.color, box.background)
+      const large = effPx >= 24 || (effPx >= 18.66 && fontWeightNum(box.fontWeight) >= 700)
+      const contrastMin = large ? CONTRAST_AA_LARGE : CONTRAST_AA
+      legItems.push({
+        element_id: box.elementId,
+        frame_id: box.frameId,
+        t: shot.t,
+        font_px_effective: Math.round(effPx * 10) / 10,
+        under_minimum: effPx < MIN_TEXT_PX,
+        small: effPx < MIN_TEXT_PX * 1.4,
+        contrast: contrast === undefined ? null : Math.round(contrast * 100) / 100,
+        contrast_min: contrastMin,
+        low_contrast: contrast !== undefined && contrast < contrastMin,
+      })
+    }
+  }
+  return { legItems, violations }
+}
 
 export async function checkScene(canvas: Canvas, pageId: string, input: { pixels?: boolean }): Promise<Outcome> {
   if (!canvasPages(canvas).some((p) => p.id === pageId)) return fail(`no page ${pageId} on this canvas`)
@@ -244,7 +387,10 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
     dead_beats: deadBeats.map((s) => ({ t: s.t, duration: s.duration })),
   }
 
-  /* 3 — the effect bill, per track and in total */
+  /* 3 — the effect bill, per track and in total, plus what the renderer
+     cannot draw: stacks on tracks whose pixels never reach the GL pass
+     (element/clip/audio/caption), a track blend, a per-effect blend, and
+     registry effects this GL build has no body for */
   const perTrack = comp.tracks
     .map((track) => ({
       track_id: track.id,
@@ -255,14 +401,38 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
     .filter((t) => t.effects.length > 0 || t.kind === 'adjustment')
   const totalCost = perTrack.reduce((a, t) => a + t.cost, 0)
   const unsupported = new Set<string>()
-  for (const track of comp.tracks) for (const e of track.effects ?? []) if (!effectSpec(e.fx)) unsupported.add(e.fx)
+  const notDrawn: { track_id: string; what: string; reason: string }[] = []
+  for (const track of comp.tracks) {
+    for (const e of track.effects ?? []) {
+      if (!effectSpec(e.fx)) unsupported.add(e.fx)
+      if (track.kind !== 'camera' && track.kind !== 'adjustment') {
+        notDrawn.push({
+          track_id: track.id,
+          what: e.fx,
+          reason: `effects on ${track.kind} tracks are not drawn`,
+        })
+      } else if (effectSpec(e.fx) && !GL_EFFECT_IDS.has(e.fx)) {
+        notDrawn.push({ track_id: track.id, what: e.fx, reason: 'no shader in this build — renders as passthrough' })
+      }
+      if (e.blend != null) {
+        notDrawn.push({
+          track_id: track.id,
+          what: `blend:${e.blend} on ${e.fx}`,
+          reason: 'per-effect blend is not drawn',
+        })
+      }
+    }
+    if (track.blend != null) {
+      notDrawn.push({ track_id: track.id, what: `blend:${track.blend}`, reason: 'track blend is not drawn' })
+    }
+  }
   const effects = {
     per_track: perTrack,
     total_cost: totalCost,
-    /* the preview budget: 6 layers × 3 effects of average cost 2 ≈ 36 —
-       over it, check reports over_budget */
-    over_budget: totalCost > 36,
+    cost_cap: EFFECT_COST_CAP,
+    over_budget: totalCost > EFFECT_COST_CAP,
     unsupported: [...unsupported],
+    not_drawn: notDrawn,
   }
 
   /* 4 — safe zones + legibility need measured text: the harness measure
@@ -273,58 +443,25 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
     const driven = await driveHarness(comp, { measure: true })
     if (!('error' in driven) && driven.boxes) {
       const frameById = new Map(frames.map((f) => [f.id, f]))
-      const legItems: unknown[] = []
-      const violations: unknown[] = []
-      for (const shot of shots.length ? shots : [{ t: 0, duration: comp.duration }]) {
-        const state = frameStateAt(comp, shot.t + shot.duration / 2)
-        const camera = state.camera ?? { x: 0, y: 0, zoom: 1, rotation: 0 }
-        for (const box of driven.boxes) {
-          const frame = frameById.get(box.frameId)
-          if (!frame) continue
-          const rect = boxAt(box, frame, camera, comp)
-          const cx = rect.x + rect.w / 2
-          const cy = rect.y + rect.h / 2
-          const inTitleSafe =
-            cx > comp.width * TITLE_SAFE &&
-            cx < comp.width * (1 - TITLE_SAFE) &&
-            cy > comp.height * TITLE_SAFE &&
-            cy < comp.height * (1 - TITLE_SAFE)
-          const inActionSafe =
-            cx > comp.width * ACTION_SAFE &&
-            cx < comp.width * (1 - ACTION_SAFE) &&
-            cy > comp.height * ACTION_SAFE &&
-            cy < comp.height * (1 - ACTION_SAFE)
-          if (!inTitleSafe) {
-            violations.push({
-              element_id: box.elementId,
-              frame_id: box.frameId,
-              t: shot.t,
-              zone: inActionSafe ? 'title' : 'action',
-              edge: { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.w), h: Math.round(rect.h) },
-            })
-          }
-          const effPx = box.fontSize * camera.zoom
-          legItems.push({
-            element_id: box.elementId,
-            frame_id: box.frameId,
-            t: shot.t,
-            font_px_effective: Math.round(effPx * 10) / 10,
-            under_minimum: effPx < MIN_TEXT_PX,
-            small: effPx < MIN_TEXT_PX * 1.4,
-          })
-        }
-      }
+      const measured = measureChecks(
+        comp,
+        shots.length ? shots : [{ t: 0, duration: comp.duration }],
+        driven.boxes,
+        frameById,
+      )
       legibility = {
         available: true,
         min_effective_px: MIN_TEXT_PX,
-        elements: legItems,
-        under_minimum: legItems.filter((i) => (i as { under_minimum: boolean }).under_minimum).length,
+        contrast_aa: { normal: CONTRAST_AA, large: CONTRAST_AA_LARGE },
+        elements: measured.legItems,
+        under_minimum: measured.legItems.filter((i) => i.under_minimum).length,
+        low_contrast: measured.legItems.filter((i) => i.low_contrast).length,
       }
       safeZones = {
         available: true,
         action_safe: ACTION_SAFE,
         title_safe: TITLE_SAFE,
-        violations,
+        violations: measured.violations,
       }
     }
   }
@@ -360,6 +497,16 @@ interface CritiqueState {
   revisions: Set<number>
 }
 const critiques = new Map<string, CritiqueState>()
+/* the budget is per run, not per process: a long-lived instance could
+   otherwise strand an exhausted budget on a page the agent moved on from */
+const CRITIQUE_STATES_MAX = 200
+
+/** a new run on the page restarts the critique budget — animate_storyboard
+ *  and set_direction both clear it */
+export function resetCritiques(canvasId: string, pageId: string) {
+  const prefix = `${canvasId}/${pageId}/`
+  for (const key of critiques.keys()) if (key.startsWith(prefix)) critiques.delete(key)
+}
 
 /** critique_scene: the check's numbers folded into the rubric, plus the
  *  pass budget — `direction.passes` (default 3, hard max 5). A call on a
@@ -372,14 +519,22 @@ export async function critiqueScene(canvas: Canvas, pageId: string, input: { pix
   const report = checked.data as {
     lint: { errors: number; warnings: number }
     pacing: { dead_beats: { t: number }[]; shot_seconds: { min: number; max: number; variance: number } }
-    legibility: { available?: boolean; under_minimum?: number }
+    legibility: { available?: boolean; under_minimum?: number; low_contrast?: number }
     safe_zones: { available?: boolean; violations?: unknown[] }
-    effects: { over_budget: boolean; unsupported: string[] }
+    effects: {
+      over_budget: boolean
+      unsupported: string[]
+      not_drawn?: { track_id: string; what: string; reason: string }[]
+    }
   }
 
   const key = `${canvas.id}/${pageId}/${comp.id}`
   let state = critiques.get(key)
-  if (!state) critiques.set(key, (state = { revisions: new Set() }))
+  if (!state) {
+    /* bound the map — a canvas left mid-run must not grow it forever */
+    if (critiques.size >= CRITIQUE_STATES_MAX) critiques.delete(critiques.keys().next().value!)
+    critiques.set(key, (state = { revisions: new Set() }))
+  }
   const maxPasses = Math.min(comp.direction?.passes ?? CRITIQUE_PASS_DEFAULT, CRITIQUE_PASS_MAX)
   const firstOnRevision = !state.revisions.has(comp.revision)
   if (firstOnRevision) state.revisions.add(comp.revision)
@@ -416,7 +571,13 @@ export async function critiqueScene(canvas: Canvas, pageId: string, input: { pix
   if ((report.legibility.under_minimum ?? 0) > 0) {
     rubric.legibility!.issues.push({
       severity: 'major',
-      fix: `${report.legibility.under_minimum} text element(s) under ${14}px effective — zoom the camera or raise the type`,
+      fix: `${report.legibility.under_minimum} text element(s) under ${MIN_TEXT_PX}px effective — zoom the camera or raise the type`,
+    })
+  }
+  if ((report.legibility.low_contrast ?? 0) > 0) {
+    rubric.legibility!.issues.push({
+      severity: 'major',
+      fix: `${report.legibility.low_contrast} text element(s) under the WCAG contrast floor — change the colour or the backdrop`,
     })
   }
   for (const v of report.safe_zones.violations ?? []) {
@@ -434,10 +595,17 @@ export async function critiqueScene(canvas: Canvas, pageId: string, input: { pix
       fix: `unknown effect ids: ${report.effects.unsupported.join(', ')} — they render as passthrough`,
     })
   }
+  for (const gap of report.effects.not_drawn ?? []) {
+    rubric.polish!.issues.push({
+      severity: 'major',
+      on: gap.track_id,
+      fix: `${gap.what} — ${gap.reason}; it will not appear in the render`,
+    })
+  }
   if (report.effects.over_budget) {
     rubric.polish!.issues.push({
       severity: 'minor',
-      fix: 'the effect stack is over the preview budget — trim or merge',
+      fix: `the effect stack is over the ${EFFECT_COST_CAP}-point render cap — a server render refuses it; trim or merge`,
     })
   }
   const blockers = Object.values(rubric)

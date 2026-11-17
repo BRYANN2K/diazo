@@ -12,6 +12,7 @@ import * as persist from './db/persist.ts'
 import { store } from './store.ts'
 import { createRenderJob } from './motionJobs.ts'
 import { elementHtml, lintComposition, lintMotionHtml, motionLintSummary } from '../shared/motionLint.ts'
+import { resetCritiques } from './motionSnapshot.ts'
 import { exportCompositionCode, type CompositionCodeExport } from '../shared/motionExport.ts'
 import { itemMeta, libraryItems, saveMeta } from './libraryIndex.ts'
 import { getLibrary } from './libraries.ts'
@@ -238,7 +239,9 @@ export async function animateStoryboard(
   })
   const composition = actions.setComposition(canvas.id, body, pageId, actor)
   /* a rebuilt film starts a new run: clear the old state and record the
-     shots this film uses, so noted frames outside frame_ids never pend */
+     shots this film uses, so noted frames outside frame_ids never pend —
+     and the critique pass budget restarts with it */
+  resetCritiques(canvas.id, pageId)
   fixPasses.set(passKey(canvas.id, pageId), {
     compositionId: composition.id,
     shots: new Set(frames.map((f) => f.id)),

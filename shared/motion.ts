@@ -1599,6 +1599,12 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
       if (findTrack(comp, op.track.id)) return `track ${op.track.id} already exists`
       if (op.track.kind === 'camera' && comp.tracks.some((t) => t.kind === 'camera'))
         return 'a camera track already exists'
+      /* only the camera and adjustment stacks reach the renderer — an
+         effect stack or a blend on any other track would sit in the model
+         undrawn, so the write is refused rather than stored silently */
+      if (op.track.kind !== 'camera' && op.track.kind !== 'adjustment' && op.track.effects?.length)
+        return `effects only draw on camera and adjustment tracks, not ${op.track.kind} tracks`
+      if (op.track.blend != null) return 'track blend is not drawn yet'
       comp.tracks.push(op.track)
       return null
     }
@@ -1733,6 +1739,8 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
     case 'add_effect': {
       const track = findTrack(comp, op.trackId)
       if (!track) return `no track ${op.trackId}`
+      if (track.kind !== 'camera' && track.kind !== 'adjustment')
+        return `effects only draw on camera and adjustment tracks, not ${track.kind} tracks`
       const effects = (track.effects ??= [])
       if (effects.length >= 20) return 'too many effects on the track'
       if (effects.some((e) => e.id === op.effect.id)) return `effect ${op.effect.id} already exists`
@@ -1754,7 +1762,9 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
       if (op.mix !== undefined) effect.mix = op.mix
       if (op.blend !== undefined) {
         if (op.blend === null) delete effect.blend
-        else effect.blend = op.blend
+        /* per-effect blend is parsed but the GL pass draws only `mix` —
+           setting one would silently do nothing, so it is refused */
+        else return 'effect blend is not drawn yet'
       }
       return null
     }
@@ -1786,8 +1796,10 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
     case 'set_blend': {
       const track = findTrack(comp, op.trackId)
       if (!track) return `no track ${op.trackId}`
+      /* no renderer composites a track's blend mode — storing one would be
+         a silent no-op, so only clearing is allowed */
       if (op.blend === null) delete track.blend
-      else track.blend = op.blend
+      else return 'track blend is not drawn yet'
       return null
     }
   }

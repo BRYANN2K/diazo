@@ -158,7 +158,16 @@ export async function renderInBrowser(
   await motionApi.updateRender(job.id, { status: 'rendering', progress: 0 })
   const total = Math.max(1, Math.round((job.range.end - job.range.start) * job.fps))
   const frameMs = 1000 / job.fps
-  await paintShutter(ctx, scaledComp, scaled, job.range.start, signal)
+  /* an effect that cannot draw must fail the render, not quietly ship a
+     film missing its look */
+  const checkDrops = (drops: { fx: string; reason: string }[]) => {
+    if (drops.length) {
+      throw new Error(
+        `the film's effect stack could not be drawn: ${drops.map((d) => `${d.fx} (${d.reason})`).join(', ')}`,
+      )
+    }
+  }
+  checkDrops(await paintShutter(ctx, scaledComp, scaled, job.range.start, signal))
   recorder.start()
   let lastBeat = 0
   try {
@@ -166,7 +175,7 @@ export async function renderInBrowser(
       if (signal?.aborted) throw new DOMException('canceled', 'AbortError')
       const t = job.range.start + i / job.fps
       const began = performance.now()
-      await paintShutter(ctx, scaledComp, scaled, t, signal)
+      checkDrops(await paintShutter(ctx, scaledComp, scaled, t, signal))
       requestFrame?.()
       /* MediaRecorder timestamps frames by wall clock, so frames are paced at
          the film's rate; the picture itself only ever depends on t */
