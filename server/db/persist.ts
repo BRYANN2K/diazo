@@ -1134,6 +1134,10 @@ export function deleteCanvas(canvasId: string) {
   swallow(db.delete(t.canvasMembers).where(eq(t.canvasMembers.canvasId, canvasId)))
   /* dev tasks and their stored handoff packs go with the canvas */
   swallow(db.delete(t.frameDevTasks).where(eq(t.frameDevTasks.canvasId, canvasId)))
+  /* the audit tables go with their canvas — a script run or tool call is
+     meaningless once the canvas it narrates is gone */
+  swallow(db.delete(t.scriptRuns).where(eq(t.scriptRuns.canvasId, canvasId)))
+  swallow(db.delete(t.toolCalls).where(eq(t.toolCalls.canvasId, canvasId)))
   swallow(db.delete(t.canvases).where(eq(t.canvases.id, canvasId)))
 }
 

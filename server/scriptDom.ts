@@ -199,14 +199,41 @@ function byDoopId(doc: Document, id: string): Element | undefined {
   return findElement(doc, (el) => attr(el, 'data-doop-id') === id)
 }
 
+/** Split a declaration list on its real `;` boundaries — semicolons inside
+ *  `url(...)` (data URLs carry `;base64`) and quoted strings do not split. */
+export function splitDecls(style: string): string[] {
+  const decls: string[] = []
+  let cur = ''
+  let depth = 0
+  let quote = ''
+  for (const ch of style) {
+    if (quote) {
+      cur += ch
+      if (ch === quote) quote = ''
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch
+      cur += ch
+      continue
+    }
+    if (ch === '(') depth++
+    else if (ch === ')') depth = Math.max(0, depth - 1)
+    if (ch === ';' && depth === 0) {
+      if (cur.trim()) decls.push(cur.trim())
+      cur = ''
+      continue
+    }
+    cur += ch
+  }
+  if (cur.trim()) decls.push(cur.trim())
+  return decls
+}
+
 function styleSet(el: Element, property: string, value: string | null): void {
   const name = property.trim().toLowerCase()
   if (!/^[-a-z]+$/.test(name)) throw new Error(`invalid property “${property}”`)
-  const decls = (attr(el, 'style') ?? '')
-    .split(';')
-    .map((d) => d.trim())
-    .filter(Boolean)
-    .filter((d) => !d.toLowerCase().startsWith(name + ':'))
+  const decls = splitDecls(attr(el, 'style') ?? '').filter((d) => !d.toLowerCase().startsWith(name + ':'))
   if (value !== null) decls.push(`${name}: ${value.trim().replace(/[;{}]/g, '')}`)
   setAttr(el, 'style', decls.length ? decls.join('; ') : null)
 }
@@ -247,8 +274,15 @@ export function applyEditOps(source: string, ops: EditOp[]): EditOutcome {
           else setAttr(el, name, op.value)
           const value = attr(el, name)
           const old = loc.attrs?.[name]
-          start = old?.startOffset ?? loc.startTag.endOffset - 1
-          end = old?.endOffset ?? start
+          if (!old) {
+            /* a start tag that ends `/>` takes the new attribute before the
+               slash — splicing between `/` and `>` corrupts it */
+            const tagEnd = loc.startTag.endOffset
+            start = end = html[tagEnd - 2] === '/' && html[tagEnd - 1] === '>' ? tagEnd - 2 : tagEnd - 1
+          } else {
+            start = old.startOffset
+            end = old.endOffset
+          }
           replacement = value === undefined || value === null ? '' : `${old ? '' : ' '}${name}="${escape(value)}"`
         } else if (op.op === 'text') {
           if (['script', 'style'].includes(el.tagName) || !loc.endTag) throw new Error('element does not take text')
@@ -285,6 +319,12 @@ export function applyEditOps(source: string, ops: EditOp[]): EditOutcome {
 /* style inventory + token rewrite                                     */
 /* ------------------------------------------------------------------ */
 
+/* Values are inventoried inside style contexts only: style="" attributes,
+   <style> bodies and SVG presentation attributes. Scanning the raw document
+   reads &#8212; entities and href="#..." fragment ids as hex colours. */
+const STYLE_CTX_RE = /\bstyle\s*=\s*"([^"]*)"|\bstyle\s*=\s*'([^']*)'|<style[^>]*>([\s\S]*?)<\/style\s*>/gi
+const PRESENTATION_RE = /\b(?:fill|stroke|color|stop-color|flood-color|lighting-color)\s*=\s*"([^"]*)"/gi
+
 const COLOR_RE = /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/g
 const RADIUS_RE = /border(?:-top|-bottom|-left|-right)?(?:-start|-end)?-radius\s*:\s*([^;}]+)/g
 const SPACING_RE =
@@ -292,6 +332,23 @@ const SPACING_RE =
 const FAMILY_RE = /font-family\s*:\s*([^;}]+)/g
 const SIZE_RE = /font-size\s*:\s*([^;}]+)/g
 const VAR_RE = /var\(\s*(--[\w-]+)/g
+
+function styleBodies(html: string): string[] {
+  const bodies: string[] = []
+  for (const m of html.matchAll(STYLE_CTX_RE)) bodies.push(m[1] ?? m[2] ?? m[3]!)
+  for (const m of html.matchAll(PRESENTATION_RE)) bodies.push(m[1]!)
+  return bodies
+}
+
+/** Colour literals inside one style body; `url(#id)` gradient refs are not. */
+function colorLiterals(body: string): string[] {
+  const out: string[] = []
+  for (const m of body.matchAll(COLOR_RE)) {
+    if (m[0].startsWith('#') && body[m.index! - 1] === '(') continue
+    out.push(m[0].trim())
+  }
+  return out
+}
 
 function bucket(literals: string[], tokens: Map<string, string>): StyleBucket[] {
   const counts = new Map<string, number>()
@@ -311,16 +368,22 @@ function tokenByValue(tokens: readonly DesignToken[]): Map<string, string> {
 /** Literal design values in a document, with the token each maps to. */
 export function styleInventory(html: string, tokens: readonly DesignToken[]): StyleInventory {
   const byValue = tokenByValue(tokens)
-  const colors = (html.match(COLOR_RE) ?? []).map((m) => m.trim())
-  const pick = (re: RegExp) => [...html.matchAll(re)].map((m) => m[1]!.trim())
-  const varCount = (html.match(VAR_RE) ?? []).length
-  const literalCount = colors.length
+  const bodies = styleBodies(html)
+  const pick = (re: RegExp) => bodies.flatMap((body) => [...body.matchAll(re)].map((m) => m[1]!.trim()))
+  const colors = bodies.flatMap(colorLiterals)
+  const radii = pick(RADIUS_RE)
+  const spacing = pick(SPACING_RE)
+  const fontFamilies = pick(FAMILY_RE)
+  const fontSizes = pick(SIZE_RE)
+  const varCount = bodies.reduce((n, body) => n + (body.match(VAR_RE) ?? []).length, 0)
+  /* var() uses and literals of every kind, so both sides count the same thing */
+  const literalCount = colors.length + radii.length + spacing.length + fontFamilies.length + fontSizes.length
   return {
     colors: bucket(colors, byValue),
-    radii: bucket(pick(RADIUS_RE), byValue),
-    spacing: bucket(pick(SPACING_RE), byValue),
-    fontFamilies: bucket(pick(FAMILY_RE), byValue),
-    fontSizes: bucket(pick(SIZE_RE), byValue),
+    radii: bucket(radii, byValue),
+    spacing: bucket(spacing, byValue),
+    fontFamilies: bucket(fontFamilies, byValue),
+    fontSizes: bucket(fontSizes, byValue),
     tokenCoverage: literalCount === 0 ? 1 : Math.max(0, Math.min(1, varCount / (varCount + literalCount))),
   }
 }
@@ -348,6 +411,17 @@ function rgbOf(value: string): [number, number, number] | null {
 
 const COLOR_DISTANCE_MAX = 24 * 24 * 3
 
+/** Which token type each `kinds` entry maps onto — a literal only ever
+ *  resolves to a token of its own type, so a '16px' radius token never
+ *  claims a font-size declaration. */
+const KIND_TOKEN_TYPE: Record<string, DesignToken['type']> = {
+  color: 'color',
+  radius: 'radius',
+  spacing: 'spacing',
+  font: 'fontFamily',
+  fontSize: 'fontSize',
+}
+
 /** Swap literal values for var(--token) wherever they appear in CSS
  *  declarations (style attributes and <style> blocks). */
 export function replaceValues(
@@ -360,14 +434,15 @@ export function replaceValues(
   let count = 0
   const unmapped = new Map<string, string>()
   const swap = (value: string, kind: string): string => {
-    if (value.startsWith('var(')) return value
-    const exact = pool.find((t) => t.value === value)
+    if (value.startsWith('var(') || value.includes(' URL')) return value
+    const typed = pool.filter((t) => t.type === KIND_TOKEN_TYPE[kind])
+    const exact = typed.find((t) => t.value === value)
     let name = exact?.name
     if (!name && input.match === 'nearest' && kind === 'color') {
       const rgb = rgbOf(value)
       if (rgb) {
         let best: { name: string; d: number } | null = null
-        for (const token of pool) {
+        for (const token of typed) {
           const trgb = rgbOf(token.value)
           if (!trgb) continue
           const d = trgb.reduce((sum, c, i) => sum + (c - rgb[i]!) ** 2, 0)
@@ -383,8 +458,15 @@ export function replaceValues(
     count++
     return `var(--${name.replace(/^--/, '')})`
   }
+  /* url(...) contents are opaque to value matching — a data URL's inner
+     markup is not a declaration value and must never be rewritten */
   const swapCss = (css: string) => {
-    let out = css
+    const urls: string[] = []
+    let out = css.replace(/url\([^)]*\)/gi, (m) => {
+      urls.push(m)
+      return ` URL${urls.length - 1} `
+    })
+    const unmask = (s: string) => s.replace(/ URL(\d+) /g, (_m, i: string) => urls[Number(i)]!)
     if (input.kinds.includes('color')) {
       out = out.replace(
         /((?:color|background|border|fill|stroke|outline|box-shadow|text-shadow)\s*:\s*)([^;}]+)/g,
@@ -403,7 +485,7 @@ export function replaceValues(
     if (input.kinds.includes('fontSize')) {
       out = out.replace(SIZE_RE, (m, value: string) => m.replace(value, swap(value, 'fontSize')))
     }
-    return out
+    return unmask(out)
   }
   const out = html
     .replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (_m, a: string, css: string, b: string) => a + swapCss(css) + b)

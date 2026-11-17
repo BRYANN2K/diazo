@@ -26,7 +26,26 @@ export interface ScriptWriteRecord {
   detail?: string
 }
 
-export type ScriptRunOutcome = 'ok' | 'error' | 'limit' | 'reverted' | 'dry_run'
+export type ScriptRunOutcome = 'ok' | 'error' | 'limit' | 'reverted' | 'reverted_partial' | 'dry_run'
+
+/** One entity a writing run touched, stored for undo. `before`/`after` hold
+ *  the entity's design fields (derived data like a frame's lint and checks
+ *  is not part of the payload and is never compared). Absent `before` means
+ *  the run created the entity; absent `after` means it deleted it. */
+export interface ScriptEntityUndo {
+  kind: 'frame' | 'token' | 'component' | 'composition' | 'tokenThemes'
+  /** frame id / token name / component id / composition pageId; '' for tokenThemes */
+  id: string
+  before?: unknown
+  after?: unknown
+}
+
+/** What a revert reports back: which entities were restored, which it left
+ *  alone because a later edit moved them past the recorded state. */
+export interface ScriptUndoReport {
+  restored: string[]
+  unreverted: string[]
+}
 
 export interface ScriptRunRecord {
   id: string
@@ -77,4 +96,48 @@ export interface ScriptRunResult {
   deduplicated?: boolean
   /** planned writes/checks, nothing applied */
   dry_run?: boolean
+  /** after a failed run's automatic rollback: entities that could not be
+   *  restored because a later edit changed them (empty = clean rollback) */
+  unreverted?: string[]
+}
+
+/** The summary get_usage and the Usage tab list: everything about a run
+ *  except its source, result payload and undo state, which are served only
+ *  on explicit request (a run's record can carry the full script). */
+export interface ScriptRunSummary {
+  id: string
+  hash: string
+  outcome: ScriptRunOutcome
+  source: 'mcp' | 'resident'
+  agentRunId: string | null
+  actorName: string
+  actorKind: 'user' | 'agent'
+  calls: number
+  writes: number
+  ms: number
+  dryRun: boolean
+  truncated: boolean
+  resultBytes: number
+  idempotencyKey: string | null
+  createdAt: number
+}
+
+export function summarizeRun(record: ScriptRunRecord): ScriptRunSummary {
+  return {
+    id: record.id,
+    hash: record.hash,
+    outcome: record.outcome,
+    source: record.source,
+    agentRunId: record.agentRunId,
+    actorName: record.actorName,
+    actorKind: record.actorKind,
+    calls: record.calls.length,
+    writes: record.writes.length,
+    ms: record.ms,
+    dryRun: record.dryRun,
+    truncated: record.truncated,
+    resultBytes: record.resultBytes,
+    idempotencyKey: record.idempotencyKey,
+    createdAt: record.createdAt,
+  }
 }

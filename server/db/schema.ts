@@ -1669,18 +1669,25 @@ export const voices = pgTable(
   (t) => [index('voices_owner_idx').on(t.ownerId)],
 )
 
-/** Durable script audit, idempotency response and undo state. */
+/** Durable script audit, idempotency response and undo state. `undo` holds
+ *  only the entities a writing run changed — never whole-canvas snapshots,
+ *  and null for queries, dry runs and runs that changed nothing. Old rows
+ *  are pruned by the retention sweep (server/scriptRuns.ts). */
 export const scriptRuns = pgTable(
   'script_runs',
   {
     id: text('id').primaryKey(),
     canvasId: text('canvas_id').notNull(),
+    ownerId: text('owner_id'),
     idempotencyKey: text('idempotency_key'),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
-    data: jsonb('data').$type<import('../scriptRuns.ts').StoredScriptRun>().notNull(),
+    record: jsonb('record').$type<import('../../shared/scriptRuns.ts').ScriptRunRecord>().notNull(),
+    response: jsonb('response').$type<import('../../shared/scriptRuns.ts').ScriptRunResult>(),
+    undo: jsonb('undo').$type<import('../../shared/scriptRuns.ts').ScriptEntityUndo[]>(),
   },
   (t) => [
     index('script_runs_canvas_idx').on(t.canvasId),
+    index('script_runs_created_idx').on(t.createdAt),
     uniqueIndex('script_runs_key_idx').on(t.canvasId, t.idempotencyKey),
   ],
 )

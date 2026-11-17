@@ -5,7 +5,7 @@ import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
 import type { Actor } from '../shared/types.ts'
 import type { ScriptRunRecord, ScriptRunResult } from '../shared/scriptRuns.ts'
-import { dispatchScriptCall, sdkPaths, SdkError, type ScriptRunContext } from './scriptSdk.ts'
+import { dispatchScriptCall, finishScriptReviews, sdkPaths, SdkError, type ScriptRunContext } from './scriptSdk.ts'
 import { runInSandbox, stripTypes, SCRIPT_LIMITS } from './scriptSandbox.ts'
 import { scriptRunDeps, type StoredScriptRun } from './scriptRuns.ts'
 import { logActivity, restoreScriptState, scriptActivityRuns } from './actions.ts'
@@ -45,7 +45,12 @@ export async function executeScript(
         input.result_cap !== undefined &&
         (!Number.isInteger(input.result_cap) || input.result_cap < 1 || input.result_cap > SCRIPT_LIMITS.resultBytesMax)
       )
-        throw new SdkError('invalid', 'result_cap must be 1..32768')
+        throw new SdkError('invalid', `result_cap must be 1..${SCRIPT_LIMITS.resultBytesMax}`)
+      if (
+        input.timeout_ms !== undefined &&
+        (!Number.isInteger(input.timeout_ms) || input.timeout_ms < 1 || input.timeout_ms > SCRIPT_LIMITS.wallMsMax)
+      )
+        throw new SdkError('invalid', `timeout_ms must be 1..${SCRIPT_LIMITS.wallMsMax}`)
       return execute(input, caller, write)
     })
   } finally {
@@ -83,7 +88,10 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
   }
   const started = Date.now()
   const id = randomUUID()
-  const actor = { ...caller.actor, runId: id }
+  /* script calls inherit the caller's resident runId when one exists — a
+     resident replay or rollback then sees the writes its script made — and
+     carry this run's id in scriptRunId so activity is summarized, not flooded */
+  const actor = { ...caller.actor, scriptRunId: id }
   const record: ScriptRunRecord = {
     id,
     canvasId: caller.canvasId,
@@ -106,8 +114,6 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
     createdAt: started,
   }
   const saved: StoredScriptRun = { record }
-  const before = structuredClone(store.getCanvas(caller.canvasId)!)
-  saved.before = before
   await scriptRunDeps.save(saved)
   const ctx: ScriptRunContext = {
     canvasId: caller.canvasId,
@@ -120,6 +126,7 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
     budgets: { frameWrites: SCRIPT_LIMITS.frameWrites },
     snapshots: new Map(),
     writes: [],
+    changedFrames: new Set(),
   }
   const checks: Record<string, unknown> = {}
   let pending = Promise.resolve()
@@ -161,8 +168,10 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
     await pending
     record.calls = outcome.calls.map((c) => ({ fn: c.path, target: c.target, ms: c.ms, ok: c.ok }))
     if (!outcome.ok) throw new SdkError(outcome.limit ? 'limit' : 'failed', outcome.error, outcome.limit)
-    Object.assign(checks, ctx.checks)
     ctx.active = false
+    /* the rendered pass happens now: one review per changed frame, outside
+       the guest's wall budget */
+    Object.assign(checks, ctx.checks, await finishScriptReviews(ctx))
     const json = JSON.stringify(outcome.value ?? null)
     record.resultBytes = Buffer.byteLength(json)
     record.truncated = record.resultBytes > (input.result_cap ?? SCRIPT_LIMITS.resultBytes)
@@ -190,7 +199,13 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
   } catch (error) {
     ctx.active = false
     await pending
-    if (!ctx.dryRun) restoreScriptState(ctx.undoBefore ?? before, ctx.undoAfter ?? before, actor)
+    let unreverted: string[] = []
+    if (!ctx.dryRun && ctx.undo?.size) {
+      /* roll back what the failed run wrote, entity by entity — whatever a
+         collaborator moved in the meantime is reported, not clobbered */
+      const report = restoreScriptState([...ctx.undo.values()], caller.canvasId, actor)
+      unreverted = report.unreverted
+    }
     record.outcome = error instanceof SdkError && error.code === 'limit' ? 'limit' : 'error'
     record.error = error instanceof Error ? error.message : String(error)
     result = {
@@ -202,6 +217,7 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
       checks: {},
       ms: Date.now() - started,
       truncated: false,
+      ...(unreverted.length ? { unreverted } : {}),
     }
   } finally {
     ctx.active = false
@@ -211,15 +227,24 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
   record.ms = Date.now() - started
   result.writes = record.writes
   result.ms = record.ms
-  saved.before = ctx.undoBefore ?? before
-  saved.after = ctx.undoAfter ?? before
+  /* persist the entities the run changed — nothing for queries, dry runs
+     or runs that wrote but landed back where they started */
+  if (!ctx.dryRun && ctx.undo?.size) {
+    const entries = [...ctx.undo.values()].filter(
+      (e) => JSON.stringify(e.before ?? null) !== JSON.stringify(e.after ?? null),
+    )
+    if (entries.length) saved.undo = entries
+  }
   saved.response = result
   await scriptRunDeps.save(saved)
   logActivity(caller.canvasId, actor, `script ${id}: ${record.outcome} (${record.writes.length} writes)`)
   return result
 }
 
-export async function revertScriptRun(runId: string, caller: ScriptCaller): Promise<{ ok: true; run_id: string }> {
+export async function revertScriptRun(
+  runId: string,
+  caller: ScriptCaller,
+): Promise<{ ok: true; run_id: string; restored: string[]; unreverted: string[] }> {
   gate(caller, true)
   return serializeScript(caller.canvasId, async () => {
     if (!roleAllows(canvasRole(caller.userId, store.getCanvas(caller.canvasId)!), 'edit'))
@@ -227,17 +252,22 @@ export async function revertScriptRun(runId: string, caller: ScriptCaller): Prom
     const saved = await scriptRunDeps.get(runId)
     if (!saved || saved.record.canvasId !== caller.canvasId)
       throw new SdkError('not_found', 'no script run on this canvas')
-    if (saved.record.outcome === 'reverted') return { ok: true, run_id: runId }
-    if (saved.record.outcome !== 'ok' || !saved.before || !saved.after)
+    if (saved.record.outcome === 'reverted' || saved.record.outcome === 'reverted_partial')
+      return { ok: true, run_id: runId, restored: [], unreverted: [] }
+    if (saved.record.outcome !== 'ok' || !saved.undo?.length)
       throw new SdkError('invalid', 'only successful writes can be reverted')
-    try {
-      restoreScriptState(saved.before, saved.after, caller.actor)
-    } catch (error) {
-      throw new SdkError('conflict', String(error))
-    }
-    saved.record.outcome = 'reverted'
+    const report = restoreScriptState(saved.undo, caller.canvasId, caller.actor)
+    saved.record.outcome = report.unreverted.length ? 'reverted_partial' : 'reverted'
     await scriptRunDeps.save(saved)
-    logActivity(caller.canvasId, caller.actor, `reverted script ${runId}`)
-    return { ok: true, run_id: runId }
+    logActivity(
+      caller.canvasId,
+      caller.actor,
+      report.unreverted.length
+        ? `reverted script ${runId} except ${report.unreverted.length} entit${
+            report.unreverted.length === 1 ? 'y' : 'ies'
+          }`
+        : `reverted script ${runId}`,
+    )
+    return { ok: true, run_id: runId, restored: report.restored, unreverted: report.unreverted }
   })
 }

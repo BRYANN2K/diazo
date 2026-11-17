@@ -384,6 +384,9 @@ export interface Actor {
   /** a resident agent's run (agent_runs.id): what it writes is tagged with
    *  it, for the run's replay and rollback */
   runId?: string
+  /** a script run (script_runs.id): its per-call activity lines are folded
+   *  into the run's own summary line instead of flooding the feed */
+  scriptRunId?: string
 }
 
 export interface Presence {
@@ -593,6 +596,9 @@ export interface ActivityItem {
   at: number
   /** the resident run that did it (agent_runs.id) */
   runId?: string
+  /** the script run that did it (script_runs.id) — scripts log one summary
+   *  line instead of a line per SDK call */
+  scriptRunId?: string
 }
 
 /* ---- canvas chat ---- */

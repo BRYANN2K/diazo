@@ -1,5 +1,7 @@
 import type { LibraryInfo } from '../shared/library.ts'
 import { nanoid } from 'nanoid'
+import { canonicalJson } from '../shared/canonicalJson.ts'
+import type { ScriptEntityUndo, ScriptUndoReport } from '../shared/scriptRuns.ts'
 import { MAX_DECISION_CHARS } from '../shared/designDecisions.ts'
 import { prepareChunk, prepareFrameHtml, referencesComponent } from './components.ts'
 import { COMPONENT_ATTR, type ComponentDef, type ComponentIssue } from '../shared/components.ts'
@@ -197,7 +199,9 @@ export function getActivity(canvasId: string): ActivityItem[] {
 export const scriptActivityRuns = new Set<string>()
 
 export function logActivity(canvasId: string, actor: Actor, message: string, frameId?: string) {
-  if (actor.runId && scriptActivityRuns.has(actor.runId)) return
+  /* a running script logs one summary line when it finishes — its SDK calls
+   *  arrive with scriptRunId set and are suppressed here */
+  if (actor.scriptRunId && scriptActivityRuns.has(actor.scriptRunId)) return
   const item: ActivityItem = {
     id: nanoid(8),
     actorName: actor.name,
@@ -207,6 +211,7 @@ export function logActivity(canvasId: string, actor: Actor, message: string, fra
     frameId,
     at: Date.now(),
     ...(actor.runId ? { runId: actor.runId } : {}),
+    ...(actor.scriptRunId ? { scriptRunId: actor.scriptRunId } : {}),
   }
   const list = activityLog.get(canvasId) ?? []
   list.unshift(item)
@@ -3546,90 +3551,124 @@ export function mediaTranscribed(
   broadcast(canvasId, { type: 'media:transcribed', mediaId, transcript })
 }
 
-/** Restore only script-touched entities; refuse the whole undo before changing
- * anything if a collaborator has since modified one of them. */
-export function restoreScriptState(before: Canvas, after: Canvas, actor: Actor): void {
-  const canvas = store.getCanvas(before.id)
+/** Derived fields on a frame — the linter and the responsive checker stamp
+ *  them asynchronously, outside any run, so undo never compares or stores
+ *  them. Everything else on an entity counts as design state. */
+const UNDO_IGNORED_FRAME_KEYS = new Set(['lint', 'checks', 'htmlDeferred'])
+
+/** The entity shape undo compares and stores: design fields only. */
+export function scriptUndoProjection(kind: ScriptEntityUndo['kind'], entity: unknown): unknown {
+  if (entity === undefined || entity === null) return undefined
+  if (kind !== 'frame') return entity
+  const out = { ...(entity as Record<string, unknown>) }
+  for (const key of UNDO_IGNORED_FRAME_KEYS) delete out[key]
+  return out
+}
+
+/**
+ * Bring the canvas back to what a script run recorded — one entity at a
+ * time. An entity whose current state still matches the run's `after` is
+ * restored to `before`; one that moved on (a collaborator, a later script)
+ * is reported in `unreverted` and left alone instead of being clobbered.
+ * The comparison is canonical JSON over the design projection, so Postgres
+ * JSONB key order can never read as a conflict.
+ */
+export function restoreScriptState(undo: ScriptEntityUndo[], canvasId: string, actor: Actor): ScriptUndoReport {
+  const canvas = store.getCanvas(canvasId)
   if (!canvas) throw new Error('the canvas is gone')
-  const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
-  const changed = <T>(a: T[], b: T[], key: (v: T) => string) => {
-    const ids = new Set([...a, ...b].map(key))
-    return [...ids].filter(
-      (id) =>
-        !equal(
-          a.find((v) => key(v) === id),
-          b.find((v) => key(v) === id),
-        ),
-    )
+  const canon = (kind: ScriptEntityUndo['kind'], entity: unknown) =>
+    entity === undefined ? undefined : canonicalJson(scriptUndoProjection(kind, entity))
+  const report: ScriptUndoReport = { restored: [], unreverted: [] }
+  const label = (e: ScriptEntityUndo) => (e.kind === 'tokenThemes' ? 'tokenThemes' : `${e.kind}:${e.id}`)
+
+  const frames: { id: string; prev: Frame | undefined }[] = []
+  const tokenNames: string[] = []
+  for (const entry of undo) {
+    const current = currentEntity(canvas, entry)
+    const target = canon(entry.kind, entry.before)
+    /* already at the undo target — a human reverted by hand or a later run
+       landed on the same state; count it restored, touch nothing */
+    if (canon(entry.kind, current) === target) {
+      report.restored.push(label(entry))
+      continue
+    }
+    /* moved past the recorded state — someone else owns this entity now */
+    if (canon(entry.kind, current) !== canon(entry.kind, entry.after)) {
+      report.unreverted.push(label(entry))
+      continue
+    }
+    const prev = entry.before === undefined ? undefined : structuredClone(entry.before)
+    switch (entry.kind) {
+      case 'frame':
+        frames.push({ id: entry.id, prev: prev as Frame | undefined })
+        break
+      case 'token': {
+        canvas.tokens = (canvas.tokens ?? []).filter((t) => t.name !== entry.id)
+        if (prev) {
+          canvas.tokens.push(prev as DesignToken)
+          persist.saveToken(canvas.id, prev as DesignToken)
+        } else persist.deleteToken(canvas.id, entry.id)
+        tokenNames.push(entry.id)
+        break
+      }
+      case 'tokenThemes':
+        if (prev === undefined) delete canvas.tokenThemes
+        else canvas.tokenThemes = prev as Canvas['tokenThemes']
+        break
+      case 'component':
+        if (prev) {
+          store.saveComponent(canvas.id, prev as ComponentDef)
+          broadcastComponent(canvas.id, prev as ComponentDef, actor)
+        } else {
+          store.deleteComponent(canvas.id, entry.id)
+          broadcastComponentDeleted(canvas.id, entry.id, actor)
+        }
+        break
+      case 'composition':
+        if (prev) store.setComposition(canvas.id, prev as Composition, actor)
+        else store.deleteComposition(canvas.id, entry.id)
+        broadcast(canvas.id, {
+          type: 'composition',
+          pageId: entry.id,
+          composition: (prev as Composition | undefined) ?? null,
+          actor,
+        })
+        break
+    }
+    report.restored.push(label(entry))
   }
-  const frames = changed(before.frames, after.frames, (v) => v.id)
-  const tokens = changed(before.tokens ?? [], after.tokens ?? [], (v) => v.name)
-  const components = changed(before.components ?? [], after.components ?? [], (v) => v.id)
-  const compositions = changed(before.compositions ?? [], after.compositions ?? [], (v) => v.pageId)
-  const assertSame = (a: unknown, b: unknown) => {
-    if (!equal(a, b)) throw new Error('script undo conflict: target changed since the run')
-  }
-  for (const id of frames)
-    assertSame(
-      store.getFrame(id),
-      after.frames.find((f) => f.id === id),
-    )
-  for (const name of tokens)
-    assertSame(
-      canvas.tokens?.find((t) => t.name === name),
-      after.tokens?.find((t) => t.name === name),
-    )
-  for (const id of components)
-    assertSame(
-      canvas.components?.find((c) => c.id === id),
-      after.components?.find((c) => c.id === id),
-    )
-  for (const id of compositions)
-    assertSame(
-      canvas.compositions?.find((c) => c.pageId === id),
-      after.compositions?.find((c) => c.pageId === id),
-    )
-  if (!equal(before.tokenThemes, after.tokenThemes)) assertSame(canvas.tokenThemes, after.tokenThemes)
-  for (const id of frames) {
-    const prev = before.frames.find((f) => f.id === id)
+  /* frames last among their kind: the store write path needs a settled list */
+  for (const { id, prev } of frames) {
     if (!prev) {
       store.deleteFrame(id)
       broadcast(canvas.id, { type: 'frame:deleted', frameId: id, actor })
-    } else {
-      const frame = store.getFrame(id)!
-      for (const key of Object.keys(frame))
-        if (!(key in prev)) delete (frame as unknown as Record<string, unknown>)[key]
-      Object.assign(frame, structuredClone(prev))
-      persist.saveFrame(frame)
-      broadcast(canvas.id, { type: 'frame:updated', frame, actor })
+      continue
     }
+    const frame = store.getFrame(id)
+    if (!frame) continue
+    for (const key of Object.keys(frame))
+      if (!(key in prev) && !UNDO_IGNORED_FRAME_KEYS.has(key)) delete (frame as unknown as Record<string, unknown>)[key]
+    Object.assign(frame, prev)
+    persist.saveFrame(frame)
+    broadcast(canvas.id, { type: 'frame:updated', frame, actor })
   }
-  for (const name of tokens) {
-    const prev = before.tokens?.find((t) => t.name === name)
-    canvas.tokens = (canvas.tokens ?? []).filter((t) => t.name !== name)
-    if (prev) {
-      canvas.tokens.push(structuredClone(prev))
-      persist.saveToken(canvas.id, prev)
-    } else persist.deleteToken(canvas.id, name)
-  }
-  if (!equal(before.tokenThemes, after.tokenThemes)) canvas.tokenThemes = structuredClone(before.tokenThemes)
-  if (tokens.length || !equal(before.tokenThemes, after.tokenThemes))
+  if (tokenNames.length || undo.some((e) => e.kind === 'tokenThemes' && report.restored.includes('tokenThemes')))
     broadcast(canvas.id, { type: 'tokens', tokens: canvas.tokens ?? [], themes: canvas.tokenThemes ?? [], actor })
-  for (const id of components) {
-    const prev = before.components?.find((c) => c.id === id)
-    if (prev) {
-      store.saveComponent(canvas.id, structuredClone(prev))
-      broadcastComponent(canvas.id, prev, actor)
-    } else {
-      store.deleteComponent(canvas.id, id)
-      broadcastComponentDeleted(canvas.id, id, actor)
-    }
-  }
-  for (const id of compositions) {
-    const prev = before.compositions?.find((c) => c.pageId === id)
-    if (prev) store.setComposition(canvas.id, structuredClone(prev), actor)
-    else store.deleteComposition(canvas.id, id)
-    broadcast(canvas.id, { type: 'composition', pageId: id, composition: prev ?? null, actor })
-  }
   persist.saveCanvas(canvas)
+  return report
+}
+
+function currentEntity(canvas: Canvas, entry: ScriptEntityUndo): unknown {
+  switch (entry.kind) {
+    case 'frame':
+      return canvas.frames.find((f) => f.id === entry.id)
+    case 'token':
+      return canvas.tokens?.find((t) => t.name === entry.id)
+    case 'component':
+      return canvas.components?.find((c) => c.id === entry.id)
+    case 'composition':
+      return canvas.compositions?.find((c) => c.pageId === entry.id)
+    case 'tokenThemes':
+      return canvas.tokenThemes
+  }
 }

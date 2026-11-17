@@ -17,14 +17,46 @@ export const SCRIPT_LIMITS = {
   wallMs: 30_000,
   wallMsMax: 60_000,
   memoryBytes: 64 * 1024 * 1024,
+  /** a caller may ask for more guest heap, never past this ceiling */
+  memoryBytesMax: 256 * 1024 * 1024,
   sdkCalls: 200,
   frameWrites: 40,
   scriptBytes: 256 * 1024,
   resultBytes: 8 * 1024,
   resultBytesMax: 32 * 1024,
+  /** serialized size of one SDK call's argument list */
+  argsBytes: 1024 * 1024,
+  /** operations in one frames.edit call */
+  editOps: 64,
+  /** QuickJS workers alive at once, across all canvases */
+  workers: 4,
 } as const
 
 export type LimitName = 'wall' | 'memory' | 'sdk_calls' | 'frame_writes' | 'script_size' | 'result_size'
+
+/** The limits that kill a run when an SDK call reports them. Anything else
+ *  an SdkError carries — renderer, search, args_bytes, ops — is an ordinary
+ *  call failure the script can catch, not a run-level kill. */
+const RUN_LIMITS = new Set<LimitName>(['wall', 'memory', 'sdk_calls', 'frame_writes', 'script_size', 'result_size'])
+
+/** Global worker pool: per-canvas serialization does not stop N canvases
+ *  from spawning N QuickJS workers at once, so the host caps them here. */
+let liveWorkers = 0
+const workerWaiters: (() => void)[] = []
+
+function acquireWorker(): Promise<void> | void {
+  if (liveWorkers < SCRIPT_LIMITS.workers) {
+    liveWorkers++
+    return
+  }
+  return new Promise<void>((resolve) => workerWaiters.push(resolve))
+}
+
+function releaseWorker(): void {
+  const next = workerWaiters.shift()
+  if (next) next()
+  else liveWorkers--
+}
 
 export interface SdkCallRecord {
   path: string
@@ -56,8 +88,12 @@ export type SandboxOutcome =
    worker per run, created on demand */
 
 export async function runInSandbox(req: SandboxRequest): Promise<SandboxOutcome> {
+  /* a queued run's wall clock starts when its worker starts, not while it
+     waits for a slot */
+  await acquireWorker()
   const startedAt = Date.now()
   if (Buffer.byteLength(req.source, 'utf8') > SCRIPT_LIMITS.scriptBytes) {
+    releaseWorker()
     return {
       ok: false,
       error: 'the script is too large',
@@ -67,7 +103,7 @@ export async function runInSandbox(req: SandboxRequest): Promise<SandboxOutcome>
       calls: [],
     }
   }
-  const timeout = Math.min(req.timeoutMs ?? SCRIPT_LIMITS.wallMs, SCRIPT_LIMITS.wallMsMax)
+  const timeout = Math.max(250, Math.min(req.timeoutMs ?? SCRIPT_LIMITS.wallMs, SCRIPT_LIMITS.wallMsMax))
   const deadline = startedAt + timeout
   const calls: SdkCallRecord[] = []
 
@@ -90,6 +126,7 @@ export async function runInSandbox(req: SandboxRequest): Promise<SandboxOutcome>
       req.onClose?.()
       clearTimeout(kill)
       void worker.terminate()
+      releaseWorker()
       resolve(outcome)
     }
 
@@ -125,14 +162,27 @@ export async function runInSandbox(req: SandboxRequest): Promise<SandboxOutcome>
             })
           })
           .catch((error: unknown) => {
-            if (error && typeof error === 'object' && 'limit' in error && error.limit) {
+            /* only a run-level limit kills the run — a renderer, search or
+               argument failure is this call's error and the script sees it */
+            const limit =
+              error && typeof error === 'object' && 'limit' in error && error.limit
+                ? (error.limit as LimitName)
+                : undefined
+            if (limit && RUN_LIMITS.has(limit)) {
+              calls.push({
+                path,
+                target: typeof args[0] === 'string' ? args[0] : undefined,
+                ms: Date.now() - at,
+                ok: false,
+              })
               finish({
                 ok: false,
-                error: String(error.limit) + ' limit reached',
-                limit: error.limit as LimitName,
+                error: String(limit) + ' limit reached',
+                limit,
                 ms: Date.now() - startedAt,
                 calls,
               })
+              return
             }
             calls.push({
               path,
@@ -199,7 +249,7 @@ export async function runInSandbox(req: SandboxRequest): Promise<SandboxOutcome>
       paths: req.paths,
       runInfo: req.runInfo,
       deadline,
-      memoryBytes: req.memoryBytes ?? SCRIPT_LIMITS.memoryBytes,
+      memoryBytes: Math.min(req.memoryBytes ?? SCRIPT_LIMITS.memoryBytes, SCRIPT_LIMITS.memoryBytesMax),
       callLimit: req.callLimit ?? SCRIPT_LIMITS.sdkCalls,
     } satisfies Record<string, unknown>)
   })

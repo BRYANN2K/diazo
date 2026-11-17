@@ -36,6 +36,10 @@ import { runComponentTool } from './componentTools.ts'
 import { findComponent, componentDetail } from './componentActions.ts'
 import * as motion from './motionTools.ts'
 import * as dom from './scriptDom.ts'
+import { canonicalJson } from '../shared/canonicalJson.ts'
+import { scriptUndoProjection } from './actions.ts'
+import type { ScriptEntityUndo } from '../shared/scriptRuns.ts'
+import { SCRIPT_LIMITS } from './scriptSandbox.ts'
 import sharp from 'sharp'
 import { randomUUID } from 'node:crypto'
 
@@ -85,49 +89,74 @@ export interface ScriptRunContext {
   /** audit: the writes this run made (path + frame target) */
   writes: { path: string; frameId?: string }[]
   checks?: Record<string, unknown>
-  undoBefore?: Canvas
-  undoAfter?: Canvas
-  undoTouched?: Set<string>
+  /** per-entity undo payloads the run accumulates, keyed `kind:id` — only
+   *  entities the run changed, never a canvas snapshot */
+  undo?: Map<string, ScriptEntityUndo>
+  /** frames whose html the run changed — they get one rendered review each
+   *  after the run, outside its wall budget */
+  changedFrames?: Set<string>
+}
+
+/** key -> canonical-JSON projection of one undoable entity */
+type UndoSnapshot = Map<string, string>
+
+const UNDO_KINDS: readonly { kind: ScriptEntityUndo['kind']; entries: (c: Canvas) => [string, unknown][] }[] = [
+  { kind: 'frame', entries: (c) => c.frames.map((f) => [f.id, f]) },
+  { kind: 'token', entries: (c) => (c.tokens ?? []).map((t) => [t.name, t]) },
+  { kind: 'component', entries: (c) => (c.components ?? []).map((v) => [v.id, v]) },
+  { kind: 'composition', entries: (c) => (c.compositions ?? []).map((v) => [v.pageId, v]) },
+]
+
+const undoKey = (kind: ScriptEntityUndo['kind'], id: string) => `${kind}:${id}`
+
+function canonEntity(kind: ScriptEntityUndo['kind'], entity: unknown): string | undefined {
+  const projected = scriptUndoProjection(kind, entity)
+  return projected === undefined ? undefined : canonicalJson(projected)
+}
+
+function undoSnapshot(canvas: Canvas): UndoSnapshot {
+  const snap: UndoSnapshot = new Map()
+  for (const { kind, entries } of UNDO_KINDS)
+    for (const [id, entity] of entries(canvas)) {
+      const canon = canonEntity(kind, entity)
+      if (canon !== undefined) snap.set(undoKey(kind, id), canon)
+    }
+  const themes = canonEntity('tokenThemes', canvas.tokenThemes)
+  if (themes !== undefined) snap.set('tokenThemes:', themes)
+  return snap
+}
+
+/** Fold the entities this mutate changed into the run's undo map: `before`
+ *  is captured the first time an entity moves, `after` always lands on the
+ *  latest state, and an entity that returns to its original value stays
+ *  recorded (the runner drops the no-op entries before persisting). */
+function undoDiff(ctx: ScriptRunContext, snap: UndoSnapshot, canvas: Canvas): void {
+  const cur = undoSnapshot(canvas)
+  ctx.undo ??= new Map()
+  for (const key of new Set([...snap.keys(), ...cur.keys()])) {
+    const prev = snap.get(key)
+    const next = cur.get(key)
+    if (prev === next) continue
+    const cut = key.indexOf(':')
+    const kind = key.slice(0, cut) as ScriptEntityUndo['kind']
+    const id = key.slice(cut + 1)
+    let entry = ctx.undo.get(key)
+    if (!entry) {
+      entry = { kind, id, ...(prev === undefined ? {} : { before: JSON.parse(prev) }) }
+      ctx.undo.set(key, entry)
+    }
+    if (next === undefined) delete entry.after
+    else entry.after = JSON.parse(next)
+  }
 }
 
 /** Capture only synchronous mutations performed by this run. Awaiting a
  * renderer or library lookup never claims a collaborator's unrelated edits. */
 function mutate<T>(ctx: ScriptRunContext, fn: () => T): T {
   if (ctx.active === false) throw new SdkError('limit', 'wall limit reached', 'wall')
-  const before = structuredClone(store.getCanvas(ctx.canvasId)!)
+  const snap = undoSnapshot(store.getCanvas(ctx.canvasId)!)
   const value = fn()
-  const after = structuredClone(store.getCanvas(ctx.canvasId)!)
-  ctx.undoBefore ??= structuredClone(before)
-  ctx.undoAfter ??= structuredClone(before)
-  const touched = (ctx.undoTouched ??= new Set())
-  const update = (key: 'frames' | 'tokens' | 'components' | 'compositions', idKey: string) => {
-    type Entity = Record<string, unknown>
-    const a = (before[key] ?? []) as unknown as Entity[]
-    const b = (after[key] ?? []) as unknown as Entity[]
-    for (const id of new Set([...a, ...b].map((v) => String(v[idKey])))) {
-      const prev = a.find((v) => v[idKey] === id)
-      const next = b.find((v) => v[idKey] === id)
-      if (JSON.stringify(prev) === JSON.stringify(next)) continue
-      const set = (canvas: Canvas, v: Entity | undefined) => {
-        const list = ((canvas[key] ?? []) as unknown as Entity[]).filter((e) => e[idKey] !== id)
-        if (v) list.push(structuredClone(v))
-        Object.assign(canvas, { [key]: list })
-      }
-      const target = key + ':' + id
-      if (!touched.has(target)) set(ctx.undoBefore!, prev)
-      set(ctx.undoAfter!, next)
-      touched.add(target)
-    }
-  }
-  update('frames', 'id')
-  update('tokens', 'name')
-  update('components', 'id')
-  update('compositions', 'pageId')
-  if (JSON.stringify(before.tokenThemes) !== JSON.stringify(after.tokenThemes)) {
-    if (!touched.has('tokenThemes')) ctx.undoBefore.tokenThemes = before.tokenThemes
-    ctx.undoAfter.tokenThemes = after.tokenThemes
-    touched.add('tokenThemes')
-  }
+  undoDiff(ctx, snap, store.getCanvas(ctx.canvasId)!)
   return value
 }
 
@@ -267,12 +296,14 @@ function responsiveResult(c: import('../shared/frameChecks.ts').FrameChecks): Re
 
 /** The layout numbers a screenshot would only show a person. */
 async function measureOf(frame: Frame): Promise<Record<string, unknown>> {
-  const loaded = await loadFramePage(frame, { priority: 'interactive' })
+  const consoleErrors: string[] = []
+  const loaded = await loadFramePage(frame, {
+    priority: 'interactive',
+    onConsole: (type, text) => {
+      if (type === 'error' && consoleErrors.length < 20) consoleErrors.push(text.slice(0, 200))
+    },
+  })
   try {
-    const consoleErrors: string[] = []
-    loaded.page.on('console', (msg) => {
-      if (msg.type() === 'error') consoleErrors.push(msg.text().slice(0, 200))
-    })
     const measured = (await loaded.page.evaluate(`
       (() => {
         const W = ${frame.width}, H = ${frame.height}
@@ -309,7 +340,29 @@ async function measureOf(frame: Frame): Promise<Record<string, unknown>> {
         const brokenImages = [...document.images].filter(i => i.complete && i.naturalWidth === 0).map(i => ({ src: String(i.src).slice(0, 200) })).slice(0, 20)
         const asked = new Set()
         for (const el of all) { const f = getComputedStyle(el).fontFamily.split(',')[0].replace(/["']/g, '').trim(); if (f) asked.add(f) }
-        const fallbackFonts = [...asked].filter(f => !document.fonts.check('12px "' + f + '"')).slice(0, 20)
+        /* document.fonts only knows @font-face families — system fonts would
+           all read as missing. Width-probe instead: a family that resolves
+           renders its own glyphs, so '32px "F", serif' measures differently
+           from '32px serif'; a missing family falls through and matches the
+           baseline. Three baselines keep monospace-metric fonts honest. */
+        const GENERIC = new Set(['serif','sans-serif','monospace','cursive','fantasy','system-ui','ui-serif','ui-sans-serif','ui-monospace','ui-rounded','emoji','math','fangsong','inherit','initial','unset'])
+        const fallbackFonts = []
+        const probe = document.createElement('canvas').getContext('2d')
+        if (probe) {
+          const SAMPLE = 'mmmmmmmmmmlliWWW1234567890'
+          const base = {}
+          for (const g of ['monospace','serif','sans-serif']) { probe.font = '32px ' + g; base[g] = probe.measureText(SAMPLE).width }
+          for (const f of asked) {
+            if (fallbackFonts.length >= 20) break
+            if (GENERIC.has(f.toLowerCase())) continue
+            let resolved = false
+            for (const g of ['monospace','serif','sans-serif']) {
+              probe.font = '32px "' + f.replace(/"/g, '') + '", ' + g
+              if (Math.abs(probe.measureText(SAMPLE).width - base[g]) > 0.5) { resolved = true; break }
+            }
+            if (!resolved) fallbackFonts.push(f)
+          }
+        }
         const sectionsOut = sections.map(el => { const r = el.getBoundingClientRect(); return { selector: el.tagName.toLowerCase(), elementId: el.getAttribute('data-doop-id') || undefined, box: { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) } } })
         return { heightDeltaPx: Math.round(doc.scrollHeight - H), overflowPx: Math.round(overflowPx), outside, clippedText, overlaps, brokenImages, fallbackFonts, sections: sectionsOut }
       })()
@@ -592,6 +645,8 @@ const HANDLERS: Record<string, Entry> = {
       const frame = frameOf(ctx, str(args[0], 'frameId'))
       const ops = args[1]
       if (!Array.isArray(ops) || !ops.length) throw invalid('ops must be a non-empty array')
+      if (ops.length > SCRIPT_LIMITS.editOps)
+        throw new SdkError('limit', `frames.edit takes at most ${SCRIPT_LIMITS.editOps} operations`, 'ops')
       const result = dom.applyEditOps(frame.html, ops as dom.EditOp[])
       if (ctx.dryRun) {
         frame.html = result.html
@@ -683,9 +738,9 @@ const HANDLERS: Record<string, Entry> = {
       const opts = args[0] === undefined ? {} : obj(args[0], 'opts')
       let tokens = canvasOf(ctx).tokens ?? []
       if (Array.isArray(opts.types)) tokens = tokens.filter((t) => (opts.types as string[]).includes(t.type))
-      if (typeof opts.namePattern === 'string') {
-        const re = new RegExp(opts.namePattern, 'i')
-        tokens = tokens.filter((t) => re.test(t.name))
+      if (typeof opts.namePattern === 'string' && opts.namePattern) {
+        const match = nameMatcher(opts.namePattern)
+        tokens = tokens.filter((t) => match(t.name))
       }
       return tokens.map(tokenSummary)
     },
@@ -1390,6 +1445,18 @@ function nearestPassingToken(wanted: string, bg: string, tokens: readonly Design
 export async function dispatchScriptCall(ctx: ScriptRunContext, path: string, args: unknown[]): Promise<unknown> {
   if (!env.DOOP_AGENT_SCRIPTS) throw new SdkError('refused', 'agent scripts are disabled on this instance')
   if (ctx.active === false) throw new SdkError('limit', 'the run already ended', 'wall')
+  /* host-side bound on what one call may carry — a guest with no size check
+   *  could otherwise push unbounded payloads through the bridge */
+  let argsBytes = 0
+  for (const arg of args) {
+    argsBytes += typeof arg === 'string' ? arg.length : (JSON.stringify(arg)?.length ?? 0)
+    if (argsBytes > SCRIPT_LIMITS.argsBytes)
+      throw new SdkError(
+        'limit',
+        `call arguments exceed ${Math.round(SCRIPT_LIMITS.argsBytes / 1024)} KB`,
+        'args_bytes',
+      )
+  }
   if (ctx.dryRun && !ctx.draft) ctx.draft = structuredClone(store.getCanvas(ctx.canvasId))
   const entry = Object.hasOwn(HANDLERS, path) ? HANDLERS[path] : undefined
   if (!entry) throw invalid(`unknown diazo function ${path}`)
@@ -1409,10 +1476,14 @@ export async function dispatchScriptCall(ctx: ScriptRunContext, path: string, ar
   const out = await entry.fn(ctx, args)
   if (entry.write) {
     for (const frame of canvasOf(ctx).frames) {
-      if (beforeHtml.get(frame.id) !== frame.html) {
-        const review = await reviewOf(frame, ctx.actor, { render: rendererAvailable() })
-        ;(ctx.checks ??= {})[frame.id] = review
-        if (out && typeof out === 'object') Object.assign(out, { review })
+      if (beforeHtml.get(frame.id) === frame.html) continue
+      /* rendered review is deferred to finishScriptReviews — one pass per
+         changed frame, after the run, outside its wall budget */
+      ;(ctx.changedFrames ??= new Set()).add(frame.id)
+      if (!(ctx.checks ??= {})[frame.id]) {
+        const review = await reviewOf(frame, ctx.actor, {})
+        ctx.checks[frame.id] = review
+        if (out && typeof out === 'object' && !('review' in out)) Object.assign(out, { review })
       }
     }
   }
@@ -1427,6 +1498,44 @@ export async function dispatchScriptCall(ctx: ScriptRunContext, path: string, ar
     })
   }
   return out
+}
+
+/**
+ * The one rendered pass per frame a run touched. The runner calls this after
+ * the guest's wall clock stopped, so renders never eat script budget — and
+ * a frame edited ten times is reviewed once, not ten times. Lint-level
+ * reviews collected during the run survive for frames the renderer misses.
+ */
+export async function finishScriptReviews(ctx: ScriptRunContext): Promise<Record<string, unknown>> {
+  const checks = ctx.checks ?? {}
+  if (ctx.dryRun || !rendererAvailable()) return checks
+  for (const id of ctx.changedFrames ?? []) {
+    const frame = store.getFrame(id)
+    if (!frame || frame.canvasId !== ctx.canvasId) continue
+    try {
+      checks[id] = await reviewOf(frame, ctx.actor, { render: true })
+    } catch {
+      checks[id] ??= { ok: false, error: 'the rendered review failed' }
+    }
+  }
+  return checks
+}
+
+/** A script-supplied name filter: a regex when it is short and cannot nest
+ *  quantifiers, a case-insensitive substring otherwise. No user pattern
+ *  reaches the engine unexamined. */
+export function nameMatcher(pattern: string): (name: string) => boolean {
+  const safe = pattern.length <= 128 && !/\\[1-9]/.test(pattern) && !/\([^)]*[+*{][^)]*\)[+*?{]/.test(pattern)
+  if (safe) {
+    try {
+      const re = new RegExp(pattern, 'i')
+      return (name) => re.test(name)
+    } catch {
+      /* malformed pattern — fall through to a substring match */
+    }
+  }
+  const needle = pattern.toLowerCase()
+  return (name) => name.toLowerCase().includes(needle)
 }
 
 /** The catalogue `get_sdk_docs` serves: which paths exist and which write. */

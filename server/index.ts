@@ -3,7 +3,7 @@ import { registerBlenderRoutes } from './blenderRoutes.ts'
 import { queueServerRender, renderAccess } from './motionRender.ts'
 import { recoverSpeechJobs } from './speechJobs.ts'
 import { recoverBlenderOps } from './blenderOps.ts'
-import { scriptRunDeps } from './scriptRuns.ts'
+import { scriptRunDeps, pruneScriptRuns } from './scriptRuns.ts'
 import * as libraries from './libraries.ts'
 import * as libraryThumbQueue from './libraryThumbQueue.ts'
 import * as libraryIndex from './libraryIndex.ts'
@@ -4783,6 +4783,18 @@ server.listen(PORT, () => {
       if (dropped) console.log(`[store] dropped the frame HTML of ${dropped} idle canvas(es)`)
     },
     Math.min(60_000, Math.max(1_000, env.CANVAS_IDLE_MS / 2)),
+  ).unref()
+  /* audit retention: script_runs rows past their keep window are pruned
+     hourly so the table cannot grow without bound */
+  setInterval(
+    () => {
+      void pruneScriptRuns()
+        .then((dropped) => {
+          if (dropped) console.log(`[script_runs] pruned ${dropped} old audit row(s)`)
+        })
+        .catch((error) => console.warn('[script_runs] prune failed', error))
+    },
+    60 * 60 * 1000,
   ).unref()
   /* comments anchored before element ids: stamped now, while serving, so a
      slow or failing row can never keep the server from coming up */

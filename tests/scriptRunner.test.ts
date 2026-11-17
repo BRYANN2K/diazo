@@ -51,7 +51,7 @@ it('executes TypeScript, audits, reviews and undoes the whole run', async () => 
   expect(result.checks[frameId]).toHaveProperty('lint')
   expect(store.getFrame(frameId)!.html).toContain('After')
   expect(rows.get(result.run_id)!.record.calls[0]!.fn).toBe('frames.edit')
-  expect(actions.getActivity(caller.canvasId).filter((a) => a.runId === result.run_id)).toHaveLength(1)
+  expect(actions.getActivity(caller.canvasId).filter((a) => a.scriptRunId === result.run_id)).toHaveLength(1)
   await revertScriptRun(result.run_id, caller)
   expect(store.getFrame(frameId)!.html).toBe(before)
   expect(rows.get(result.run_id)!.record.outcome).toBe('reverted')
@@ -107,11 +107,26 @@ it('query has no write function and even the raw bridge refuses writes', async (
   expect(store.getFrame(frameId)!.html).toContain('Before')
 })
 
-it('refuses undo after a later edit, without partially reverting tokens', async () => {
-  const result = await executeScript({ script: edit() }, caller, true)
-  actions.updateFrame(frameId, { name: 'Later' }, caller.actor)
-  await expect(revertScriptRun(result.run_id, caller)).rejects.toThrow(/conflict/)
-  expect(store.getFrame(frameId)!.name).toBe('Later')
+it('reports a later edit as unreverted while restoring what it can', async () => {
+  const result = await executeScript(
+    {
+      script: edit() + `await diazo.tokens.create([{name:'--ink',type:'color',value:'#123456'}])`,
+    },
+    caller,
+    true,
+  )
+  expect(result.ok).toBe(true)
+  const before = rows.get(result.run_id)!.undo!
+  expect(before.map((e) => `${e.kind}:${e.id}`).sort()).toEqual([`frame:${frameId}`, 'token:--ink'])
+  /* the collaborator touched only the token — the frame still reverts */
+  const canvas = store.getCanvas(caller.canvasId)!
+  canvas.tokens = canvas.tokens!.map((t) => (t.name === '--ink' ? { ...t, value: '#654321' } : t))
+  const out = await revertScriptRun(result.run_id, caller)
+  expect(out.unreverted).toEqual(['token:--ink'])
+  expect(out.restored).toEqual([`frame:${frameId}`])
+  expect(store.getFrame(frameId)!.html).toContain('Before')
+  expect(store.getTokens(caller.canvasId).find((t) => t.name === '--ink')?.value).toBe('#654321')
+  expect(rows.get(result.run_id)!.record.outcome).toBe('reverted_partial')
 })
 
 it('bounds multibyte results, records full bytes and validates a raised cap', async () => {
