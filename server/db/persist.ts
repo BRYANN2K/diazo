@@ -1417,13 +1417,24 @@ export async function flush(getFrame: (id: string) => Frame | undefined): Promis
   const ids = [...dirtyFrames.keys()]
   for (const [, timer] of frameTimers) clearTimeout(timer)
   frameTimers.clear()
-  await Promise.allSettled(
+  const results = await Promise.allSettled(
     ids.map((id) => {
       const f = getFrame(id)
       return f ? writeFrame(f) : Promise.resolve()
     }),
   )
+  /* the version queue drains too — it is its own durability story, not a
+     reason to hide a frame-write failure behind a clean exit */
   await pendingVersionWrites(() => true)
+  const failed: string[] = []
+  for (const [i, id] of ids.entries()) {
+    const result = results[i]
+    if (result?.status === 'rejected') {
+      console.error(`[persist] flush could not write frame ${id}`, result.reason)
+      failed.push(id)
+    }
+  }
+  if (failed.length) throw new Error(`flush failed for ${failed.length} frame(s): ${failed.join(', ')}`)
 }
 
 /* ------------------------------------------------------------------ */
