@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-orca-poll"
+description = "Enables the orca_poll command without any pre-configured scope."
+commands.allow = ["orca_poll"]
+
+[[permission]]
+identifier = "deny-orca-poll"
+description = "Denies the orca_poll command without any pre-configured scope."
+commands.deny = ["orca_poll"]

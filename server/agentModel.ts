@@ -234,6 +234,7 @@ const BYO_LABELS: Record<BuiltinAccountKind, string> = {
   'deepseek-key': 'DeepSeek',
   'kimi-key': 'Kimi',
   'kimi-code': 'Kimi Code',
+  'elevenlabs-key': 'ElevenLabs',
 }
 
 /* the account kinds that run on the Chat Completions transport */
@@ -360,6 +361,7 @@ function customModel(account: ModelAccount): AgentModel {
 
 function byoModel(account: ModelAccount): AgentModel {
   const kind = account.kind
+  if (kind === 'elevenlabs-key') throw new ModelConfigurationError('Voice connections cannot run canvas tasks.')
   if (isCustomProviderKind(kind)) return customModel(account)
   if (kind === 'anthropic-key') {
     if (!account.apiKey) throw new ModelAuthError('Reconnect your Claude API key in Settings.')
@@ -530,7 +532,10 @@ export async function pickModel(payerId?: string, pick?: RunnerPick): Promise<Ag
  */
 export async function accountTurnModels(payerId: string): Promise<{ main: AgentModel; bulk: AgentModel } | null> {
   const connections = await readConnections(payerId)
-  const account = usableAccount(connections, connections.default) ?? connections.accounts.find((a) => a.enabled) ?? null
+  const account =
+    usableAccount(connections, connections.default) ??
+    connections.accounts.find((a) => a.enabled && a.kind !== 'elevenlabs-key') ??
+    null
   if (!account) return null
   const main = byoModel(account)
   return { main, bulk: accountDescriber(account) ?? main }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-speech-uninstall"
+description = "Enables the speech_uninstall command without any pre-configured scope."
+commands.allow = ["speech_uninstall"]
+
+[[permission]]
+identifier = "deny-speech-uninstall"
+description = "Denies the speech_uninstall command without any pre-configured scope."
+commands.deny = ["speech_uninstall"]

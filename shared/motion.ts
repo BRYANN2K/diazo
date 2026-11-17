@@ -50,6 +50,29 @@ export type MarkupTrackKind = (typeof MARKUP_TRACK_KINDS)[number]
 export const TIME_CSS_VAR = '--t'
 export const SEEK_EVENT = 'doop:seek'
 
+/** text animator: the element carries this attr naming its split mode; the
+ *  player derives units at runtime while the HTML keeps one editable string */
+export const TEXT_SPLIT_ATTR = 'data-doop-split'
+export const TEXT_SPLITS = ['line', 'word', 'char'] as const
+export type TextSplit = (typeof TEXT_SPLITS)[number]
+
+/** one transcribed word on the media's own clock; `speaker` names an `S*`
+ *  label when speaker labels ran (proposal 18.8) */
+export interface TranscriptWord {
+  text: string
+  /** seconds in source media time */
+  start: number
+  end: number
+  confidence?: number
+  speaker?: string
+}
+
+/** scroll/pointer-driven layers (phase 4): a 3d or timed subtree can name a
+ *  driver other than the composition clock */
+export const DRIVER_ATTR = 'data-doop-driver'
+export const DRIVERS = ['time', 'scroll', 'pointer'] as const
+export type MotionDriver = (typeof DRIVERS)[number]
+
 /** prefixes a frame's custom properties use for motion tokens */
 export const MOTION_TOKEN_PREFIXES = ['--dur-', '--ease-', '--spring-'] as const
 
@@ -218,6 +241,17 @@ export const ELEMENT_PROPERTIES = [
   'borderRadius',
   'color',
   'backgroundColor',
+  /* masks, shapes and paths (proposal 14.6): clip-path forms, trim-path
+     dash pairs, morphing `d`, motion-path offset-* and paint colours */
+  'clipPath',
+  'offsetPath',
+  'offsetDistance',
+  'offsetRotate',
+  'strokeDashoffset',
+  'strokeDasharray',
+  'd',
+  'fill',
+  'stroke',
 ] as const
 
 const PROPERTY_RE = /^(--)?[A-Za-z][A-Za-z0-9-]{0,59}$/
@@ -242,8 +276,41 @@ export type MotionClipSource =
   | { type: 'library'; itemId: string; variantId?: string }
   /** an /a/ asset: uploaded or generated media (video, audio, image) */
   | { type: 'asset'; assetId: string }
-  /** caption text drawn by the caption lane; `style` names an editor preset */
-  | { type: 'caption'; text: string; style?: string }
+  /** caption text drawn by the caption lane; `style` names an editor preset.
+   *  `words` carries per-word timings so word-highlight styles can light the
+   *  current word — written by build_captions from a transcript */
+  | { type: 'caption'; text: string; style?: string; words?: TranscriptWord[] }
+  /** a 3D layer (phase 4): `assetId` is a glTF/GLB canvas asset rendered by a
+   *  three.js layer in the frame; `fallbackAssetId` is the still image a
+   *  non-3D surface (export, thumbnail, old shell) draws instead. `driver`
+   *  overrides the composition clock — `scroll`/`pointer` let the layer scrub
+   *  on page input even inside a timed composition (default 'time') */
+  | { type: '3d'; assetId: string; fallbackAssetId?: string; driver?: MotionDriver }
+
+/* ---- transitions (proposal 14.4) ----
+ * A transition is the overlap of two visibility windows plus one paired
+ * animation. It hangs on the incoming clip: when the clip takes over from
+ * the previous clip on the same track, `transition` says how. `cut` is the
+ * default — no transition, the field is simply absent. */
+
+export const TRANSITION_KINDS = ['cut', 'dissolve', 'push', 'wipe', 'zoom', 'shared-element'] as const
+export type TransitionKind = (typeof TRANSITION_KINDS)[number]
+
+export const TRANSITION_DIRECTIONS = ['left', 'right', 'up', 'down'] as const
+export type TransitionDirection = (typeof TRANSITION_DIRECTIONS)[number]
+
+export interface MotionTransition {
+  kind: TransitionKind
+  /** seconds the two clips' windows overlap */
+  duration: number
+  /** the `--dur-*` token the duration came from — kept so a token change can
+   *  retime it; `duration` stays the resolved fallback for renderers */
+  token?: string
+  /** push/wipe travel direction; default left for push, right for wipe */
+  direction?: TransitionDirection
+  /** interpolation of the paired animation; default is per-kind */
+  easing?: MotionEasing
+}
 
 export interface MotionClip {
   id: string
@@ -254,9 +321,18 @@ export interface MotionClip {
   name?: string
   /** trim: seconds into the source media the clip opens at (video/audio) */
   mediaStart?: number
+  /** playback rate of the media inside this clip, 0.25× to 4×; 1 when absent.
+   *  One value per clip — a speed ramp is several clips (proposal 14.10) */
+  speed?: number
   /** audio level, 1 = 0 dB */
   gain?: number
+  /** seconds the audio fades in/out inside this clip's window (audio clips) */
+  fadeIn?: number
+  fadeOut?: number
   muted?: boolean
+  /** how this clip takes over from the previous clip on the same track;
+   *  absent = a hard cut */
+  transition?: MotionTransition
 }
 
 export const TRACK_KINDS = ['camera', 'element', 'clip', 'audio', 'caption'] as const
@@ -354,10 +430,15 @@ export type CompositionOp =
       start?: number
       duration?: number
       mediaStart?: number
+      speed?: number
       gain?: number
+      fadeIn?: number
+      fadeOut?: number
       muted?: boolean
       name?: string
       source?: MotionClipSource
+      /** null clears the transition (back to a hard cut) */
+      transition?: MotionTransition | null
     }
   | { op: 'remove_clip'; trackId: string; clipId: string }
 
@@ -375,9 +456,49 @@ export interface FrameMotionKeyframe {
   ease?: MotionEasing
 }
 
+/* ---- text animators (proposal 14.5) ----
+ * The element's text stays one editable string; `data-doop-split` names the
+ * unit split and an animator spec here says how the units arrive. The
+ * player derives the units at runtime; `expandTextAnimator` (shared/
+ * motionText.ts) folds a spec into ordinary keyframes on generated unit
+ * targets — `unitSelector(el, i)` — so renderers need no DOM. */
+
+export const TEXT_ANIMATOR_PRESETS = [
+  'rise-blur',
+  'typewriter',
+  'scale-pop',
+  'mask-wipe',
+  'tracking-in',
+  'scramble',
+] as const
+export type TextAnimatorPreset = (typeof TEXT_ANIMATOR_PRESETS)[number]
+
+export const TEXT_ORDERS = ['forward', 'center', 'random'] as const
+export type TextOrder = (typeof TEXT_ORDERS)[number]
+
+export interface FrameTextAnimator {
+  /** the text element's data-doop-id (which carries data-doop-split) */
+  el: string
+  split: TextSplit
+  preset: TextAnimatorPreset
+  /** seconds on the composition clock the first unit starts */
+  start: number
+  /** per-unit animation length, seconds */
+  duration: number
+  /** seconds between unit starts */
+  stagger: number
+  /** unit order; default forward */
+  order?: TextOrder
+  /** per-unit easing; default per preset */
+  ease?: MotionEasing
+  /** seed for 'random' order and the 'scramble' preset */
+  seed?: number
+}
+
 export interface FrameMotionBlock {
   v: 1
   keyframes: FrameMotionKeyframe[]
+  animators?: FrameTextAnimator[]
 }
 
 export function parseMotionBlock(text: string): FrameMotionBlock | null {
@@ -403,23 +524,81 @@ export function parseMotionBlock(text: string): FrameMotionBlock | null {
     }
     keyframes.push({ el, prop, t, value: value as number | string, ease: easing })
   }
-  return { v: 1, keyframes }
+  const block: FrameMotionBlock = { v: 1, keyframes }
+  if (json.animators !== undefined) {
+    if (!Array.isArray(json.animators)) return null
+    const animators: FrameTextAnimator[] = []
+    for (const raw of json.animators) {
+      const parsed = parseTextAnimator(raw)
+      if (!parsed) return null
+      animators.push(parsed)
+    }
+    block.animators = animators
+  }
+  return block
+}
+
+function parseTextAnimator(input: unknown): FrameTextAnimator | null {
+  if (!isRecord(input)) return null
+  const { el, split, preset, start, duration, stagger, order, ease, seed } = input
+  if (typeof el !== 'string' || !el || el.length > 100) return null
+  if (!TEXT_SPLITS.includes(split as TextSplit)) return null
+  if (!TEXT_ANIMATOR_PRESETS.includes(preset as TextAnimatorPreset)) return null
+  if (
+    ![start, duration, stagger].every((v) => typeof v === 'number' && Number.isFinite(v)) ||
+    (start as number) < 0 ||
+    (duration as number) <= 0 ||
+    (stagger as number) < 0
+  ) {
+    return null
+  }
+  const out: FrameTextAnimator = {
+    el,
+    split: split as TextSplit,
+    preset: preset as TextAnimatorPreset,
+    start: start as number,
+    duration: duration as number,
+    stagger: stagger as number,
+  }
+  if (order !== undefined) {
+    if (!TEXT_ORDERS.includes(order as TextOrder)) return null
+    out.order = order as TextOrder
+  }
+  if (ease !== undefined) {
+    const parsed = parseEasing(ease)
+    if (!parsed) return null
+    out.ease = parsed
+  }
+  if (seed !== undefined) {
+    if (typeof seed !== 'number' || !Number.isInteger(seed) || seed < 0) return null
+    out.seed = seed
+  }
+  return out
 }
 
 /* ---- render jobs ---- */
 
-export const RENDER_FORMATS = ['mp4', 'webm'] as const
+/* `gif`/`pngseq` join the containers: a GIF needs the ffmpeg palette pass
+ * and a pngseq uploads a zip of the stills (sniffed on upload) */
+export const RENDER_FORMATS = ['mp4', 'webm', 'gif', 'pngseq'] as const
 export type RenderFormat = (typeof RENDER_FORMATS)[number]
 
 /**
- * Who produces the file. MVP: `browser` (MediaRecorder/WebCodecs in the
- * page) and `desktop` (the Tauri shell — deterministic seeks plus an
- * allowlisted local ffmpeg). `server` and `blender` are reserved for later
- * phases; the API rejects them until then.
+ * Who produces the file. `browser` (MediaRecorder/WebCodecs in the page),
+ * `desktop` (the Tauri shell — deterministic seeks plus an allowlisted local
+ * ffmpeg), `blender` (the desktop shell driving Blender per frame, phase
+ * 4) and `server` (the instance's own headless renderer through the
+ * renderer gate at background priority — capped at 60 s, 1080p and 30 fps,
+ * one open render per account, phase 5).
  */
 export const RENDER_TARGETS = ['browser', 'desktop', 'server', 'blender'] as const
 export type RenderTarget = (typeof RENDER_TARGETS)[number]
-export const RENDER_TARGETS_MVP: readonly RenderTarget[] = ['browser', 'desktop']
+export const RENDER_TARGETS_MVP: readonly RenderTarget[] = ['browser', 'desktop', 'blender', 'server']
+
+/** The render engine a `blender`-target job asks Blender to use. `octane`
+ *  stays a name Blender interprets — there is no Octane integration. */
+export const BLENDER_ENGINES = ['eevee', 'cycles', 'octane'] as const
+export type BlenderEngine = (typeof BLENDER_ENGINES)[number]
 
 export const RENDER_STATUSES = ['queued', 'rendering', 'encoding', 'done', 'failed', 'canceled'] as const
 export type RenderStatus = (typeof RENDER_STATUSES)[number]
@@ -437,6 +616,8 @@ export interface RenderJob {
   compositionId: string
   format: RenderFormat
   target: RenderTarget
+  /** blender-target jobs only: which engine Blender renders with */
+  engine?: BlenderEngine
   width: number
   height: number
   fps: number
@@ -558,9 +739,51 @@ function parseClipSource(input: unknown): ParseResult<MotionClipSource> {
       }
       out.style = input.style
     }
+    if (input.words !== undefined) {
+      if (!Array.isArray(input.words) || input.words.length > 512) return bad('clip.source.words must be ≤512 words')
+      const words: TranscriptWord[] = []
+      for (const w of input.words) {
+        const parsed = parseTranscriptWord(w)
+        if (!parsed) return bad('clip.source.words must be {text,start,end}')
+        words.push(parsed)
+      }
+      out.words = words
+    }
+    return ok(out)
+  }
+  if (input.type === '3d') {
+    const assetId = parseId(input.assetId, 'clip.source.assetId')
+    if (!assetId.ok) return assetId
+    const out: MotionClipSource = { type: '3d', assetId: assetId.value }
+    if (input.fallbackAssetId !== undefined) {
+      const fallback = parseId(input.fallbackAssetId, 'clip.source.fallbackAssetId')
+      if (!fallback.ok) return fallback
+      out.fallbackAssetId = fallback.value
+    }
+    if (input.driver !== undefined) {
+      if (!DRIVERS.includes(input.driver as MotionDriver)) {
+        return bad(`clip.source.driver must be one of ${DRIVERS.join(', ')}`)
+      }
+      out.driver = input.driver as MotionDriver
+    }
     return ok(out)
   }
   return bad(`unknown clip source type "${input.type}"`)
+}
+
+/** validates one transcript word: non-empty text, 0 ≤ start < end, finite */
+export function parseTranscriptWord(input: unknown): TranscriptWord | null {
+  if (!isRecord(input)) return null
+  const { text, start, end } = input
+  if (typeof text !== 'string' || text.length < 1 || text.length > 200) return null
+  if (typeof start !== 'number' || typeof end !== 'number' || !Number.isFinite(start) || !Number.isFinite(end)) {
+    return null
+  }
+  if (start < 0 || end <= start || end > MOTION_LIMITS.MAX_DURATION_S) return null
+  const out: TranscriptWord = { text, start, end }
+  if (typeof input.confidence === 'number' && Number.isFinite(input.confidence)) out.confidence = input.confidence
+  if (typeof input.speaker === 'string' && input.speaker.length <= 40) out.speaker = input.speaker
+  return out
 }
 
 function parseClip(input: unknown, duration: number): ParseResult<MotionClip> {
@@ -592,7 +815,46 @@ function parseClip(input: unknown, duration: number): ParseResult<MotionClip> {
     if (typeof input.muted !== 'boolean') return bad('clip.muted must be a boolean')
     clip.muted = input.muted
   }
+  if (input.speed !== undefined) {
+    const s = parseSeconds(input.speed, 'clip.speed', 0.25, 4)
+    if (!s.ok) return s
+    clip.speed = s.value
+  }
+  for (const f of ['fadeIn', 'fadeOut'] as const) {
+    if (input[f] !== undefined) {
+      const n = parseSeconds(input[f], `clip.${f}`, 0, length.value)
+      if (!n.ok) return n
+      clip[f] = n.value
+    }
+  }
+  if (input.transition !== undefined) {
+    const transition = parseTransition(input.transition)
+    if (!transition) return bad('clip.transition is not a valid transition')
+    clip.transition = transition
+  }
   return ok(clip)
+}
+
+function parseTransition(input: unknown): MotionTransition | null {
+  if (!isRecord(input)) return null
+  const { kind, duration, token, direction, easing } = input
+  if (!TRANSITION_KINDS.includes(kind as TransitionKind) || kind === 'cut') return null
+  if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0 || duration > 60) return null
+  const out: MotionTransition = { kind: kind as TransitionKind, duration }
+  if (token !== undefined) {
+    if (typeof token !== 'string' || !token.startsWith('--dur-') || token.length > 60) return null
+    out.token = token
+  }
+  if (direction !== undefined) {
+    if (!TRANSITION_DIRECTIONS.includes(direction as TransitionDirection)) return null
+    out.direction = direction as TransitionDirection
+  }
+  if (easing !== undefined) {
+    const parsed = parseEasing(easing)
+    if (!parsed) return null
+    out.easing = parsed
+  }
+  return out
 }
 
 export function parseTrack(input: unknown, duration: number): ParseResult<MotionTrack> {
@@ -870,12 +1132,15 @@ function parseOp(input: unknown, duration: number): ParseResult<CompositionOp> {
         trackId: trackId.value,
         clipId: clipId.value,
       }
-      for (const f of ['start', 'duration', 'mediaStart', 'gain'] as const) {
+      for (const f of ['start', 'duration', 'mediaStart', 'speed', 'gain', 'fadeIn', 'fadeOut'] as const) {
         if (input[f] !== undefined) {
           const n = parseSeconds(input[f], f, f === 'duration' ? 0.01 : 0, MOTION_LIMITS.MAX_DURATION_S)
           if (!n.ok) return n
           op[f] = n.value
         }
+      }
+      if (op.speed !== undefined && (op.speed < 0.25 || op.speed > 4)) {
+        return bad('speed must be between 0.25 and 4')
       }
       if (input.muted !== undefined) {
         if (typeof input.muted !== 'boolean') return bad('muted must be a boolean')
@@ -889,6 +1154,15 @@ function parseOp(input: unknown, duration: number): ParseResult<CompositionOp> {
         const source = parseClipSource(input.source)
         if (!source.ok) return source
         op.source = source.value
+      }
+      if (input.transition !== undefined) {
+        if (input.transition === null) {
+          op.transition = null
+        } else {
+          const transition = parseTransition(input.transition)
+          if (!transition) return bad('transition is not valid')
+          op.transition = transition
+        }
       }
       return ok(op)
     }
@@ -1043,13 +1317,20 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
       if (op.start !== undefined) clip.start = op.start
       if (op.duration !== undefined) clip.duration = op.duration
       if (op.mediaStart !== undefined) clip.mediaStart = op.mediaStart
+      if (op.speed !== undefined) clip.speed = op.speed
       if (op.gain !== undefined) clip.gain = op.gain
+      if (op.fadeIn !== undefined) clip.fadeIn = op.fadeIn
+      if (op.fadeOut !== undefined) clip.fadeOut = op.fadeOut
       if (op.muted !== undefined) clip.muted = op.muted
       if (op.name !== undefined) clip.name = op.name
       if (op.source !== undefined) {
         const err = clipAllowed(track, { ...clip, source: op.source })
         if (err) return err
         clip.source = op.source
+      }
+      if (op.transition !== undefined) {
+        if (op.transition === null) delete clip.transition
+        else clip.transition = op.transition
       }
       if (clip.start + clip.duration > comp.duration + 1e-9) return 'clip ends past the composition duration'
       track.clips!.sort((a, b) => a.start - b.start)

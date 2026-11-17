@@ -90,9 +90,9 @@ fn valid_job_id(id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// mp4 or webm — the only containers the encode step knows.
+/// mp4, webm, gif or a png sequence — the only outputs the encode step knows.
 fn valid_format(format: &str) -> bool {
-    matches!(format, "mp4" | "webm")
+    matches!(format, "mp4" | "webm" | "gif" | "pngseq")
 }
 
 /// The page the timeline renders on must be the app's own: the server the
@@ -134,18 +134,148 @@ fn ffmpeg_args(format: &str, fps: u32, dir: &Path, out: &Path) -> Vec<String> {
         input.to_string_lossy().into_owned(),
         "-vf".to_string(),
         "pad=ceil(iw/2)*2:ceil(ih/2)*2".to_string(),
-        "-pix_fmt".to_string(),
-        "yuv420p".to_string(),
-        "-r".to_string(),
-        fps.to_string(),
     ];
     if format == "webm" {
+        args.extend(["-pix_fmt", "yuv420p", "-r", &fps.to_string()].map(String::from));
         args.extend(["-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "32"].map(String::from));
-    } else {
+    } else if format == "mp4" {
+        args.extend(["-pix_fmt", "yuv420p", "-r", &fps.to_string()].map(String::from));
         args.extend(["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-movflags", "+faststart"].map(String::from));
     }
     args.push(out.to_string_lossy().into_owned());
     args
+}
+
+/// A GIF takes two passes: palettegen over the frames, then paletteuse
+/// against the palette — a one-pass gif encode banding is unacceptable.
+/// `palette` is the pass-1 output pass 2 reads.
+fn ffmpeg_gif_args(pass: u8, fps: u32, dir: &Path, palette: &Path, out: &Path) -> Vec<String> {
+    let input = dir.join("frame_%06d.png");
+    let base = || {
+        vec![
+            "-y".to_string(),
+            "-hide_banner".to_string(),
+            "-loglevel".to_string(),
+            "error".to_string(),
+            "-framerate".to_string(),
+            fps.to_string(),
+            "-i".to_string(),
+            input.to_string_lossy().into_owned(),
+        ]
+    };
+    match pass {
+        1 => {
+            let mut a = base();
+            a.extend(["-vf".to_string(), "palettegen".to_string(), palette.to_string_lossy().into_owned()]);
+            a
+        }
+        _ => {
+            let mut a = base();
+            a.extend([
+                "-i".to_string(),
+                palette.to_string_lossy().into_owned(),
+                "-lavfi".to_string(),
+                "paletteuse".to_string(),
+                "-loop".to_string(),
+                "0".to_string(),
+                out.to_string_lossy().into_owned(),
+            ]);
+            a
+        }
+    }
+}
+
+/// A pngseq ships as a zip of the stills. PNGs are already compressed, so
+/// the archive stores entries — a store-only zip writer, no dependencies.
+fn zip_store(dir: &Path, out: &Path) -> Result<u64, String> {
+    fn crc32(bytes: &[u8]) -> u32 {
+        /* the ieee table, built once */
+        use std::sync::OnceLock;
+        static TABLE: OnceLock<[u32; 256]> = OnceLock::new();
+        let table = TABLE.get_or_init(|| {
+            let mut t = [0u32; 256];
+            for (i, e) in t.iter_mut().enumerate() {
+                let mut c = i as u32;
+                for _ in 0..8 {
+                    c = if c & 1 != 0 { 0xedb8_8320 ^ (c >> 1) } else { c >> 1 };
+                }
+                *e = c;
+            }
+            t
+        });
+        bytes
+            .iter()
+            .fold(0xffff_ffff, |c, &b| table[((c ^ b as u32) & 0xff) as usize] ^ (c >> 8))
+            ^ 0xffff_ffff
+    }
+    fn push_u16(v: &mut Vec<u8>, n: u16) {
+        v.extend(n.to_le_bytes());
+    }
+    fn push_u32(v: &mut Vec<u8>, n: u32) {
+        v.extend(n.to_le_bytes());
+    }
+    /* dos timestamp: fixed noon 2024-01-01 — a render's frames need no clock */
+    const DOS_TIME: u16 = 0x8000; // 12:00:00
+    const DOS_DATE: u16 = 0x5821; // 2024-01-01
+    let mut names: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("could not list frames: {e}"))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("frame_") && name.ends_with(".png") {
+            names.push(name);
+        }
+    }
+    names.sort();
+    let mut file = Vec::<u8>::new();
+    let mut central = Vec::<u8>::new();
+    for name in &names {
+        let data = std::fs::read(dir.join(name)).map_err(|e| format!("could not read {name}: {e}"))?;
+        let crc = crc32(&data);
+        let offset = file.len() as u32;
+        /* local file header */
+        push_u32(&mut file, 0x0403_4b50);
+        push_u16(&mut file, 20);
+        push_u16(&mut file, 0);
+        push_u16(&mut file, 0);
+        push_u16(&mut file, DOS_TIME);
+        push_u16(&mut file, DOS_DATE);
+        push_u32(&mut file, crc);
+        push_u32(&mut file, data.len() as u32);
+        push_u32(&mut file, data.len() as u32);
+        push_u16(&mut file, name.len() as u16);
+        push_u16(&mut file, 0);
+        file.extend(name.as_bytes());
+        file.extend(&data);
+        /* central directory entry */
+        push_u32(&mut central, 0x0201_4b50);
+        push_u16(&mut central, 20);
+        push_u16(&mut central, 20);
+        push_u16(&mut central, 0);
+        push_u16(&mut central, 0);
+        push_u16(&mut central, DOS_TIME);
+        push_u16(&mut central, DOS_DATE);
+        push_u32(&mut central, crc);
+        push_u32(&mut central, data.len() as u32);
+        push_u32(&mut central, data.len() as u32);
+        push_u16(&mut central, name.len() as u16);
+        central.extend([0; 12]);
+        push_u32(&mut central, 0);
+        push_u32(&mut central, offset);
+        central.extend(name.as_bytes());
+    }
+    let cd_offset = file.len() as u32;
+    file.extend(&central);
+    /* end of central directory */
+    push_u32(&mut file, 0x0605_4b50);
+    push_u16(&mut file, 0);
+    push_u16(&mut file, 0);
+    push_u16(&mut file, names.len() as u16);
+    push_u16(&mut file, names.len() as u16);
+    push_u32(&mut file, central.len() as u32);
+    push_u32(&mut file, cd_offset);
+    push_u16(&mut file, 0);
+    std::fs::write(out, &file).map_err(|e| format!("could not write the zip: {e}"))?;
+    Ok(file.len() as u64)
 }
 
 /// Every place an ffmpeg may be: the login shell's PATH first (where the
@@ -309,19 +439,43 @@ pub async fn motion_render(
     /* the frames are on disk: encode. ffmpeg resolves here, its args are
        built here, and nothing the page sent reaches either */
     progress(&app, &job, "encode", 0, frames);
-    let ffmpeg = resolve_ffmpeg()?;
-    let out = dir.join(format!("out.{format}"));
-    let status = Command::new(&ffmpeg)
-        .args(ffmpeg_args(&format, fps, &dir, &out))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .status()
-        .map_err(|e| format!("could not run {}: {e}", ffmpeg.display()))?;
-    if !status.success() {
-        return Err(format!("ffmpeg failed ({status})"));
-    }
-    let bytes = std::fs::metadata(&out).map_err(|e| format!("no output file: {e}"))?.len();
+    let run = |args: Vec<String>| -> Result<(), String> {
+        let ffmpeg = resolve_ffmpeg()?;
+        let status = Command::new(&ffmpeg)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .status()
+            .map_err(|e| format!("could not run {}: {e}", ffmpeg.display()))?;
+        if !status.success() {
+            return Err(format!("ffmpeg failed ({status})"));
+        }
+        Ok(())
+    };
+    let (out, bytes) = match format.as_str() {
+        /* palettegen then paletteuse — the two-pass GIF encode */
+        "gif" => {
+            let palette = dir.join("palette.png");
+            let out = dir.join("out.gif");
+            run(ffmpeg_gif_args(1, fps, &dir, &palette, &out))?;
+            run(ffmpeg_gif_args(2, fps, &dir, &palette, &out))?;
+            let bytes = std::fs::metadata(&out).map_err(|e| format!("no output file: {e}"))?.len();
+            (out, bytes)
+        }
+        /* the stills themselves, zipped */
+        "pngseq" => {
+            let out = dir.join("out.zip");
+            let bytes = zip_store(&dir, &out)?;
+            (out, bytes)
+        }
+        _ => {
+            let out = dir.join(format!("out.{format}"));
+            run(ffmpeg_args(&format, fps, &dir, &out))?;
+            let bytes = std::fs::metadata(&out).map_err(|e| format!("no output file: {e}"))?.len();
+            (out, bytes)
+        }
+    };
     /* the pngs have served; the video and an empty frames dir remain */
     for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
         let p = entry.path();
@@ -440,8 +594,10 @@ mod tests {
 
     #[test]
     fn formats() {
-        assert!(valid_format("mp4") && valid_format("webm"));
-        for f in ["", "mov", "MP4", "mp4;rm"] {
+        for f in ["mp4", "webm", "gif", "pngseq"] {
+            assert!(valid_format(f), "{f}");
+        }
+        for f in ["", "mov", "MP4", "mp4;rm", "gif;", "zip"] {
             assert!(!valid_format(f), "{f}");
         }
     }
@@ -492,5 +648,37 @@ mod tests {
         assert!(webm.contains("-c:v libvpx-vp9"));
         assert!(webm.contains("-framerate 24"));
         assert_eq!(ffmpeg_args("mp4", 30, dir, out).len(), args.len());
+    }
+
+    #[test]
+    fn gif_two_pass() {
+        let dir = Path::new("/tmp/r");
+        let palette = dir.join("palette.png");
+        let out = dir.join("out.gif");
+        let p1 = ffmpeg_gif_args(1, 30, dir, &palette, &out).join(" ");
+        assert!(p1.contains("-vf palettegen"));
+        let p2 = ffmpeg_gif_args(2, 30, dir, &palette, &out).join(" ");
+        assert!(p2.contains("-lavfi paletteuse"));
+        assert!(p2.contains("-loop 0"));
+        assert!(p2.ends_with("out.gif"));
+    }
+
+    #[test]
+    fn zip_store_writes_a_valid_archive() {
+        let dir = std::env::temp_dir().join(format!("zip-store-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("frame_000000.png"), [0x89, 0x50, 0x4e, 0x47]).unwrap();
+        std::fs::write(dir.join("frame_000001.png"), [1, 2, 3]).unwrap();
+        std::fs::write(dir.join("ignore.txt"), [9]).unwrap();
+        let out = dir.join("out.zip");
+        let bytes = zip_store(&dir, &out).unwrap();
+        let zip = std::fs::read(&out).unwrap();
+        assert_eq!(bytes, zip.len() as u64);
+        /* pk magic, two entries only (the .txt is excluded), eocd present */
+        assert_eq!(&zip[..4], b"PK\x03\x04");
+        let text = String::from_utf8_lossy(&zip);
+        assert!(text.contains("frame_000000.png") && text.contains("frame_000001.png"));
+        assert!(!text.contains("ignore.txt"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

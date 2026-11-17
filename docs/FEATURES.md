@@ -1,5 +1,7 @@
 # Diazo features
 
+Status: current, updated 2026-11-16
+
 What this fork adds on top of [kgoedecke/doop](https://github.com/kgoedecke/doop), and the
 upstream pull requests it merged ahead of upstream. Resync notes are in
 [runbooks/upstream-resync.md](runbooks/upstream-resync.md) and the deploy recipe in
@@ -123,6 +125,12 @@ upstream pull requests it merged ahead of upstream. Resync notes are in
 - **Handoff to Stip** — a frame marked ready for dev builds a Stip change pack, previewed in the
   Inspector and plan cards, then written into the linked repo by the desktop app's single write
   command (`repo_write_change`). Agents call `create_handoff`.
+- **Send to Orca** (desktop app) — a ready-for-dev frame can be sent to an Orca worktree on
+  this Mac or a paired environment (the `vps` target): the desktop app creates the worktree
+  and starts a coding agent in it after a native confirmation, and the canvas watches the
+  task's live state until the PR. The agent reads its handoff pack over MCP (`get_handoff`)
+  and reports with `update_dev_task`; nothing writes into the worktree and no absolute path
+  ever reaches the server ([docs/orca.md](orca.md)).
 - **Zoomed-out frame pictures** — frames too small for live documents show stored previews at
   their on-screen width. Edits keep the previous picture until its replacement loads. Unchanged
   previews survive a server restart, and moving a frame does not render it again. A neutral
@@ -251,12 +259,28 @@ compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per bu
   `render:progress`). REST under `/api/canvases/:id/pages/:pageId/composition` (+ `/renders`,
   `/api/renders/:id` upload into `/a/` assets) behind the view/edit gates; agents get
   `get_composition`, `set_composition` (whole body or ops), `animate_storyboard`, `lint_motion`
-  and `render_composition`, resident-agent included. Renders are queued jobs: the browser renders
+  and `render_composition`, resident-agent included. `animate_storyboard` reads each shot's
+  frame for its notes (mouvement / transition / son / voix off / notes labels, FR and EN) and
+  its animatable elements — `data-doop-id` targets stamped the way comments stamp theirs — and
+  every `set_composition` reports the noted shots still without an element track, so the film
+  gets animated elements, not just camera cuts. Renders are queued jobs: the browser renders
   them (MediaRecorder/WebCodecs) or the desktop shell does deterministically — a hidden webview
   seeks the page frame by frame and a local, allowlisted `ffmpeg` encodes, all behind
-  `__DOOP_MOTION_RENDER__`. A disabled-by-default Blender bridge (`DOOP_BLENDER_BRIDGE`) can spawn
-  an allowlisted `blender-mcp` and relay a read-only tool set. Server-side and Blender renders
-  land in later phases.
+  `__DOOP_MOTION_RENDER__`. Phases 2 to 5 add transitions, camera presets and text animators,
+  `3d` clips (a glTF asset with a fallback image, driven by time, scroll or pointer), media rows
+  (speed, cuts, beats, transcript, recipe, ducking, captions), `generate_video` on OpenRouter and
+  Gemini keys, a speech engine (installed models in the desktop shell, cloud providers on the
+  user's own key, custom models and cloned voices), a Blender op relay whose write and render
+  tools need a grant in the shell, `blender` and `server` render targets — the server one under
+  60 s / 1080p / 30 fps / one-per-account caps on the instance's headless Chromium — Lottie and
+  HyperFrames import/export of the transform subset, and the motion duel (each pick animates its
+  own copy of the storyboard page).
+
+- **Speech job backend (phase 3, partial)** — persisted jobs and preferences,
+  explicit cloud estimates on connected user keys, owner-scoped desktop relay,
+  word-timed media transcripts and voice-over audio clips with their recipes.
+  REST, MCP and resident tools share one service. Installers and real local engines
+  are pending; unpinned catalog downloads are blocked. Contract: [speech-api.md](speech-api.md).
 
 ## Merged upstream PRs
 

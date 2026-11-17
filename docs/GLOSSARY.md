@@ -141,3 +141,13 @@ Code: `compositions`. Avoid: scene (the proposal's earlier word), project.
 - **ACP.** Agent Client Protocol. See **Local agent**.
 - **MCP.** Model Context Protocol, served at `/mcp`. See **Agent**.
 - **ADR.** Architecture decision record, in `docs/adr/`.
+
+## Speech
+
+**Speech job.** A persisted transcription or voice-over request, routed to a desktop, the server or an explicitly selected cloud provider. It has one requester and an immutable terminal result.
+Code: `SpeechJob`, `speech_jobs`.
+
+**Transcript.** Words with source-time start and end timestamps, optional speaker labels and engine metadata. Transcript cuts exclude ranges of source media; captions project the kept words onto the composition clock.
+Code: `Transcript`, `scene_media.transcript`.
+
+**Voice-over.** Speech generated from a script and kept as an audio media asset with timed words and its generation recipe. A voice sample for local cloning remains private to the instance.

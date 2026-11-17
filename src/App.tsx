@@ -190,6 +190,19 @@ export function App() {
       </>
     )
 
+  /* /c/<id>/motion-render mounts without a session: the server render
+     worker drives it with a scoped read token (server/motionRender.ts)
+     that authorizes the two API reads the harness makes — the page is
+     public, the data is not */
+  const motionRenderPath = path.match(/^\/c\/([^/]+)\/motion-render\/?$/)?.[1]
+  if (motionRenderPath)
+    return (
+      <>
+        <ShellDragBar />
+        <MotionRenderHarness canvasId={motionRenderPath} key={motionRenderPath} />
+      </>
+    )
+
   /* signed out on a canvas link: the canvas itself, read-only, as long as
      the owner shared it by link (server: guestCanvasRole); a private one
      refuses the join and lands on the sign-in form below. The prototype
@@ -228,12 +241,8 @@ export function App() {
 
   /* /c/<id>/proto: the prototype player, full page */
   const prototypeOf = path.match(/^\/c\/([^/]+)\/proto\/?$/)?.[1]
-  /* /c/<id>/motion-render: the film render harness the desktop shell drives */
-  const motionRenderOf = path.match(/^\/c\/([^/]+)\/motion-render\/?$/)?.[1]
   const page = prototypeOf ? (
     <PrototypePage canvasId={prototypeOf} key={prototypeOf} />
-  ) : motionRenderOf ? (
-    <MotionRenderHarness canvasId={motionRenderOf} key={motionRenderOf} />
   ) : canvasId ? (
     <CanvasPage canvasId={canvasId} key={canvasId} />
   ) : path === CODEX_SETUP_PATH ? (

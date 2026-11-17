@@ -37,12 +37,13 @@ export function resolveDefault(
   accounts: readonly ModelAccount[],
   acpOn: readonly AcpRunnerProvider[] = [],
 ): RunnerProvider | undefined {
-  const on = accounts.filter((account) => account.enabled)
+  const on = accounts.filter((account) => account.enabled && isRunnerProvider(account.kind))
   if (stored === 'claude-local' && planOn) return stored
   if (stored && acpOn.some((provider) => provider === stored)) return stored
   if (stored && on.some((account) => account.kind === stored)) return stored
   if (planOn) return 'claude-local'
-  return on[0]?.kind ?? acpOn[0]
+  const first = on[0]?.kind
+  return isRunnerProvider(first) ? first : acpOn[0]
 }
 
 /** The ACP agents switched on, in menu order. */

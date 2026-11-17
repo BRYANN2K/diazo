@@ -16,6 +16,8 @@ export interface DuelEntry {
   runner: RunnerPick
   /** what the entry reads as, e.g. "ChatGPT · gpt-5" */
   label: string
+  /** motion duels only: the entry's own copy of the storyboard page */
+  pageId?: string
 }
 
 export interface ModelDuel {
@@ -25,6 +27,9 @@ export interface ModelDuel {
   createdBy: string
   createdAt: number
   entries: DuelEntry[]
+  /** 'motion' marks a duel where each pick animates its own copy of one
+   *  storyboard page; absent means the classic design duel */
+  kind?: 'motion'
   /** the frame kept; the others are archived */
   pickedFrameId?: string
   decidedAt?: number

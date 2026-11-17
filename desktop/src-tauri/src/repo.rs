@@ -120,7 +120,7 @@ fn grant_for(app: &AppHandle, link_id: &str) -> Result<Grant, String> {
 }
 
 /// The grant's folder, canonicalized: reads are checked against this root.
-fn grant_root(app: &AppHandle, link_id: &str) -> Result<PathBuf, String> {
+pub(crate) fn grant_root(app: &AppHandle, link_id: &str) -> Result<PathBuf, String> {
     let grant = grant_for(app, link_id)?;
     let root = PathBuf::from(&grant.path)
         .canonicalize()

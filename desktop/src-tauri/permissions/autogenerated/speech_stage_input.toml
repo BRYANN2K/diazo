@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-speech-stage-input"
+description = "Enables the speech_stage_input command without any pre-configured scope."
+commands.allow = ["speech_stage_input"]
+
+[[permission]]
+identifier = "deny-speech-stage-input"
+description = "Denies the speech_stage_input command without any pre-configured scope."
+commands.deny = ["speech_stage_input"]

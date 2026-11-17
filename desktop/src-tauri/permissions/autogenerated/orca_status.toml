@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-orca-status"
+description = "Enables the orca_status command without any pre-configured scope."
+commands.allow = ["orca_status"]
+
+[[permission]]
+identifier = "deny-orca-status"
+description = "Denies the orca_status command without any pre-configured scope."
+commands.deny = ["orca_status"]

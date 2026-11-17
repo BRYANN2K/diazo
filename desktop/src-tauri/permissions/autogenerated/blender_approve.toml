@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-blender-approve"
+description = "Enables the blender_approve command without any pre-configured scope."
+commands.allow = ["blender_approve"]
+
+[[permission]]
+identifier = "deny-blender-approve"
+description = "Denies the blender_approve command without any pre-configured scope."
+commands.deny = ["blender_approve"]

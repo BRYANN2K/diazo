@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "speech_jobs_active_user_idx" ON "speech_jobs" USING btree ("requested_by") WHERE "speech_jobs"."state" in ('queued', 'running');

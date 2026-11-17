@@ -606,7 +606,7 @@ type CommentAnchor =
       point?: { x: number; y: number }
       elementOrigin?: { x: number; y: number }
     }
-  | { pageId: string; x: number; y: number }
+  | { pageId: string; x: number; y: number; timeStart?: number; timeEnd?: number }
 
 /** What a client knows about the element it is pointing at: the positional
  *  path the live document answered with, the id the element already wears if
@@ -666,6 +666,34 @@ async function stampSaved(frameId: string, id: string): Promise<boolean> {
   }
 }
 
+/** Land a batch of `data-doop-id` stamps on a frame: the annotated HTML goes
+ *  in (sign-off stands, no design-history version), every fresh id is tracked
+ *  until the write that carries it is on disk, and the room sees the frame
+ *  once. Callers hand the ids out only after this returns, so a link is never
+ *  ahead of its stamp. Undefined when the frame is gone or the write fails. */
+export async function commitElementStamps(
+  frame: Frame,
+  html: string,
+  ids: readonly string[],
+  by: string,
+  kind: ActorKind = 'user',
+): Promise<Frame | undefined> {
+  const next = store.updateFrame(frame.id, { html }, by, { annotation: true })
+  if (!next) return undefined
+  const pending = unsavedStamps.get(frame.id) ?? { ids: new Set<string>() }
+  for (const id of ids) pending.ids.add(id)
+  unsavedStamps.set(frame.id, pending)
+  for (const id of ids) {
+    /* the first stampSaved writes the frame carrying every pending id; the
+       rest see their id already carried and return at once */
+    if (!(await stampSaved(frame.id, id))) return undefined
+  }
+  /* deleted meanwhile: an update now would put it back on every screen */
+  if (!store.getFrame(frame.id)) return undefined
+  broadcast(next.canvasId, { type: 'frame:updated', frame: next, actor: resolveActor({ name: by, kind }) })
+  return next
+}
+
 /** Make the element a positional selector names addressable by id: the id
  *  it already carries, or a fresh `data-doop-id` written into the frame's
  *  HTML as an annotation (sign-off stands, no design-history version, no
@@ -692,16 +720,8 @@ export async function ensureElementId(
     const current = store.getFrame(frameId)
     return current ? { id: stamped.id, frame: current } : undefined
   }
-  const next = store.updateFrame(frameId, { html: stamped.html }, by, { annotation: true })
-  if (!next) return undefined
-  const pending = unsavedStamps.get(frameId) ?? { ids: new Set<string>() }
-  pending.ids.add(stamped.id)
-  unsavedStamps.set(frameId, pending)
-  if (!(await stampSaved(frameId, stamped.id))) return undefined
-  /* deleted meanwhile: an update now would put it back on every screen */
-  if (!store.getFrame(frameId)) return undefined
-  broadcast(next.canvasId, { type: 'frame:updated', frame: next, actor: resolveActor({ name: by, kind: 'user' }) })
-  return { id: stamped.id, frame: next }
+  const next = await commitElementStamps(frame, stamped.html, [stamped.id], by)
+  return next ? { id: stamped.id, frame: next } : undefined
 }
 
 /** An anchor inside a frame, as a client sent it. An element is kept by the
@@ -761,7 +781,10 @@ export async function addElementComment(
  *  carry is absent, so a moved comment sheds its old frame, element or page. */
 function anchorFields(
   anchor: CommentAnchor,
-): Pick<ElementComment, 'frameId' | 'elementId' | 'snippet' | 'pageId' | 'x' | 'y' | 'elementOrigin'> {
+): Pick<
+  ElementComment,
+  'frameId' | 'elementId' | 'snippet' | 'pageId' | 'x' | 'y' | 'elementOrigin' | 'timeStart' | 'timeEnd'
+> {
   if ('frame' in anchor) {
     return {
       frameId: anchor.frame.id,
@@ -771,7 +794,14 @@ function anchorFields(
       ...(anchor.elementOrigin ? { elementOrigin: anchor.elementOrigin } : {}),
     }
   }
-  return { snippet: '', pageId: anchor.pageId, x: anchor.x, y: anchor.y }
+  return {
+    snippet: '',
+    pageId: anchor.pageId,
+    x: anchor.x,
+    y: anchor.y,
+    ...(anchor.timeStart !== undefined ? { timeStart: anchor.timeStart } : {}),
+    ...(anchor.timeEnd !== undefined ? { timeEnd: anchor.timeEnd } : {}),
+  }
 }
 
 /** Comments anchored by a positional CSS path before element ids existed:
@@ -914,14 +944,42 @@ export async function moveComment(
  *  between frames, or a spot where something should go. */
 export function addCanvasComment(
   canvasId: string,
-  input: { pageId: string; x: number; y: number; text: string },
+  input: { pageId: string; x: number; y: number; text: string; timeStart?: number; timeEnd?: number },
   from: string,
   fromUserId?: string,
 ): ElementComment | undefined {
   const canvas = store.getCanvas(canvasId)
   if (!canvas || !canvasPages(canvas).some((page) => page.id === input.pageId)) return undefined
   if (!Number.isFinite(input.x) || !Number.isFinite(input.y)) return undefined
-  return postComment(canvasId, { pageId: input.pageId, x: input.x, y: input.y }, input.text, from, fromUserId)
+  /* a scene-time anchor is sane only as a range inside the composition */
+  const comp = store.getComposition(canvasId, input.pageId)
+  if (input.timeStart !== undefined || input.timeEnd !== undefined) {
+    const { timeStart: s, timeEnd: e } = input
+    if (
+      typeof s !== 'number' ||
+      typeof e !== 'number' ||
+      !Number.isFinite(s) ||
+      !Number.isFinite(e) ||
+      !(s >= 0) ||
+      !(e > s) ||
+      !comp ||
+      e > comp.duration
+    )
+      return undefined
+  }
+  return postComment(
+    canvasId,
+    {
+      pageId: input.pageId,
+      x: input.x,
+      y: input.y,
+      ...(input.timeStart !== undefined ? { timeStart: input.timeStart } : {}),
+      ...(input.timeEnd !== undefined ? { timeEnd: input.timeEnd } : {}),
+    },
+    input.text,
+    from,
+    fromUserId,
+  )
 }
 
 /** Reply inside a thread: the reply inherits the root comment's anchor (its
@@ -3466,4 +3524,16 @@ export function resolveProposal(
   broadcast(canvasId, { type: 'proposal', proposal })
   if (accept) logActivity(canvasId, actor, `accepted a Memory rule into “${proposal.guideName}”`)
   return proposal
+}
+
+/** Speech room updates contain no credentials or engine diagnostics. */
+export function speechProgress(canvasId: string, job: import('../shared/speech.ts').SpeechJob) {
+  broadcast(canvasId, { type: 'speech:progress', job })
+}
+export function mediaTranscribed(
+  canvasId: string,
+  mediaId: string,
+  transcript: import('../shared/motionMedia.ts').Transcript,
+) {
+  broadcast(canvasId, { type: 'media:transcribed', mediaId, transcript })
 }
