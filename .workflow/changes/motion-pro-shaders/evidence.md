@@ -62,3 +62,22 @@ cleanly and four fix commits close both review documents.
   `bun run doc-lint` clean; motion + storyboard suites green — 212 tests,
   including `motionGoldenBrowser` 8/8 against Chrome for Testing
   (`CHROME_PATH`).
+
+## CI fix (run 44160740223, shard 4)
+
+- `tests/mcpScreenshotCache.test.ts` mocked `../server/screenshot.ts` with
+  only `renderFrame`; `server/motionRender.ts` reads `openIsolatedPage` at
+  module scope into `renderDeps`, so the suite died on import. The mock now
+  carries both exports.
+- `motionGoldenBrowser` drift: reproduced locally on Chrome for Testing 157
+  with `--use-angle=swiftshader` — the software rasterizer a GPU-less CI
+  runner renders WebGL through. Same 5/255 halftone drift as CI, plus ±1
+  wobble on a few channels of six other effects (inside the ±2 floor). The
+  rim is the suite's only sub-pixel-graded output: a ~16× smoothstep slope
+  on the luma-derived dot radius amplifies a sub-LSB backend wobble (trig
+  and texture upload rounding are implementation-defined in GLSL). No
+  deterministic shader keeps the same look, so `DRIFT_TOLERANCE` gives
+  halftone ±8 with the mechanism beside it; every other effect keeps ±2,
+  and the dead-body/untouched/same-hash checks are unchanged.
+- Verified: `motionGoldenBrowser` 8/8 under SwiftShader and under the GPU
+  path, `mcpScreenshotCache` 2/2; `typecheck`, `lint`, `format:check` clean.
