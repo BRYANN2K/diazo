@@ -1,16 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type Anthropic from '@anthropic-ai/sdk'
-import type { AgentTask } from '../shared/types.ts'
+import type { AgentTask, ElementComment, TaskFeedback } from '../shared/types.ts'
 import type { LocalHarnessRequest } from '../server/localAgentRuns.ts'
 import type { AgentModel, AgentTurnRequest, AgentTurnResult } from '../server/agentModel.ts'
 
 /* A run's room to work: an "Animate storyboard" card directs a whole film
    and gets NO turn budget — only a high safety backstop so a broken loop
-   cannot run forever, plus a no-progress stop that ends it when turns in a
-   row change nothing on the canvas. The sweep knows an animate card
-   because its prompt names the animate_storyboard tool in every locale;
-   the real prompts are imported here so a reworded string that drops the
-   name fails this test, not the budget. */
+   cannot run forever, plus a no-progress stop that ends it after 8
+   consecutive turns that neither change the canvas nor read something new
+   (24 tool calls on a local harness, which shows calls rather than turns).
+   The sweep knows an animate card by its `kind` — never by its text, so a
+   card or comment that merely names animate_storyboard keeps the ordinary
+   budget. The real prompts are imported here so the negative case runs on
+   the shipped wording. */
 
 const mocks = vi.hoisted(() => ({ pickModel: vi.fn() }))
 
@@ -23,6 +25,8 @@ vi.mock('../server/db/persist.ts', () => ({
   saveProposal: () => {},
   saveCanvas: () => {},
   saveFrame: () => {},
+  saveComposition: () => {},
+  saveCompositionVersion: () => {},
 }))
 vi.mock('../server/agentModel.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../server/agentModel.ts')>()),
@@ -31,10 +35,11 @@ vi.mock('../server/agentModel.ts', async (importOriginal) => ({
 
 const actions = await import('../server/actions.ts')
 const { store } = await import('../server/store.ts')
+const { canvasPages } = await import('../shared/pages.ts')
 const { motion: en } = await import('../src/lib/i18n/en/motion.ts')
 const { motion: pt } = await import('../src/lib/i18n/pt-BR/motion.ts')
 
-function card(id: string, status: string): AgentTask {
+function card(id: string, status: string, kind?: AgentTask['kind']): AgentTask {
   return {
     id,
     agentName: '',
@@ -44,14 +49,19 @@ function card(id: string, status: string): AgentTask {
     queuedBy: 'Ann',
     queuedByUserId: 'ann',
     stage: 0,
+    ...(kind ? { kind } : {}),
   }
 }
 
-function seed(canvasId: string, tasks: AgentTask[]) {
+function seed(
+  canvasId: string,
+  tasks: AgentTask[],
+  extras?: { feedback?: TaskFeedback[]; comments?: ElementComment[] },
+) {
   actions.hydrateLogs({
     tasks: new Map([[canvasId, tasks]]),
-    feedback: new Map(),
-    comments: new Map(),
+    feedback: new Map(extras?.feedback ? [[canvasId, extras.feedback]] : []),
+    comments: new Map(extras?.comments ? [[canvasId, extras.comments]] : []),
     activity: new Map(),
     decisions: new Map(),
     proposals: new Map(),
@@ -88,11 +98,29 @@ const toolUse = (name: string, input: Record<string, unknown>): AgentTurnResult 
   content: [{ type: 'tool_use', id: Math.random().toString(36).slice(2), name, input }],
   stop_reason: 'tool_use',
 })
-/* a turn that moves nothing: a read on a page that does not exist fails
+/* one turn can carry several calls — the watch must still count it once */
+const toolUseTurn = (calls: [string, Record<string, unknown>][]): AgentTurnResult => ({
+  content: calls.map(([name, input]) => ({
+    type: 'tool_use' as const,
+    id: Math.random().toString(36).slice(2),
+    name,
+    input,
+  })),
+  stop_reason: 'tool_use',
+})
+/* a call that moves nothing: a read on a page that does not exist fails
    without changing the canvas — the flat line the watch counts */
-const flatTurn = () => toolUse('get_composition', { page_id: 'nope' })
+const flatCall: [string, Record<string, unknown>] = ['get_composition', { page_id: 'nope' }]
+const flatTurn = () => toolUse(flatCall[0], flatCall[1])
 /* a turn that moves something: every rename counts as an arrangement write */
 const progressTurn = (frameId: string, n: number) => toolUse('update_frame', { frame_id: frameId, name: `s${n}` })
+/* a whole-body timeline write — identical bodies are the write loop the
+   watch exists for, a different duration is real work */
+const compositionTurn = (pageId: string, duration: number) =>
+  toolUse('set_composition', {
+    page_id: pageId,
+    composition: { duration, fps: 30, width: 1280, height: 720, tracks: [] },
+  })
 const doneTurn: AgentTurnResult = { content: [{ type: 'text', text: 'the film is directed' }], stop_reason: 'end_turn' }
 
 /* a scripted API-loop model: each call pops the next scripted turn and a
@@ -119,12 +147,51 @@ beforeEach(() => {
 })
 
 describe('a run’s turn budget', () => {
-  it('hands an animate storyboard card only the safety backstop, in both shipped locales', async () => {
+  it('hands an animate-flagged card only the safety backstop, whatever its text says', async () => {
+    seed('canvas-animate', [card('c1', 'make the button bigger', 'animate')])
+    expect(await maxTurnsFor('canvas-animate')).toBe(200)
+  })
+
+  it('keeps a card that merely names animate_storyboard at 24, in both shipped locales', async () => {
     seed('canvas-animate-en', [card('c1', animatePrompt(en.animatePrompt))])
-    expect(await maxTurnsFor('canvas-animate-en')).toBe(200)
+    expect(await maxTurnsFor('canvas-animate-en')).toBe(24)
 
     seed('canvas-animate-pt', [card('c1', animatePrompt(pt.animatePrompt))])
-    expect(await maxTurnsFor('canvas-animate-pt')).toBe(200)
+    expect(await maxTurnsFor('canvas-animate-pt')).toBe(24)
+  })
+
+  it('keeps a run with a comment naming animate_storyboard at 24', async () => {
+    const canvasId = 'canvas-animate-comment'
+    seed(canvasId, [card('c1', 'make the button bigger')], {
+      feedback: [
+        {
+          id: 'fb1',
+          taskId: 'c1',
+          canvasId,
+          agentName: '',
+          from: 'Ann',
+          fromUserId: 'ann',
+          text: 'have you tried animate_storyboard for this?',
+          at: 1,
+        },
+      ],
+      comments: [
+        {
+          id: 'cm1',
+          canvasId,
+          pageId: `${canvasId}:page1`,
+          x: 0,
+          y: 0,
+          snippet: '',
+          from: 'Ann',
+          fromUserId: 'ann',
+          text: '@doop run animate_storyboard here',
+          at: 2,
+          forAgent: true,
+        },
+      ],
+    })
+    expect(await maxTurnsFor(canvasId)).toBe(24)
   })
 
   it('keeps a redesign card at 40 and an ordinary card at 24', async () => {
@@ -139,11 +206,13 @@ describe('a run’s turn budget', () => {
 describe('an animate run’s room to work', () => {
   let canvasId: string
   let frameId: string
+  let pageId: string
 
   beforeEach(() => {
     canvasId = store.createCanvas('animate room', 'ann').id
     frameId = store.createFrame(canvasId, { name: 'shot', html: '<p>shot</p>' }, 'ann')!.id
-    seed(canvasId, [card('c1', animatePrompt(en.animatePrompt))])
+    pageId = canvasPages(store.getCanvas(canvasId)!)[0]!.id
+    seed(canvasId, [card('c1', 'animate the storyboard', 'animate')])
   })
 
   it('goes on past 40 turns while it keeps making progress', async () => {
@@ -179,8 +248,9 @@ describe('an animate run’s room to work', () => {
     mocks.pickModel.mockResolvedValue(model)
     await runSweep(canvasId)
     await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
-    expect(run).toHaveBeenCalledTimes(8)
-    expect(cardById(canvasId, 'c1').failureReason).toMatch(/without a change on the canvas/i)
+    /* nine calls: the first turn always moves, then eight that land nothing */
+    expect(run).toHaveBeenCalledTimes(9)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
     expect(
       actions
         .getActivity(canvasId)
@@ -200,15 +270,127 @@ describe('an animate run’s room to work', () => {
     await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
     /* five flat turns, one working turn, then eight flat ones again */
     expect(run).toHaveBeenCalledTimes(14)
-    expect(cardById(canvasId, 'c1').failureReason).toMatch(/without a change on the canvas/i)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
   })
 
-  it('tells a harness run to wrap up after 8 tool calls that change nothing', async () => {
+  it('counts turns, not tool calls: one turn of many flat calls is still one turn', async () => {
+    const { model, run } = scriptedModel(
+      Array.from({ length: 30 }, () => toolUseTurn(Array.from({ length: 10 }, () => flatCall))),
+    )
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* 9 turns of 10 calls each — counting calls would have stopped the run
+       during its third turn */
+    expect(run).toHaveBeenCalledTimes(9)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/the last 8 turns/i)
+  })
+
+  it('lets reading move the watch: a new target counts, a repeat does not', async () => {
+    const frames = Array.from(
+      { length: 9 },
+      (_, i) => store.createFrame(canvasId, { name: `shot ${i}`, html: `<p>${i}</p>` }, 'ann')!.id,
+    )
+    const { model, run } = scriptedModel([
+      /* nine turns each reading a frame the run had not read */
+      ...frames.map((id) => toolUse('get_frame_html', { frame_id: id })),
+      /* then the same read again and again — now it is time, not work */
+      ...Array.from({ length: 30 }, () => toolUse('get_frame_html', { frame_id: frames[0]! })),
+    ])
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* the survey went well past 8 turns; the repeats then stalled it:
+       9 new reads + 8 turns of re-reading the same frame */
+    expect(run).toHaveBeenCalledTimes(17)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('treats a write loop that rewrites the same timeline as no progress', async () => {
+    const { model, run } = scriptedModel(Array.from({ length: 30 }, () => compositionTurn(pageId, 6)))
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* the first write lands the film; the 8 identical rewrites stall it —
+       the revision bump is not progress */
+    expect(run).toHaveBeenCalledTimes(9)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('keeps going while the timeline itself keeps changing', async () => {
+    const { model, run } = scriptedModel(Array.from({ length: 30 }, (_, i) => compositionTurn(pageId, 6 + i)))
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    /* a run that only ever wrote compositions has nothing deliverable, so
+       the card fails on no-mutation — but only after all 30 turns ran, the
+       no-mutation nudge and the final word */
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'), { timeout: 15_000 })
+    expect(run).toHaveBeenCalledTimes(32)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/without changing a frame or a token/i)
+  })
+
+  it('closes a stalled run with the stop reason, then the last narration', async () => {
+    const { model, run } = scriptedModel([
+      ...Array.from({ length: 3 }, flatTurn),
+      /* the last words it had before the stall — one turn's narration */
+      {
+        content: [
+          { type: 'text', text: 'checking the third shot before the cut' },
+          { type: 'tool_use', id: 't1', name: 'get_composition', input: { page_id: 'nope' } },
+        ],
+        stop_reason: 'tool_use',
+      },
+      ...Array.from({ length: 29 }, flatTurn),
+    ])
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* the narration rode turn 4; the flat turns then stall the run at 9 */
+    expect(run).toHaveBeenCalledTimes(9)
+    const activity = actions
+      .getActivity(canvasId)
+      .map((a) => a.message)
+      .join('\n')
+    expect(activity).toMatch(/Stopped: the last 8 turns changed nothing on the canvas and read nothing new/)
+    expect(activity).toMatch(/checking the third shot before the cut/)
+    /* and the card itself carries the reason, not a bare "hit a snag" */
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/stopped: the last 8 turns/i)
+  })
+
+  it('gives a local harness a wider call window — and fails a stalled card instead of delivering it', async () => {
     const results: Anthropic.ToolResultBlockParam[] = []
     const runHarness = vi.fn(async (req: LocalHarnessRequest) => {
-      for (let i = 0; i < 10; i++) {
+      expect(req.maxTurns).toBe(200)
+      for (let i = 0; i < 30; i++) {
+        results.push(await req.execute({ type: 'tool_use', id: `t${i}`, name: flatCall[0], input: flatCall[1] }))
+      }
+      return { success: true, text: 'wrapping up' }
+    })
+    mocks.pickModel.mockResolvedValue({
+      provider: 'claude-local',
+      label: 'Test',
+      userId: 'ann',
+      runHarness,
+      run: vi.fn(),
+    })
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* 24 still calls are the window: call 25 lands the verdict, from call
+       26 the run only hears "wrap up" */
+    expect(results).toHaveLength(30)
+    expect(results.slice(0, 25).every((r) => !/the run is ending/i.test(String(r.content)))).toBe(true)
+    expect(String(results[25]!.content)).toMatch(/the run is ending/i)
+    /* a stalled run is a failed card — not a delivered one */
+    expect(cardById(canvasId, 'c1').endedAt).toBeUndefined()
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('never stalls a harness run that keeps finding new ground to read', async () => {
+    const results: Anthropic.ToolResultBlockParam[] = []
+    const runHarness = vi.fn(async (req: LocalHarnessRequest) => {
+      for (let i = 0; i < 30; i++) {
         results.push(
-          await req.execute({ type: 'tool_use', id: `t${i}`, name: 'get_composition', input: { page_id: 'nope' } }),
+          await req.execute({ type: 'tool_use', id: `t${i}`, name: 'find_in_canvas', input: { query: `shot ${i}` } }),
         )
       }
       return { success: true, text: 'wrapping up' }
@@ -221,11 +403,11 @@ describe('an animate run’s room to work', () => {
       run: vi.fn(),
     })
     await runSweep(canvasId)
-    await vi.waitFor(() =>
-      expect(cardById(canvasId, 'c1').failedAt ?? cardById(canvasId, 'c1').endedAt).toBeTypeOf('number'),
-    )
-    /* the ninth call still ran; from the tenth the run only hears "wrap up" */
-    expect(results).toHaveLength(10)
-    expect(String(results.at(-1)!.content)).toMatch(/the run is ending/i)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* every call was a first read — no wrap-up, no stall */
+    expect(results).toHaveLength(30)
+    expect(results.every((r) => !/the run is ending/i.test(String(r.content)))).toBe(true)
+    /* the card still fails — on no deliverable, not on a stall */
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/without changing a frame or a token/i)
   })
 })

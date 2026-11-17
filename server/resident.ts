@@ -82,6 +82,7 @@ import { roleAllows } from '../shared/canvasRole.ts'
 import { canvasesFor } from './workspaces.ts'
 import { previewFrame } from './componentPreview.ts'
 import { prototypeReport, setPrototypeStart } from './prototypeTools.ts'
+import type { Composition } from '../shared/motion.ts'
 import {
   describeInspiration,
   INSPIRATION_NO_MATCH_NOTE,
@@ -152,10 +153,15 @@ const MAX_REDESIGN_TURNS = 40
    takes. This is a backstop, not a budget: it exists so a broken loop
    cannot run forever */
 const MOTION_SAFETY_TURNS = 200
-/* consecutive turns that change nothing — no composition revision bump, no
-   frame write, no new screenshot or lint verdict that differs — before an
-   animate run is ended; reading and planning alone do not count */
+/* consecutive turns that neither change the canvas nor read something new —
+   no composition content change, no frame write, no new screenshot or lint
+   verdict that differs, no first read of a target — before an animate run
+   is ended; reading and planning alone do not count */
 const MOTION_STALL_TURNS = 8
+/* the same watch on a local harness (Claude Plan, ACP): it shows tool
+   calls rather than turns, and one turn there is several calls — so the
+   window is wider */
+const MOTION_STALL_CALLS = 24
 /* a sweep hands a card down its pipeline in place; the cap is a backstop
    against a card that somehow keeps requeueing itself */
 const MAX_SWEEP_RUNS = 24
@@ -464,14 +470,28 @@ function lintBlockedFrameIds(runState: RunState): string[] {
   return deliverableFrameIds(runState).filter((id) => (runState.lintResults?.get(id)?.errors ?? 0) > 0)
 }
 
+/** What a composition IS, without the bookkeeping a no-op write still bumps
+ *  (revision, updatedAt, updatedBy): the timeline the viewer would get. A
+ *  write loop that lands nothing leaves this hash unmoved. */
+function compositionSig(c: Composition): string {
+  return JSON.stringify({
+    duration: c.duration,
+    fps: c.fps,
+    width: c.width,
+    height: c.height,
+    posterTime: c.posterTime ?? null,
+    tracks: c.tracks,
+  })
+}
+
 /** Everything a productive animate turn can move, folded into one
  *  signature so a turn that changed nothing is recognizable: a frame write
  *  (id and write time, so a second pass over the same frame counts), an
  *  open rewrite draft's growth, newly screenshotted frames, lint verdicts
  *  that differ (the document hash, not the timestamp), token, arrangement,
- *  drift and image writes, answered comment threads, a composition
- *  revision bump, the notes check's own pass memory, and render-job
- *  progress. */
+ *  drift and image writes, answered comment threads, a composition's
+ *  CONTENT (the notes check's pending set, not its pass count — it rises on
+ *  the rounds that saw no progress), and render-job progress. */
 function motionSignature(canvasId: string, runState: RunState): string {
   const canvas = store.getCanvas(canvasId)
   return JSON.stringify({
@@ -485,12 +505,74 @@ function motionSignature(canvasId: string, runState: RunState): string {
       .sort(),
     writes: [runState.tokenWrites, runState.arrangeWrites, runState.driftFindings ?? 0, runState.imagesGenerated],
     threads: [runState.repliedThreads.size, runState.awaitingThreads.size],
-    compositions: (canvas?.compositions ?? []).map((c) => `${c.id}:${c.revision}`).sort(),
-    checks: fixPassReport(canvasId).map((p) => `${p.pageId}:${p.passes}:${p.pendingKey ?? ''}`),
+    compositions: (canvas?.compositions ?? []).map((c) => `${c.id}:${compositionSig(c)}`).sort(),
+    checks: fixPassReport(canvasId).map((p) => `${p.pageId}:${p.pendingKey ?? ''}`),
     renders: listRenderJobs(canvasId)
       .map((j) => `${j.id}:${j.status}:${j.progress}`)
       .sort(),
   })
+}
+
+/* Reads that move the no-progress watch without changing the canvas: the
+   first call on each target teaches the run something (reading nine shots'
+   HTML in a row is an opening survey, not a stall), while re-reading the
+   same target is still time. Frame reads version on the frame's last write
+   and film reads on the page's film — a check re-run against changed
+   content is new ground, a poll of the same state is not. */
+const MOTION_FRAME_READS = new Set(['inspect_frame', 'get_frame_html', 'screenshot_frame', 'check_frame', 'lint_frame'])
+const MOTION_FILM_READS = new Set(['get_composition', 'lint_motion', 'export_composition', 'list_media'])
+const MOTION_TARGETED_READS = new Set<string>([
+  'find_in_canvas',
+  'view_website',
+  'get_reference',
+  'search_inspiration',
+  'search_images',
+  'list_backgrounds',
+  'search_icons',
+  'search_logos',
+  'get_skill',
+  'get_tokens',
+  'get_prototype',
+  'screenshot_component',
+  'find_references',
+  'list_video_models',
+  'suggest_cuts',
+  'repo_list',
+  'repo_read',
+  'repo_search',
+])
+for (const tool of [...SPEECH_TOOLS, ...BLENDER_TOOLS, ...COMPONENT_TOOLS, ...DESIGN_LIBRARY_TOOLS]) {
+  if (tool.readOnly) MOTION_TARGETED_READS.add(tool.name)
+}
+
+/** The content a film read sees: the page's composition body plus the last
+ *  write stamp of every frame on it (lint covers frame HTML too). */
+function filmVersion(canvasId: string, input: Record<string, unknown>): string {
+  const pageId =
+    (typeof input.page_id === 'string' && input.page_id) ||
+    (typeof input.frame_id === 'string' ? store.getFrame(input.frame_id)?.pageId : undefined)
+  const canvas = store.getCanvas(canvasId)
+  if (!pageId || !canvas) return ''
+  const comp = store.getComposition(canvasId, pageId)
+  const frames = pageFrames(canvas, pageId)
+    .map((f) => `${f.id}@${f.updatedAt}`)
+    .join(',')
+  return `${comp ? compositionSig(comp) : 'no-film'}|${frames}`
+}
+
+/** A read call's novelty key — undefined for a write or an untargeted call. */
+function motionReadKey(block: Anthropic.ToolUseBlockParam, canvasId: string): string | undefined {
+  const input = block.input as Record<string, unknown>
+  let version = ''
+  if (MOTION_FRAME_READS.has(block.name)) {
+    const frameId = typeof input.frame_id === 'string' ? input.frame_id : ''
+    version = `f${store.getFrame(frameId)?.updatedAt ?? ''}`
+  } else if (MOTION_FILM_READS.has(block.name)) {
+    version = filmVersion(canvasId, input)
+  } else if (!MOTION_TARGETED_READS.has(block.name)) {
+    return undefined
+  }
+  return `${block.name} ${JSON.stringify(block.input)} ${version}`
 }
 
 const LINT_NOTE_ISSUES = 8
@@ -520,9 +602,6 @@ function completeHtml(value: unknown): string | undefined {
 
 const REDESIGN_RE =
   /\b(redesign|re-?style|same style|match (?:the )?(?:style|design)|copy (?:the )?(?:style|design)|design of)\b/i
-/* an animate card's prompt names its tool in every locale — a stable marker
-   where the redesign ask is natural language */
-const MOTION_RE = /\banimate_storyboard\b/
 
 function strategyFor(text: string, frames: NonNullable<ReturnType<typeof store.getCanvas>>['frames']): string {
   const isRedesign = REDESIGN_RE.test(text)
@@ -646,10 +725,11 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
   actor.runId = meter.id
   let delivered = false
   /* structured repo cards (the GitHub import) have their own runner with
-     repo-reading tools; drift-review cards ride the loop below like prompt
-     cards — their delivery is findings, not frame edits */
+     repo-reading tools; drift-review and animate cards ride the loop below
+     like prompt cards — drift's delivery is findings, an animate card's is
+     the film it directs */
   const repoCards = allCards.filter((c) => c.kind === 'sketch' || c.kind === 'design-system')
-  const cards = allCards.filter((c) => !c.kind || c.kind === 'drift')
+  const cards = allCards.filter((c) => !c.kind || c.kind === 'drift' || c.kind === 'animate')
   /* latched: Retry clears a stopped card's failure on this same object, and
      the old run, still letting go, must not take the retried card for its own */
   let stopped = false
@@ -881,20 +961,37 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     let outputLimitNudgeSent = false
     let turnsUsed = 0
     /* an animate run has no turn budget: it ends early only when a run of
-       turns changes nothing on the canvas. A local harness shows tool calls
-       rather than turns, so the same watch feeds on each call there */
-    const motionRun = MOTION_RE.test(workText)
+       turns changes nothing on the canvas and reads nothing new. Only the
+       card the Animate button queued carries the flag — a card or comment
+       that merely names the tool gets the ordinary budget */
+    const motionRun = cards.some((c) => c.kind === 'animate')
     let stalledRun = false
+    /* why the run was ended, for the closing summary and the card */
+    let stallReason: string | undefined
     let stillTurns = 0
-    let lastMotionSig: string | undefined
-    const motionStalled = () => {
+    let stillCalls = 0
+    /* the watch: a call is movement when it leaves the canvas in a state
+       never seen before — a write loop that rewrites the same timeline is
+       still — or when it reads a target the run had not read. The first
+       call always counts (claiming the card is itself an act). */
+    let movedThisTurn = true
+    const seenMotionSigs = new Set<string>()
+    const seenMotionReads = new Set<string>()
+    const motionMoved = (block: Anthropic.ToolUseBlockParam, failed: boolean): boolean => {
       const sig = motionSignature(canvasId, runState)
-      if (sig !== lastMotionSig) {
-        lastMotionSig = sig
-        stillTurns = 0
-        return false
-      }
-      return ++stillTurns >= MOTION_STALL_TURNS
+      const fresh = !seenMotionSigs.has(sig)
+      seenMotionSigs.add(sig)
+      /* a read that coincides with a state move is still a read — note the
+         target even then, so polling it afterwards counts as a repeat */
+      const key = failed ? undefined : motionReadKey(block, canvasId)
+      const newRead = key !== undefined && !seenMotionReads.has(key)
+      if (key) seenMotionReads.add(key)
+      return fresh || newRead
+    }
+    const motionStall = (limit: number, unit: 'turns' | 'tool calls') => {
+      stalledRun = true
+      stallReason = `the last ${limit} ${unit} changed nothing on the canvas and read nothing new`
+      console.log(`[resident] animate run ending: ${stallReason} canvas=${canvasId}`)
     }
 
     try {
@@ -1021,33 +1118,39 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
               return {
                 type: 'tool_result',
                 tool_use_id: block.id,
-                content: `The canvas has not changed for ${MOTION_STALL_TURNS} turns — the run is ending. Write your final message now, without more tool calls.`,
+                content: `The canvas has not changed for ${MOTION_STALL_CALLS} calls — the run is ending. Write your final message now, without more tool calls.`,
                 is_error: true,
               }
             const result = await execTool(block, canvasId, actor, runState)
-            if (motionRun && motionStalled()) {
-              stalledRun = true
-              console.log(
-                `[resident] animate run ending: ${MOTION_STALL_TURNS} tool calls without a canvas change canvas=${canvasId}`,
-              )
+            /* the harness shows tool calls rather than turns — the watch
+               feeds on each call against the wider call window */
+            if (motionRun && !stalledRun) {
+              if (motionMoved(block, result.is_error === true)) stillCalls = 0
+              else if (++stillCalls >= MOTION_STALL_CALLS) motionStall(MOTION_STALL_CALLS, 'tool calls')
             }
             return result
           },
         })
         if (canceled()) return 'ran'
-        finished = result.success
-        crashed = !result.success
+        /* a stalled run's wrap-up is not a delivery: the card fails with
+           the stall reason, as on the API path */
+        finished = result.success && !stalledRun
+        crashed = !result.success && !stalledRun
         messages.push({ role: 'assistant', content: [{ type: 'text', text: result.text }] })
-        if (!result.success) actions.agentSummary(canvasId, actor, result.text)
+        if (!result.success && !stalledRun) actions.agentSummary(canvasId, actor, result.text)
       } else
         for (let turn = 0; turn < maxTurns; turn++) {
           if (canceled()) return 'ran'
-          if (motionRun && motionStalled()) {
-            stalledRun = true
-            console.log(
-              `[resident] animate run ending: ${MOTION_STALL_TURNS} turns without a canvas change canvas=${canvasId}`,
-            )
-            break
+          /* the watch counts turns, not calls: a turn moves when one of its
+             calls changed the canvas or read a target it had not read */
+          if (motionRun) {
+            if (movedThisTurn) {
+              movedThisTurn = false
+              stillTurns = 0
+            } else if (++stillTurns >= MOTION_STALL_TURNS) {
+              motionStall(MOTION_STALL_TURNS, 'turns')
+              break
+            }
           }
           /* the status showing when the connection dropped, so a recovered
              run picks its narration back up instead of staying "reconnecting" */
@@ -1133,6 +1236,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                     `[resident] tool canvas=${canvasId} name=${block.name}${typeof target === 'string' ? ` frame=${target}` : ''}`,
                   )
                   const result = await execTool(block, canvasId, actor, runState)
+                  if (motionRun && motionMoved(block, result.is_error === true)) movedThisTurn = true
                   if (block.name === 'import_webpage' && result.is_error && !runState.blockedWebsiteAccess) {
                     importFailureInBatch =
                       'The website import failed. Correct the tool error and retry the import before making design changes.'
@@ -1246,7 +1350,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     if (unverifiedMutation) actions.setAgentStatus(canvasId, actor, 'Change not verified — waiting for a retry')
     if (unresolvedLint) actions.setAgentStatus(canvasId, actor, 'Lint errors remain — waiting for a retry')
     console.log(
-      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} stalled=${stalledRun} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} tokenWrites=${runState.tokenWrites} arrangeWrites=${runState.arrangeWrites} verified=${runState.verifiedFrames.size}`,
+      `[resident] run end canvas=${canvasId} agent=${role.name} turns=${turnsUsed} finished=${finished} refused=${refused} crashed=${crashed} stalled=${stalledRun}${stallReason ? ` stall="${stallReason}"` : ''} mutations=${runState.mutatedFrames.size} sources=${runState.sourceFrames.size} deliverables=${deliverableFrames.length} tokenWrites=${runState.tokenWrites} arrangeWrites=${runState.arrangeWrites} verified=${runState.verifiedFrames.size}`,
     )
     let summary = ''
     if (finished) {
@@ -1263,9 +1367,12 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       }
     }
     /* an animate run ended on no progress or at the backstop still closes
-       with a summary — the last words it had, or why it was ended, never a
-       bare "ran out of turns" */
+       with a summary — why it was stopped, then the last words it had,
+       never a bare "ran out of turns" */
     if (!finished && motionRun && (stalledRun || exhausted)) {
+      const reason = stalledRun
+        ? `Stopped: ${stallReason}.`
+        : `Stopped at the ${MOTION_SAFETY_TURNS}-turn safety backstop.`
       let closing = ''
       for (let i = messages.length - 1; i >= 0 && !closing.trim(); i--) {
         const message = messages[i]!
@@ -1275,11 +1382,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             .map((b) => b.text)
             .join(' ')
       }
-      summary = closing.trim()
-        ? closing
-        : stalledRun
-          ? `Stopped: the last ${MOTION_STALL_TURNS} turns changed nothing on the canvas.`
-          : `Stopped at the ${MOTION_SAFETY_TURNS}-turn safety backstop.`
+      summary = closing.trim() ? `${reason} ${closing.trim()}` : reason
       console.log(`[resident] summary canvas=${canvasId} ${summary.replace(/\s+/g, ' ').trim().slice(0, 500)}`)
       actions.agentSummary(canvasId, actor, summary)
     }
@@ -1305,7 +1408,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       } else if (crashed) {
         reason = `${role.name} hit a snag before finishing. Retry when you are ready.`
       } else if (stalledRun) {
-        reason = `${role.name} stopped after ${MOTION_STALL_TURNS} turns without a change on the canvas. Retry when you are ready.`
+        reason = `${role.name} stopped: ${stallReason}. Retry when you are ready.`
       } else if (exhausted) {
         reason = `${role.name} ran out of turns before finishing. Retry when you are ready.`
       } else if (noMutation) {
