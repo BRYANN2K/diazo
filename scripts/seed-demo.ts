@@ -23,6 +23,7 @@ import { mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, st
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { lintDocKey, type LintDocument } from '../shared/lintDocument.ts'
 import { startDemoModel } from './demo-model.ts'
 import {
   DASHBOARD,
@@ -466,10 +467,11 @@ export async function seedDemo(dataDir: string): Promise<Seeded> {
   /* the anti-slop lint a client computes inside the iframe, written straight
      for the demo: the landing trips errors, the dashboard warnings only, the
      pricing is clean — one badge of each tone. Written last, after every run
-     that rewrites a frame, as passes with computed styles: a client keeps a
-     verdict taken after the document's last change (lintIsCurrent) instead
-     of scoring it again */
+     that rewrites a frame, as passes with computed styles of the document
+     each frame shows now (`doc`): a client keeps such a verdict
+     (lintIsCurrent) instead of scoring it again */
   const checkedAt = Date.now()
+  const docOf = async (frameId: string) => lintDocKey(await c.json<LintDocument>('GET', `/api/frames/${frameId}`))
   await c.json('PUT', `/api/frames/${landing.id}/lint`, {
     lint: {
       score: 52,
@@ -487,6 +489,7 @@ export async function seedDemo(dataDir: string): Promise<Seeded> {
       checkedAt,
       version: 1,
       engine: 'dom',
+      doc: await docOf(landing.id),
     },
   })
   await c.json('PUT', `/api/frames/${dashboard.id}/lint`, {
@@ -502,10 +505,20 @@ export async function seedDemo(dataDir: string): Promise<Seeded> {
       checkedAt,
       version: 1,
       engine: 'dom',
+      doc: await docOf(dashboard.id),
     },
   })
   await c.json('PUT', `/api/frames/${pricing.id}/lint`, {
-    lint: { score: 100, errors: 0, warnings: 0, issues: [], checkedAt, version: 1, engine: 'dom' },
+    lint: {
+      score: 100,
+      errors: 0,
+      warnings: 0,
+      issues: [],
+      checkedAt,
+      version: 1,
+      engine: 'dom',
+      doc: await docOf(pricing.id),
+    },
   })
 
   return {

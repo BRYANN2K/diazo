@@ -31,6 +31,7 @@ import { canvasOpenedOn, frameHtmlBatches, MAX_LOAD_FRAME_IDS, openingPageId } f
 import { normalizePageBackground } from '../shared/pageBackground.ts'
 import { MAX_STACK_WRITES, type StackWrite } from '../shared/frameStack.ts'
 import { normalizeRotation } from '../shared/frameRotation.ts'
+import { lintDocKey } from '../shared/lintDocument.ts'
 import type { CommentAnchorInput } from '../shared/comments.ts'
 import type { LocaleConfig } from '../shared/locales.ts'
 import { FIRST_CANVAS_PATH, SIGNUP_PARAM, parseSignupMethod } from '../shared/firstCanvas.ts'
@@ -3325,12 +3326,18 @@ const lintBody = z.object({
   version: z.number().int().min(0).max(100).optional(),
   engine: z.enum(['dom', 'static']).optional(),
   truncated: z.boolean().optional(),
+  doc: z.string().max(80).optional(),
 })
 
 app.put('/api/frames/:id/lint', (req, res) => {
-  if (!requireFrame(req, res, req.params.id, 'edit')) return
+  const current = requireFrame(req, res, req.params.id, 'edit')
+  if (!current) return
   const parsed = lintBody.safeParse(req.body?.lint)
   if (!parsed.success) return res.status(400).json({ error: 'bad lint payload' })
+  /* a verdict scores one document (lintDocKey): one that lands after the
+     frame moved on would read as current for a design it never saw */
+  if (parsed.data.doc !== undefined && parsed.data.doc !== lintDocKey(current))
+    return res.status(409).json({ error: 'the frame changed since this verdict was scored' })
   /* a client clock running ahead must not make a verdict look newer than
      the document's next change (the client skips a current verdict) */
   const now = Date.now()

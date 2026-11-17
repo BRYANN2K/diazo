@@ -7,6 +7,7 @@
  */
 import type { Frame } from '../../shared/types'
 import { SLOP_RULES_VERSION, lintSnapshot } from '../../shared/slopRules'
+import { lintDocKey } from '../../shared/lintDocument'
 import { slopSnapshotOf } from './frameBridge'
 import { api } from './api'
 import { useStore } from './store'
@@ -15,61 +16,97 @@ import { useStore } from './store'
    the settled document is worth scoring */
 const LINT_DEBOUNCE_MS = 1500
 
-const timers = new Map<string, number>()
-/* frameId → the html a pass is currently measuring, so a second schedule
-   for the same document does not stack another render of the same snapshot */
-const inflight = new Map<string, string>()
+type LintedFrame = Pick<Frame, 'id' | 'html' | 'width' | 'height'>
 
-/* frameId → the html this tab last scored: the verdict it wrote comes back
-   as a new frame object (`frame:lint`), which must not score it again */
+const timers = new Map<string, number>()
+/* frameId → the document (`lintDocKey`) a pass is measuring or waiting to
+   measure, so a second schedule for it does not stack another render */
+const pending = new Map<string, string>()
+
+/* frameId → the document this tab scored or found current. Every schedule
+   of that document is then a no-op: the verdict the tab wrote coming back as
+   `frame:lint`, the server's echo of a save the tab already scored, another
+   render of the same frame. A short key, so the map stays small. */
 const scored = new Map<string, string>()
 
-/** Whether the frame's stored verdict already covers its document: a pass
- *  with computed styles, under today's rules, taken after its last change.
- *  Opening a canvas then re-scores nothing that has not moved on. */
-export function lintIsCurrent(frame: Pick<Frame, 'lint' | 'updatedAt'>): boolean {
+/* frameId → the last html hashed and its key: a frame re-renders far more
+   often than its document changes */
+const keys = new Map<string, { html: string; width: number; height: number; key: string }>()
+
+function docKeyOf(frame: LintedFrame): string {
+  const cached = keys.get(frame.id)
+  if (cached && cached.html === frame.html && cached.width === frame.width && cached.height === frame.height)
+    return cached.key
+  const key = lintDocKey(frame)
+  keys.set(frame.id, { html: frame.html, width: frame.width, height: frame.height, key })
+  return key
+}
+
+/** Whether the frame's stored verdict covers the document it shows now: a
+ *  pass with computed styles, under today's rules, of this very HTML at this
+ *  size. Keyed on what was scored, not on timestamps, since a local save
+ *  patches the HTML ahead of the server's `updatedAt`. A verdict from before
+ *  the key existed is scored once more. */
+export function lintIsCurrent(frame: Pick<Frame, 'lint' | 'html' | 'width' | 'height'>): boolean {
   const lint = frame.lint
-  return !!lint && lint.engine === 'dom' && lint.version === SLOP_RULES_VERSION && lint.checkedAt >= frame.updatedAt
+  return !!lint && lint.engine === 'dom' && lint.version === SLOP_RULES_VERSION && lint.doc === lintDocKey(frame)
+}
+
+function cancel(frameId: string) {
+  const timer = timers.get(frameId)
+  if (timer !== undefined) window.clearTimeout(timer)
+  timers.delete(frameId)
 }
 
 export function scheduleFrameLint(frame: Frame) {
   if (!frame.html || frame.demo) return
-  const html = frame.html
-  if (inflight.get(frame.id) === html || scored.get(frame.id) === html) return
-  if (lintIsCurrent(frame)) {
-    scored.set(frame.id, html)
+  const key = docKeyOf(frame)
+  if (scored.get(frame.id) === key) return
+  const lint = frame.lint
+  if (lint && lint.engine === 'dom' && lint.version === SLOP_RULES_VERSION && lint.doc === key) {
+    /* someone (another tab, the server) scored this document already */
+    cancel(frame.id)
+    pending.delete(frame.id)
+    scored.set(frame.id, key)
     return
   }
-  const timer = timers.get(frame.id)
-  if (timer !== undefined) window.clearTimeout(timer)
+  if (pending.get(frame.id) === key) return
+  cancel(frame.id)
+  pending.set(frame.id, key)
   timers.set(
     frame.id,
     window.setTimeout(() => {
       timers.delete(frame.id)
-      void runFrameLint(frame.id, html)
+      void runFrameLint(frame.id, key)
     }, LINT_DEBOUNCE_MS),
   )
 }
 
-async function runFrameLint(frameId: string, html: string) {
-  const current = useStore.getState().canvas?.frames.find((f) => f.id === frameId)
-  /* the document moved on while we waited — a newer schedule owns it now */
-  if (!current || current.html !== html) return
-  inflight.set(frameId, html)
+function currentFrame(frameId: string) {
+  return useStore.getState().canvas?.frames.find((f) => f.id === frameId)
+}
+
+async function runFrameLint(frameId: string, key: string) {
+  const owns = () => pending.get(frameId) === key
   try {
+    const current = currentFrame(frameId)
+    /* the document moved on while we waited: a newer schedule owns it now */
+    if (!owns() || !current || docKeyOf(current) !== key) return
     const snap = await slopSnapshotOf(frameId)
-    /* not mounted (off-screen) or the collector failed — nothing to write */
+    /* not mounted (off-screen) or the collector failed: nothing to write */
     if (!snap) return
-    const after = useStore.getState().canvas?.frames.find((f) => f.id === frameId)
-    if (!after || after.html !== html) return
-    const lint = lintSnapshot(snap)
+    const after = currentFrame(frameId)
+    if (!owns() || !after || docKeyOf(after) !== key) return
+    const lint = { ...lintSnapshot(snap), doc: key }
     /* show it at once; the server's frame:lint confirms it to the room */
     useStore.getState().patchFrameLocal(frameId, { lint })
-    scored.set(frameId, html)
+    /* set before the write, so the echo is not scored again; a refused
+       write (offline, a viewer) is not retried for the same document */
+    scored.set(frameId, key)
     await api.setFrameLint(frameId, lint)
   } catch (error) {
     console.error('frame lint failed', error)
   } finally {
-    if (inflight.get(frameId) === html) inflight.delete(frameId)
+    if (owns()) pending.delete(frameId)
   }
 }
