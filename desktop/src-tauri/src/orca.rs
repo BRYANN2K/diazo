@@ -50,8 +50,9 @@ const MAX_FIELD_CHARS: usize = 120;
 /// Agent ids the server offers; `--agent` accepts more upstream, but a dev
 /// task only ever launches these (DEV_TASK_AGENTS in shared/devTasks.ts).
 const ALLOWED_AGENTS: &[&str] = &["claude", "codex", "opencode", "devin"];
-/// `programStatus.state` values treated as a terminal outcome by
-/// DevTaskPollReport — anything else stays a working status.
+/// `mainAgent.outcome` values treated as terminal by DevTaskPollReport —
+/// `programStatus.state` is kept as a fallback but only ever reads
+/// `working`/`done` on real Orca, never an outcome.
 const TERMINAL_OUTCOMES: &[&str] = &["success", "failure", "interruption", "cancellation"];
 
 /* ------------------------------------------------------------------ */
@@ -894,8 +895,9 @@ fn launch_reply(out: &Value, identity: &str, branch: &str) -> Value {
     })
 }
 
-/// The main agent's row in a `worktree ps` entry: the one flagged
-/// `mainAgent`, else the first agent in the list.
+/// The main agent's row in a `worktree ps` entry: each agent carries a
+/// `mainAgent` sub-object (`{state, outcome?, stateStartedAt}`); the first
+/// agent holding one is the main agent's record.
 fn main_agent(row: &Value) -> Option<&Value> {
     let agents = row.get("agents")?.as_array()?;
     agents
@@ -911,10 +913,18 @@ fn poll_row(identity: &str, row: Option<&Value>) -> Value {
         return json!({ "identity": identity, "found": false });
     };
     let agent = main_agent(row);
+    /* the outcome lives on `mainAgent` — `programStatus.state` is only a
+       fallback (real Orca reports `working`/`done` there, never one) */
     let outcome = agent
-        .and_then(|a| a.pointer("/programStatus/state"))
+        .and_then(|a| a.pointer("/mainAgent/outcome"))
         .and_then(Value::as_str)
-        .filter(|s| TERMINAL_OUTCOMES.contains(s));
+        .filter(|s| TERMINAL_OUTCOMES.contains(s))
+        .or_else(|| {
+            agent
+                .and_then(|a| a.pointer("/programStatus/state"))
+                .and_then(Value::as_str)
+                .filter(|s| TERMINAL_OUTCOMES.contains(s))
+        });
     json!({
         "identity": identity,
         "found": true,
@@ -1319,27 +1329,43 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
 
     #[test]
     fn poll_trims_rows_to_the_contract() {
+        /* the row's real shape (a `worktree ps --json` agent): the outcome
+           lives on `mainAgent`; `programStatus.state` only ever reads
+           `working`/`done`, never an outcome */
         let row = json!({
             "identity": {"key": "wt2:vps:inst-9"},
-            "status": "working",
+            "status": "active",
             "path": "/secret/path",
             "branch": "refs/heads/doop/x",
             "workspaceStatus": "in-review",
             "linkedPR": "https://github.com/a/b/pull/3",
             "agents": [{
-                "state": "idle",
-                "mainAgent": {"state": "working"},
-                "programStatus": {"state": "success"},
+                "state": "done",
+                "agentType": "claude",
+                "mainAgent": {"state": "done", "outcome": "failure", "stateStartedAt": 1794868517130i64},
+                "programStatus": {"state": "working", "message": "1 shell still running", "observedAt": 1794878295466i64},
                 "lastAssistantMessage": "done",
                 "orcaSessionId": "s-1"
             }]
         });
         let trimmed = poll_row("wt2:vps:inst-9", Some(&row));
         assert_eq!(trimmed["found"], true);
-        assert_eq!(trimmed["agentState"], "working");
-        assert_eq!(trimmed["outcome"], "success");
+        assert_eq!(trimmed["agentState"], "done");
+        assert_eq!(trimmed["outcome"], "failure");
         assert_eq!(trimmed["branch"], "doop/x");
         assert_eq!(trimmed["linkedPR"], "https://github.com/a/b/pull/3");
+        /* success reports the same way; a mainAgent still working reports
+           no outcome, and a bare programStatus "done" is not one either */
+        let ok = json!({"agents":[{"mainAgent":{"state":"done","outcome":"success"}}]});
+        assert_eq!(poll_row("wt2:x:y", Some(&ok))["outcome"], "success");
+        let running = json!({"agents":[{"mainAgent":{"state":"working","stateStartedAt":1},
+            "programStatus":{"state":"working","message":"1 shell still running"}}]});
+        assert_eq!(poll_row("wt2:x:y", Some(&running))["outcome"], Value::Null);
+        let program_done = json!({"agents":[{"state":"done","programStatus":{"state":"done"}}]});
+        assert_eq!(poll_row("wt2:x:y", Some(&program_done))["outcome"], Value::Null);
+        /* programStatus stays a fallback for an outcome-shaped state */
+        let fallback = json!({"agents":[{"state":"done","programStatus":{"state":"success"}}]});
+        assert_eq!(poll_row("wt2:x:y", Some(&fallback))["outcome"], "success");
         /* a linkedPR object reduces to its url; any other shape drops out */
         let obj = json!({"linkedPR": {"url": "https://github.com/a/b/pull/9", "title": "x"}});
         assert_eq!(
@@ -1363,7 +1389,7 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
         assert_eq!(ports.len(), 2);
         assert!(!ports[0].to_string().contains("/secret"));
         /* an unrecognised terminal label is not reported as an outcome */
-        let odd = json!({"agents":[{"programStatus":{"state":"done"},"state":"done"}]});
+        let odd = json!({"agents":[{"programStatus":{"state":"paused"},"state":"done"}]});
         assert_eq!(poll_row("wt2:x:y", Some(&odd))["outcome"], Value::Null);
         assert_eq!(poll_row("wt2:x:y", Some(&odd))["agentState"], "done");
     }

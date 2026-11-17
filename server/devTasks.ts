@@ -34,8 +34,8 @@ import {
  *
  * Two status sources merge into one row: the agent's own `pr_open` /
  * `done` / `failed` push outranks the device's `worktree ps` read, and a
- * poll ends a task only on the worktree's `programStatus` outcome — an
- * agent's per-turn "done" is a finished turn, not a finished task.
+ * poll ends a task only on the main agent's `outcome` — an agent's
+ * per-turn "done" is a finished turn, not a finished task.
  */
 
 type Broadcast = (canvasId: string, msg: ServerMessage, excludeClientId?: string) => void

@@ -264,6 +264,26 @@ describe('applyDeviceReport', () => {
     expect(gone.ok && gone.task.state).toBe('done')
   })
 
+  it('a failed poll outcome ends the task as failed', async () => {
+    const { task } = await launch([frame.id])
+    await applyDeviceReport(owner.id, task.id, {
+      deviceId: DEVICE,
+      launch: { ok: true, orcaIdentity: 'wt2:mac:i1' },
+    })
+    await applyDeviceReport(owner.id, task.id, {
+      deviceId: DEVICE,
+      poll: { found: true, agentState: 'working' },
+    })
+    /* the main agent's outcome — the shell reads mainAgent.outcome —
+       is the pull-side value that ends the task */
+    const out = await applyDeviceReport(owner.id, task.id, {
+      deviceId: DEVICE,
+      poll: { found: true, agentState: 'done', outcome: 'failure' },
+    })
+    expect(out.ok && out.task.state).toBe('failed')
+    expect(out.ok && out.task.finishedAt).toBeTypeOf('number')
+  })
+
   it('ignores launch reports once the row is terminal', async () => {
     const { task } = await launch([frame.id])
     await applyDeviceReport(owner.id, task.id, {

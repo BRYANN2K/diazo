@@ -67,9 +67,10 @@ The split of trust:
 outcome?, lastAssistantMessage?, linkedPR?, orcaSessionId?, branch?,
 workspaceStatus?, devUrl? }`. `found:false` maps to `cancelled`; a `linkedPR`
   maps to `pr_open`; `outcome` `failure`/`interruption` to `failed`,
-  `cancellation` to `cancelled`, `success` to `done` — the worktree's
-  `programStatus` is the only pull-side value that may end a task (an
-  agent's per-turn `agentState: done` is a finished turn, not a finished
+  `cancellation` to `cancelled`, `success` to `done` — the main agent's
+  `mainAgent.outcome` is the only pull-side value that may end a task (its
+  `programStatus.state` only ever reads `working`/`done`, and an agent's
+  per-turn `agentState: done` is a finished turn, not a finished
   task). `devUrl` is the dev server `orca ports` reported for the worktree —
   http(s) only, stored on the task for a live frame or the drift review to
   use. `linkedPR` follows the same http(s)-only rule.
