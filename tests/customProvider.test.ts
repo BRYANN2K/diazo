@@ -484,6 +484,22 @@ describe('a server with Anthropic credentials of its own', () => {
     expect(headers['x-server-header']).toBeUndefined()
   })
 
+  it('headers the SDK sends itself still reach it from the env', async () => {
+    reply = anthropicToolCall
+    await stubServerAnthropicEnv(
+      'anthropic-version: 2999-01-01\nUser-Agent: server-agent\nAccept: application/x-custom',
+    )
+    const run = customTurn(
+      { config: { name: 'Gateway', apiType: 'anthropic', baseUrl: `${base}/anthropic`, models: [] } },
+      { id: 'glm-5', vision: true },
+    )
+    await run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 1000 })
+    const headers = seen[0]!.headers
+    expect(headers['anthropic-version']).toBe('2999-01-01')
+    expect(headers['user-agent']).toBe('server-agent')
+    expect(headers.accept).toBe('application/x-custom')
+  })
+
   it('the /test call is guarded the same way', async () => {
     reply = anthropicToolCallWith('{"ready":true}')
     await stubServerAnthropicEnv()

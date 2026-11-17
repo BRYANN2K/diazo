@@ -266,19 +266,24 @@ export interface CustomTarget {
   headers?: Record<string, string>
 }
 
+/* set by the SDK itself on every request: an env value for one of these must
+   stay — a null would strip the header outright, and a strict gateway needs
+   anthropic-version to answer at all */
+const SDK_OWN_HEADERS = new Set(['anthropic-version', 'user-agent', 'accept'])
+
 /**
- * The header names ANTHROPIC_CUSTOM_HEADERS parses to, each nulled. The SDK
- * merges that variable into every client's headers, where the server's own
- * values would ride along to a custom endpoint; nulls in defaultHeaders take
- * them back out. The endpoint's own headers are spread after these, so one
- * it shares a name with still wins.
+ * The header names ANTHROPIC_CUSTOM_HEADERS parses to, each nulled — except
+ * the SDK's own. The SDK merges that variable into every client's headers,
+ * where the server's own values would ride along to a custom endpoint; nulls
+ * in defaultHeaders take them back out. The endpoint's own headers are spread
+ * after these, so one it shares a name with still wins.
  */
 function envHeaderNulls(): Record<string, null> {
   const nulls: Record<string, null> = {}
   for (const line of (env.ANTHROPIC_CUSTOM_HEADERS ?? '').split('\n')) {
     const colon = line.indexOf(':')
     const name = colon >= 0 ? line.slice(0, colon).trim() : ''
-    if (name) nulls[name] = null
+    if (name && !SDK_OWN_HEADERS.has(name.toLowerCase())) nulls[name] = null
   }
   return nulls
 }
@@ -302,13 +307,14 @@ export function customTurn(target: CustomTarget, model: CustomModel): AgentModel
       authToken: null,
       baseURL: config.baseUrl,
       fetch: customProviderFetch,
-      /* env headers and the sentinel nulled out — the keyless null said
-         explicitly, or the SDK refuses to send anything; the person's key is
-         restated so an env X-Api-Key cannot smuggle the server's in, and
-         their own headers win over all of it */
       defaultHeaders: {
+        /* the server's env headers must not reach an endpoint a person named */
         ...envHeaderNulls(),
+        /* without a key, drop the sentinel's header explicitly or the SDK
+           refuses to send anything; with one, restate it so an env X-Api-Key
+           cannot smuggle the server's in */
         ...(apiKey ? { 'X-Api-Key': apiKey } : { 'X-Api-Key': null }),
+        /* the person's own headers win over all of it */
         ...headers,
       },
     })
