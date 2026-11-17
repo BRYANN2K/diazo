@@ -50,6 +50,34 @@ const BODY: Record<string, string | readonly string[]> = {
       col += texture(u_tex, u_center + rc*z);
     }
     col /= 16.;`,
+  /* three skewed gathers along 0°, 60° and 120° — their convolution is a
+     hexagonal kernel, and the luminance weight makes bright points bloom
+     into discs (the bokeh look a disc kernel gives) */
+  'lens-blur': [
+    `vec3 acc = vec3(0.); float ws = 0.; float r = u_radius / u_res.x;
+    for(int i=-8;i<=8;i++){
+      vec3 t3 = texture(u_tex, uv + vec2(float(i)*r*.125, 0.)).rgb;
+      float w = 1. + u_bokeh * 6. * smoothstep(.55, 1., doopLuma(t3));
+      acc += t3*w; ws += w;
+    }
+    col = vec4(acc/ws, texture(u_tex, uv).a);`,
+    `vec3 acc = vec3(0.); float ws = 0.; float r = u_radius / u_res.x;
+    vec2 d = vec2(-.5, .866);
+    for(int i=-8;i<=8;i++){
+      vec3 t3 = texture(u_tex, uv + float(i)*r*.125*d).rgb;
+      float w = 1. + u_bokeh * 6. * smoothstep(.55, 1., doopLuma(t3));
+      acc += t3*w; ws += w;
+    }
+    col = vec4(acc/ws, texture(u_tex, uv).a);`,
+    `vec3 acc = vec3(0.); float ws = 0.; float r = u_radius / u_res.x;
+    vec2 d = vec2(-.5, -.866);
+    for(int i=-8;i<=8;i++){
+      vec3 t3 = texture(u_tex, uv + float(i)*r*.125*d).rgb;
+      float w = 1. + u_bokeh * 6. * smoothstep(.55, 1., doopLuma(t3));
+      acc += t3*w; ws += w;
+    }
+    col = vec4(acc/ws, texture(u_tex, uv).a);`,
+  ],
   glow: `vec3 s = texture(u_tex, uv).rgb;
     vec3 bl = vec3(0.);
     float r = u_radius / u_res.x;
@@ -164,6 +192,27 @@ const BODY: Record<string, string | readonly string[]> = {
     vec2 c = u_position + vec2(cos(an), sin(an)) * u_drift * u_t * .02;
     float leak = smoothstep(u_size, 0., distance(uv, c)) * u_opacity;
     col = vec4(clamp(s.rgb + u_color * leak, 0., 1.), s.a);`,
+  /* threshold pass, then a separable gaussian over the bright pass; the last
+     sub-pass composites the blur onto the untouched input on u_tex2 */
+  bloom: [
+    `vec3 s = texture(u_tex, uv).rgb;
+    float l = doopLuma(s);
+    col = vec4(s * smoothstep(u_threshold - .1, u_threshold + .1, l), 1.);`,
+    `vec3 acc = vec3(0.);
+    float r = u_radius / u_res.x;
+    float w[5]; w[0]=.227; w[1]=.194; w[2]=.121; w[3]=.054; w[4]=.016;
+    for(int i=-4;i<=4;i++) acc += texture(u_tex, uv + vec2(float(i), 0.)*r*.25).rgb * w[abs(i)];
+    col = vec4(acc, 1.);`,
+    `vec3 acc = vec3(0.);
+    float r = u_radius / u_res.y;
+    float w[5]; w[0]=.227; w[1]=.194; w[2]=.121; w[3]=.054; w[4]=.016;
+    for(int i=-4;i<=4;i++) acc += texture(u_tex, uv + vec2(0., float(i))*r*.25).rgb * w[abs(i)];
+    vec4 s = texture(u_tex2, uv);
+    col = vec4(clamp(s.rgb + acc * u_intensity, 0., 1.), s.a);`,
+  ],
+  curves: `vec4 s = texture(u_tex, uv);
+    vec3 x = clamp((s.rgb - vec3(u_black)) / max(u_white - u_black, 1e-3), 0., 1.);
+    col = vec4(clamp(pow(x, vec3(1. / u_gamma)) + vec3(u_lift), 0., 1.), s.a);`,
 }
 
 /* an integer hash, not a sine hash: sin()'s precision is implementation-
