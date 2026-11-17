@@ -4,7 +4,7 @@
  * mapping is a canvas-level fact (collaborators see the same one); storing
  * it never touches the repo. Suggestions come from the linked project's
  * `repo_list` / `repo_search` reads, and implementers read the mapping in
- * get_component, get_frame and the Stip handoff pack.
+ * get_component, get_frame and a dev task's brief.
  */
 
 export const CODE_LINK_KINDS = ['component', 'frame'] as const
@@ -80,7 +80,7 @@ export function codeLinkLabel(link: Pick<CodeLink, 'path' | 'exportName'>): stri
   return link.exportName ? `${link.path}#${link.exportName}` : link.path
 }
 
-/** What agents read in get_component / get_frame / the handoff pack. */
+/** What agents read in get_component / get_frame / a dev task's brief. */
 export function describeCodeLink(link: CodeLink) {
   return {
     path: link.path,

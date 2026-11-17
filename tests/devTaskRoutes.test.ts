@@ -156,7 +156,7 @@ describe('POST /api/frames/:id/dev-tasks', () => {
       runner: 'orca',
     })
     expect(task.frameRevision).toBeTypeOf('number')
-    /* the public task never carries a path or the stored pack */
+    /* the public task never carries a path or the stored brief */
     expect(task).not.toHaveProperty('handoff')
     expect(JSON.stringify(task)).not.toMatch(/\/Users\/|\/home\//)
 

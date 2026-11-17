@@ -47,8 +47,7 @@ import type {
   RenderStatus,
   RenderTarget,
 } from '../../shared/motion.ts'
-import type { DevTaskDrift, DevTaskState } from '../../shared/devTasks.ts'
-import type { HandoffPack } from '../../shared/handoff.ts'
+import type { DevTaskBrief, DevTaskDrift, DevTaskState } from '../../shared/devTasks.ts'
 import type { GenerationRecipe, Transcript } from '../../shared/motionMedia.ts'
 import type { CustomModel, SpeechInstall, SpeechJob, SpeechPreferences, Voice } from '../../shared/speech.ts'
 
@@ -1464,16 +1463,15 @@ export const renderJobs = pgTable(
  *  path is never stored — `orca_identity` is the opaque `wt2:` key — and
  *  `agent_state` is the state the coding agent itself pushed through
  *  update_dev_task, which outranks device polls for pr_open/done. `handoff`
- *  is the full pack built at launch (get_handoff serves it verbatim), kept
+ *  is the brief stored at launch (get_handoff serves it verbatim), kept
  *  out of the row's public shape. */
 export const frameDevTasks = pgTable(
   'frame_dev_tasks',
   {
     id: text('id').primaryKey(),
     canvasId: text('canvas_id').notNull(),
-    /** one frame, or every frame a multi-frame pack covers */
+    /** one frame, or every frame a multi-frame brief covers */
     frameIds: jsonb('frame_ids').$type<string[]>().notNull(),
-    handoffChangeId: text('handoff_change_id').notNull(),
     /** `approval.approvedFrameUpdatedAt` at launch — flags a stale build */
     frameRevision: bigint('frame_revision', { mode: 'number' }),
     /** groups duel contestants; null for a solo launch */
@@ -1503,8 +1501,8 @@ export const frameDevTasks = pgTable(
     drift: jsonb('drift').$type<DevTaskDrift>(),
     /** the dev-server URL `orca ports` reported (phase 2) */
     devUrl: text('dev_url'),
-    /** the pack built at launch — get_handoff's payload, never broadcast */
-    handoff: jsonb('handoff').$type<HandoffPack>().notNull(),
+    /** the brief stored at launch — get_handoff's payload, never broadcast */
+    handoff: jsonb('handoff').$type<DevTaskBrief>().notNull(),
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
     updatedAt: bigint('updated_at', { mode: 'number' }).notNull(),
     finishedAt: bigint('finished_at', { mode: 'number' }),

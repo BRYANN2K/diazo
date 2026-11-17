@@ -4,9 +4,13 @@ import { db } from './db/index.ts'
 import { frameDevTasks } from './db/schema.ts'
 import { env } from './env.ts'
 import { localRepo } from './localRepo.ts'
-import type { ServerMessage } from '../shared/types.ts'
+import { renderFrame } from './screenshot.ts'
+import { store } from './store.ts'
+import { usedComponentIds } from './componentEngine.ts'
+import { describeTokens } from '../shared/designTokens.ts'
+import type { CodeLink } from '../shared/codeLinks.ts'
+import type { Canvas, Frame, ServerMessage } from '../shared/types.ts'
 import type { RepoLink } from '../shared/localRepo.ts'
-import type { HandoffPack } from '../shared/handoff.ts'
 import {
   DEV_TASK_KEEP_PER_FRAME,
   DEV_TASK_LAUNCH_TTL_MS,
@@ -15,9 +19,11 @@ import {
   DEV_TASK_TERMINAL,
   devTaskComment,
   devTaskPrompt,
+  devTaskSlug,
   isDevTaskPushState,
   type DevTask,
   type DevTaskAgentUpdate,
+  type DevTaskBrief,
   type DevTaskLaunchArgs,
   type DevTaskLaunchReport,
   type DevTaskPollReport,
@@ -56,21 +62,20 @@ function announce(task: DevTask): void {
 
 type Row = typeof frameDevTasks.$inferSelect
 
-/** Every column but the stored pack. `handoff` holds the frame PNGs in
+/** Every column but the stored brief. `handoff` holds the frame PNGs in
  *  base64 — megabytes per row — so status reads (the REST lists, the
  *  report merge, get_canvas's dev_tasks) select these columns only and
- *  the pack leaves Postgres solely through `handoffFor`. */
+ *  the brief leaves Postgres solely through `briefFor`. */
 const { handoff: _handoff, ...STATUS_COLUMNS } = getTableColumns(frameDevTasks)
 type StatusRow = Omit<Row, 'handoff'>
 
-/** The public shape: the stored handoff pack and the agent-merge column
+/** The public shape: the stored brief and the agent-merge column
  *  stay inside the server. */
 function toTask(row: StatusRow): DevTask {
   return {
     id: row.id,
     canvasId: row.canvasId,
     frameIds: row.frameIds,
-    handoffChangeId: row.handoffChangeId,
     frameRevision: row.frameRevision,
     duelId: row.duelId,
     requestedBy: row.requestedByName,
@@ -121,11 +126,84 @@ export async function devTasksForCanvas(canvasId: string): Promise<DevTask[]> {
   }
 }
 
-/** The stored pack — `get_handoff`'s payload, the one place the full row
+/** The stored brief — `get_handoff`'s payload, the one place the full row
  *  (handoff column included) is selected. */
-export async function handoffFor(taskId: string): Promise<{ row: Row; pack: HandoffPack } | undefined> {
+export async function briefFor(taskId: string): Promise<{ row: Row; brief: DevTaskBrief } | undefined> {
   const [row] = await db.select().from(frameDevTasks).where(eq(frameDevTasks.id, taskId))
-  return row ? { row, pack: row.handoff } : undefined
+  return row ? { row, brief: row.handoff } : undefined
+}
+
+/* ------------------------------------------------------------------ */
+/* the brief                                                           */
+/* ------------------------------------------------------------------ */
+
+/** The mappings a brief carries: its frames' own, and those of every
+ *  component an exported frame uses. */
+function codeMapFor(canvas: Canvas, frames: Frame[], links: readonly CodeLink[]) {
+  const out: NonNullable<DevTaskBrief['codeLinks']> = []
+  const components = new Set<string>()
+  for (const f of frames) {
+    for (const id of usedComponentIds(f.html ?? '')) components.add(id)
+    const link = links.find((l) => l.targetKind === 'frame' && l.targetId === f.id)
+    if (link)
+      out.push({
+        kind: 'frame',
+        name: f.name,
+        path: link.path,
+        ...(link.exportName ? { export: link.exportName } : {}),
+      })
+  }
+  for (const def of canvas.components ?? []) {
+    if (!components.has(def.id)) continue
+    const link = links.find((l) => l.targetKind === 'component' && l.targetId === def.id)
+    if (link)
+      out.push({
+        kind: 'component',
+        name: def.name,
+        path: link.path,
+        ...(link.exportName ? { export: link.exportName } : {}),
+      })
+  }
+  return out
+}
+
+/** The brief stored on a launch: the frame's PNG export, the canvas's
+ *  design tokens and the code links its frames and components map to.
+ *  `renderPng` is injectable so tests never boot Chromium. */
+export async function buildDevTaskBrief(
+  canvas: Canvas,
+  frames: Frame[],
+  opts: { plan?: string; codeLinks?: CodeLink[]; renderPng?: (frame: Frame) => Promise<Buffer> } = {},
+): Promise<DevTaskBrief> {
+  const warnings: string[] = []
+  const render = opts.renderPng ?? ((f: Frame) => renderFrame(f, 1))
+  const briefFrames: DevTaskBrief['frames'] = []
+  for (const frame of frames) {
+    const entry: DevTaskBrief['frames'][number] = {
+      id: frame.id,
+      name: frame.name,
+      width: Math.round(frame.width),
+      height: Math.round(frame.height),
+    }
+    try {
+      entry.png = (await render(frame)).toString('base64')
+    } catch (e) {
+      warnings.push(`"${frame.name}" could not be rendered: ${e instanceof Error ? e.message : e}`)
+    }
+    briefFrames.push(entry)
+  }
+  const tokens = store.getTokens(canvas.id)
+  const themes = store.getTokenThemes(canvas.id)
+  const codeLinks = codeMapFor(canvas, frames, opts.codeLinks ?? [])
+  return {
+    title: frames[0]?.name.trim() || 'Design handoff',
+    canvasId: canvas.id,
+    ...(opts.plan ? { plan: opts.plan } : {}),
+    frames: briefFrames,
+    ...(tokens.length ? { tokens: { tokens: describeTokens(tokens), ...(themes.length ? { themes } : {}) } } : {}),
+    ...(codeLinks.length ? { codeLinks } : {}),
+    warnings,
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -217,7 +295,7 @@ export async function createDevTask(input: {
   canvasId: string
   frameIds: string[]
   frameRevision: number | null
-  pack: HandoffPack
+  brief: DevTaskBrief
   link: RepoLink
   userId: string
   userName: string
@@ -229,11 +307,11 @@ export async function createDevTask(input: {
   const now = Date.now()
   const id = nanoid(10)
   const environment = input.environment
+  const slug = devTaskSlug(input.brief.title, id)
   const row = {
     id,
     canvasId: input.canvasId,
     frameIds: input.frameIds,
-    handoffChangeId: input.pack.changeId,
     frameRevision: input.frameRevision,
     duelId: null,
     requestedByUserId: input.userId,
@@ -247,13 +325,13 @@ export async function createDevTask(input: {
     environment: environment ?? null,
     orcaIdentity: null,
     orcaSessionId: null,
-    branch: `doop/${input.pack.changeId}`,
+    branch: `doop/${slug}`,
     prUrl: null,
     state: 'queued' as DevTaskState,
     agentState: null,
     summary: null,
     drift: null,
-    handoff: input.pack,
+    handoff: input.brief,
     createdAt: now,
     updatedAt: now,
     finishedAt: null,
@@ -263,8 +341,8 @@ export async function createDevTask(input: {
   const task = toTask(row as Row)
   const args: DevTaskLaunchArgs = {
     taskId: id,
-    worktreeName: `doop-${input.pack.changeId}`.slice(0, 80),
-    branch: `doop/${input.pack.changeId}`,
+    worktreeName: `doop-${slug}`.slice(0, 80),
+    branch: `doop/${slug}`,
     agent: input.agent,
     ...(input.model ? { model: input.model } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
@@ -272,7 +350,6 @@ export async function createDevTask(input: {
       canvasId: input.canvasId,
       frameIds: input.frameIds,
       taskId: id,
-      changeId: input.pack.changeId,
     }),
     comment: devTaskComment({
       canvasUrl: `${env.BETTER_AUTH_URL}/c/${input.canvasId}`,

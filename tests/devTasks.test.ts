@@ -19,10 +19,9 @@ import {
 import { buildMcpServer } from '../server/mcp.ts'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import type { HandoffPack } from '../shared/handoff.ts'
 import { REPO_POLL_MS, type RepoLink } from '../shared/localRepo.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
-import { DEV_TASK_LAUNCH_TTL_MS, type DevTaskState } from '../shared/devTasks.ts'
+import { DEV_TASK_LAUNCH_TTL_MS, devTaskSlug, type DevTaskBrief, type DevTaskState } from '../shared/devTasks.ts'
 
 /**
  * Dev tasks against an in-memory PGlite: the launch job really rides the
@@ -55,18 +54,10 @@ let canvas: Canvas
 let frame: Frame
 let broadcasts: { canvasId: string; msg: unknown }[]
 
-const fakePack = (changeId = 'new-screen-a1b2'): HandoffPack => ({
-  changeId,
-  dir: `.workflow/changes/${changeId}`,
+const fakeBrief = (): DevTaskBrief => ({
   title: 'New screen',
-  proposal: '# Proposal\n',
-  spec: '# Spec\n\n- AC-1: it works\n',
-  tasks: '# Tasks\n',
-  files: [
-    { path: `.workflow/changes/${changeId}/spec.md`, text: '# Spec\n\n- AC-1: it works\n' },
-    { path: `.workflow/changes/${changeId}/assets/frame-1.png`, base64: 'aGVsbG8=' },
-  ],
-  draftedBy: 'template',
+  canvasId: canvas.id,
+  frames: [{ id: 'frame-1', name: 'Checkout', width: 800, height: 600, png: 'aGVsbG8=' }],
   warnings: [],
 })
 
@@ -77,7 +68,7 @@ async function launch(frameIds: string[], extra: Partial<Parameters<typeof creat
     canvasId: canvas.id,
     frameIds,
     frameRevision: 42,
-    pack: fakePack(),
+    brief: fakeBrief(),
     link: LINK,
     userId: owner.id,
     userName: owner.name,
@@ -87,6 +78,9 @@ async function launch(frameIds: string[], extra: Partial<Parameters<typeof creat
   const job = await claim
   return { task, job }
 }
+
+/** The task id reduced to what devTaskSlug's suffix keeps — [a-z0-9]. */
+const idSlug = (id: string) => id.toLowerCase().replace(/[^a-z0-9]/g, '')
 
 const row = async (id: string) => (await db.select().from(frameDevTasks).where(eq(frameDevTasks.id, id)))[0]
 
@@ -156,8 +150,8 @@ describe('createDevTask', () => {
       args: {
         devTask: {
           taskId: task.id,
-          worktreeName: 'doop-new-screen-a1b2',
-          branch: 'doop/new-screen-a1b2',
+          worktreeName: `doop-new-screen-${idSlug(task.id)}`,
+          branch: `doop/new-screen-${idSlug(task.id)}`,
           agent: 'claude',
           model: 'opus',
           effort: 'high',
@@ -169,9 +163,9 @@ describe('createDevTask', () => {
     expect(args.prompt).toContain(`get_handoff({ task_id: "${task.id}" })`)
     expect(args.prompt).toContain('update_dev_task')
     expect(args.comment).toContain(`/c/${canvas.id}?frame=${frame.id}`)
-    /* nothing on the row carries a path or the pack itself */
+    /* nothing on the row carries a path or the brief itself */
     const stored = await row(task.id)
-    expect(stored?.handoff.changeId).toBe('new-screen-a1b2')
+    expect(stored?.handoff.title).toBe('New screen')
     expect(JSON.stringify(task)).not.toContain('/Users/')
     expect(broadcasts.at(-1)).toMatchObject({ canvasId: canvas.id, msg: { type: 'dev-task', task: { id: task.id } } })
   })
@@ -182,7 +176,7 @@ describe('createDevTask', () => {
       canvasId: canvas.id,
       frameIds: [frame.id],
       frameRevision: null,
-      pack: fakePack(),
+      brief: fakeBrief(),
       link: LINK,
       userId: 'user-without-device',
       userName: 'Ghost',
@@ -392,6 +386,68 @@ describe('applyAgentUpdate', () => {
   })
 })
 
+describe('devTaskSlug', () => {
+  /* the desktop shell's valid_branch (desktop/src-tauri/src/orca.rs):
+     [A-Za-z0-9._/-], no '..', no leading '-'/'/', no trailing '/'/'.'/'-' */
+  const branchOk = (branch: string) =>
+    branch.length > 0 &&
+    branch.length <= 200 &&
+    [...branch].every((c) => /[A-Za-z0-9._/-]/.test(c)) &&
+    !branch.includes('..') &&
+    !'-/'.includes(branch[0]!) &&
+    !'/.-'.includes(branch.at(-1)!)
+
+  const titles = [
+    'Checkout screen',
+    '',
+    '   ',
+    '—',
+    'Ünïcödé ✨ frame',
+    'a'.repeat(80),
+    'trailing dash—',
+    '..dots..',
+    'slash/inside',
+    'Version 2.0 (final)',
+  ]
+  const ids = [
+    'abcDEF1234',
+    'abcdef123-', // nanoid's '-' as the last character
+    '----------',
+    '__________',
+    '-_-_-_-_-_',
+    'a/b.c d',
+    'XYZ-123_zy',
+    '',
+    'x'.repeat(40),
+    /* nanoid's real alphabet at many deterministic positions */
+    ...Array.from({ length: 64 }, (_, i) =>
+      Array.from(
+        { length: 10 },
+        (__, k) => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-'[(i * 17 + k * 29) % 64],
+      ).join(''),
+    ),
+  ]
+
+  it('keeps doop/<slug> inside the shell’s branch rules for every input', () => {
+    for (const title of titles)
+      for (const id of ids) {
+        const branch = `doop/${devTaskSlug(title, id)}`
+        expect(branchOk(branch), `${JSON.stringify(title)} / ${JSON.stringify(id)} -> ${branch}`).toBe(true)
+      }
+  })
+
+  it('strips the id to [a-z0-9] so the suffix can never end in a dash', () => {
+    expect(devTaskSlug('Billing screen', 'abcdef123-')).toBe('billing-screen-abcdef123')
+    expect(devTaskSlug('Billing screen', '_AbC-Def_')).toBe('billing-screen-abcdef')
+    expect(devTaskSlug('', 'x1')).toBe('task-x1')
+    expect(devTaskSlug('—', 'ab12')).toBe('task-ab12')
+    /* an all-punctuation id still yields a valid, non-empty slug */
+    expect(devTaskSlug('Checkout', '----____')).toBe('checkout-x')
+    /* two launches of one frame still differ */
+    expect(devTaskSlug('Checkout', 'id00000001')).not.toBe(devTaskSlug('Checkout', 'id00000002'))
+  })
+})
+
 describe('state mapping', () => {
   const base = { state: 'working', agentState: null } as typeof frameDevTasks.$inferSelect
   it('maps trimmed worktree ps rows', () => {
@@ -448,7 +504,7 @@ describe('cancel', () => {
       canvasId: canvas.id,
       frameIds: [frame.id],
       frameRevision: null,
-      pack: fakePack(),
+      brief: fakeBrief(),
       link: LINK,
       userId: owner.id,
       userName: owner.name,
@@ -509,16 +565,15 @@ describe('failStaleDevTasks', () => {
 })
 
 describe('MCP tools', () => {
-  it('get_handoff hands the requester’s agent the stored pack', async () => {
+  it('get_handoff hands the requester’s agent the stored brief', async () => {
     const { task } = await launch([frame.id])
     const mcp = await mcpFor(owner.id)
     const result = await mcp.call('get_handoff', { task_id: task.id })
     const content = result.content as { type: string; text?: string; data?: string; mimeType?: string }[]
     const header = JSON.parse(content[0]!.text!)
     expect(header.task).toMatchObject({ id: task.id, canvasId: canvas.id, frameIds: [frame.id] })
-    expect(header.files).toContain('.workflow/changes/new-screen-a1b2/spec.md')
-    const spec = content.find((b) => b.type === 'text' && b.text!.startsWith('--- '))
-    expect(spec?.text).toContain('AC-1: it works')
+    expect(header.title).toBe('New screen')
+    expect(header.frames).toEqual([{ id: 'frame-1', name: 'Checkout', width: 800, height: 600 }])
     const png = content.find((b) => b.type === 'image')
     expect(png).toMatchObject({ mimeType: 'image/png', data: 'aGVsbG8=' })
     await mcp.close()
@@ -559,7 +614,7 @@ describe('MCP tools', () => {
       canvasId: canvas.id,
       frameIds: [frame.id],
       frameRevision: null,
-      pack: fakePack(),
+      brief: fakeBrief(),
       link: LINK,
       userId: 'user-2',
       userName: 'Agent Two',

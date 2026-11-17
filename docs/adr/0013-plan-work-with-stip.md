@@ -4,7 +4,7 @@ One architecture decision for Diazo. Read by anyone, human or agent, about to ch
 
 ## Status
 
-Accepted, updated 2026-11-16.
+Superseded: the product no longer builds or writes Stip packs — the change workflow described below remains Diazo's own dev process only.
 
 ## Context
 

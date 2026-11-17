@@ -43,7 +43,6 @@
     "allow-repo-list",
     "allow-repo-read",
     "allow-repo-search",
-    "allow-repo-write-change",
     "allow-repo-apply-patch",
     "allow-orca-status",
     "allow-orca-resolve-repo",

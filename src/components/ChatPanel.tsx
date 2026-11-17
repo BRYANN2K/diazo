@@ -32,7 +32,6 @@ import { Avatar } from './ui/avatar'
 import { Chip } from './ui/chip'
 import { Kbd } from './ui/kbd'
 import { StatusLabel } from './ui/status-label'
-import { HandoffModal } from './HandoffModal'
 import { Note } from './ui/note'
 import {
   ArrowDownIcon,
@@ -518,7 +517,6 @@ function PlanCard({ message, plan }: { message: ChatMessage; plan: ChatPlan }) {
   const t = useT()
   const [editing, setEditing] = useState(false)
   const [revising, setRevising] = useState(false)
-  const [handoffOpen, setHandoffOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const open = isOpenPlan(plan)
 
@@ -597,17 +595,6 @@ function PlanCard({ message, plan }: { message: ChatMessage; plan: ChatPlan }) {
                   name: plan.launchedBy ?? '',
                 })}
               </span>
-              {canEdit && canvasId && (
-                <Button
-                  variant="bare"
-                  size="pill"
-                  className="ml-auto flex-none"
-                  title={t('handoff.actionTitle')}
-                  onClick={() => setHandoffOpen(true)}
-                >
-                  {t('handoff.action')}
-                </Button>
-              )}
             </div>
           )}
           {open && canEdit && (
@@ -651,13 +638,6 @@ function PlanCard({ message, plan }: { message: ChatMessage; plan: ChatPlan }) {
             </div>
           )}
           {open && revising && canEdit && canvasId && <ReviseField canvasId={canvasId} message={message} />}
-          {handoffOpen && canvasId && (
-            <HandoffModal
-              canvasId={canvasId}
-              input={{ planMessageId: message.id }}
-              onClose={() => setHandoffOpen(false)}
-            />
-          )}
         </>
       )}
     </Card>

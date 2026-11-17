@@ -81,8 +81,7 @@ import { capture, captureThrottled } from './analytics.ts'
 import { renderFrame } from './screenshot.ts'
 import { lintAndStore } from './lint.ts'
 import { checkAndStore, checkOutcomeForAgent } from './frameChecks.ts'
-import { buildHandoffPack, HandoffError } from './handoff.ts'
-import { applyAgentUpdate, devTaskFor, devTasksForCanvas, handoffFor } from './devTasks.ts'
+import { applyAgentUpdate, briefFor, devTaskFor, devTasksForCanvas } from './devTasks.ts'
 import { DEV_TASK_PUSH_STATES, DEV_TASK_SUMMARY_CHARS } from '../shared/devTasks.ts'
 import {
   CodeLinkError,
@@ -162,7 +161,7 @@ You MUST call get_guide({ topic: "diazo-instructions" }) once before using other
 
 - Context first: call get_canvas before adding or editing frames.
 - Implementation handoff: get_canvas and get_frame expose approvalStatus (draft, ready_for_dev, needs_review) and human approval attribution. Use get_canvas with approval_status="ready_for_dev" to find approved screens. Re-read get_frame before implementing; only ready_for_dev is current sign-off. HTML or size edits invalidate approval. Approval does not automatically start an implementation task; follow the human's implementation request.
-- Dev tasks: a prompt naming a dev task id was launched from a signed-off frame. Call get_handoff({ task_id }) for its Stip pack and report progress with update_dev_task; get_canvas lists a canvas's dev tasks.
+- Dev tasks: a prompt naming a dev task id was launched from a signed-off frame. Call get_handoff({ task_id }) for its brief and report progress with update_dev_task; get_canvas lists a canvas's dev tasks.
 - Element links: /c/<canvas_id>?frame=<frame_id>&element=<element_id> identifies one element: the one carrying data-doop-id="<element_id>" in that frame's HTML. Read get_canvas and get_frame and find that attribute before applying the feedback. If no element carries the id any more, ask for an updated reference.
 - Keep data-doop-* attributes on every element you rewrite: data-doop-id is how comments and links point at an element, data-doop-on / data-doop-action carry prototype wiring, data-doop-locked a layer lock. Drop one only together with its element.
 - Identity: pick an agent_name and reuse the SAME name on every call — your presence and edits are attributed live.
@@ -3621,68 +3620,26 @@ export function buildMcpServer(
     },
   )
 
-  server.registerTool(
-    'create_handoff',
-    {
-      title: 'Build a Stip handoff pack',
-      description:
-        "Draft a Stip change pack ('Ready for dev') from canvas frames: proposal.md, spec.md with - AC-n: criteria, tasks.md, evidence.md, state.json, tokens.json (the canvas's design tokens) and PNG exports under assets/, all under .workflow/changes/<id>/. The pack is RETURNED, never written — write it into the linked project yourself (every file must be new). Pass your own proposal/spec/tasks to write the contract yourself; otherwise a template drafts the criteria. Frame ids pick which frames are exported (up to 6); without any, every non-demo frame goes.",
-      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-      inputSchema: {
-        canvas_id: z.string(),
-        frame_ids: z.array(z.string()).max(24).optional().describe('Frames to export; omit for all non-demo frames'),
-        title: z.string().max(200).optional().describe('Pack title — also seeds the change id'),
-        change_id: z
-          .string()
-          .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
-          .max(100)
-          .optional()
-          .describe('The Stip change id (lowercase slug); one is minted when omitted'),
-        proposal: z.string().max(60000).optional().describe('Your own proposal.md, replacing the drafted one'),
-        spec: z.string().max(60000).optional().describe('Your own spec.md — keep the "- AC-n:" criteria lines'),
-        tasks: z.string().max(60000).optional().describe('Your own tasks.md'),
-        agent_name: agentName.optional(),
-      },
-    },
-    async ({ canvas_id, frame_ids, title, change_id, proposal, spec, tasks, agent_name }) => {
-      if (!canvasFor(canvas_id, 'view')) return noCanvas(canvas_id)
-      arrive(canvas_id, agent_name)
-      try {
-        const pack = await buildHandoffPack(canvas_id, {
-          frameIds: frame_ids,
-          title,
-          changeId: change_id,
-          docs: proposal || spec || tasks ? { proposal, spec, tasks } : undefined,
-          codeLinks: await listCodeLinks(canvas_id).catch(() => []),
-        })
-        return text(pack)
-      } catch (e) {
-        if (e instanceof HandoffError) return err(e.message)
-        return err(`handoff failed: ${e instanceof Error ? e.message : String(e)}`)
-      }
-    },
-  )
-
   /* get_handoff / update_dev_task: the Orca coding agent's side of a dev
-     task (docs/orca.md). The pack it builds from never touches the
+     task (docs/orca.md). The brief it serves never touches the
      worktree — it arrives here, over MCP, and only for the requester's own
      credentials. */
 
   server.registerTool(
     'get_handoff',
     {
-      title: 'Get a dev task’s handoff pack',
+      title: 'Get a dev task’s brief',
       description:
-        "Read the handoff pack stored for a dev task ('Send to Orca'): the task's id, canvas, frames, state and Stip change id, then every file — proposal/spec/tasks/state.json/tokens as text, the frame PNG exports as image blocks. Call it with the task_id your launch prompt names, before writing any code, and implement against spec.md's AC list. Only the account that launched the task may read its pack.",
+        "Read the brief stored for a dev task ('Send to Orca'): the task's id, canvas, frames and state, then the brief itself — title, the plan text when the launch carried one, the canvas's design tokens and code links as JSON, and each frame's PNG export as an image block. Call it with the task_id your launch prompt names, before writing any code. Only the account that launched the task may read its brief.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: { task_id: z.string() },
     },
     async ({ task_id }) => {
-      const found = await handoffFor(task_id)
+      const found = await briefFor(task_id)
       if (!found) return err(`no dev task ${task_id} — the id comes from the launch prompt`)
-      const { row, pack } = found
+      const { row, brief } = found
       if (!ownerId || row.requestedByUserId !== ownerId)
-        return err('only the account that launched this dev task may read its handoff')
+        return err('only the account that launched this dev task may read its brief')
       if (!canvasFor(row.canvasId, 'view')) return noCanvas(row.canvasId)
       const content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [
         {
@@ -3694,23 +3651,21 @@ export function buildMcpServer(
                 canvasId: row.canvasId,
                 frameIds: row.frameIds,
                 state: row.state,
-                handoffChangeId: row.handoffChangeId,
               },
-              title: pack.title,
-              changeId: pack.changeId,
-              dir: pack.dir,
-              draftedBy: pack.draftedBy,
-              warnings: pack.warnings,
-              files: pack.files.map((f) => f.path),
+              title: brief.title,
+              plan: brief.plan,
+              tokens: brief.tokens,
+              codeLinks: brief.codeLinks,
+              warnings: brief.warnings,
+              frames: brief.frames.map((f) => ({ id: f.id, name: f.name, width: f.width, height: f.height })),
             },
             null,
             2,
           ),
         },
       ]
-      for (const file of pack.files) {
-        if (file.text !== undefined) content.push({ type: 'text' as const, text: `--- ${file.path} ---\n${file.text}` })
-        else if (file.base64) content.push({ type: 'image' as const, data: file.base64, mimeType: 'image/png' })
+      for (const frame of brief.frames) {
+        if (frame.png) content.push({ type: 'image' as const, data: frame.png, mimeType: 'image/png' })
       }
       return { content }
     },

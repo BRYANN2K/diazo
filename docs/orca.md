@@ -10,8 +10,8 @@ shows the task's live state until the PR.
 
 The split of trust:
 
-- **Diazo server** keeps `frame_dev_tasks` rows, builds the handoff pack and
-  broadcasts `dev-task` to the room. It never learns a worktree path.
+- **Diazo server** keeps `frame_dev_tasks` rows, builds the brief stored on
+  the task and broadcasts `dev-task` to the room. It never learns a worktree path.
 - **Desktop shell** (`desktop/src-tauri/src/orca.rs`) is the only place that
   runs `orca` — typed commands behind `window.__DIAZO_ORCA__` /
   `__DOOP_ORCA__`, argv vectors never shell strings, a native confirmation
@@ -22,9 +22,10 @@ The split of trust:
 
 ## The flow
 
-1. `POST /api/frames/:id/dev-tasks` builds the handoff pack (same
-   `server/handoff.ts` as the Stip export), creates a `queued` row and
-   hands a `dev_task` job to the requester's desktop over the
+1. `POST /api/frames/:id/dev-tasks` builds the brief
+   (`buildDevTaskBrief` in `server/devTasks.ts`: the frame's PNG export,
+   the canvas's design tokens and its code links), creates a `queued` row
+   and hands a `dev_task` job to the requester's desktop over the
    `/api/local-repo/poll` bridge — only a device holding the canvas's repo
    link grant may claim it.
 2. The shell resolves the grant folder to an Orca repo (`orca repo list`),
@@ -50,9 +51,9 @@ The split of trust:
 - `POST …/dev-tasks` requires the frame's `approval.status` to be
   `ready_for_dev` and the caller to hold a repo link on the canvas whose
   device is online — else `409`. `environment` is an Orca environment name
-  (`vps`); absent launches on this Mac. Answers `503` when the pack cannot
-  build, and is rate limited (5 launches per user per minute, `429`) —
-  every call builds a pack before the device's confirm gates it.
+  (`vps`); absent launches on this Mac. Answers `503` when the frame's html
+  is not loaded, and is rate limited (5 launches per user per minute,
+  `429`) — every call builds a brief before the device's confirm gates it.
   `model`/`effort` are charset-checked here already
   (`[a-z0-9._:-]+`, no leading `-`), and `effort` needs `model`.
 - `report` accepts only the requester's session; the first report binds the
@@ -110,10 +111,10 @@ TTL are swept to `failed` at boot and once a minute.
 
 ## MCP tools (the coding agent's side)
 
-| Tool              | Input                                                               | Returns                                                                                        |
-| ----------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `get_handoff`     | `{ task_id }`                                                       | the stored pack: task meta + `pack.files` — text files as text, `assets/*.png` as image blocks |
-| `update_dev_task` | `{ task_id, state?, pr_url?, summary?, orca_session_id?, branch? }` | the updated task                                                                               |
+| Tool              | Input                                                               | Returns                                                                                                |
+| ----------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `get_handoff`     | `{ task_id }`                                                       | the stored brief: task meta + title/plan/tokens/code links as JSON, each frame's PNG as an image block |
+| `update_dev_task` | `{ task_id, state?, pr_url?, summary?, orca_session_id?, branch? }` | the updated task                                                                                       |
 
 `update_dev_task` requires the caller to be the task's requester (the agent
 runs with their Diazo MCP credentials) and to still have access to the

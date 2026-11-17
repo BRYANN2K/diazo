@@ -1,4 +1,4 @@
-import type { HandoffPack } from './handoff.ts'
+import type { describeTokens } from './designTokens.ts'
 
 /**
  * A dev task: one launch of a coding agent into an Orca worktree, sent from
@@ -54,13 +54,11 @@ export const DEV_TASK_COMMENT_CHARS = 500
 /** How long a queued launch may sit before it counts as lost. */
 export const DEV_TASK_LAUNCH_TTL_MS = 10 * 60_000
 
-/** The task as the room, REST and MCP see it — never the pack or a path. */
+/** The task as the room, REST and MCP see it — never the brief or a path. */
 export interface DevTask {
   id: string
   canvasId: string
   frameIds: string[]
-  /** the Stip change id the stored handoff pack was built under */
-  handoffChangeId: string
   /** `approval.approvedFrameUpdatedAt` at launch — an older value than the
    *  frame's current approval means the design moved since the build */
   frameRevision: number | null
@@ -114,9 +112,9 @@ export interface DevTaskDrift {
  *  nothing here is a shell string. */
 export interface DevTaskLaunchArgs {
   taskId: string
-  /** Orca worktree name — `doop-<changeId>` */
+  /** Orca worktree name — `doop-<slug>` (devTaskSlug) */
   worktreeName: string
-  /** git branch — `doop/<changeId>` */
+  /** git branch — `doop/<slug>` */
   branch: string
   agent: string
   model?: string
@@ -213,18 +211,13 @@ export interface DevTaskAgentUpdate {
 /* ------------------------------------------------------------------ */
 
 /** The launch's `--prompt` — deliberately short: the confirmation shows it
- *  whole and the pack itself travels over MCP, never through argv. */
-export function devTaskPrompt(input: {
-  canvasId: string
-  frameIds: string[]
-  taskId: string
-  changeId: string
-}): string {
+ *  whole and the brief itself travels over MCP, never through argv. */
+export function devTaskPrompt(input: { canvasId: string; frameIds: string[]; taskId: string }): string {
   return [
     'You are implementing a design signed off in Diazo.',
-    `Canvas ${input.canvasId}, frame(s) ${input.frameIds.join(', ')}, dev task ${input.taskId}, Stip change ${input.changeId}.`,
-    `1. Call the Diazo MCP tool get_handoff({ task_id: "${input.taskId}" }) and follow spec.md's AC list.`,
-    '2. Read get_frame and get_tokens for exact values; respect code-links.json.',
+    `Canvas ${input.canvasId}, frame(s) ${input.frameIds.join(', ')}, dev task ${input.taskId}.`,
+    `1. Call the Diazo MCP tool get_handoff({ task_id: "${input.taskId}" }) for the brief — the frame's PNG export, the canvas's design tokens and its code links.`,
+    '2. Read get_frame and get_tokens for exact values; respect the code links.',
     '3. Report with update_dev_task when you open a PR and when you finish (one-line summary).',
     'If the Diazo MCP is not connected, say so and stop.',
   ].join('\n')
@@ -241,11 +234,47 @@ export function devTaskComment(input: { canvasUrl: string; frameId: string; task
 /* MCP                                                                 */
 /* ------------------------------------------------------------------ */
 
-/** What `get_handoff` answers: the stored pack plus enough context to know
- *  what it is for. PNG files come back as image content blocks. */
+/** The brief stored on a dev task at launch — what `get_handoff` serves
+ *  the coding agent. Plain content, no repo write: the frame's PNG export,
+ *  the canvas's design tokens and its code links. */
+export interface DevTaskBrief {
+  title: string
+  canvasId: string
+  /** the chat plan's text when the launch carried one */
+  plan?: string
+  /** one entry per frame the brief covers; `png` is the base64 export,
+   *  absent when its render failed (see warnings) */
+  frames: { id: string; name: string; width: number; height: number; png?: string }[]
+  /** describeTokens() output plus theme names — absent on a tokenless canvas */
+  tokens?: { tokens: ReturnType<typeof describeTokens>; themes?: string[] }
+  /** the canvas's component ↔ file mappings narrowed to the brief's frames */
+  codeLinks?: { kind: 'frame' | 'component'; name: string; path: string; export?: string }[]
+  /** non-fatal build notes — a frame whose render failed */
+  warnings: string[]
+}
+
+/** A slug for the launch's worktree name and branch: the title kebab-cased
+ *  plus the task id so two launches of one frame still differ. The id drops
+ *  to [a-z0-9] — nanoid's alphabet carries '-' and '_', and a branch ending
+ *  in '-' is one the shell's valid_branch refuses. */
+export function devTaskSlug(title: string, taskId: string): string {
+  const slug = title
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+    .replace(/-+$/g, '')
+  const id = taskId.toLowerCase().replace(/[^a-z0-9]/g, '')
+  return `${slug || 'task'}-${id || 'x'}`
+}
+
+/** What `get_handoff` answers: the stored brief plus enough context to know
+ *  what it is for. Frame PNGs come back as image content blocks. */
 export interface DevTaskHandoff {
-  task: Pick<DevTask, 'id' | 'canvasId' | 'frameIds' | 'state' | 'handoffChangeId'>
-  pack: HandoffPack
+  task: Pick<DevTask, 'id' | 'canvasId' | 'frameIds' | 'state'>
+  brief: DevTaskBrief
 }
 
 export function isDevTaskState(value: unknown): value is DevTaskState {

@@ -170,7 +170,7 @@ export async function setCodeLinkTool(
 }
 
 export const SET_CODE_LINK_DESCRIPTION =
-  'Record where a component or a frame lives in the linked repo: a repo-relative file path plus the export name (Button, or default). Implementers read it in get_component, get_frame and the Stip handoff pack. It writes nothing to the repo. Pass path null to clear the mapping.'
+  'Record where a component or a frame lives in the linked repo: a repo-relative file path plus the export name (Button, or default). Implementers read it in get_component, get_frame and a dev task’s brief. It writes nothing to the repo. Pass path null to clear the mapping.'
 
 /** get_component's mapping, added to its answer (MCP and resident alike). */
 export async function componentCodeLink(canvasId: string, componentId: string) {

@@ -11,13 +11,12 @@ import { deleteFrameTracked, recordUpdate, trackSave } from '../lib/history'
 import { setFramesLocked } from '../lib/layerEdits'
 import { FrameHistoryModal } from './FrameHistoryModal'
 import { FrameApprovalControl } from './FrameApproval'
-import { HandoffModal } from './HandoffModal'
 import { CodeLinkSection } from './CodeLinkSection'
 import { FrameCodeModal } from './FrameCodeModal'
 import { cn } from '@/lib/utils'
 import { Panel, PanelClose, PanelHeader, type PanelSurface } from './ui/panel'
 import { Collapsible, CollapsibleContent } from './ui/collapsible'
-import { ArrowRightIcon, CopyIcon, DownloadIcon, FrameIcon, LockIcon } from './ui/icons'
+import { CopyIcon, DownloadIcon, FrameIcon, LockIcon } from './ui/icons'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Textarea } from './ui/textarea'
@@ -69,7 +68,6 @@ export function Inspector({
   /* what the frame actually renders at: a huge frame caps a large pick */
   const exportScale = fitExportScale(frame, exportSettings.scale)
   const [historyOpen, setHistoryOpen] = useState(false)
-  const [handoffOpen, setHandoffOpen] = useState(false)
   const [codeOpen, setCodeOpen] = useState(false)
   const [htmlCopy, setHtmlCopy] = useState<'idle' | 'copied' | 'failed'>('idle')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -239,17 +237,6 @@ export function Inspector({
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <InspectorGroup title={t('inspector.groupDevelopment')}>
           <FrameApprovalControl key={frame.id} frame={frame} hasUnsavedChanges={saveState === 'dirty'} />
-          {canEdit && (
-            <Button
-              variant="bare"
-              className={cn(fillBtn, 'mt-1.5 w-full gap-1.5')}
-              title={t('handoff.actionTitle')}
-              onClick={() => setHandoffOpen(true)}
-            >
-              <ArrowRightIcon className="size-3.5" />
-              {t('handoff.action')}
-            </Button>
-          )}
           {canEdit && (
             <Button
               variant="bare"
@@ -455,13 +442,6 @@ export function Inspector({
       </footer>
       {codeOpen && <FrameCodeModal frameId={frame.id} onClose={() => setCodeOpen(false)} />}
       {historyOpen && <FrameHistoryModal frame={frame} onClose={() => setHistoryOpen(false)} />}
-      {handoffOpen && (
-        <HandoffModal
-          canvasId={frame.canvasId}
-          input={{ frameIds: [frame.id] }}
-          onClose={() => setHandoffOpen(false)}
-        />
-      )}
     </Panel>
   )
 }
