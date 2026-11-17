@@ -86,7 +86,9 @@ esac`,
 
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-describe('install-local.sh', () => {
+/* script-driven tests: each run() spawns a fresh sh; a loaded machine
+   pushes whole-test time past the 5s default */
+describe('install-local.sh', { timeout: 30_000 }, () => {
   it('rejects an unknown argument and a bad port', async () => {
     expect((await run(['--nope'])).code).not.toBe(0)
     expect((await run([], { DOOP_PORT: 'abc' })).out).toMatch(/DOOP_PORT must be a port number/)

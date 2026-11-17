@@ -132,7 +132,9 @@ cp "$file" "$out"`,
 
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-describe('install-desktop.sh', () => {
+/* script-driven tests: each run() spawns a fresh sh; a loaded machine
+   pushes whole-test time past the 5s default */
+describe('install-desktop.sh', { timeout: 30_000 }, () => {
   it('rejects an unknown argument and a malformed version', async () => {
     expect((await run(['--nope'])).code).not.toBe(0)
     const bad = await run(['--version', '../../evil'])

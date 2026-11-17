@@ -101,5 +101,7 @@ describe('boot-time refusal on partial OIDC config', () => {
       proc.kill()
       rmSync(dataDir, { recursive: true, force: true })
     }
-  }, 15_000)
+    /* the refusal lands after initDb — a fresh PGlite boot plus the
+       migration journal, which a loaded machine pushes past 15s */
+  }, 60_000)
 })

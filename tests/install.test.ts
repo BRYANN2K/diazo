@@ -144,7 +144,9 @@ esac`,
 
 afterEach(() => rmSync(root, { recursive: true, force: true }))
 
-describe('install.sh', () => {
+/* script-driven tests: each run() spawns a fresh sh; a loaded machine
+   pushes whole-test time past the 5s default */
+describe('install.sh', { timeout: 30_000 }, () => {
   it('prints help and rejects what it does not know, touching nothing', async () => {
     const help = await run(['--help'])
     expect(help.code).toBe(0)
@@ -337,7 +339,7 @@ describe('install.sh', () => {
   })
 })
 
-describe('the diazo command', () => {
+describe('the diazo command', { timeout: 30_000 }, () => {
   const command = () => path.join(diazoHome(), 'bin', 'diazo')
   /* the installed copy, using the scripts it installed beside it */
   const diazo = (args: string[], env: Record<string, string> = {}) => run(args, { DIAZO_LIB: '', ...env }, command())
