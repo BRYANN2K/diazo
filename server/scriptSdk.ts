@@ -97,8 +97,8 @@ export interface ScriptRunContext {
   changedFrames?: Set<string>
 }
 
-/** key -> canonical-JSON projection of one undoable entity */
-type UndoSnapshot = Map<string, string>
+/** key -> projected undo copy of one entity */
+type UndoSnapshot = Map<string, unknown>
 
 const UNDO_KINDS: readonly { kind: ScriptEntityUndo['kind']; entries: (c: Canvas) => [string, unknown][] }[] = [
   { kind: 'frame', entries: (c) => c.frames.map((f) => [f.id, f]) },
@@ -109,19 +109,46 @@ const UNDO_KINDS: readonly { kind: ScriptEntityUndo['kind']; entries: (c: Canvas
 
 const undoKey = (kind: ScriptEntityUndo['kind'], id: string) => `${kind}:${id}`
 
-function canonEntity(kind: ScriptEntityUndo['kind'], entity: unknown): string | undefined {
+/** A restorable copy of one entity. Scalars and strings — a frame's html is
+ *  the common payload — stay shared references, which is free and safe
+ *  (strings are immutable); only nested objects are cloned, since a mutator
+ *  could reach into one without replacing the field. */
+function undoCopy(kind: ScriptEntityUndo['kind'], entity: unknown): unknown {
   const projected = scriptUndoProjection(kind, entity)
-  return projected === undefined ? undefined : canonicalJson(projected)
+  if (projected === null || typeof projected !== 'object') return projected
+  const copy: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(projected as Record<string, unknown>)) {
+    copy[key] = value !== null && typeof value === 'object' ? structuredClone(value) : value
+  }
+  return copy
+}
+
+/** Two snapshots of the same entity, without serialising first. Fields
+ *  compare by identity; only object fields (token themes, component props)
+ *  fall back to canonical JSON. */
+function sameEntity(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true
+  if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false
+  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const av = (a as Record<string, unknown>)[key]
+    const bv = (b as Record<string, unknown>)[key]
+    if (Object.is(av, bv)) continue
+    if (av !== null && bv !== null && typeof av === 'object' && typeof bv === 'object') {
+      if (canonicalJson(av) === canonicalJson(bv)) continue
+    }
+    return false
+  }
+  return true
 }
 
 function undoSnapshot(canvas: Canvas): UndoSnapshot {
   const snap: UndoSnapshot = new Map()
   for (const { kind, entries } of UNDO_KINDS)
     for (const [id, entity] of entries(canvas)) {
-      const canon = canonEntity(kind, entity)
-      if (canon !== undefined) snap.set(undoKey(kind, id), canon)
+      const copy = undoCopy(kind, entity)
+      if (copy !== undefined) snap.set(undoKey(kind, id), copy)
     }
-  const themes = canonEntity('tokenThemes', canvas.tokenThemes)
+  const themes = undoCopy('tokenThemes', canvas.tokenThemes)
   if (themes !== undefined) snap.set('tokenThemes:', themes)
   return snap
 }
@@ -136,17 +163,17 @@ function undoDiff(ctx: ScriptRunContext, snap: UndoSnapshot, canvas: Canvas): vo
   for (const key of new Set([...snap.keys(), ...cur.keys()])) {
     const prev = snap.get(key)
     const next = cur.get(key)
-    if (prev === next) continue
+    if (sameEntity(prev, next)) continue
     const cut = key.indexOf(':')
     const kind = key.slice(0, cut) as ScriptEntityUndo['kind']
     const id = key.slice(cut + 1)
     let entry = ctx.undo.get(key)
     if (!entry) {
-      entry = { kind, id, ...(prev === undefined ? {} : { before: JSON.parse(prev) }) }
+      entry = { kind, id, ...(prev === undefined ? {} : { before: prev }) }
       ctx.undo.set(key, entry)
     }
     if (next === undefined) delete entry.after
-    else entry.after = JSON.parse(next)
+    else entry.after = next
   }
 }
 

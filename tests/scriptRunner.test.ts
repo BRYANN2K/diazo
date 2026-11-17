@@ -15,8 +15,13 @@ vi.mock('../server/db/persist.ts', () => ({
   saveCompositionVersion: vi.fn(),
   loadFrameHtml: async () => [],
 }))
+vi.mock('../shared/canonicalJson.ts', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('../shared/canonicalJson.ts')>()
+  return { ...orig, canonicalJson: vi.fn(orig.canonicalJson) }
+})
 import { store } from '../server/store.ts'
 import * as actions from '../server/actions.ts'
+import { canonicalJson } from '../shared/canonicalJson.ts'
 import { executeScript, revertScriptRun, scriptRunRate, type ScriptCaller } from '../server/scriptRunner.ts'
 import { scriptRunDeps, type StoredScriptRun } from '../server/scriptRuns.ts'
 import { reloadEnv } from '../server/env.ts'
@@ -156,6 +161,49 @@ it('refuses scripts when disabled and canvas access after revocation', async () 
   await expect(executeScript({ script: 'return 1' }, { ...caller, userId: 'stranger' }, false)).rejects.toThrow(
     /access/,
   )
+})
+
+it('serialises only the entities a write touched for undo', async () => {
+  /* a frame the run never changes: under the old whole-canvas diff its html
+     was canonicalised twice for every write */
+  actions.createFrame(
+    caller.canvasId,
+    { name: 'Other', html: '<p>x</p>'.repeat(500), width: 100, height: 100 },
+    caller.actor,
+  )
+  const canon = vi.mocked(canonicalJson)
+  canon.mockClear()
+  const result = await executeScript({ script: edit() }, caller, true)
+  expect(result.ok).toBe(true)
+  /* the lazy pre-image never reaches JSON on a scalar-only change */
+  expect(canon).not.toHaveBeenCalled()
+})
+
+it('reverts writes and frees the idempotency key when the audit row is refused', async () => {
+  const before = store.getFrame(frameId)!.html
+  /* the bare record lands, then the full row (response + undo) is refused */
+  let saves = 0
+  vi.spyOn(scriptRunDeps, 'save').mockImplementation(async (run) => {
+    saves++
+    if (saves > 1) throw new Error('value too long')
+    rows.set(run.record.id, structuredClone(run))
+  })
+  const released: string[] = []
+  vi.spyOn(scriptRunDeps, 'release').mockImplementation(async (id) => {
+    released.push(id)
+    const row = rows.get(id)
+    if (row) row.record.idempotencyKey = null
+  })
+  const result = await executeScript({ script: edit(), idempotency_key: 'k1' }, caller, true)
+  expect(result.ok).toBe(false)
+  expect(result.error).toMatch(/too long/)
+  expect(store.getFrame(frameId)!.html).toBe(before)
+  expect(released).toEqual([result.run_id])
+  /* the key is free — a retry is not locked out by the dead row */
+  saves = 0
+  const retry = await executeScript({ script: `return 7`, idempotency_key: 'k1' }, caller, true)
+  expect(retry.ok).toBe(false)
+  expect(retry.error).not.toMatch(/interrupted|conflict/i)
 })
 
 it('refuses runs past the per-account rate', async () => {

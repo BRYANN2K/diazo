@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import { desc, eq } from 'drizzle-orm'
+import { desc, eq, inArray, isNull, lt } from 'drizzle-orm'
 import { db } from './db/index.ts'
 import { toolCalls } from './db/schema.ts'
 import { imageSize } from './imageSize.ts'
@@ -120,4 +120,41 @@ export async function toolCallReport(
 ): Promise<{ totals: ToolCallTotals; calls: ToolCallRecord[] }> {
   const calls = await listToolCalls(canvasId, limit)
   return { totals: toolCallTotals(calls), calls }
+}
+
+/** Ledger rows stay long enough for the Usage tab to be useful, then the
+ *  sweep drops them — same retention shape as script_runs. */
+export const TOOL_CALL_KEEP_DAYS = 30
+/** A busy canvas keeps its most recent calls even inside the window. */
+export const TOOL_CALL_KEEP_PER_CANVAS = 2_000
+
+/** Retention: drop calls older than the keep window, then trim every canvas
+ *  to its most recent keep count. Returns the number of rows removed. */
+export async function pruneToolCalls(now = Date.now()): Promise<number> {
+  let removed = 0
+  const cutoff = now - TOOL_CALL_KEEP_DAYS * 24 * 60 * 60 * 1000
+  removed += (await db.delete(toolCalls).where(lt(toolCalls.at, cutoff)).returning({ id: toolCalls.id })).length
+  const crowded = await db.select({ canvasId: toolCalls.canvasId }).from(toolCalls).groupBy(toolCalls.canvasId)
+  for (const { canvasId } of crowded) {
+    const ids = await db
+      .select({ id: toolCalls.id })
+      .from(toolCalls)
+      .where(canvasId === null ? isNull(toolCalls.canvasId) : eq(toolCalls.canvasId, canvasId))
+      .orderBy(desc(toolCalls.at))
+      .offset(TOOL_CALL_KEEP_PER_CANVAS)
+    if (ids.length) {
+      removed += (
+        await db
+          .delete(toolCalls)
+          .where(
+            inArray(
+              toolCalls.id,
+              ids.map((r) => r.id),
+            ),
+          )
+          .returning({ id: toolCalls.id })
+      ).length
+    }
+  }
+  return removed
 }

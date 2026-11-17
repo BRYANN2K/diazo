@@ -257,7 +257,33 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
     if (entries.length) saved.undo = entries
   }
   saved.response = result
-  await scriptRunDeps.save(saved)
+  try {
+    await scriptRunDeps.save(saved)
+  } catch (error) {
+    /* a refused audit row must not leave the writes live or the
+       idempotency key locked on a response that was never persisted */
+    if (!ctx.dryRun && ctx.undo?.size) {
+      const report = restoreScriptState([...ctx.undo.values()], caller.canvasId, actor)
+      if (report.unreverted.length) result.unreverted = report.unreverted
+    }
+    if (record.idempotencyKey) {
+      record.idempotencyKey = null
+      await scriptRunDeps.release(id).catch(() => {})
+    }
+    record.outcome = 'error'
+    record.error = `the audit row could not be stored: ${error instanceof Error ? error.message : String(error)}`
+    result = {
+      run_id: id,
+      ok: false,
+      error: record.error,
+      code: 'failed',
+      writes: record.writes,
+      checks: {},
+      ms: record.ms,
+      truncated: false,
+      ...(result.unreverted?.length ? { unreverted: result.unreverted } : {}),
+    }
+  }
   logActivity(caller.canvasId, actor, `script ${id}: ${record.outcome} (${record.writes.length} writes)`)
   return result
 }

@@ -4,6 +4,7 @@ import { queueServerRender, renderAccess } from './motionRender.ts'
 import { recoverSpeechJobs } from './speechJobs.ts'
 import { recoverBlenderOps } from './blenderOps.ts'
 import { scriptRunDeps, pruneScriptRuns } from './scriptRuns.ts'
+import { pruneToolCalls } from './toolCalls.ts'
 import * as libraries from './libraries.ts'
 import * as libraryThumbQueue from './libraryThumbQueue.ts'
 import * as libraryIndex from './libraryIndex.ts'
@@ -4784,8 +4785,8 @@ server.listen(PORT, () => {
     },
     Math.min(60_000, Math.max(1_000, env.CANVAS_IDLE_MS / 2)),
   ).unref()
-  /* audit retention: script_runs rows past their keep window are pruned
-     hourly so the table cannot grow without bound */
+  /* audit retention: script_runs and the per-call ledger prune hourly so
+     neither table grows without bound */
   setInterval(
     () => {
       void pruneScriptRuns()
@@ -4793,6 +4794,11 @@ server.listen(PORT, () => {
           if (dropped) console.log(`[script_runs] pruned ${dropped} old audit row(s)`)
         })
         .catch((error) => console.warn('[script_runs] prune failed', error))
+      void pruneToolCalls()
+        .then((dropped) => {
+          if (dropped) console.log(`[tool_calls] pruned ${dropped} old ledger row(s)`)
+        })
+        .catch((error) => console.warn('[tool_calls] prune failed', error))
     },
     60 * 60 * 1000,
   ).unref()

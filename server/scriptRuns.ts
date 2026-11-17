@@ -81,6 +81,11 @@ export const scriptRunDeps = {
     const [row] = await db.select({ record: scriptRuns.record }).from(scriptRuns).where(eq(scriptRuns.id, id)).limit(1)
     return row?.record
   },
+  /** Free a run's idempotency key — called when the final audit save is
+   *  refused, so the key cannot replay-lock a retry against a dead row. */
+  release: async (id: string) => {
+    await db.update(scriptRuns).set({ idempotencyKey: null }).where(eq(scriptRuns.id, id))
+  },
 }
 
 /** Retention: drop runs older than the keep window, then trim every canvas
