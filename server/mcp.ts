@@ -2189,6 +2189,7 @@ export function buildMcpServer(
     server.registerTool(
       tool.name,
       {
+        title: tool.title,
         description: tool.description,
         annotations: {
           readOnlyHint: tool.readOnly,
@@ -2216,6 +2217,7 @@ export function buildMcpServer(
     server.registerTool(
       tool.name,
       {
+        title: tool.title,
         description: tool.description,
         annotations: {
           readOnlyHint: tool.readOnly,

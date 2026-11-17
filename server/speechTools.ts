@@ -12,18 +12,21 @@ import { and, eq } from 'drizzle-orm'
 export const SPEECH_TOOLS = [
   {
     name: 'list_speech_engines',
+    title: 'List speech engines',
     description: 'List speech engines, install readiness and estimates. Local routing never falls back to cloud.',
     readOnly: true,
     shape: {},
   },
   {
     name: 'estimate_speech',
+    title: 'Estimate a speech job',
     description: 'Estimate speech cost before running. Cloud execution requires max_cost at least this estimate.',
     readOnly: true,
     shape: { request: speechRequestSchema },
   },
   {
     name: 'transcribe_clip',
+    title: 'Transcribe a clip',
     description:
       'Queue a word-timed transcript for media_id. Explicit cloud requests use your key and require seconds and max_cost. Poll get_transcript with job_id.',
     readOnly: false,
@@ -31,6 +34,7 @@ export const SPEECH_TOOLS = [
   },
   {
     name: 'generate_voiceover',
+    title: 'Generate a voice-over',
     description:
       'Queue voice-over and insert an audio clip with its recipe and words. Requires text, voice and page_id. Cloud requests require max_cost from estimate_speech.',
     readOnly: false,
@@ -38,12 +42,14 @@ export const SPEECH_TOOLS = [
   },
   {
     name: 'get_transcript',
+    title: 'Read a transcript',
     description: 'Read your speech job by job_id, or the transcript of media_id on this canvas.',
     readOnly: true,
     shape: { job_id: z.string().optional(), media_id: z.string().optional() },
   },
   {
     name: 'list_voices',
+    title: 'List your voices',
     description: 'List your local cloned voices. Voice samples remain on this instance.',
     readOnly: true,
     shape: {},

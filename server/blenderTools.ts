@@ -10,6 +10,7 @@ import { BLENDER_OP_ARGS, type BlenderOpTool } from '../shared/blender.ts'
 export const BLENDER_TOOLS = [
   {
     name: 'blender_get_scene',
+    title: 'Read the Blender scene',
     description:
       'Read the scene tree of the Blender session on your desktop (names, objects, materials). Queues a read op; poll get_blender_result.',
     readOnly: true,
@@ -18,6 +19,7 @@ export const BLENDER_TOOLS = [
   },
   {
     name: 'blender_get_object',
+    title: 'Read a Blender object',
     description: 'Read one object in the desktop Blender scene by name. Queues a read op; poll get_blender_result.',
     readOnly: true,
     tool: 'get_object_info',
@@ -25,6 +27,7 @@ export const BLENDER_TOOLS = [
   },
   {
     name: 'blender_set_material',
+    title: 'Set a Blender material',
     description:
       "Set an object's material in the desktop Blender scene. Needs the shell's write approval; poll get_blender_result.",
     readOnly: false,
@@ -33,6 +36,7 @@ export const BLENDER_TOOLS = [
   },
   {
     name: 'blender_add_light',
+    title: 'Add a Blender light',
     description:
       "Add a light to the desktop Blender scene (type POINT, SUN, SPOT or AREA). Needs the shell's write approval.",
     readOnly: false,
@@ -45,6 +49,7 @@ export const BLENDER_TOOLS = [
   },
   {
     name: 'blender_render_frame',
+    title: 'Render a Blender frame',
     description:
       "Render one frame of the desktop Blender scene to a file. Needs the shell's render approval; the shell picks the output path, the result reports it. Poll get_blender_result.",
     readOnly: false,
@@ -56,6 +61,7 @@ export const BLENDER_TOOLS = [
   },
   {
     name: 'get_blender_result',
+    title: 'Read a Blender result',
     description: 'Read your Blender op by op_id — queued, running, done or failed.',
     readOnly: true,
     tool: null,
