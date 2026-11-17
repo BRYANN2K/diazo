@@ -65,7 +65,9 @@ async function fetchCatalog(url: URL, headers: Record<string, string>, signal: A
 /** Messages models with image input and room for a full turn, newest first.
  *  The SDK pages through `/v1/models` itself and honours ANTHROPIC_BASE_URL. */
 async function anthropicModels(apiKey: string, signal: AbortSignal): Promise<ModelOption[]> {
-  const client = new Anthropic({ apiKey, maxRetries: 0 })
+  /* the person's key only: a null authToken keeps the server's
+     ANTHROPIC_AUTH_TOKEN from being sent beside it */
+  const client = new Anthropic({ apiKey, authToken: null, maxRetries: 0 })
   const models: (ModelOption & { createdAt: string })[] = []
   try {
     for await (const model of client.models.list({ limit: 1000 }, { signal })) {

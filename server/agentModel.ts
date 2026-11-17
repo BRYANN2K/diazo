@@ -394,7 +394,9 @@ function byoModel(account: ModelAccount): AgentModel {
   if (isCustomProviderKind(kind)) return customModel(account)
   if (kind === 'anthropic-key') {
     if (!account.apiKey) throw new ModelAuthError('Reconnect your Claude API key in Settings.')
-    const client = new Anthropic({ apiKey: account.apiKey })
+    /* the person's key only: a null authToken keeps the server's
+       ANTHROPIC_AUTH_TOKEN from being sent beside it */
+    const client = new Anthropic({ apiKey: account.apiKey, authToken: null })
     const model = accountModelFor(account)
     return {
       provider: account.kind,
