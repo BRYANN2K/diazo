@@ -1,6 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+import { env } from './env.ts'
 import { browserProfileDir } from './paths.ts'
 
 /**
@@ -16,7 +17,10 @@ import { browserProfileDir } from './paths.ts'
  *  - a watchdog `node -e` watches our pid and the browser's, reaping the
  *    group when the server disappears — the kill -9 case nothing can
  *    catch. It exits as soon as either side is gone, so it never piles up
- *    either. One watchdog per live browser.
+ *    either. One watchdog per live browser — skipped inside a container,
+ *    where the namespace dying with the server reaps the browser already
+ *    and the watchdog would be a spare `node` for a case that cannot
+ *    happen.
  *
  * A child that is closed politely is released: the watchdog is killed and
  * the pid leaves the map, so a later process that reuses the pid is never
@@ -72,7 +76,7 @@ export function guardProcessTree(child: ChildProcess, opts: { cleanupDir?: strin
     exitHookInstalled = true
     process.once('exit', reapAll)
   }
-  guarded.set(pid, { child, watchdog: spawnWatchdog(pid), cleanupDir: opts.cleanupDir })
+  guarded.set(pid, { child, watchdog: wantsWatchdog() ? spawnWatchdog(pid) : null, cleanupDir: opts.cleanupDir })
 }
 
 /** The browser went away by itself or through terminate(): stop watching
@@ -168,6 +172,20 @@ setInterval(() => {
   else if (!live(ppid)) reap()
 }, 1000)
 `
+
+/** Whether the kill -9 watchdog earns its spare `node` per live browser:
+ *  inside a container the pid namespace dies with the server — the kernel
+ *  reaps the browser for us — so the watchdog matters only on bare metal,
+ *  a dev checkout or the desktop sidecar. Read at call time so tests can
+ *  flip the variables. */
+export function wantsWatchdog(): boolean {
+  const install = env.DOOP_INSTALL
+  /* `local` is install-local.sh's single-container install: the same
+     namespace-teardown guarantee as docker/kubernetes */
+  if (install === 'docker' || install === 'kubernetes' || install === 'local') return false
+  if (env.KUBERNETES_SERVICE_HOST) return false
+  return !fs.existsSync('/.dockerenv')
+}
 
 /** A detached `node -e` watching our pid: when the server is gone — however
  *  it went — the browser's process group follows. Runs on the same runtime

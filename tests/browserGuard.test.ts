@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { sweepBrowserProfiles } from '../server/browserGuard.ts'
+import { sweepBrowserProfiles, wantsWatchdog } from '../server/browserGuard.ts'
 import { browserProfileDir } from '../server/paths.ts'
 import { findBrowserPath, launchBrowser } from '../server/screenshot.ts'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
@@ -25,7 +25,9 @@ const ROOT = process.cwd()
 const TSX = path.join(ROOT, 'node_modules', '.bin', 'tsx')
 const HELPER = path.join(ROOT, 'tests', 'fixtures', 'browserGuardHelper.ts')
 
-const posix = describe.skipIf(process.platform === 'win32')
+/* inside a container the watchdog is off by design (the namespace teardown
+   reaps the browser), so the kill -9 suite runs only where it is armed */
+const posix = describe.skipIf(process.platform === 'win32' || fs.existsSync('/.dockerenv'))
 
 function pidAlive(pid: number): boolean {
   try {
@@ -210,4 +212,24 @@ describe('sweepBrowserProfiles (server/browserGuard.ts)', () => {
       await browser.close()
     }
   }, 60_000)
+})
+
+describe('wantsWatchdog (server/browserGuard.ts)', () => {
+  afterEach(() => unstubAllEnvs())
+
+  it('is off inside a container and on everywhere else', () => {
+    /* the container's namespace teardown reaps the browser, so the spare
+       node per browser would only cost memory there */
+    for (const install of ['docker', 'kubernetes', 'local']) {
+      stubEnv('DOOP_INSTALL', install)
+      expect(wantsWatchdog()).toBe(false)
+    }
+    stubEnv('DOOP_INSTALL', undefined)
+    stubEnv('KUBERNETES_SERVICE_HOST', '10.43.0.1')
+    expect(wantsWatchdog()).toBe(false)
+    stubEnv('KUBERNETES_SERVICE_HOST', undefined)
+    /* off-container the watchdog is the only reaper of a kill -9 — on a
+       containerised CI run this expectation inverts, which is correct */
+    expect(wantsWatchdog()).toBe(!fs.existsSync('/.dockerenv'))
+  })
 })
