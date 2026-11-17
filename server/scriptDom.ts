@@ -523,17 +523,21 @@ export function replaceValues(
   }
   /* the declaration kinds each `kinds` entry reaches — a custom property
      (--x) never matches: it holds a value, it is not a declaration to
-     tokenise, and rewriting it would build a var() self-reference */
-  const COLOR_PROPS = new Set([
-    'color',
-    'background',
-    'border',
-    'fill',
-    'stroke',
-    'outline',
-    'box-shadow',
-    'text-shadow',
-  ])
+     tokenise, and rewriting it would build a var() self-reference.
+     Colour lands on `color`, every `*-color` longhand and the background,
+     border, outline, fill, stroke and shadow families; spacing on the
+     margin, padding and inset longhands. Radius is tested first so the
+     `border-*-radius` longhands are never claimed for colour. */
+  const COLOR_PROP = (prop: string) =>
+    prop === 'color' ||
+    prop.endsWith('-color') ||
+    prop === 'background' ||
+    prop === 'fill' ||
+    prop === 'stroke' ||
+    prop === 'box-shadow' ||
+    prop === 'text-shadow' ||
+    prop.startsWith('border') ||
+    prop.startsWith('outline')
   const RADIUS_PROPS = /^border(?:-(?:top|bottom|left|right))?(?:-(?:start|end))?-radius$/
   const SPACING_PROPS = new Set([
     'margin',
@@ -547,6 +551,8 @@ export function replaceValues(
     'row-gap',
     'column-gap',
   ])
+  const SPACING_PROP = (prop: string) =>
+    SPACING_PROPS.has(prop) || prop.startsWith('margin-') || prop.startsWith('padding-') || prop.startsWith('inset-')
   /* url(...) contents are opaque to value matching — a data URL's inner
      markup is not a declaration value and must never be rewritten */
   const swapCss = (css: string) => {
@@ -563,20 +569,22 @@ export function replaceValues(
       if (prop.startsWith('--')) return m
       const v = value.trim()
       if (!v) return m
-      if (input.kinds.includes('color') && COLOR_PROPS.has(prop)) {
-        return sep + head + value.replace(COLOR_RE, (lit) => swap(lit.trim(), 'color'))
-      }
       const kind =
         RADIUS_PROPS.test(prop) && input.kinds.includes('radius')
           ? 'radius'
-          : SPACING_PROPS.has(prop) && input.kinds.includes('spacing')
+          : SPACING_PROP(prop) && input.kinds.includes('spacing')
             ? 'spacing'
             : prop === 'font-family' && input.kinds.includes('font')
               ? 'font'
               : prop === 'font-size' && input.kinds.includes('fontSize')
                 ? 'fontSize'
-                : null
+                : COLOR_PROP(prop) && input.kinds.includes('color')
+                  ? 'color'
+                  : null
       if (!kind) return m
+      /* a colour declaration can hold several literals (border shorthand,
+         shadows); the other kinds carry exactly one value each */
+      if (kind === 'color') return sep + head + value.replace(COLOR_RE, (lit) => swap(lit.trim(), 'color'))
       return sep + head + value.replace(v, swap(v, kind))
     })
     return unmask(out)

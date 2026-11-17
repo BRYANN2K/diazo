@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { applyEditOps, replaceValues, splitDecls } from '../server/scriptDom.ts'
+import { applyEditOps, replaceValues, splitDecls, tokenCoverage } from '../server/scriptDom.ts'
 import type { DesignToken } from '../shared/designTokens.ts'
 
 const token = (name: string, type: DesignToken['type'], value: string): DesignToken =>
@@ -88,6 +88,37 @@ it('replaceValues never rewrites a custom property declaration', () => {
   expect(out.html).toContain('--card-background: #111111')
   expect(out.html).toContain('color: var(--text-color)')
   expect(out.count).toBe(1)
+})
+
+it('replaceValues reaches the *-color and spacing longhands', () => {
+  const html =
+    '<html><body><div style="background-color: #111111; border-color: #111111; ' +
+    'border-bottom: 1px solid #111111; outline-color: #111111; padding-left: 16px; ' +
+    'margin-top: 16px; inset-block-start: 16px"></div></body></html>'
+  const out = replaceValues(html, [token('--ink', 'color', '#111111'), token('--s4', 'spacing', '16px')], {
+    kinds: ['color', 'spacing'],
+  })
+  expect(out.html).toContain('background-color: var(--ink)')
+  expect(out.html).toContain('border-color: var(--ink)')
+  expect(out.html).toContain('border-bottom: 1px solid var(--ink)')
+  expect(out.html).toContain('outline-color: var(--ink)')
+  expect(out.html).toContain('padding-left: var(--s4)')
+  expect(out.html).toContain('margin-top: var(--s4)')
+  expect(out.html).toContain('inset-block-start: var(--s4)')
+  expect(out.count).toBe(7)
+})
+
+it('tokenCoverage agrees with replaceValues on the longhands', () => {
+  const html =
+    '<html><body><div style="background-color: #111111; outline-color: #111111; ' +
+    'margin-top: 16px; padding-left: 16px"></div></body></html>'
+  /* coverage counts these literals — replaceValues must be able to retire
+     every one, or a frame can never reach full coverage */
+  expect(tokenCoverage(html)).toBe(0)
+  const out = replaceValues(html, [token('--ink', 'color', '#111111'), token('--s4', 'spacing', '16px')], {
+    kinds: ['color', 'spacing'],
+  })
+  expect(tokenCoverage(out.html)).toBe(1)
 })
 
 it('replaceValues only touches real style declarations, never lookalike text', () => {
