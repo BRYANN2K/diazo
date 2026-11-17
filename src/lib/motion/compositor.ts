@@ -123,13 +123,17 @@ export interface FxDrop {
 
 /** Paint the film at `t` onto `ctx`, sized `comp.width × comp.height`.
  *  Returns the scene effects that could not be drawn (empty when every
- *  effect landed or the stack was empty). */
+ *  effect landed or the stack was empty). `fxScale` is the ratio the film
+ *  was scaled by to reach `comp`'s size (job size ÷ authored size), so the
+ *  pixel-unit effect params follow the render instead of staying in
+ *  composition pixels. */
 export async function paintAt(
   ctx: CanvasRenderingContext2D,
   comp: Composition,
   stage: FilmStage,
   t: number,
   signal?: AbortSignal,
+  fxScale = 1,
 ): Promise<FxDrop[]> {
   const frameBlocks = new Map<string, readonly FrameMotionKeyframe[]>()
   for (const entry of stage.frames) if (entry.motionKfs.length > 0) frameBlocks.set(entry.frame.id, entry.motionKfs)
@@ -176,7 +180,7 @@ export async function paintAt(
     }
   })
   ctx.setTransform(1, 0, 0, 1, 0, 0)
-  return paintSceneFx(ctx, comp, t)
+  return paintSceneFx(ctx, comp, t, fxScale)
 }
 
 /** the stack the whole scene sees at t: the camera track's effects, plus each
@@ -217,7 +221,7 @@ function sceneStackAt(
  *  not be drawn: an effect with no GLSL body, a missing GL context, or a
  *  failed pass — the pixels stay as the 2D pass left them and the caller
  *  reports the gap instead of shipping a film without its look */
-function paintSceneFx(ctx: CanvasRenderingContext2D, comp: Composition, t: number): FxDrop[] {
+function paintSceneFx(ctx: CanvasRenderingContext2D, comp: Composition, t: number, fxScale: number): FxDrop[] {
   const stack = sceneStackAt(comp, t)
   if (stack.length === 0) return []
   const { ok, unsupported } = supportedStack(stack)
@@ -225,7 +229,7 @@ function paintSceneFx(ctx: CanvasRenderingContext2D, comp: Composition, t: numbe
   if (ok.length === 0) return drops
   const gl = fxGl()
   if (!gl) return [...drops, ...ok.map((e) => ({ fx: e.fx, reason: 'no WebGL2 context' as const }))]
-  const out = gl.apply(ctx.canvas, comp.width, comp.height, ok, t, comp.fps)
+  const out = gl.apply(ctx.canvas, comp.width, comp.height, ok, t, comp.fps, fxScale)
   if (!out) return [...drops, ...ok.map((e) => ({ fx: e.fx, reason: 'effect pass failed' as const }))]
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, comp.width, comp.height)
@@ -255,11 +259,12 @@ export async function paintShutter(
   stage: FilmStage,
   t: number,
   signal?: AbortSignal,
+  fxScale = 1,
 ): Promise<FxDrop[]> {
   const mb = comp.motionBlur
   const shutter = mb && Number.isFinite(mb.shutter) ? Math.min(Math.max(mb.shutter, 0), 360) : 0
   if (shutter <= 0) {
-    return paintAt(ctx, comp, stage, t, signal)
+    return paintAt(ctx, comp, stage, t, signal, fxScale)
   }
   const K = Math.min(Math.max(Math.round(mb?.samples ?? 8), 2), MAX_SHUTTER_SAMPLES)
   const window = (shutter / 360) * (1 / comp.fps)
@@ -268,7 +273,7 @@ export async function paintShutter(
   off.height = comp.height
   const offCtx = off.getContext('2d')
   if (!offCtx) {
-    return paintAt(ctx, comp, stage, t, signal)
+    return paintAt(ctx, comp, stage, t, signal, fxScale)
   }
   const pixels = comp.width * comp.height * 4
   const acc = new Float32Array(pixels)
@@ -277,7 +282,7 @@ export async function paintShutter(
     const sub = t - window / 2 + (window * (k + 0.5)) / K
     offCtx.setTransform(1, 0, 0, 1, 0, 0)
     offCtx.clearRect(0, 0, comp.width, comp.height)
-    for (const d of await paintAt(offCtx, comp, stage, sub, signal)) drops.set(`${d.fx}:${d.reason}`, d)
+    for (const d of await paintAt(offCtx, comp, stage, sub, signal, fxScale)) drops.set(`${d.fx}:${d.reason}`, d)
     if (signal?.aborted) break
     const data = offCtx.getImageData(0, 0, comp.width, comp.height).data
     for (let i = 0; i < pixels; i++) acc[i]! += data[i]!

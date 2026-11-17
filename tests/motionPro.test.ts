@@ -312,7 +312,7 @@ describe('fx: keyframe namespace', () => {
 })
 
 describe('looks', () => {
-  it('every built-in look resolves to a valid, enabled stack', () => {
+  it('every built-in look resolves to a valid, enabled stack the renderer draws', () => {
     expect(MOTION_LOOKS.length).toBeGreaterThanOrEqual(8)
     for (const look of MOTION_LOOKS) {
       const stack = lookEffects(look.id)
@@ -320,6 +320,10 @@ describe('looks', () => {
       for (const fx of stack!) {
         expect(effectSpec(fx.fx), `${look.id}:${fx.fx}`).toBeTruthy()
         expect(effectSpec(fx.fx)!.validate(fx.params)).toBeNull()
+        /* a look effect without a GL body drops loudly at render — every
+           one must be drawable (film-35 needs curves + halftone, crt needs
+           scanlines + barrel-distortion + bloom) */
+        expect(GL_EFFECT_IDS.has(fx.fx), `${look.id}:${fx.fx} has no GL body`).toBe(true)
       }
     }
     expect(lookEffects('not-a-look')).toBeUndefined()

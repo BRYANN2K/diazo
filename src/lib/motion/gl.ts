@@ -584,7 +584,10 @@ export class FxGl {
    * them instead of letting a broken shader pass for the input). Returns
    * null when the context is unavailable. `fps` is the film's own frame
    * rate, the clock the seeded time-jitters quantize to (not a hard-coded
-   * 30). */
+   * 30). `fxScale` is output pixels per composition pixel — the params a
+   * spec marks `unit: 'px'` are authored at the composition's size and get
+   * multiplied by it, so a radius reads the same on a 720p export of a
+   * 4 K film as in the preview. */
   apply(
     src: TexImageSource,
     w: number,
@@ -592,6 +595,7 @@ export class FxGl {
     stack: readonly (EffectInstance & { paramsAt?: Record<string, number | string | boolean> })[],
     t: number,
     fps: number,
+    fxScale = 1,
   ): { canvas: HTMLCanvasElement; failed: string[] } | null {
     const gl = this.gl
     if (!gl || stack.length === 0) return null
@@ -621,9 +625,11 @@ export class FxGl {
       }
       const effectInput = input
       let second = effectInput
-      if (bodies.length > 1) {
+      if (bodies.length > 1 && effectInput !== this.tex[2]) {
         /* the sub-passes ping-pong the work buffers and would overwrite the
-           effect's input mid-chain, so u_tex2 reads a snapshot on tex[2] */
+           effect's input mid-chain, so u_tex2 reads a snapshot on tex[2] —
+           skipped when the input already sits there (an earlier mix landed
+           on the scratch buffer), which would sample the texture it draws */
         const mp = this.mixProgram()
         if (mp) {
           gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo[2] ?? null)
@@ -700,7 +706,7 @@ export class FxGl {
             if (loc) gl.uniform1f(loc, idx >= 0 ? idx : Math.max(0, opts.indexOf(String(param.def))))
           } else {
             const f = typeof value === 'number' ? value : Number(param.def)
-            if (loc) gl.uniform1f(loc, f)
+            if (loc) gl.uniform1f(loc, param.unit === 'px' ? f * fxScale : f)
           }
         }
         gl.drawArrays(gl.TRIANGLES, 0, 3)
@@ -723,11 +729,14 @@ export class FxGl {
       if (mix < 1) {
         const mp = this.mixProgram()
         if (mp) {
-          const mi = effectInput === this.tex[side] ? 2 : side
+          /* blend against the effect's original input: a single pass left it
+             untouched, a multi-pass one overwrote it mid-chain and only the
+             snapshot on tex[2] still holds it (`second` covers both) */
+          const mi = second === this.tex[side] ? 2 : side
           gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo[mi] ?? null)
           gl.useProgram(mp.prog)
           gl.activeTexture(gl.TEXTURE0)
-          gl.bindTexture(gl.TEXTURE_2D, effectInput ?? null)
+          gl.bindTexture(gl.TEXTURE_2D, second ?? null)
           gl.uniform1i(mp.uniforms.get('u_tex') ?? null, 0)
           gl.activeTexture(gl.TEXTURE1)
           gl.bindTexture(gl.TEXTURE_2D, input ?? null)

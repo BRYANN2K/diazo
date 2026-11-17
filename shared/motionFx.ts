@@ -29,6 +29,10 @@ export interface FxParam {
   options?: readonly string[]
   /** only number params take `fx:` keyframe lanes */
   note?: string
+  /** 'px' marks a number read in output pixels — the GL pass multiplies it
+   *  by the render scale so a radius means the same share of the picture at
+   *  any export size */
+  unit?: 'px'
 }
 
 export interface FxSpec {
@@ -43,6 +47,10 @@ export interface FxSpec {
   gen?: boolean
   /** needs a second input — an element/clip texture the instance binds */
   needsInput?: boolean
+  /** the second input exists but binds the layer's own picture until
+   *  instances can point at another element's texture — luma matte and
+   *  displacement map sample themselves today */
+  selfMapped?: boolean
   /** resting values `EffectInstance.params` starts from */
   defaults(): Record<string, number | string | boolean>
   /** a params object's error, null when clean */
@@ -57,6 +65,11 @@ const n = (id: string, min: number, max: number, def: number, step?: number, not
   def,
   ...(step !== undefined ? { step } : {}),
   ...(note !== undefined ? { note } : {}),
+})
+/* a number read in output pixels — radii, pitches, amplitudes */
+const px = (id: string, min: number, max: number, def: number, step?: number, note?: string): FxParam => ({
+  ...n(id, min, max, def, step, note),
+  unit: 'px',
 })
 const c = (id: string, def: string): FxParam => ({ id, kind: 'color', def })
 const b = (id: string, def: boolean): FxParam => ({ id, kind: 'bool', def })
@@ -119,13 +132,13 @@ const F = (spec: Omit<FxSpec, 'defaults' | 'validate'>): FxSpec => ({
  */
 export const MOTION_EFFECTS: readonly FxSpec[] = [
   /* blur */
-  F({ id: 'gaussian-blur', label: 'Gaussian Blur', family: 'blur', cost: 4, params: [n('radius', 0, 200, 12)] }),
+  F({ id: 'gaussian-blur', label: 'Gaussian Blur', family: 'blur', cost: 4, params: [px('radius', 0, 200, 12)] }),
   F({
     id: 'directional-blur',
     label: 'Directional Blur',
     family: 'blur',
     cost: 3,
-    params: [n('radius', 0, 200, 20), n('angle', -180, 180, 0)],
+    params: [px('radius', 0, 200, 20), n('angle', -180, 180, 0)],
   }),
   F({
     id: 'radial-blur',
@@ -139,7 +152,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     label: 'Lens Blur',
     family: 'blur',
     cost: 5,
-    params: [n('radius', 0, 60, 10), n('bokeh', 0, 1, 0.6, undefined, 'highlight gain')],
+    params: [px('radius', 0, 60, 10), n('bokeh', 0, 1, 0.6, undefined, 'highlight gain')],
   }),
   F({
     id: 'whip-blur',
@@ -154,14 +167,14 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     label: 'Glow',
     family: 'light',
     cost: 4,
-    params: [n('radius', 0, 120, 18), n('intensity', 0, 4, 0.8), n('threshold', 0, 1, 0.6), c('tint', '#ffffff')],
+    params: [px('radius', 0, 120, 18), n('intensity', 0, 4, 0.8), n('threshold', 0, 1, 0.6), c('tint', '#ffffff')],
   }),
   F({
     id: 'bloom',
     label: 'Bloom',
     family: 'light',
     cost: 5,
-    params: [n('threshold', 0, 1, 0.75), n('intensity', 0, 3, 0.9), n('radius', 0, 80, 24)],
+    params: [n('threshold', 0, 1, 0.75), n('intensity', 0, 3, 0.9), px('radius', 0, 80, 24)],
   }),
   F({
     id: 'light-leak',
@@ -203,7 +216,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     label: 'Chromatic Aberration',
     family: 'lens',
     cost: 1,
-    params: [n('amount', 0, 40, 4), pt('center'), sel('falloff', ['linear', 'edges'], 'edges')],
+    params: [px('amount', 0, 40, 4), pt('center'), sel('falloff', ['linear', 'edges'], 'edges')],
   }),
   F({
     id: 'barrel-distortion',
@@ -224,7 +237,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     label: 'Rolling Shutter',
     family: 'lens',
     cost: 2,
-    params: [n('amount', -60, 60, 8, undefined, 'px of skew across the frame'), sel('axis', ['x', 'y'], 'x')],
+    params: [px('amount', -60, 60, 8, undefined, 'px of skew across the frame'), sel('axis', ['x', 'y'], 'x')],
   }),
   /* texture */
   F({
@@ -232,7 +245,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     label: 'Film Grain',
     family: 'texture',
     cost: 1,
-    params: [n('amount', 0, 1, 0.12), n('size', 0.5, 6, 1.4), b('mono', true)],
+    params: [n('amount', 0, 1, 0.12), px('size', 0.5, 6, 1.4), b('mono', true)],
   }),
   F({
     id: 'noise',
@@ -257,14 +270,14 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     label: 'Halftone',
     family: 'texture',
     cost: 2,
-    params: [n('size', 2, 40, 6, undefined, 'dot pitch px'), n('angle', -180, 180, 15), n('softness', 0, 1, 0.3)],
+    params: [px('size', 2, 40, 6, undefined, 'dot pitch px'), n('angle', -180, 180, 15), n('softness', 0, 1, 0.3)],
   }),
   F({
     id: 'pixelate',
     label: 'Pixelate',
     family: 'texture',
     cost: 1,
-    params: [n('size', 1, 200, 12, undefined, 'block px'), sel('mode', ['square', 'diamond', 'hex'], 'square')],
+    params: [px('size', 1, 200, 12, undefined, 'block px'), sel('mode', ['square', 'diamond', 'hex'], 'square')],
   }),
   /* distort */
   F({
@@ -273,7 +286,8 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'distort',
     cost: 3,
     needsInput: true,
-    params: [n('amount', 0, 200, 24), sel('channel', ['r', 'g', 'luma'], 'luma')],
+    selfMapped: true,
+    params: [px('amount', 0, 200, 24), sel('channel', ['r', 'g', 'luma'], 'luma')],
   }),
   F({
     id: 'wave-warp',
@@ -281,8 +295,8 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'distort',
     cost: 1,
     params: [
-      n('amplitude', 0, 200, 12),
-      n('wavelength', 1, 1000, 90),
+      px('amplitude', 0, 200, 12),
+      px('wavelength', 1, 1000, 90),
       n('angle', -180, 180, 0),
       n('speed', -20, 20, 0, undefined, 'seeded phase rate — deterministic per seed'),
     ],
@@ -293,7 +307,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'distort',
     cost: 3,
     params: [
-      n('amount', 0, 200, 16),
+      px('amount', 0, 200, 16),
       n('scale', 0.2, 20, 3),
       n('evolution', -10, 10, 0, undefined, 'seeded noise rate'),
     ],
@@ -359,21 +373,21 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     label: 'RGB Split',
     family: 'glitch',
     cost: 1,
-    params: [n('amount', 0, 60, 6), n('angle', -180, 180, 0), n('jitter', 0, 1, 0, undefined, 'seeded wobble')],
+    params: [px('amount', 0, 60, 6), n('angle', -180, 180, 0), n('jitter', 0, 1, 0, undefined, 'seeded wobble')],
   }),
   F({
     id: 'block-shift',
     label: 'Block Shift',
     family: 'glitch',
     cost: 2,
-    params: [n('amount', 0, 200, 24), n('rows', 2, 60, 12, 1), n('rate', 0, 20, 4, undefined, 'seeded re-roll rate')],
+    params: [px('amount', 0, 200, 24), n('rows', 2, 60, 12, 1), n('rate', 0, 20, 4, undefined, 'seeded re-roll rate')],
   }),
   F({
     id: 'scan-jitter',
     label: 'Scan Jitter',
     family: 'glitch',
     cost: 1,
-    params: [n('amount', 0, 60, 6), n('frequency', 1, 200, 60), n('rate', 0, 20, 6)],
+    params: [px('amount', 0, 60, 6), n('frequency', 1, 200, 60), n('rate', 0, 20, 6)],
   }),
   /* generators */
   F({
@@ -404,7 +418,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'generate',
     cost: 1,
     gen: true,
-    params: [n('size', 2, 400, 40), n('line', 0.5, 40, 1), c('color', '#ffffff'), c('background', '#00000000')],
+    params: [px('size', 2, 400, 40), px('line', 0.5, 40, 1), c('color', '#ffffff'), c('background', '#00000000')],
   }),
   /* matte */
   F({
@@ -413,6 +427,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'matte',
     cost: 2,
     needsInput: true,
+    selfMapped: true,
     params: [sel('channel', ['luma', 'alpha', 'r', 'g', 'b'], 'luma'), b('invert', false), n('softness', 0, 1, 0)],
   }),
   F({
@@ -420,14 +435,14 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     label: 'Feather',
     family: 'matte',
     cost: 2,
-    params: [n('amount', 0, 200, 12, undefined, 'edge softness px')],
+    params: [px('amount', 0, 200, 12, undefined, 'edge softness px')],
   }),
   F({
     id: 'choke',
     label: 'Choke / Spread',
     family: 'matte',
     cost: 2,
-    params: [n('amount', -100, 100, 8, undefined, 'px — negative chokes the matte')],
+    params: [px('amount', -100, 100, 8, undefined, 'px — negative chokes the matte')],
   }),
 ]
 

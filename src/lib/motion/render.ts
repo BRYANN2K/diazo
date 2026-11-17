@@ -167,7 +167,7 @@ export async function renderInBrowser(
       )
     }
   }
-  checkDrops(await paintShutter(ctx, scaledComp, scaled, job.range.start, signal))
+  checkDrops(await paintShutter(ctx, scaledComp, scaled, job.range.start, signal, zoomFactor))
   recorder.start()
   let lastBeat = 0
   try {
@@ -175,7 +175,7 @@ export async function renderInBrowser(
       if (signal?.aborted) throw new DOMException('canceled', 'AbortError')
       const t = job.range.start + i / job.fps
       const began = performance.now()
-      checkDrops(await paintShutter(ctx, scaledComp, scaled, t, signal))
+      checkDrops(await paintShutter(ctx, scaledComp, scaled, t, signal, zoomFactor))
       requestFrame?.()
       /* MediaRecorder timestamps frames by wall clock, so frames are paced at
          the film's rate; the picture itself only ever depends on t */
