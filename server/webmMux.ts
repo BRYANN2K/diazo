@@ -18,11 +18,19 @@ export interface WebmChunk {
 
 /** EBML variable-size integer: a size field, not an element id. */
 function vint(size: number): Buffer {
-  /* 1-byte vint holds 7 bits, 2-byte 14, and so on */
+  /* len bytes hold 7*len value bits — a 1-byte vint tops at 126, the
+   * all-ones value being the reserved 'unknown size' marker. Bytes are
+   * assembled by hand: JS bitwise ops are 32-bit, so `1 << (7*len)`
+   * wraps for len >= 5 and `|` cannot set the marker at 35+ bits. */
   for (let len = 1; len <= 8; len++) {
-    if (size < 1 << (7 * len)) {
+    if (size < 2 ** (7 * len) - 1) {
       const buf = Buffer.alloc(len)
-      buf.writeUIntBE(size | (1 << (7 * len)), 0, len)
+      let v = size
+      for (let i = len - 1; i >= 1; i--) {
+        buf[i] = v % 256
+        v = Math.floor(v / 256)
+      }
+      buf[0] = v | (1 << (8 - len))
       return buf
     }
   }
