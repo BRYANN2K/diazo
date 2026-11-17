@@ -78,22 +78,6 @@ function notedFrames(frames: Frame[]): Map<string, ShotInfo> {
   return noted
 }
 
-/** The frames this film actually uses: the shots animate_storyboard
- *  recorded for the composition, else the frames its tracks and clips
- *  name. Undefined when nothing says — a camera-only film over a noted
- *  page is checked against every noted frame. */
-function filmFrames(composition: Composition, shots?: ReadonlySet<string>): ReadonlySet<string> | undefined {
-  if (shots) return shots
-  const refs = new Set<string>()
-  for (const track of composition.tracks) {
-    if (track.frameId) refs.add(track.frameId)
-    for (const clip of track.clips ?? []) {
-      if (clip.source.type === 'frame') refs.add(clip.source.frameId)
-    }
-  }
-  return refs.size > 0 ? refs : undefined
-}
-
 /** Run the notes check against a composition and advance the pass counter:
  *  a pass is a round that reports the same pending set as the round before
  *  (no progress); fixing a shot or changing which are missing starts it
@@ -107,9 +91,13 @@ function coverageFor(
   const key = passKey(canvas.id, pageId)
   let state = fixPasses.get(key)
   if (state?.compositionId !== composition.id) state = undefined
-  /* only the shots in this film can go pending — a noted frame left out of
-     a frame_ids run or of a rewritten timeline is not the agent's to fix */
-  const inFilm = filmFrames(composition, state?.shots)
+  /* only the shots of this run can go pending: the ones animate_storyboard
+     recorded (the storyboard, or frame_ids), else every noted frame of the
+     page. The scope never comes from the frames the tracks name — a camera
+     track names none and this map is in memory, so after a whole-body
+     write or a restart one element track on one shot would otherwise
+     shrink the film to itself and answer "animated" over the rest */
+  const inFilm = state?.shots
   const scoped = inFilm ? new Map([...noted].filter(([frameId]) => inFilm.has(frameId))) : noted
   if (scoped.size === 0) return undefined
   const pending = pendingNotedShots(composition.tracks, scoped)

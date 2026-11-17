@@ -206,6 +206,48 @@ describe('animate_storyboard — notes, targets and coverage', () => {
     expect(data.storyboard?.pending.map((p) => p.frameId)).not.toContain(otherId)
   })
 
+  it('never narrows the film to the frames a track already names — one of three animated is not animated', async () => {
+    const shot2 = actions.createFrame(
+      canvasId,
+      { name: 'Shot 3', width: 1000, height: 600, html: SHOT_HTML('Séquence 03'), x: 2400, y: 0 },
+      actor(),
+      { reveal: false },
+    )!.id
+    const shot3 = actions.createFrame(
+      canvasId,
+      { name: 'Shot 4', width: 1000, height: 600, html: SHOT_HTML('Séquence 04'), x: 3600, y: 0 },
+      actor(),
+      { reveal: false },
+    )!.id
+    const created = await toolJson('animate_storyboard', { page_id: pageId })
+    const target = created.shots.find((s) => s.frameId === frameId)!.targets[0]!.id
+
+    /* one element track on one of the three noted shots: the other two pend */
+    const partial = await toolJson('set_composition', {
+      page_id: pageId,
+      ops: [elementTrack(frameId, target)],
+    })
+    expect(partial.storyboard?.noted).toBe(3)
+    expect(partial.storyboard?.animated).toBe(1)
+    expect(partial.storyboard?.pending.map((p) => p.frameId).sort()).toEqual([shot2, shot3].sort())
+
+    /* a whole-body write drops the run's shot memory — the map lives in
+       memory, so a server restart is the same — and the scope must not
+       shrink to the one frame the track names */
+    const rewritten = await toolJson('set_composition', {
+      page_id: pageId,
+      composition: partial.composition,
+    })
+    expect(rewritten.storyboard?.pending.map((p) => p.frameId).sort()).toEqual([shot2, shot3].sort())
+    expect(rewritten.storyboard?.message).not.toContain('the storyboard is animated')
+
+    const after = await toolJson('set_composition', {
+      page_id: pageId,
+      ops: [{ op: 'set_meta', duration: 9 }],
+    })
+    expect(after.storyboard?.pending.map((p) => p.frameId).sort()).toEqual([shot2, shot3].sort())
+  })
+
   it('refuses to hand out ids for a frame still streaming', async () => {
     const streaming = actions.createFrame(
       canvasId,
