@@ -984,6 +984,11 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        card the Animate button queued carries the flag — a card or comment
        that merely names the tool gets the ordinary budget */
     const motionRun = cards.some((c) => c.kind === 'animate')
+    /* an animate card can ask for a film alone — no frame write required:
+       remember the compositions at the start so a changed one counts as
+       delivered work the way a mutated frame does */
+    const filmBaseline = motionRun ? filmSigs(canvasId).join('|') : undefined
+    const filmMoved = () => filmBaseline !== undefined && filmSigs(canvasId).join('|') !== filmBaseline
     let stalledRun = false
     /* why the run was ended, for the closing summary and the card */
     let stallReason: string | undefined
@@ -1285,7 +1290,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             continue
           }
 
-          if (requireMutation && !deliveredWork(runState) && !mutationNudgeSent) {
+          if (requireMutation && !deliveredWork(runState) && !filmMoved() && !mutationNudgeSent) {
             mutationNudgeSent = true
             messages.push({
               role: 'user',
@@ -1350,7 +1355,9 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        or out-of-turns runs pause so nothing gets a false Done or auto-retry */
     const deliverableFrames = deliverableFrameIds(runState)
     const blockedWebsiteAccess = runState.blockedWebsiteAccess
-    const noMutation = finished && requireMutation && !deliveredWork(runState) && !blockedWebsiteAccess
+    /* a film an animate run built or rewrote is delivered work too — the
+       no-mutation gate holds cards that produced nothing at all */
+    const noMutation = finished && requireMutation && !deliveredWork(runState) && !filmMoved() && !blockedWebsiteAccess
     const unverifiedMutation =
       finished &&
       runState.vision &&

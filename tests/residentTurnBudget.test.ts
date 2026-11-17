@@ -330,16 +330,15 @@ describe('an animate run’s room to work', () => {
     expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
   })
 
-  it('keeps going while the timeline itself keeps changing', async () => {
+  it('delivers a film made only of timeline writes — no frame edit required', async () => {
     const { model, run } = scriptedModel(Array.from({ length: 30 }, (_, i) => compositionTurn(pageId, 6 + i)))
     mocks.pickModel.mockResolvedValue(model)
     await runSweep(canvasId)
-    /* a run that only ever wrote compositions has nothing deliverable, so
-       the card fails on no-mutation — but only after all 30 turns ran, the
-       no-mutation nudge and the final word */
-    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'), { timeout: 15_000 })
-    expect(run).toHaveBeenCalledTimes(32)
-    expect(cardById(canvasId, 'c1').failureReason).toMatch(/without changing a frame or a token/i)
+    /* the changed composition IS the delivery on an animate run: the card
+       completes on the run's last word, no frame ever touched */
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').endedAt).toBeTypeOf('number'), { timeout: 15_000 })
+    expect(run).toHaveBeenCalledTimes(31)
+    expect(cardById(canvasId, 'c1').failureReason).toBeUndefined()
   })
 
   it('ends a write loop that only toggles the same frame back and forth', async () => {
