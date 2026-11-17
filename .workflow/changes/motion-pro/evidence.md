@@ -4,36 +4,47 @@ Recorded on `feat/motion-pro` (worktree `doop-wt/motion-pro`).
 
 ## Setup — merges
 
-| Step                                    | Result | Evidence                                                                                                                                                                                                                                                                                                                                              |
-| --------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Merge `feat/motion-backend-next`        | passed | `7cbeec21` (`chore:` merge commit; `merge:` rejected by commitlint).                                                                                                                                                                                                                                                                                  |
-| Merge `fix/animate-storyboard-elements` | passed | `ea0381e2`; conflicts in `server/motionTools.ts`, `docs/TECHSTACK.md`, `docs/motion-api.md`, `.workflow/changes/motion-studio-backend/evidence.md` resolved (media imports kept, `Frame` type kept, doc table corrected to the real tool surface). MOTION guide block present in `server/guide.ts`; migrations 0074–0080 unchanged after Orca's 0073. |
-| Post-merge tests                        | passed | `bun run typecheck` + affected motion vitest files green after the merge.                                                                                                                                                                                                                                                                             |
+| Step                                    | Result | Evidence                                                                                                                                                                                                    |
+| --------------------------------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Merge `feat/motion-backend-next`        | passed | `7cbeec21` (`chore:` merge commit; `merge:` rejected by commitlint).                                                                                                                                        |
+| Merge `fix/animate-storyboard-elements` | passed | `ea0381e2`; conflicts in `server/motionTools.ts`, `docs/TECHSTACK.md`, `docs/motion-api.md`, `motion-studio-backend/evidence.md` resolved. MOTION guide block kept; migrations 0074–0080 after Orca's 0073. |
+| Post-merge tests                        | passed | `bun run typecheck` + affected motion vitest files green after the merge.                                                                                                                                   |
 
 ## P0
 
-| AC   | Result  | Evidence |
-| ---- | ------- | -------- |
-| AC-1 | pending |          |
-| AC-2 | pending |          |
-| AC-3 | pending |          |
-| AC-4 | pending |          |
-| AC-5 | pending |          |
-| AC-6 | pending |          |
-| AC-7 | pending |          |
+| AC   | Result | Evidence                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AC-1 | done   | `get_scene_snapshot` on MCP (`server/mcp.ts`) + resident (`server/resident.ts`) through `sceneSnapshot` (`server/motionSnapshot.ts`) + `__doopMotionSheet`/`__doopMotionMeasure` harness bridges — contact sheet PNG, per-cell luminance/contrast, motion energy, measured text boxes. Image returns as MCP/resident image block. Live path needs the instance renderer; unit-level verified. |
+| AC-2 | done   | `checkScene` folds `lintComposition`/`lintMotionHtml`, pacing with dead beats, safe zones, legibility px, per-track `effectCost`; pixel parts report `unavailable` without the renderer.                                                                                                                                                                                                      |
+| AC-3 | done   | `applyCameraPreset`/`applyTransition`/`applyTextAnimation` in `server/motionProTools.ts` write ordinary keyframes/clips/motion blocks; `listMotionPresets` exposes the vocabulary.                                                                                                                                                                                                            |
+| AC-4 | done   | `Direction` + `DirectionBeat` on `Composition` (parse clamps `passes` to `CRITIQUE_PASS_MAX=5`); persisted via `newComposition`/`setComposition` and `set_direction` op; `buildStoryboard` consumes beats — non-uniform seconds, handover easings, unknown transition = cut. tests/motionPro.test.ts.                                                                                         |
+| AC-5 | done   | `server/guide.ts` MOTION block carries the director's brief (treatment first, presets editable, see before ship, bounded critique).                                                                                                                                                                                                                                                           |
+| AC-6 | done   | `critiqueScene` folds the fixed rubric with machine issues pre-filled; revision-bound pass counting, default 3, hard max 5.                                                                                                                                                                                                                                                                   |
+| AC-7 | done   | All new tools registered in `server/mcp.ts` and `server/resident.ts` over one code path (`execMotionPro`); parity suite `tests/agentToolParity.test.ts` green.                                                                                                                                                                                                                                |
 
 ## P1
 
-| AC    | Result  | Evidence |
-| ----- | ------- | -------- |
-| AC-8  | pending |          |
-| AC-9  | pending |          |
-| AC-10 | pending |          |
-| AC-11 | pending |          |
-| AC-12 | pending |          |
-| AC-13 | pending |          |
-| AC-14 | pending |          |
-| AC-15 | pending |          |
-| AC-16 | pending |          |
-| AC-17 | pending |          |
-| AC-18 | pending |          |
+| AC    | Result   | Evidence                                                                                                                                                                                                                                                                                                                                                                |
+| ----- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AC-8  | done     | `shared/motionFx.ts`: 43 effects with full specs (params, ranges, defaults, validate, cost, families); test asserts ≥25 + unique ids.                                                                                                                                                                                                                                   |
+| AC-9  | done     | `add_effect`/`update_effect`/`remove_effect`/`reorder_effects`/`set_effects`/`set_blend` ops validated and applied atomically (`applyCompositionOps` re-parses the result); `fx:<id>.<param>` lanes parse via `isFxProperty`/`fxPropertyParts`. Registry + spec param validation live in `parseEffectInstance`/`applyOp`, so unvalidated ops cannot smuggle bad stacks. |
+| AC-10 | partial  | `src/lib/motion/gl.ts` WebGL2 ping-pong pipeline runs the 25 `GL_EFFECT_IDS` over scene-level stacks (camera + covered adjustment tracks) inside `paintAt` — same entry, same t; `supportedStack` partitions, rest falls back to the 2D paint and is reported (MO-14). Element-track stacks and multi-pass/pyramid effects are not GL-drawn yet.                        |
+| AC-11 | partial  | Unknown fx ids and bad params are rejected at parse (`parseEffectInstance` → `effectSpec.validate`), and `check_scene` reports `fx_cost` per track; there is no dedicated check_scene section named for the flags.                                                                                                                                                      |
+| AC-12 | done     | `paintShutter` evaluates the scene at K clamped sub-times across `shutter/360` of a frame interval, averaged via additive accumulation — deterministic, `shutter 0` identity; harness + browser renderer route through it.                                                                                                                                              |
+| AC-13 | done     | `shared/motionLooks.ts`: 8 looks (teal-orange, noir, film-35, crt, glitch, dream, product, riso), each resolving to a valid enabled stack (tested).                                                                                                                                                                                                                     |
+| AC-14 | partial  | Determinism is structural: every new path is a pure function of (comp, t) with seeded entropy only; `buildStoryboard` tested deterministic modulo minted ids. No golden-frame pixel test was added — unverified at pixel level.                                                                                                                                         |
+| AC-15 | done     | `THIRD-PARTY-LICENSES` records the EffectCraft spirit-of port (MIT OR Apache-2.0); shaders are original clean-room implementations with Diazo ids.                                                                                                                                                                                                                      |
+| AC-16 | done     | `shared/motionGraph.ts`: `trackLanes`, `laneSegments`, `speedGraph`, `handlesToEasing`, `CURVE_PRESETS`/`curveEasing`, `copyEasing`/`pasteEasing`, `LaneSelection`. Tested.                                                                                                                                                                                             |
+| AC-17 | not done | `check_scene` reports per-track `effectCost`, but `render_composition` does not yet refuse stacks above a cap.                                                                                                                                                                                                                                                          |
+| AC-18 | done     | `docs/motion-api.md` (tools + MO-13/14), `docs/motion-fx.md` (new), `docs/FEATURES.md`, `docs/TECHSTACK.md`; `bun run doc-lint` clean.                                                                                                                                                                                                                                  |
+
+## Gates
+
+| Gate      | Result | Evidence                                                                         |
+| --------- | ------ | -------------------------------------------------------------------------------- |
+| typecheck | passed | `tsgo --noEmit` clean.                                                           |
+| oxlint    | passed | `--type-aware --deny-warnings` clean.                                            |
+| eslint    | passed | `--max-warnings 0` clean.                                                        |
+| tests     | passed | 111 tests across the 10 motion/parity files (`tests/motionPro.test.ts` adds 19). |
+| doc-lint  | passed | `doc-lint passed (0 warning(s))`.                                                |
+| prettier  | passed | changed files formatted per repo config.                                         |

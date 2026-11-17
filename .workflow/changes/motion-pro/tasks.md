@@ -9,38 +9,38 @@ Built on `feat/motion-pro` (worktree `doop-wt/motion-pro`), branched from
 - [x] 0. Merge `feat/motion-backend-next` (`7cbeec21`) and
       `fix/animate-storyboard-elements` (`ea0381e2`); MOTION guide block kept;
       migrations stay ordered after Orca's 0073; merged tests green.
-- [ ] 1. `Direction` type + `direction` field on `Composition`
+- [x] 1. `Direction` type + `direction` field on `Composition`
       (`shared/motion.ts`), `set_direction`/`get_direction` tools, REST round-trip.
-- [ ] 2. `apply_camera_preset`, `apply_transition`, `apply_text_animation`
+- [x] 2. `apply_camera_preset`, `apply_transition`, `apply_text_animation`
       tools in `server/motionTools.ts`, MCP + resident.
-- [ ] 3. `get_scene_snapshot`: harness contact-sheet mode + server tool
+- [x] 3. `get_scene_snapshot`: harness contact-sheet mode + server tool
       (renderer gate), stats.
-- [ ] 4. `check_scene`: lint + pacing + safe zones + legibility + cost report.
-- [ ] 5. `critique_scene`: fixed rubric + pass budget (default 3, max 5).
-- [ ] 6. Director brief in `server/guide.ts`; `animate_storyboard` consumes
+- [x] 4. `check_scene`: lint + pacing + safe zones + legibility + cost report.
+- [x] 5. `critique_scene`: fixed rubric + pass budget (default 3, max 5).
+- [x] 6. Director brief in `server/guide.ts`; `animate_storyboard` consumes
       `direction` (non-equal beats, non-cut transitions).
-- [ ] 7. Parity + `tests/motionSnapshot.test.ts` + builder/direction tests.
+- [x] 7. Parity + `tests/motionSnapshot.test.ts` + builder/direction tests.
 
 ## P1 — pro finish
 
-- [ ] 8. `shared/motionFx.ts`: `EffectInstance`, `FX_REGISTRY` (≥25 effects,
+- [x] 8. `shared/motionFx.ts`: `EffectInstance`, `FX_REGISTRY` (≥25 effects,
       GLSL source keys, param schemas, cost), validation, ops `add_effect` /
       `update_effect` / `remove_effect` / `reorder_effects`, `fx:` keyframes.
-- [ ] 9. Contract additions: `adjustment` track kind, `blend`, `motionBlur` on
+- [x] 9. Contract additions: `adjustment` track kind, `blend`, `motionBlur` on
       `Composition`; lint `MO-13`/`MO-14`; interchange "unsupported" lists; CSS
       export fallbacks.
-- [ ] 10. `src/lib/motion/gl/` WebGL2 layer compositor + GLSL effect modules;
+- [x] 10. `src/lib/motion/gl/` WebGL2 layer compositor + GLSL effect modules;
       Canvas 2D fallback flags unshown effects.
-- [ ] 11. `list_motion_effects`, `set_effects`/`add_effect`, `apply_look`
+- [x] 11. `list_motion_effects`, `set_effects`/`add_effect`, `apply_look`
       tools, MCP + resident.
-- [ ] 12. `shared/motionLooks.ts`: ≥ 8 built-in looks.
-- [ ] 13. Deterministic motion blur (sub-sample `frameStateAt`; `shutter: 0`
+- [x] 12. `shared/motionLooks.ts`: ≥ 8 built-in looks.
+- [x] 13. Deterministic motion blur (sub-sample `frameStateAt`; `shutter: 0`
       identity).
-- [ ] 14. `shared/motionGraph.ts`: value/speed curves, bezier handles, spring
+- [x] 14. `shared/motionGraph.ts`: value/speed curves, bezier handles, spring
       params, easing presets.
-- [ ] 15. Golden-frame browser tests per effect + seek-determinism tests.
-- [ ] 16. `THIRD-PARTY-LICENSES`: EffectCraft MIT notice + pinned commit.
-- [ ] 17. Docs: `docs/motion-api.md`, `docs/motion-fx.md`, `docs/TECHSTACK.md`,
+- [x] 15. Golden-frame browser tests per effect + seek-determinism tests.
+- [x] 16. `THIRD-PARTY-LICENSES`: EffectCraft MIT notice + pinned commit.
+- [x] 17. Docs: `docs/motion-api.md`, `docs/motion-fx.md`, `docs/TECHSTACK.md`,
       FEATURES/CHANGELOG lines.
-- [ ] 18. Full verification (typecheck, lint, tests, doc-lint), PR draft at
+- [x] 18. Full verification (typecheck, lint, tests, doc-lint), PR draft at
       `/tmp/pr-drafts/motion-pro-backend.md`, evidence recorded.
