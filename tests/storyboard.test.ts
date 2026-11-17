@@ -226,6 +226,22 @@ describe('shot notes — the false positives that are not notes', () => {
     expect(panelId).toBeTruthy()
     expect(targets).toEqual([])
   })
+
+  it('never takes a card that holds an image for the notes panel', () => {
+    const html = DOC(`
+      <div class="card">
+        <p class="eyebrow">MOUVEMENT</p>
+        <p>travelling avant lent</p>
+        <img src="still.png" alt="La chute"/>
+      </div>
+    `)
+    const { notes, targets, panelId } = analyzeShotHtml(html)
+    expect(notes.some((n) => n.text.includes('MOUVEMENT'))).toBe(true)
+    /* the card holds real content the clip has to keep — it is design,
+       not a notes bar, and its image stays animatable */
+    expect(panelId).toBeUndefined()
+    expect(targets.map((t) => t.tag)).toContain('img')
+  })
 })
 
 describe('animatable targets and id stamping', () => {

@@ -105,6 +105,11 @@ const SKIP_TAGS = new Set([
    shape — a wrapper, a heading or an image is design, not the note */
 const NOTE_VALUE_TAGS = new Set(['p', 'div', 'span', 'dd', 'li', 'blockquote', 'q', 'small'])
 
+/* a notes bar holds words only — an element that is or holds imagery is
+   design, not the panel to hide (a card with a picture and one line that
+   reads like a note is still a card) */
+const MEDIA_TAGS = new Set(['img', 'picture', 'video', 'svg', 'canvas'])
+
 /* what an agent can usefully keyframe, in reading order of usefulness:
    headlines and text, imagery, then the structural layers parallax moves
    need, then named divs */
@@ -305,6 +310,8 @@ function containsNote(el: Element, noteSubtree: ReadonlySet<Element>): boolean {
    then `el` is part of the notes bar, never a design element to animate */
 function notesOnly(el: Element, noteSubtree: ReadonlySet<Element>): boolean {
   if (noteSubtree.has(el) || concealed(el)) return true
+  if (MEDIA_TAGS.has(el.tagName.toLowerCase())) return false
+  for (const d of walk(el)) if (MEDIA_TAGS.has(d.tagName.toLowerCase())) return false
   if (!elementChildren(el).some((child) => containsNote(child, noteSubtree))) {
     const text = textOf(el)
     return text === '' || SHOT_META.test(text)
