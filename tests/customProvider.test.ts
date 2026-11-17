@@ -192,8 +192,8 @@ const toolCall = {
 }
 
 /* a Messages-API turn that ends in the tool call, as an Anthropic-compatible
-   endpoint streams it */
-const anthropicToolCall = (_req: Seen, res: http.ServerResponse) => {
+   endpoint streams it; `input` is the tool call's JSON arguments */
+const anthropicToolCallWith = (input: string) => (_req: Seen, res: http.ServerResponse) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream' })
   const events: [string, unknown][] = [
     [
@@ -222,7 +222,7 @@ const anthropicToolCall = (_req: Seen, res: http.ServerResponse) => {
     ],
     [
       'content_block_delta',
-      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } },
+      { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: input } },
     ],
     ['content_block_stop', { type: 'content_block_stop', index: 0 }],
     [
@@ -238,6 +238,8 @@ const anthropicToolCall = (_req: Seen, res: http.ServerResponse) => {
   for (const [event, data] of events) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
   res.end()
 }
+
+const anthropicToolCall = anthropicToolCallWith('{}')
 
 const TOOL: Anthropic.Tool = { name: 'report_ready', input_schema: { type: 'object', properties: {} } }
 
@@ -476,6 +478,22 @@ describe('a server with Anthropic credentials of its own', () => {
       { id: 'glm-5', vision: true },
     )
     await run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 1000 })
+    const headers = seen[0]!.headers
+    expect(headers['x-api-key']).toBe('sk-person')
+    expect(headers.authorization).toBeUndefined()
+    expect(headers['x-server-header']).toBeUndefined()
+  })
+
+  it('the /test call is guarded the same way', async () => {
+    reply = anthropicToolCallWith('{"ready":true}')
+    await stubServerAnthropicEnv()
+    await testCustomProvider(
+      {
+        config: { name: 'Gateway', apiType: 'anthropic', baseUrl: `${base}/anthropic`, models: [] },
+        apiKey: 'sk-person',
+      },
+      { id: 'glm-5', vision: true },
+    )
     const headers = seen[0]!.headers
     expect(headers['x-api-key']).toBe('sk-person')
     expect(headers.authorization).toBeUndefined()
