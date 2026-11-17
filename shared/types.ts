@@ -467,8 +467,10 @@ export interface CardScope {
 export type RepoCardKind = 'sketch' | 'design-system'
 
 /** Structured card kinds beyond the repo import: 'drift' asks the resident
- *  to review the gaps between a designed frame and its shipped capture. */
-export type CardKind = RepoCardKind | 'drift'
+ *  to review the gaps between a designed frame and its shipped capture;
+ *  'animate' marks the card Motion Studio's "Animate storyboard" queues —
+ *  it rides the ordinary loop but buys the film-direction turn budget. */
+export type CardKind = RepoCardKind | 'drift' | 'animate'
 
 /** A screen of a connected GitHub repository, as the import manifest lists it. */
 export interface RepoScreenRef {

@@ -47,6 +47,7 @@ import type {
   AgentTask,
   Canvas,
   CanvasMeta,
+  CardKind,
   CardScope,
   ChatMessage,
   ChatPlan,
@@ -1003,10 +1004,11 @@ export const api = {
     attachments?: string[],
     scope?: CardScope,
     runner?: RunnerPick,
+    kind?: CardKind,
   ) =>
     req(`/api/canvases/${canvasId}/cards`, {
       method: 'POST',
-      body: JSON.stringify({ title, agents, attachments, scope, runner }),
+      body: JSON.stringify({ title, agents, attachments, scope, runner, kind }),
     }),
   completeCard: (canvasId: string, cardId: string) =>
     req(`/api/canvases/${canvasId}/cards/${cardId}/done`, { method: 'POST' }),

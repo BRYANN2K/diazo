@@ -196,6 +196,7 @@ export function MotionTimeline({
         [],
         undefined,
         currentRunnerPick(),
+        'animate',
       )
       onToast(t('motion.animateQueued'))
     } catch (err) {
