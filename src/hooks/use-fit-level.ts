@@ -54,12 +54,19 @@ export function useFitLevel<T extends HTMLElement>(
 
 /** Whether a row's children reach past its content box. `scrollWidth` alone
  *  misses a flex row that runs into its own end padding, so the children's
- *  far edge is checked against the padding edge too. */
+ *  far edge is checked against the padding edge too. Children out of the
+ *  flow (a strip's gliding indicator, which follows the open tab and may be
+ *  mid-transition) do not count: `scrollWidth` is read only without them. */
 function overflows(el: HTMLElement): boolean {
-  if (el.scrollWidth > el.clientWidth + 1) return true
+  const children = [...el.children]
+  const flow = children.filter((child) => {
+    const position = getComputedStyle(child).position
+    return position !== 'absolute' && position !== 'fixed'
+  })
+  if (flow.length === children.length && el.scrollWidth > el.clientWidth + 1) return true
   const box = el.getBoundingClientRect()
   const end = box.right - (parseFloat(getComputedStyle(el).paddingRight) || 0)
   let right = box.left
-  for (const child of el.children) right = Math.max(right, child.getBoundingClientRect().right)
+  for (const child of flow) right = Math.max(right, child.getBoundingClientRect().right)
   return right > end + 0.5
 }

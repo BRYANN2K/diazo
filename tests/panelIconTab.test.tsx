@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { PanelIconTab, PanelTabPanel, PanelTabs, PanelTabsRoot } from '../src/components/ui/panel'
@@ -142,5 +142,69 @@ describe('PanelIconTab compact', () => {
     })
     const tip = document.querySelector('[data-slot="tooltip"]')
     expect(tip?.textContent).toContain('Assets')
+  })
+})
+
+describe('PanelIconTab folding under the keyboard', () => {
+  /* the strip unfolds the open tab and folds the others (the Layers strip
+     at its default width), so an arrow key moves onto a folded tab that
+     unfolds as it opens */
+  function FoldingStrip() {
+    const [value, setValue] = useState('a')
+    return (
+      <TooltipProvider delayDuration={0}>
+        <PanelTabsRoot value={value} onValueChange={setValue}>
+          <PanelTabs>
+            <PanelIconTab value="a" compact={value !== 'a'} icon={<svg />}>
+              Alpha
+            </PanelIconTab>
+            <PanelIconTab value="b" compact={value !== 'b'} icon={<svg />}>
+              Beta
+            </PanelIconTab>
+            <PanelIconTab value="c" compact icon={<svg />}>
+              Gamma
+            </PanelIconTab>
+          </PanelTabs>
+          <PanelTabPanel value="a">a</PanelTabPanel>
+          <PanelTabPanel value="b">b</PanelTabPanel>
+          <PanelTabPanel value="c">c</PanelTabPanel>
+        </PanelTabsRoot>
+      </TooltipProvider>
+    )
+  }
+
+  const tabs = () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+
+  async function arrowRight() {
+    await act(async () => {
+      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+  }
+
+  it('keeps the same element and the focus when an arrow key unfolds a tab', async () => {
+    act(() => root.render(<FoldingStrip />))
+    const [alpha, beta, gamma] = tabs()
+    act(() => alpha!.focus())
+    await arrowRight()
+    expect(tabs()[1]).toBe(beta)
+    expect(beta!.dataset.state).toBe('active')
+    expect(document.activeElement).toBe(beta)
+    /* and the walk goes on: a second step lands on the next tab */
+    await arrowRight()
+    expect(document.activeElement).toBe(gamma)
+  })
+
+  it('keeps the active state on an open tab that is folded', async () => {
+    act(() => root.render(<FoldingStrip />))
+    const gamma = tabs()[2]!
+    act(() => gamma.focus())
+    await act(async () => {
+      gamma.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(gamma.getAttribute('aria-selected')).toBe('true')
+    expect(gamma.hasAttribute('data-compact')).toBe(true)
+    expect(gamma.dataset.state).toBe('active')
   })
 })

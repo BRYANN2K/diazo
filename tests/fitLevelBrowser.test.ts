@@ -37,10 +37,12 @@ describe.skipIf(!findBrowserPath())('useFitLevel in Chromium', { timeout: 30_000
       const compact: Record<string, boolean> = {}
       for (const tab of document.querySelectorAll<HTMLElement>('[role="tab"]'))
         compact[tab.textContent ?? ''] = tab.hasAttribute('data-compact')
-      const end = list.getBoundingClientRect().right
-      const overflow =
-        list.scrollWidth > list.clientWidth + 1 ||
-        [...list.querySelectorAll('[role="tab"]')].some((tab) => tab.getBoundingClientRect().right > end + 0.5)
+      /* the tabs against the strip's content box; the gliding indicator is
+         out of the flow and may still be sliding to the open tab */
+      const end = list.getBoundingClientRect().right - (parseFloat(getComputedStyle(list).paddingRight) || 0)
+      const overflow = [...list.querySelectorAll('[role="tab"]')].some(
+        (tab) => tab.getBoundingClientRect().right > end + 0.5,
+      )
       return { compact, overflow }
     })
   }
@@ -63,6 +65,24 @@ describe.skipIf(!findBrowserPath())('useFitLevel in Chromium', { timeout: 30_000
     expect(narrow.overflow).toBe(false)
     const wide = await strip(480, 'Assets')
     expect(Object.values(wide.compact)).toEqual([false, false, false, false])
+  })
+
+  it('keeps the open tab active and its element when it folds', async () => {
+    await strip(480, 'Assets')
+    await page.evaluate(() => {
+      ;(window as unknown as { assetsTab: Element | null }).assetsTab =
+        document.querySelector('[role="tab"]:nth-of-type(2)')
+    })
+    const narrow = await strip(150, 'Assets')
+    expect(narrow.compact.Assets).toBe(true)
+    const kept = await page.evaluate(() => {
+      const tab = document.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')!
+      return {
+        same: tab === (window as unknown as { assetsTab: Element | null }).assetsTab,
+        state: tab.dataset.state,
+      }
+    })
+    expect(kept).toEqual({ same: true, state: 'active' })
   })
 
   it('keeps each label as the folded tab’s accessible name', async () => {

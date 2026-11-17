@@ -237,30 +237,37 @@ const PanelIconTab = React.forwardRef<
     compact?: boolean
   }
 >(function PanelIconTab({ className, icon, badge, compact = false, title, children, ...props }, ref) {
-  const tab = (
-    <TabsPrimitive.Trigger
-      ref={ref}
-      data-slot="panel-icon-tab"
-      data-compact={compact ? '' : undefined}
-      className={cn(
-        'group relative z-[1] inline-flex h-[26px] shrink-0 items-center rounded-[7px] px-2.25 font-sans text-label font-normal normal-case text-ink-2 transition-colors duration-fast hover:text-ink hover:duration-instant focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal data-[state=active]:font-medium data-[state=active]:text-ink',
-        className,
-      )}
-      {...props}
-    >
-      <span className="grid size-3.5 shrink-0 place-items-center [&>svg]:size-3.5">{icon}</span>
-      <span className={compact ? 'sr-only' : 'block whitespace-nowrap pl-1.25'}>{children}</span>
-      {badge}
-    </TabsPrimitive.Trigger>
-  )
-  return compact ? (
-    <Tooltip label={title ?? children} side="bottom">
-      {tab}
+  /* one element whether folded or not: the tooltip is always there and only
+     opens while folded, so a tab that unfolds under an arrow key keeps focus */
+  return (
+    <Tooltip label={title ?? children} side="bottom" disabled={!compact}>
+      <IconTabTrigger
+        ref={ref}
+        data-slot="panel-icon-tab"
+        data-compact={compact ? '' : undefined}
+        className={cn(
+          'group relative z-[1] inline-flex h-[26px] shrink-0 items-center rounded-[7px] px-2.25 font-sans text-label font-normal normal-case text-ink-2 transition-colors duration-fast hover:text-ink hover:duration-instant focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-signal data-[state=active]:font-medium data-[state=active]:text-ink',
+          className,
+        )}
+        {...props}
+      >
+        <span className="grid size-3.5 shrink-0 place-items-center [&>svg]:size-3.5">{icon}</span>
+        <span className={compact ? 'sr-only' : 'block whitespace-nowrap pl-1.25'}>{children}</span>
+        {badge}
+      </IconTabTrigger>
     </Tooltip>
-  ) : (
-    tab
   )
 })
+
+/* the tooltip's trigger writes its own `data-state` (closed, delayed-open)
+   onto its child; the tab's `active` / `inactive` is what the strip's
+   gliding surface and the active weight read, so the tooltip's is dropped */
+const IconTabTrigger = React.forwardRef<HTMLButtonElement, React.ComponentProps<typeof TabsPrimitive.Trigger>>(
+  function IconTabTrigger({ 'data-state': _tooltipState, ...props }: TabTriggerProps, ref) {
+    return <TabsPrimitive.Trigger ref={ref} {...props} />
+  },
+)
+type TabTriggerProps = React.ComponentProps<typeof TabsPrimitive.Trigger> & { 'data-state'?: string }
 
 function PanelTabPanel({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Content>) {
   return (
