@@ -122,7 +122,7 @@ import { SelectionBar, SelectionBarAction } from '../components/ui/selection-bar
 import { Input } from '../components/ui/input'
 import { Field } from '../components/ui/field'
 import { PeerAvatars, PresenceFace } from '../components/PeerAvatars'
-import { MotionTimeline } from '../components/motion/MotionTimeline'
+import { MOTION_TIMELINE_H, MotionTimeline } from '../components/motion/MotionTimeline'
 import { Checkbox, CheckboxCard } from '../components/ui/checkbox'
 import { Toast, ToastAction, ToastSpinner, ToastStack } from '../components/ui/toast'
 import { Tooltip } from '../components/ui/tooltip'
@@ -168,6 +168,11 @@ const FLOAT_GAP = 10
 /* the narrowest stage docked panels squeeze it to, while their minimums allow */
 const DOCKED_STAGE_MIN = 320
 const AGENTS_W = 360
+/* the Motion timeline sits this far above the canvas area's bottom edge */
+const TIMELINE_GAP = 12
+/* the zoom pill's top (14px in, 36px tall) plus a gap: toasts and update
+   cards float above it */
+const ZOOM_PILL_CLEARANCE = 58
 const PANEL_WIDTH_KEY = 'doop:canvas-panel-widths'
 
 function readPanelWidths(): { layers: number; agents: number } {
@@ -836,20 +841,42 @@ export function CanvasPage({
     })
   }, [rulers, uiHidden, hideUiActive, layersOpen, showActivity, hasSelection])
   useEffect(() => () => syncViewMenu(NO_CANVAS), [])
+  const timelineShown = motionOpen && !!activePageId && !readOnly && !isMobile
+  /* what the Motion timeline takes off the bottom of the canvas area: the
+     zoom pill, the floating toasts and the stage's fit area sit above it */
+  const chromeBottom = timelineShown && !uiHidden ? MOTION_TIMELINE_H + TIMELINE_GAP : 0
+  /* what floats over the canvas (the zoom pill, toasts) keeps clear of the
+     open panels, and of a docked column's edge */
+  const floatRight = chrome.right + (docked ? FLOAT_GAP : 0)
   const chromeVars = {
+    '--chrome-bottom': `${chromeBottom}px`,
     '--chrome-top': isMobile ? '0px' : `${(docked ? DOCKED_BAR_H : BAR_H) + rulerInset}px`,
     '--rail-left': `${chrome.toolRail + rulerInset}px`,
-    /* what floats over the canvas (the zoom pill, toasts) keeps clear of a
-       docked column's edge */
     '--chrome-left': `${chrome.left + (docked ? FLOAT_GAP : 0)}px`,
-    '--chrome-right': `${chrome.right + (docked ? FLOAT_GAP : 0)}px`,
+    '--chrome-right': `${floatRight}px`,
   } as CSSProperties
   /* what the bar and the floating chrome cover of the stage, which spans the
      whole window; phones open their panels as sheets over everything */
   const stageInsets: StageInsets =
-    isMobile || uiHidden || docked
+    isMobile || uiHidden
       ? NO_INSETS
-      : { top: BAR_H + rulerInset, right: chrome.right, bottom: 0, left: chrome.left + rulerInset }
+      : docked
+        ? { ...NO_INSETS, bottom: chromeBottom }
+        : { top: BAR_H + rulerInset, right: chrome.right, bottom: chromeBottom, left: chrome.left + rulerInset }
+  /* toasts and the update card are mounted outside this page's layers
+     (ToastStack, UpdateCard in main.tsx), so the clearance they float by is
+     set on the document while the canvas shows its chrome */
+  const floatBottom = chromeBottom + ZOOM_PILL_CLEARANCE
+  useEffect(() => {
+    if (isMobile || uiHidden) return
+    const root = document.documentElement.style
+    root.setProperty('--float-right', `${floatRight}px`)
+    root.setProperty('--float-bottom', `${floatBottom}px`)
+    return () => {
+      root.removeProperty('--float-right')
+      root.removeProperty('--float-bottom')
+    }
+  }, [isMobile, uiHidden, floatRight, floatBottom])
   /* docked, the stage is the gap between the bar and the columns; ⌘. gives
      it the whole window back */
   const stageBounds: StageInsets | undefined =
@@ -1082,10 +1109,10 @@ export function CanvasPage({
         >
           <div className="pointer-events-none absolute top-3.5 right-[var(--chrome-right)] z-30 flex flex-col items-end gap-2 transition-[right] duration-150 [&>*]:pointer-events-auto max-md:top-[56px] max-md:right-2 max-md:left-2">
             {pendingProposal && mutedProposal !== pendingProposal.id && !(showActivity && panelTab === 'memory') && (
-              <div className="flex items-center rounded-[10px] bg-surface shadow-ring">
+              <div className="flex items-center rounded-pill bg-surface shadow-ring">
                 <Button
                   variant="bare"
-                  className="h-8 pr-1 pl-3 text-[12px] font-medium text-ink hover:bg-transparent hover:text-ink"
+                  className="h-8 pr-1 pl-3 text-label font-medium text-ink hover:bg-transparent hover:text-ink"
                   onClick={() => {
                     useStore.getState().setPanelTab('memory')
                     setShowActivity(true)
@@ -1108,7 +1135,8 @@ export function CanvasPage({
             {decisionToast && (
               <Button
                 variant="bare"
-                className="h-auto max-w-full items-start gap-2.5 whitespace-normal rounded-[12px] bg-surface px-3.5 py-2.5 text-left font-normal shadow-pop transition-shadow hover:bg-surface hover:shadow-ring-hover sm:max-w-[320px] [&_svg]:text-ink-soft"
+                size="auto"
+                className="max-w-full gap-2.5 rounded-card bg-surface px-3.5 py-2.5 font-normal shadow-pop transition-shadow hover:bg-surface hover:shadow-ring-hover sm:max-w-[320px] [&_svg]:text-ink-soft"
                 title={t('canvas.openMemory')}
                 onClick={() => {
                   useStore.getState().setPanelTab('memory')
@@ -1118,8 +1146,8 @@ export function CanvasPage({
               >
                 <BrainIcon className="mt-0.5 size-4" />
                 <span className="min-w-0">
-                  <b className="block text-[12.5px] font-medium text-ink">{t('canvas.savedToMemory')}</b>
-                  <span className="mt-[1px] line-clamp-2 text-[12px] leading-[1.4] text-ink-soft">{decisionToast}</span>
+                  <b className="block text-body font-medium text-ink">{t('canvas.savedToMemory')}</b>
+                  <span className="mt-px line-clamp-2 text-label text-ink-soft">{decisionToast}</span>
                 </span>
               </Button>
             )}
@@ -1127,15 +1155,14 @@ export function CanvasPage({
           {/* the presence pill in the bar already carries each agent's status
               line; this per-agent stack is only for windows too narrow for it */}
           <WorkingNow style={{ left: chrome.left }} />
-          {motionOpen && activePageId && !readOnly && !isMobile && (
+          {timelineShown && activePageId && (
             <MotionTimeline
               canvasId={canvasId}
               pageId={activePageId}
               pageName={activePageName}
               onClose={() => setMotionOpen(false)}
               onToast={showToast}
-              className="bottom-3"
-              style={{ left: chrome.left, right: chrome.right }}
+              style={{ left: chrome.left, right: chrome.right, bottom: TIMELINE_GAP }}
             />
           )}
           {!readOnly && <Onboarding canvasId={canvasId} />}
@@ -1239,7 +1266,7 @@ export function CanvasPage({
               className="gap-0 rounded-t-2xl border-line bg-surface p-0 pb-[env(safe-area-inset-bottom)] shadow-pop"
             >
               <div className="border-b border-line-soft px-5 py-4 pr-14">
-                <SheetTitle className="font-display text-lg font-extrabold">{t('canvas.canvasActions')}</SheetTitle>
+                <SheetTitle className="font-display text-heading font-semibold">{t('canvas.canvasActions')}</SheetTitle>
                 <SheetDescription className="mt-1 text-xs text-ink-soft">
                   {t('canvas.canvasActionsDescription')}
                 </SheetDescription>
