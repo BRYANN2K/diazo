@@ -35,7 +35,7 @@ npx tsx scripts/qa-model-picker.ts --out /tmp/visual-qa/model-picker --prefix af
   menu (closed, an Older fold open, a query typed from the list, no match), the effort popover and
   the duel slots (empty, filled, a repeated pick) in light and dark, plus a 300px Agents panel and
   pt-BR.
-- Uses the demo's ports (4400, 4300); stop another demo first.
+- Uses the demo's ports (4410, 4310, or `DEMO_API_PORT` / `DEMO_WEB_PORT`); stop another demo first.
 
 ## library-thumb.ts
 

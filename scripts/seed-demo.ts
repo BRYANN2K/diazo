@@ -559,14 +559,20 @@ export function chromePath(): string | undefined {
   }
 }
 
-/** Whether anything answers HTTP on a local port. */
+/* a listener may bind IPv4 or IPv6 alone (Vite on macOS takes ::1 only) */
+const LOOPBACKS = ['127.0.0.1', '[::1]', 'localhost']
+
+/** Whether anything answers HTTP on a local port, on any loopback address. */
 async function answers(port: number): Promise<boolean> {
-  try {
-    await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) })
-    return true
-  } catch {
-    return false
-  }
+  const probes = LOOPBACKS.map(async (host) => {
+    try {
+      await fetch(`http://${host}:${port}/`, { signal: AbortSignal.timeout(1500) })
+      return true
+    } catch {
+      return false
+    }
+  })
+  return (await Promise.all(probes)).some(Boolean)
 }
 
 async function waitFor(url: string, ms = 90_000, exited?: () => string | null): Promise<void> {
