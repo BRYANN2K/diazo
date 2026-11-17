@@ -18,6 +18,7 @@ import { customTurn, withoutImages } from '../server/agentModel.ts'
 import { discoverCustomModels, takeProbeSlot, testCustomProvider } from '../server/customProviders.ts'
 import { IMAGE_OMITTED_NOTE } from '../server/chatCompletionsAgent.ts'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
+import packageJson from '../package.json' with { type: 'json' }
 
 /**
  * Custom providers: the shared validator, the guarded fetch that is the only
@@ -467,9 +468,14 @@ describe('a server with Anthropic credentials of its own', () => {
     expect(headers['x-server-header']).toBeUndefined()
   })
 
-  it('an Authorization line in the env headers does not reach it either', async () => {
+  it('Authorization and X-Api-Key lines in the env headers do not reach it either', async () => {
     reply = anthropicToolCall
-    await stubServerAnthropicEnv('X-Server-Header: server\nAuthorization: Bearer server-header-token')
+    /* the env X-Api-Key is nulled like every other name; the person's key is
+       restated after the nulls, or the request would go out with no
+       credential at all */
+    await stubServerAnthropicEnv(
+      'X-Server-Header: server\nAuthorization: Bearer server-header-token\nX-Api-Key: sk-server-hdr',
+    )
     const run = customTurn(
       {
         config: { name: 'Gateway', apiType: 'anthropic', baseUrl: `${base}/anthropic`, models: [] },
@@ -484,7 +490,7 @@ describe('a server with Anthropic credentials of its own', () => {
     expect(headers['x-server-header']).toBeUndefined()
   })
 
-  it('headers the SDK sends itself still reach it from the env', async () => {
+  it('the headers the SDK sets itself go out as fixed values, not the env’s', async () => {
     reply = anthropicToolCall
     await stubServerAnthropicEnv(
       'anthropic-version: 2999-01-01\nUser-Agent: server-agent\nAccept: application/x-custom',
@@ -495,9 +501,9 @@ describe('a server with Anthropic credentials of its own', () => {
     )
     await run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 1000 })
     const headers = seen[0]!.headers
-    expect(headers['anthropic-version']).toBe('2999-01-01')
-    expect(headers['user-agent']).toBe('server-agent')
-    expect(headers.accept).toBe('application/x-custom')
+    expect(headers['anthropic-version']).toBe('2023-06-01')
+    expect(headers['user-agent']).toBe(`Diazo/${packageJson.version}`)
+    expect(headers.accept).toBe('application/json')
   })
 
   it('the /test call is guarded the same way', async () => {
