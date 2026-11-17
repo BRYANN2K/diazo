@@ -91,20 +91,32 @@ function contest(file: string): void {
   const pid = typeof holder?.pid === 'number' ? holder.pid : 0
   const alive = pid > 0 && pidAlive(pid)
 
-  if (ours && alive) throw new DataDirInUseError(file, `process ${pid} on this host`)
-  if (ours && pid === 0) {
+  if (!ours) {
+    /* written elsewhere: the pid is not ours to probe, the heartbeat is */
+    if (isStale(stat)) return remove(file)
+    throw new DataDirInUseError(file, `a server on ${holder?.host ?? 'another host'} — its heartbeat is fresh`)
+  }
+  if (pid === 0) {
     /* unreadable content — only a fresh file could still belong to a live,
        older-format holder; a stale one is safe to drop */
     if (isStale(stat)) return remove(file)
     throw new DataDirInUseError(file, `an unreadable lock written ${age(stat)} ago`)
   }
-  if (ours) {
+  if (!alive) {
     /* pid is dead on this host: the holder is gone whatever the file's age */
     return remove(file)
   }
-  /* written elsewhere: the pid is not ours to probe, the heartbeat is */
+  /* the live pid a lock names is not another server when it is our own — a
+     container restart reruns the same low pids and Windows recycles them
+     fast — or pid 1, the pid namespace's init: a server that held the lock
+     as pid 1 took its whole container down with it, so a live pid 1 now is
+     this container's init, not a holder */
+  if (pid === process.pid || pid === 1) return remove(file)
+  /* a live holder touches the file every HEARTBEAT_MS; a live pid with a
+     heartbeat that went quiet is a recycled pid the dead holder left
+     behind, not a server that still wants the directory */
   if (isStale(stat)) return remove(file)
-  throw new DataDirInUseError(file, `a server on ${holder?.host ?? 'another host'} — its heartbeat is fresh`)
+  throw new DataDirInUseError(file, `process ${pid} on this host`)
 }
 
 function pidAlive(pid: number): boolean {

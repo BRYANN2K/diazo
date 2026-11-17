@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -45,8 +45,17 @@ function deadPid(): number {
   return spawnSync(process.execPath, ['-e', '']).pid
 }
 
+/** a pid that is guaranteed alive and not ours: a sleeping child */
+const children: ChildProcess[] = []
+function livePid(): number {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 60_000)'], { stdio: 'ignore' })
+  children.push(child)
+  return child.pid!
+}
+
 afterEach(() => {
   for (const l of held.splice(0)) l.release()
+  for (const c of children.splice(0)) c.kill('SIGKILL')
   for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true })
 })
 
@@ -63,7 +72,8 @@ describe('server/dataLock.ts', () => {
 
   it('refuses a second server while the holder is alive', () => {
     const dir = tmpdir()
-    lock(dir)
+    /* a live process on this host, still heartbeating its lock */
+    writeLock(dir, { pid: livePid(), host: os.hostname() })
     expect(() => acquireDataLock(dir)).toThrow(DataDirInUseError)
     expect(() => acquireDataLock(dir)).toThrow(/process \d+ on this host/)
   })
@@ -80,6 +90,34 @@ describe('server/dataLock.ts', () => {
     expect(() => lock(dir)).not.toThrow()
     const holder = JSON.parse(fs.readFileSync(lockFile(dir), 'utf8')) as { pid: number }
     expect(holder.pid).toBe(process.pid)
+  })
+
+  it('reclaims a fresh lock naming our own pid — a container restart reissues it', () => {
+    const dir = tmpdir()
+    /* kill -9 in a container: the next boot gets the same pid back, sees it
+       "alive" (it is us) and must not refuse into a crash loop */
+    writeLock(dir, { pid: process.pid, host: os.hostname() })
+    expect(() => lock(dir)).not.toThrow()
+  })
+
+  it('reclaims a fresh lock naming pid 1 — a live init is not a holder', () => {
+    const dir = tmpdir()
+    /* the same container story: a server that was pid 1 died with its whole
+       namespace; today's pid 1 is the new container's init */
+    writeLock(dir, { pid: 1, host: os.hostname() })
+    expect(() => lock(dir)).not.toThrow()
+  })
+
+  it('reclaims a lock whose live pid stopped heartbeating, keeps refusing a beating one', () => {
+    const dir = tmpdir()
+    const pid = livePid()
+    /* a live pid whose heartbeat is fresh is a real second server */
+    writeLock(dir, { pid, host: os.hostname() })
+    expect(() => acquireDataLock(dir)).toThrow(/process \d+ on this host/)
+    /* the same live pid with a quiet heartbeat is a recycled pid the dead
+       holder left behind */
+    writeLock(dir, { pid, host: os.hostname() }, 90_000)
+    expect(() => lock(dir)).not.toThrow()
   })
 
   it('refuses a foreign-host lock while its heartbeat is fresh, reclaims it once stale', () => {
