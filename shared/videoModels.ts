@@ -38,11 +38,13 @@ export const VIDEO_MODELS: readonly VideoModelOption[] = [
     note: 'OpenRouter video API (alpha): POST /api/v1/videos, poll the job',
   },
   {
-    id: 'gemini-omni-flash',
+    /* the Veo preview ids on the Gemini API were shut down 2026-10-22;
+     * Google names gemini-omni-1.2-flash as the migration target */
+    id: 'gemini-omni-1.2-flash',
     provider: 'gemini',
     label: 'Gemini Omni Flash',
     lengths: [4, 8, 15],
-    aspects: VIDEO_ASPECTS,
+    aspects: ['16:9', '9:16'],
     pricePerSecond: 0.07,
     note: 'First and last frame, up to 15 s and 4K',
   },
