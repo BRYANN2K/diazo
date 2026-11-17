@@ -110,6 +110,8 @@ import { addPage, pageList, parsePageList, savePages, updateFrameMeta } from './
 import { isCanvasComment, isFrameComment } from '../shared/comments.ts'
 import { websiteAccessErrorMessage } from './websiteAccess.ts'
 import { executeGuardedBatch } from './guardedBatch.ts'
+import { htmlLoaded } from './frameHtml.ts'
+import { contentHash } from './libraryExtract.ts'
 import { runRepoCards } from './githubRecon.ts'
 import { retryModelTurn } from './modelTurnRetry.ts'
 import { linkFor, repoToolCall } from './localRepo.ts'
@@ -335,6 +337,10 @@ interface RunState {
   arrangeWrites: number
   /** drift findings posted as comments: a drift card's delivery */
   driftFindings?: number
+  /** the speech jobs and Blender ops this run filed or polled, id → last
+   *  state seen: a poll that watches a job move is progress, a frozen job
+   *  is still time */
+  jobStates?: Map<string, string>
   /* ---- chat runs only ---- */
   /** the asks this chat run claimed, oldest first */
   chatAsks?: ChatMessage[]
@@ -484,18 +490,35 @@ function compositionSig(c: Composition): string {
   })
 }
 
+/** What a frame IS to the watch: its document and size, hashed — never
+ *  the write stamp. updateFrame bumps updatedAt on every save, so an
+ *  A/B/A/B edit loop would look new forever while its content only
+ *  alternates. A frame whose HTML is not loaded keeps its stamp: the only
+ *  thing that can change it is a write that loads it. */
+function frameSig(frame: Frame | undefined): string {
+  if (!frame) return ''
+  return htmlLoaded(frame) ? contentHash(`${frame.width}x${frame.height}\n${frame.html}`) : `u${frame.updatedAt}`
+}
+
+/** The canvas's compositions as the watch sees them: id → content
+ *  signature, so a changed film and a brand new one are both visible. */
+function filmSigs(canvasId: string): string[] {
+  return (store.getCanvas(canvasId)?.compositions ?? []).map((c) => `${c.id}:${compositionSig(c)}`).sort()
+}
+
 /** Everything a productive animate turn can move, folded into one
- *  signature so a turn that changed nothing is recognizable: a frame write
- *  (id and write time, so a second pass over the same frame counts), an
- *  open rewrite draft's growth, newly screenshotted frames, lint verdicts
- *  that differ (the document hash, not the timestamp), token, arrangement,
- *  drift and image writes, answered comment threads, a composition's
- *  CONTENT (the notes check's pending set, not its pass count — it rises on
- *  the rounds that saw no progress), and render-job progress. */
+ *  signature so a turn that changed nothing is recognizable: a frame's
+ *  CONTENT (html and size — a write stamp would make an A/B/A/B toggle
+ *  look new forever), an open rewrite draft's growth, newly screenshotted
+ *  frames, lint verdicts that differ (the document hash, not the
+ *  timestamp), token, arrangement, drift and image writes, answered
+ *  comment threads, a composition's CONTENT (the notes check's pending
+ *  set, not its pass count — it rises on the rounds that saw no progress),
+ *  the speech jobs and Blender ops the run is watching, and render-job
+ *  progress. */
 function motionSignature(canvasId: string, runState: RunState): string {
-  const canvas = store.getCanvas(canvasId)
   return JSON.stringify({
-    frames: [...runState.mutatedFrames].sort().map((id) => `${id}@${store.getFrame(id)?.updatedAt ?? ''}`),
+    frames: [...runState.mutatedFrames].sort().map((id) => `${id}@${frameSig(store.getFrame(id))}`),
     drafts: [...runState.rewriteDrafts].map(([id, html]) => `${id}:${html.length}`).sort(),
     verified: [...runState.verifiedFrames].sort(),
     verifyAsked: [...runState.verificationFrames].sort(),
@@ -505,7 +528,8 @@ function motionSignature(canvasId: string, runState: RunState): string {
       .sort(),
     writes: [runState.tokenWrites, runState.arrangeWrites, runState.driftFindings ?? 0, runState.imagesGenerated],
     threads: [runState.repliedThreads.size, runState.awaitingThreads.size],
-    compositions: (canvas?.compositions ?? []).map((c) => `${c.id}:${compositionSig(c)}`).sort(),
+    compositions: filmSigs(canvasId),
+    jobs: [...(runState.jobStates ?? [])].map(([id, state]) => `${id}=${state}`).sort(),
     checks: fixPassReport(canvasId).map((p) => `${p.pageId}:${p.pendingKey ?? ''}`),
     renders: listRenderJobs(canvasId)
       .map((j) => `${j.id}:${j.status}:${j.progress}`)
@@ -513,40 +537,32 @@ function motionSignature(canvasId: string, runState: RunState): string {
   })
 }
 
-/* Reads that move the no-progress watch without changing the canvas: the
-   first call on each target teaches the run something (reading nine shots'
-   HTML in a row is an opening survey, not a stall), while re-reading the
-   same target is still time. Frame reads version on the frame's last write
-   and film reads on the page's film — a check re-run against changed
-   content is new ground, a poll of the same state is not. */
-const MOTION_FRAME_READS = new Set(['inspect_frame', 'get_frame_html', 'screenshot_frame', 'check_frame', 'lint_frame'])
-const MOTION_FILM_READS = new Set(['get_composition', 'lint_motion', 'export_composition', 'list_media'])
-const MOTION_TARGETED_READS = new Set<string>([
-  'find_in_canvas',
-  'view_website',
-  'get_reference',
-  'search_inspiration',
-  'search_images',
-  'list_backgrounds',
-  'search_icons',
-  'search_logos',
-  'get_skill',
-  'get_tokens',
-  'get_prototype',
-  'screenshot_component',
-  'find_references',
-  'list_video_models',
-  'suggest_cuts',
-  'repo_list',
-  'repo_read',
-  'repo_search',
-])
-for (const tool of [...SPEECH_TOOLS, ...BLENDER_TOOLS, ...COMPONENT_TOOLS, ...DESIGN_LIBRARY_TOOLS]) {
-  if (tool.readOnly) MOTION_TARGETED_READS.add(tool.name)
+/** Remember a speech job or Blender op the run filed or polled, so the
+ *  signature sees it move — the tool descriptions tell the model to poll
+ *  get_transcript / get_blender_result, and waiting on live work must not
+ *  read as a stall. Only a job that stops moving does. */
+function watchJob(runState: RunState, kind: 'speech' | 'blender', out: unknown): void {
+  const job = ((out as { job?: unknown }).job ?? (out as { op?: unknown }).op) as
+    { id?: unknown; state?: unknown; progress?: unknown; updatedAt?: unknown } | undefined
+  if (typeof job?.id !== 'string' || typeof job.state !== 'string') return
+  ;(runState.jobStates ??= new Map()).set(
+    `${kind}:${job.id}`,
+    `${job.state}:${job.progress ?? ''}:${job.updatedAt ?? ''}`,
+  )
 }
 
-/** The content a film read sees: the page's composition body plus the last
- *  write stamp of every frame on it (lint covers frame HTML too). */
+/* Calls that move the no-progress watch without changing the canvas: the
+   first call on each target teaches the run something (reading nine shots'
+   HTML in a row is an opening survey, not a stall; filing a Blender light
+   it had not tried is work), while repeating the same call is still time.
+   Frame reads version on the frame's content and film reads on the page's
+   film — a check re-run against changed content is new ground, a poll of
+   the same state is not. */
+const MOTION_FRAME_READS = new Set(['inspect_frame', 'get_frame_html', 'screenshot_frame', 'check_frame', 'lint_frame'])
+const MOTION_FILM_READS = new Set(['get_composition', 'lint_motion', 'export_composition', 'list_media'])
+
+/** The content a film read sees: the page's composition body plus the
+ *  content hash of every frame on it (lint covers frame HTML too). */
 function filmVersion(canvasId: string, input: Record<string, unknown>): string {
   const pageId =
     (typeof input.page_id === 'string' && input.page_id) ||
@@ -555,22 +571,25 @@ function filmVersion(canvasId: string, input: Record<string, unknown>): string {
   if (!pageId || !canvas) return ''
   const comp = store.getComposition(canvasId, pageId)
   const frames = pageFrames(canvas, pageId)
-    .map((f) => `${f.id}@${f.updatedAt}`)
+    .map((f) => `${f.id}@${frameSig(f)}`)
     .join(',')
   return `${comp ? compositionSig(comp) : 'no-film'}|${frames}`
 }
 
-/** A read call's novelty key — undefined for a write or an untargeted call. */
-function motionReadKey(block: Anthropic.ToolUseBlockParam, canvasId: string): string | undefined {
+/** A call's novelty key. Frame and film reads carry the version of what
+ *  they look at, so re-checking changed content is new ground while a poll
+ *  of the same state is a repeat. Every other call keys on its name and
+ *  input alone: a first try at each distinct call is movement — a write
+ *  the signature cannot see, a job being filed or polled for the first
+ *  time — and the same call repeated is still time. */
+function motionCallKey(block: Anthropic.ToolUseBlockParam, canvasId: string): string {
   const input = block.input as Record<string, unknown>
   let version = ''
   if (MOTION_FRAME_READS.has(block.name)) {
     const frameId = typeof input.frame_id === 'string' ? input.frame_id : ''
-    version = `f${store.getFrame(frameId)?.updatedAt ?? ''}`
+    version = `f${frameSig(store.getFrame(frameId))}`
   } else if (MOTION_FILM_READS.has(block.name)) {
     version = filmVersion(canvasId, input)
-  } else if (!MOTION_TARGETED_READS.has(block.name)) {
-    return undefined
   }
   return `${block.name} ${JSON.stringify(block.input)} ${version}`
 }
@@ -972,21 +991,23 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     let stillCalls = 0
     /* the watch: a call is movement when it leaves the canvas in a state
        never seen before — a write loop that rewrites the same timeline is
-       still — or when it reads a target the run had not read. The first
-       call always counts (claiming the card is itself an act). */
+       still — or when it calls something the run had not tried: a new read
+       target, a job being filed or watched, a write the canvas cannot
+       show. The first call always counts (claiming the card is itself an
+       act). */
     let movedThisTurn = true
     const seenMotionSigs = new Set<string>()
-    const seenMotionReads = new Set<string>()
+    const seenMotionCalls = new Set<string>()
     const motionMoved = (block: Anthropic.ToolUseBlockParam, failed: boolean): boolean => {
       const sig = motionSignature(canvasId, runState)
       const fresh = !seenMotionSigs.has(sig)
       seenMotionSigs.add(sig)
-      /* a read that coincides with a state move is still a read — note the
-         target even then, so polling it afterwards counts as a repeat */
-      const key = failed ? undefined : motionReadKey(block, canvasId)
-      const newRead = key !== undefined && !seenMotionReads.has(key)
-      if (key) seenMotionReads.add(key)
-      return fresh || newRead
+      /* a call that coincides with a state move is still a first try —
+         note its target even then, so repeating it counts as a repeat */
+      const key = failed ? undefined : motionCallKey(block, canvasId)
+      const newCall = key !== undefined && !seenMotionCalls.has(key)
+      if (key) seenMotionCalls.add(key)
+      return fresh || newCall
     }
     const motionStall = (limit: number, unit: 'turns' | 'tool calls') => {
       stalledRun = true
@@ -4458,7 +4479,9 @@ export async function execTool(
           if (gate) return fail(gate)
         }
         try {
-          return ok(JSON.stringify(await runSpeechTool(block.name, canvas, runState.askerId!, block.input)))
+          const out = await runSpeechTool(block.name, canvas, runState.askerId!, block.input)
+          watchJob(runState, 'speech', out)
+          return ok(JSON.stringify(out))
         } catch (error) {
           return fail(error instanceof Error ? error.message : 'speech tool failed')
         }
@@ -4477,7 +4500,9 @@ export async function execTool(
           if (gate) return fail(gate)
         }
         try {
-          return ok(JSON.stringify(await runBlenderTool(block.name, canvas, runState.askerId!, block.input)))
+          const out = await runBlenderTool(block.name, canvas, runState.askerId!, block.input)
+          watchJob(runState, 'blender', out)
+          return ok(JSON.stringify(out))
         } catch (error) {
           return fail(error instanceof Error ? error.message : 'blender tool failed')
         }

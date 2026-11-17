@@ -14,7 +14,7 @@ import type { AgentModel, AgentTurnRequest, AgentTurnResult } from '../server/ag
    budget. The real prompts are imported here so the negative case runs on
    the shipped wording. */
 
-const mocks = vi.hoisted(() => ({ pickModel: vi.fn() }))
+const mocks = vi.hoisted(() => ({ pickModel: vi.fn(), runSpeechTool: vi.fn(), runBlenderTool: vi.fn() }))
 
 vi.mock('../server/db/persist.ts', () => ({
   saveTask: () => {},
@@ -25,12 +25,23 @@ vi.mock('../server/db/persist.ts', () => ({
   saveProposal: () => {},
   saveCanvas: () => {},
   saveFrame: () => {},
+  saveFrameVersion: () => {},
   saveComposition: () => {},
   saveCompositionVersion: () => {},
 }))
 vi.mock('../server/agentModel.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../server/agentModel.ts')>()),
   pickModel: mocks.pickModel,
+}))
+/* the runners stand in for speech jobs and Blender ops — the desktop and
+   engines they reach for do not exist in a test */
+vi.mock('../server/speechTools.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../server/speechTools.ts')>()),
+  runSpeechTool: mocks.runSpeechTool,
+}))
+vi.mock('../server/blenderTools.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../server/blenderTools.ts')>()),
+  runBlenderTool: mocks.runBlenderTool,
 }))
 
 const actions = await import('../server/actions.ts')
@@ -144,6 +155,8 @@ beforeEach(() => {
     () => {},
   )
   mocks.pickModel.mockReset()
+  mocks.runSpeechTool.mockReset()
+  mocks.runBlenderTool.mockReset()
 })
 
 describe('a run’s turn budget', () => {
@@ -327,6 +340,72 @@ describe('an animate run’s room to work', () => {
     await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'), { timeout: 15_000 })
     expect(run).toHaveBeenCalledTimes(32)
     expect(cardById(canvasId, 'c1').failureReason).toMatch(/without changing a frame or a token/i)
+  })
+
+  it('ends a write loop that only toggles the same frame back and forth', async () => {
+    const shot = store.createFrame(canvasId, { name: 'toggle', html: '<p>alpha</p>' }, 'ann')!
+    const doc = (word: string) =>
+      `<html><body><main><p>${word}</p><p>padding padding padding padding</p></main></body></html>`
+    const { model, run } = scriptedModel(
+      Array.from({ length: 30 }, (_, i) =>
+        toolUse('set_frame_html', { frame_id: shot.id, html: doc(i % 2 ? 'beta' : 'alpha') }),
+      ),
+    )
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* each document ran once as new ground; the A/B loop that follows
+       rewrites nothing the canvas has not already shown */
+    expect(run).toHaveBeenCalledTimes(10)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('keeps waiting on a job while the job itself is moving', async () => {
+    /* the tool descriptions tell the model to poll get_transcript: each
+       poll that sees the job move is progress — the wait ends eight polls
+       after the job stops */
+    let polls = 0
+    mocks.runSpeechTool.mockImplementation(async () => {
+      polls += 1
+      const state = polls < 3 ? 'queued' : polls < 6 ? 'running' : 'done'
+      const stamp = state === 'queued' ? 10 : state === 'running' ? 20 : 30
+      return { job: { id: 'j1', state, progress: state === 'done' ? 1 : 0, updatedAt: stamp } }
+    })
+    const { model, run } = scriptedModel(Array.from({ length: 30 }, () => toolUse('get_transcript', { job_id: 'j1' })))
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* queued → running → done each moved the watch once; the frozen
+       'done' job then stalled the run like any other poll */
+    expect(run).toHaveBeenCalledTimes(14)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('ends the wait when the polled job never moves', async () => {
+    mocks.runSpeechTool.mockResolvedValue({ job: { id: 'j1', state: 'queued', progress: 0, updatedAt: 1 } })
+    const { model, run } = scriptedModel(Array.from({ length: 30 }, () => toolUse('get_transcript', { job_id: 'j1' })))
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* a dead job is still time: one first look, then eight repeats */
+    expect(run).toHaveBeenCalledTimes(9)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('counts a first try at each distinct call as movement — a repeat is still time', async () => {
+    /* the Blender scene is not canvas state: each new light moves on its
+       key alone, and looping one back is still */
+    mocks.runBlenderTool.mockResolvedValue({ op: { id: 'op1', state: 'queued', updatedAt: 1 } })
+    const { model, run } = scriptedModel([
+      ...Array.from({ length: 12 }, (_, i) => toolUse('blender_add_light', { light_type: 'POINT', name: `L${i}` })),
+      ...Array.from({ length: 30 }, () => toolUse('blender_add_light', { light_type: 'POINT', name: 'L0' })),
+    ])
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* 12 first tries, then 8 repeats of L0 */
+    expect(run).toHaveBeenCalledTimes(20)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
   })
 
   it('closes a stalled run with the stop reason, then the last narration', async () => {
