@@ -258,13 +258,17 @@ export async function fetchRemote(
   const { fetchPinnedPublicUrl, parsePublicHttpUrl } = await import('./publicUrl.ts')
   const tooBig = new Error(`file exceeds the ${Math.round(maxBytes / 1024 / 1024)} MB limit`)
   let url = parsePublicHttpUrl(rawUrl)
+  /* caller headers may carry a credential (a provider api key): they go
+   * only to the origin they were meant for, never along a redirect to
+   * another host */
+  const headersOrigin = url.origin
   for (let hop = 0; hop < 4; hop++) {
     const res = await fetchPinnedPublicUrl(url, {
       redirect: 'manual',
       headers: {
         accept: options.accept ?? 'image/*,*/*;q=0.8',
         'user-agent': 'DoopAssets/1.0',
-        ...options.headers,
+        ...(url.origin === headersOrigin ? options.headers : {}),
       },
       signal: AbortSignal.timeout(options.timeoutMs ?? 20_000),
     })

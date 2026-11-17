@@ -60,9 +60,7 @@ export function sniffVideoMime(buf: Buffer): 'video/mp4' | 'video/webm' | undefi
   if (
     buf.length >= 12 &&
     buf.toString('latin1', 4, 8) === 'ftyp' &&
-    /^(isom|iso2|iso4|iso5|iso6|avc1|mp41|mp42|dash|MSNV|M4V |M4A |qt {2}|heic|heix)/.test(
-      buf.toString('latin1', 8, 12),
-    )
+    /^(isom|iso2|iso4|iso5|iso6|avc1|mp41|mp42|dash|MSNV|M4V |qt {2})/.test(buf.toString('latin1', 8, 12))
   )
     return 'video/mp4'
   /* ebml/webm */
@@ -142,13 +140,39 @@ async function openRouterVideo(key: string, model: VideoModelOption, req: VideoR
   }
 }
 
+/* the key only ever travels in the x-goog-api-key header, only to this
+ * host — never inside a URL, and fetchRemote drops it if a redirect
+ * leaves the origin */
+const GEMINI_HOST = 'generativelanguage.googleapis.com'
+
+/** the api root under the fixed Google host; the env override tunes the
+ *  base path, it is not a licence to send the key to another host */
+function geminiApiRoot(): string {
+  const base = new URL(env.GEMINI_VIDEOS_URL)
+  if (base.protocol !== 'https:' || base.host !== GEMINI_HOST) {
+    throw new VideoGenError(`GEMINI_VIDEOS_URL must stay on https://${GEMINI_HOST} — the api key goes nowhere else`)
+  }
+  return base.pathname.replace(/\/models\/?$/, '')
+}
+
+/** the operation name comes back from the provider — it picks the poll
+ *  path, so anything that could steer off the api root is refused */
+function geminiOperationUrl(root: string, name: string): string {
+  if (!/^models\/[\w.-]+\/operations\/[\w.-]+$/.test(name)) {
+    throw new VideoGenError(`Gemini returned a malformed operation name`)
+  }
+  return `https://${GEMINI_HOST}${root}/${name}`
+}
+
 async function geminiVideo(key: string, model: VideoModelOption, req: VideoRequest): Promise<GeneratedVideo> {
+  const root = geminiApiRoot()
+  const auth = { 'x-goog-api-key': key }
   const instance: Record<string, unknown> = { prompt: req.prompt }
   if (req.firstFrame) instance.image = { bytesBase64Encoded: req.firstFrame }
   if (req.lastFrame) instance.lastFrame = { bytesBase64Encoded: req.lastFrame }
-  const op = await fetchJson(`${env.GEMINI_VIDEOS_URL}/${model.id}:predictLongRunning?key=${key}`, {
+  const op = await fetchJson(`https://${GEMINI_HOST}${root}/models/${model.id}:predictLongRunning`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...auth },
     body: JSON.stringify({
       instances: [instance],
       parameters: {
@@ -161,17 +185,23 @@ async function geminiVideo(key: string, model: VideoModelOption, req: VideoReque
   })
   const name = typeof op.name === 'string' ? op.name : undefined
   if (!name) throw new VideoGenError('Gemini returned no operation name')
+  const pollUrl = geminiOperationUrl(root, name)
   const deadline = Date.now() + POLL_DEADLINE_MS
   for (;;) {
     if (Date.now() > deadline) throw new VideoGenError('the video operation timed out')
     await new Promise((r) => setTimeout(r, POLL_EVERY_MS))
-    const job = await fetchJson(`https://generativelanguage.googleapis.com/v1beta/${name}?key=${key}`, {})
+    const job = await fetchJson(pollUrl, { headers: auth })
     if (!job.done) continue
     if (job.error) throw new VideoGenError(String((job.error as { message?: string }).message))
     const response = job.response as { generateVideoResponse?: { generatedSamples?: { video?: { uri?: string } }[] } }
     const uri = response.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
     if (!uri) throw new VideoGenError('the finished operation carries no video uri')
-    /* the download uri wants the same credential as the api call */
+    /* the download uri wants the same credential as the api call, and
+     * the credential only goes to the fixed host */
+    const target = URL.canParse(uri) ? new URL(uri) : undefined
+    if (!target || target.protocol !== 'https:' || target.host !== GEMINI_HOST) {
+      throw new VideoGenError(`the video uri is not on ${GEMINI_HOST} — refusing to send the key there`)
+    }
     const buf = await downloadVideo(uri, { 'x-goog-api-key': key })
     return finish(buf, sniffVideoMime(buf)!, 'gemini', model, req)
   }
