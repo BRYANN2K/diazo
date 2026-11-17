@@ -123,13 +123,16 @@ jobs:
           # the link lands in the first writable dir of DIAZO_LINK_DIRS
           test -L "$HOME/.local/bin/diazo" || test -L /usr/local/bin/diazo
           diazo status | tee "$RUNNER_TEMP/diazo-status.log"
-          grep -qi answering "$RUNNER_TEMP/diazo-status.log"
+          grep -Fx 'diazo: answering on http://localhost:4400' "$RUNNER_TEMP/diazo-status.log"
           diazo stop
-          ! curl -fsS --max-time 5 http://127.0.0.1:4400/healthz
+          if curl -fsS --max-time 5 http://127.0.0.1:4400/healthz; then
+            echo 'the server still answers after diazo stop' >&2
+            exit 1
+          fi
           diazo start
-          diazo status | grep -qi answering
+          diazo status | grep -Fx 'diazo: answering on http://localhost:4400'
           diazo update 2>&1 | tee "$RUNNER_TEMP/diazo-update.log"
-          diazo status | grep -qi answering
+          diazo status | grep -Fx 'diazo: answering on http://localhost:4400'
           curl -fsS http://127.0.0.1:4400/healthz
 
       - name: Uninstall and assert nothing is left
@@ -140,8 +143,14 @@ jobs:
           test ! -L /usr/local/bin/diazo
           test ! -e /usr/local/bin/diazo
           test ! -d "$HOME/.local/share/dev.bryann2k.diazo"
-          ! docker inspect diazo >/dev/null 2>&1
-          ! docker image inspect "$DOOP_IMAGE" >/dev/null 2>&1
+          if docker inspect diazo >/dev/null 2>&1; then
+            echo 'the diazo container survived the purge' >&2
+            exit 1
+          fi
+          if docker image inspect "$DOOP_IMAGE" >/dev/null 2>&1; then
+            echo 'the diazo image survived the purge' >&2
+            exit 1
+          fi
 
       - name: Collect logs on failure
         if: failure()
@@ -251,13 +260,16 @@ jobs:
         run: |
           test -L "$HOME/.local/bin/diazo" || test -L /usr/local/bin/diazo
           diazo status | tee "$RUNNER_TEMP/diazo-status.log"
-          grep -qi answering "$RUNNER_TEMP/diazo-status.log"
+          grep -Fx 'diazo: answering on http://localhost:4400' "$RUNNER_TEMP/diazo-status.log"
           diazo stop
-          ! curl -fsS --max-time 5 http://127.0.0.1:4400/healthz
+          if curl -fsS --max-time 5 http://127.0.0.1:4400/healthz; then
+            echo 'the server still answers after diazo stop' >&2
+            exit 1
+          fi
           diazo start
-          diazo status | grep -qi answering
+          diazo status | grep -Fx 'diazo: answering on http://localhost:4400'
           diazo update 2>&1 | tee "$RUNNER_TEMP/diazo-update.log"
-          diazo status | grep -qi answering
+          diazo status | grep -Fx 'diazo: answering on http://localhost:4400'
           curl -fsS http://127.0.0.1:4400/healthz
 
       - name: Uninstall and assert nothing is left
@@ -268,8 +280,14 @@ jobs:
           test ! -L /usr/local/bin/diazo
           test ! -e /usr/local/bin/diazo
           test ! -d "$HOME/.local/share/dev.bryann2k.diazo"
-          ! podman inspect diazo >/dev/null 2>&1
-          ! podman image inspect "$DOOP_IMAGE" >/dev/null 2>&1
+          if podman inspect diazo >/dev/null 2>&1; then
+            echo 'the diazo container survived the purge' >&2
+            exit 1
+          fi
+          if podman image inspect "$DOOP_IMAGE" >/dev/null 2>&1; then
+            echo 'the diazo image survived the purge' >&2
+            exit 1
+          fi
 
       - name: Collect logs on failure
         if: failure()
@@ -346,7 +364,10 @@ jobs:
           sh scripts/install-desktop.sh --uninstall 2>&1 | tee "$RUNNER_TEMP/desktop-uninstall.log"
           test -z "$(find "$HOME" -name 'Diazo_*_amd64.AppImage' -print -quit)"
           test ! -f "$HOME/.local/share/applications/doop-desktop-appimage.desktop"
-          ! dpkg -s diazo >/dev/null 2>&1
+          if dpkg -s diazo >/dev/null 2>&1; then
+            echo 'the diazo package is still installed' >&2
+            exit 1
+          fi
 
       - name: Upload logs
         if: failure()
