@@ -334,8 +334,9 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) process.once(sig, shutdown)
 
 /* the desktop shell spawns the server as a sidecar over piped stdio: the
    app dying closes our stdin — leave with it, through the same flush the
-   signals get (DOOP_EMBEDDED). A terminal or a service leaves stdin open,
-   so nothing else notices this */
+   signals get (DOOP_EMBEDDED). The flag is for that piped sidecar only:
+   under systemd, launchd or nohup stdin is /dev/null and 'end' fires at
+   once, ending the server as soon as it starts */
 if (env.DOOP_EMBEDDED) {
   process.stdin.resume()
   process.stdin.once('end', shutdown)

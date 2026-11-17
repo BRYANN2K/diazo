@@ -129,8 +129,10 @@ What landed on top of P0:
   (`import.meta.url`) so `DOOP_DIST_DIR`/`DOOP_MIGRATIONS_DIR` are only overrides, never
   required. The install dir stays read-only at runtime.
 - Env switches: `DOOP_EMBEDDED=1` (stdin-close shutdown + `ready <port>` on stdout once
-  listening), `DOOP_BROWSER_DIR`, `DOOP_INSTALL=desktop` (also inferred from
-  `DOOP_EMBEDDED`; the server skips its own update check — the app's updater ships both).
+  listening + loopback bind — the piped sidecar only: under systemd/launchd/nohup stdin is
+  `/dev/null` and the server would exit at once), `DOOP_BROWSER_DIR`, `DOOP_INSTALL=desktop`
+  (also inferred from `DOOP_EMBEDDED`; the server skips its own update check — the app's
+  updater ships both).
 - `server/dataLock.ts`: one server per data dir via `<data>/server.lock` (pid + host +
   heartbeat); a live holder is refused, a dead pid or a stale foreign heartbeat is
   reclaimed. Skipped only when `DATABASE_URL` and `BUCKET` are both set (no local state).

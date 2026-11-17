@@ -136,9 +136,11 @@ const schema = {
      when set or when DOOP_EMBEDDED is on; unset and not embedded = the
      browser profile stays on the OS temp dir (the container behaviour) */
   DOOP_BROWSER_DIR: str({ default: undefined }),
-  /* the desktop shell spawns the server as a sidecar (DOOP_INSTALL=desktop):
-     it exits when stdin closes — the app died — and prints `ready <port>`
-     on stdout once listening */
+  /* the desktop shell spawns the server as a sidecar over piped stdio
+     (DOOP_INSTALL=desktop): it exits when stdin closes — the app died —
+     prints `ready <port>` once listening, and binds loopback. For the
+     piped sidecar only: a service's stdin is /dev/null and 'end' fires
+     at once */
   DOOP_EMBEDDED: bool({ default: false }),
 
   /* ---------------------------------------------------------- auth */
