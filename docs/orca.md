@@ -51,18 +51,32 @@ The split of trust:
   `ready_for_dev` and the caller to hold a repo link on the canvas whose
   device is online — else `409`. `environment` is an Orca environment name
   (`vps`); absent launches on this Mac. Answers `503` when the pack cannot
-  build.
+  build, and is rate limited (5 launches per user per minute, `429`) —
+  every call builds a pack before the device's confirm gates it.
+  `model`/`effort` are charset-checked here already
+  (`[a-z0-9._:-]+`, no leading `-`), and `effort` needs `model`.
 - `report` accepts only the requester's session; the first report binds the
-  row's `deviceId`. `requestId` settles the claimed bridge request. A
-  `launch` with `cancelled` marks the task `cancelled`; `ok:false` marks it
-  `failed`; otherwise it stores the Orca identity and moves to `starting`.
+  row's `deviceId`. `requestId` settles the claimed bridge request — and
+  must name that task's own `dev_task` job, not another launch's pending
+  one. A `launch` with `cancelled` marks the task `cancelled`; `ok:false`
+  marks it `failed`; otherwise it stores the Orca identity and moves to
+  `starting`. Launch reports on a terminal row (`done`, `failed`,
+  `cancelled`) are ignored — a late or replayed answer cannot resurrect a
+  finished task.
 - `poll` carries a trimmed `worktree ps` row: `{ found, status?, agentState?,
 outcome?, lastAssistantMessage?, linkedPR?, orcaSessionId?, branch?,
 workspaceStatus?, devUrl? }`. `found:false` maps to `cancelled`; a `linkedPR`
   maps to `pr_open`; `outcome` `failure`/`interruption` to `failed`,
-  `cancellation` to `cancelled`, `success` to `done`. `devUrl` is the dev
-  server `orca ports` reported for the worktree — http(s) only, stored on the
-  task for a live frame or the drift review to use.
+  `cancellation` to `cancelled`, `success` to `done` — the worktree's
+  `programStatus` is the only pull-side value that may end a task (an
+  agent's per-turn `agentState: done` is a finished turn, not a finished
+  task). `devUrl` is the dev server `orca ports` reported for the worktree —
+  http(s) only, stored on the task for a live frame or the drift review to
+  use. `linkedPR` follows the same http(s)-only rule.
+- `cancel` marks the row `cancelled` and withdraws the task's unclaimed
+  `dev_task` job, so a stopped launch is never handed to the desktop. A
+  job already claimed still answers through `report`, which keeps the row
+  cancelled.
 
 ## The `dev_task` bridge op
 
@@ -87,7 +101,9 @@ The device claims it like any repo request (it must hold the link's grant),
 runs `orca_launch_task` natively, and answers through the report route —
 not `/api/local-repo/finish` (the report's `requestId` settles the bridge
 entry). An unclaimed job expires at `DEV_TASK_LAUNCH_TTL_MS` (10 min) and
-the task is marked `failed`.
+the task is marked `failed`. Bridge requests live in the server's memory:
+a restart orphans every still-queued job, so `queued` rows older than the
+TTL are swept to `failed` at boot and once a minute.
 
 ## MCP tools (the coding agent's side)
 
@@ -97,7 +113,8 @@ the task is marked `failed`.
 | `update_dev_task` | `{ task_id, state?, pr_url?, summary?, orca_session_id?, branch? }` | the updated task                                                                               |
 
 `update_dev_task` requires the caller to be the task's requester (the agent
-runs with their Diazo MCP credentials). `state` may only be `needs_input`,
+runs with their Diazo MCP credentials) and to still have access to the
+task's canvas. `state` may only be `needs_input`,
 `pr_open`, `done` or `failed`; a `done`/`failed` sets `finishedAt`.
 
 `get_canvas` also lists `dev_tasks` for its canvas.
@@ -108,19 +125,35 @@ Advertised as `window.__DIAZO_ORCA__` (and `__DOOP_ORCA__` for older
 clients). All take typed fields, build an argv vector, always pass `--json`.
 No passthrough exists.
 
-| Command             | Runs                                                                             | Confirmation |
-| ------------------- | -------------------------------------------------------------------------------- | ------------ |
-| `orca_status`       | `orca status`, `orca host list`, `orca account list`                             | none         |
-| `orca_resolve_repo` | `orca repo list` matched to a repo-link grant (path, else git remote key)        | none         |
-| `orca_launch_task`  | `orca worktree create --name … --repo id:… --branch doop/… --agent … --prompt …` | native       |
-| `orca_poll`         | `orca worktree ps --limit 100`, filtered to identities this shell launched       | none         |
-| `orca_ports`        | `orca ports --worktree identity:<key>`, trimmed to `{ port, url, process }`      | none         |
-| `orca_activate`     | `orca worktree activate --worktree identity:<key>`                               | none         |
+The binary resolves in order: `DOOP_ORCA_CLI` (test override),
+`ORCA_CLI_COMMAND` — what Orca itself exports into managed sessions —
+then the install locations and `PATH`. Dynamic values ride as single argv
+elements (`--name=<value>`), so a value can never parse as its own option;
+`name`, `prompt` and `comment` additionally reject a leading `-` and
+control characters, and `--environment` values must come from
+`orca host list`. The launch keeps `operationId` for `--retry-launch`.
 
-The shell persists the identities it launched in `orca-tasks.json` (app data
-dir); selectors outside that set are refused. `--environment` values must
-come from `orca host list`. The launch keeps `operationId` for
-`--retry-launch`.
+| Command             | Runs                                                                         | Confirmation |
+| ------------------- | ---------------------------------------------------------------------------- | ------------ |
+| `orca_status`       | `orca status`, `orca host list`, `orca account list`                         | none         |
+| `orca_resolve_repo` | `orca repo list` matched to a repo-link grant (path, else git remote key)    | none         |
+| `orca_launch_task`  | `orca worktree create --name=… --repo=id:… --agent=… --prompt=… --comment=…` | native       |
+| `orca_poll`         | `orca worktree ps --limit 100`, filtered to identities this shell launched   | none         |
+| `orca_ports`        | `orca ports --worktree identity:<key>`, trimmed to `{ port, url, process }`  | none         |
+| `orca_activate`     | `orca worktree activate --worktree identity:<key>`                           | none         |
+| `orca_untrack`      | drops the task's identity once the server saw a terminal state               | none         |
+
+The shell persists the identities it launched in `orca-tasks.json` (app
+data dir): `{ taskId, environment, server, orcaIdentity, … }`, serialized
+through a mutex so concurrent callers cannot corrupt the file. `server` is
+the active Diazo origin — a shell signed into two instances never polls
+the other's worktrees. Selectors outside the current server/environment
+set are refused. A worktree gone from `ps` or terminal is kept `ended` for
+a grace window (the last report still ships) then pruned; `orca_untrack`
+removes it earlier, once the room already knows the end state.
+
+The native confirmation names the worktree, the agent and the launch
+comment, which Orca persists as task metadata.
 
 ## Dev task states
 
