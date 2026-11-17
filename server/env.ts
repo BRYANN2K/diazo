@@ -162,6 +162,9 @@ const schema = {
   /* ------------------------------------------------ resident agents */
   DOOP_AGENT_PROVIDER: str({ choices: ['anthropic', 'azure'], default: 'anthropic' }),
   ANTHROPIC_API_KEY: str({ default: undefined }),
+  /* the Anthropic SDK merges this into every client's headers; declared so
+     custom-provider clients can strip it back out (agentModel.ts) */
+  ANTHROPIC_CUSTOM_HEADERS: str({ default: undefined }),
   AZURE_OPENAI_ENDPOINT: str({ default: undefined }),
   AZURE_OPENAI_API_KEY: str({ default: undefined }),
   AZURE_OPENAI_DEPLOYMENT: str({ default: undefined }),

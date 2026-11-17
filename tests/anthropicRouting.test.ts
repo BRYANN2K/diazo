@@ -47,7 +47,7 @@ it('uses the payer key and selected Claude model on the server without a local h
   expect(model).toMatchObject({ provider: 'anthropic-key', userId: 'alice' })
   expect(model?.runHarness).toBeUndefined()
   expect(mocks.key).toHaveBeenCalledWith('sk-ant-alice')
-  expect(mocks.headers).toHaveBeenCalledWith(undefined)
+  expect(mocks.headers).toHaveBeenCalledWith({ Authorization: null, 'X-Api-Key': 'sk-ant-alice' })
   expect(await model!.run(request)).toMatchObject({ stop_reason: 'end_turn' })
   expect(mocks.stream).toHaveBeenCalledWith(
     expect.objectContaining({ model: 'claude-opus-5', max_tokens: 1024 }),
