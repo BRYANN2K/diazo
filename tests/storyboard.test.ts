@@ -33,13 +33,13 @@ describe('shot notes — what the frame tells the agent', () => {
     const html = DOC(`
       <p>Motion: slow push-in, title words in one by one</p>
       <p>Sound: low pad, first beat at 2s</p>
-      <h3>Voice-over</h3><p>a line the narrator reads</p>
+      <span>VOICE-OVER</span><p>a line the narrator reads</p>
     `)
     const notes = shotNotesIn(html)
     expect(notes).toContain('Motion: slow push-in, title words in one by one')
     expect(notes).toContain('Sound: low pad, first beat at 2s')
-    /* the bare "Voice-over" heading borrows the sibling carrying its text */
-    expect(notes.some((n) => n.includes('Voice-over') && n.includes('narrator'))).toBe(true)
+    /* the bare "VOICE-OVER" label borrows the sibling carrying its text */
+    expect(notes.some((n) => n.includes('VOICE-OVER') && n.includes('narrator'))).toBe(true)
   })
 
   it('reads more of the vocabulary designers use: caméra, narration, audio, dialogue', () => {
@@ -117,6 +117,33 @@ describe('shot notes — the false positives that are not notes', () => {
       <p>Transitions… everywhere</p>
     `)
     expect(shotNotesIn(html)).toEqual([])
+  })
+
+  it('never reads a bare label word in design markup as a note', () => {
+    const html = DOC(`
+      <div class="card"><h3>Notes</h3><p>Write anything down.</p></div>
+      <div class="card"><h3>Sound</h3><p>Spatial audio built in.</p></div>
+      <div>Transitions</div><p>Smooth by default.</p>
+      <ul><li><span>Notes</span><span>Your thoughts…</span></li></ul>
+      <a href="/sound">SON</a><p>Audio for all.</p>
+      <button>TRANSITION</button><p>Whatever.</p>
+      <div><b><span>Notes</span></b><p>Nested too.</p></div>
+    `)
+    expect(shotNotesIn(html)).toEqual([])
+    const { notes, targets, panelId } = analyzeShotHtml(html)
+    expect(notes).toEqual([])
+    expect(panelId).toBeUndefined()
+    expect(targets.length).toBeGreaterThan(0)
+  })
+
+  it('still pairs a shouted label or a colon label with the sibling carrying its text', () => {
+    const html = DOC(`
+      <div>VOIX OFF</div><div>« Et si… »</div>
+      <section><span>Notes:</span><p>jot it down</p></section>
+    `)
+    const notes = shotNotesIn(html)
+    expect(notes).toContain('VOIX OFF « Et si… »')
+    expect(notes.some((n) => n.includes('Notes:') && n.includes('jot it down'))).toBe(true)
   })
 
   it('pairs a bare label with its sibling — never with body or the whole frame', () => {

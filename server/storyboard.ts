@@ -11,7 +11,8 @@
  * The detector is deliberately narrow: a note is a block labelled by its
  * text ("VOIX OFF: …", a shouted "SON — …") or by an explicit markup name
  * (`data-doop-notes`, a shot-notes/notes/voix-off/voice-over class or id),
- * or a bare label paired with the sibling(s) holding its text. Ordinary
+ * or a shouted or colon-ended label paired with the sibling(s) holding its
+ * text. Ordinary
  * styling (`transition-all`, `motion-safe:*`, a "Sound wave" aria-label)
  * and headline copy ("Sound. Reimagined.") are never notes, and no note
  * ever promotes `body` — the notes bar is the deepest ancestor that holds
@@ -59,9 +60,13 @@ function startsNote(text: string): boolean {
   return /\p{Lu}/u.test(label) && !/\p{Ll}/u.test(label)
 }
 
-/* text that is only a label — "VOIX OFF", "Notes", "MOUVEMENT / SON" — the
+/* text that is only a label — "VOIX OFF", "Notes:", "MOUVEMENT / SON" — the
    note is then the label's sibling(s), never its parent */
 const NOTE_ONLY = new RegExp(`^\\s*${NOTE_LABELS}\\s*:?\\s*$`, 'i')
+
+/* a bare label can never sit in a heading, a link or a button — "Notes" as
+   a card title, a nav item or a CTA is design copy, not a storyboard label */
+const NOT_LABEL_TAGS = new Set(['a', 'button', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
 
 /* a notes panel labelled by markup: a bare data-doop-notes marker, or a
    class/id token equal to or prefixed shot-notes / notes / voix-off /
@@ -246,6 +251,22 @@ interface NoteGroup {
   panel?: Element
 }
 
+/* a lone label word pairs with the sibling carrying its text only when it
+   marks itself as a label — shouted caps like the dash form ("VOIX OFF")
+   or a trailing colon ("Notes:") — in a plain element: a feature grid
+   titled Animations / Notes / Sound is product copy, not shot notes */
+function bareLabel(el: Element): boolean {
+  const text = textOf(el).trim()
+  if (!NOTE_ONLY.test(text)) return false
+  if (!/[:：]$/.test(text) && !(/\p{Lu}/u.test(text) && !/\p{Ll}/u.test(text))) return false
+  for (let node: ParentNode | null | undefined = el; node && isElement(node); node = node.parentNode) {
+    const tag = node.tagName.toLowerCase()
+    if (NOT_LABEL_TAGS.has(tag)) return false
+    if (SKIP_TAGS.has(tag)) break
+  }
+  return true
+}
+
 /* a leaf sibling that can hold a note's text after a bare label: plain
    text in a plain tag, itself no label, no meta row and no deeper markup */
 function noteValue(el: Element): boolean {
@@ -347,7 +368,7 @@ function parseShot(doc: Tree.Document): ParsedShot {
      never the parent itself */
   for (const el of walk(doc)) {
     if (noteSubtree.has(el) || SKIP_TAGS.has(el.tagName.toLowerCase()) || concealed(el)) continue
-    if (!NOTE_ONLY.test(textOf(el))) continue
+    if (!bareLabel(el)) continue
     const parent = el.parentNode
     const clean = parent !== null && isElement(parent) && elementChildren(parent).every(looksNoteish)
     const elements = [el]
