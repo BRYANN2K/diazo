@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
-import { browserDir } from './paths.ts'
+import { browserProfileDir } from './paths.ts'
 
 /**
  * A launched browser dies with the server. Puppeteer detaches it into its
@@ -42,7 +42,10 @@ let exitHookInstalled = false
    a running dev server, and a launch-time sweep deletes their live
    profiles (it relied on the lock, which only server/index.ts takes) */
 export function sweepBrowserProfiles(): void {
-  const dir = browserDir()
+  const dir = browserProfileDir()
+  /* unmanaged profiles live wherever the OS keeps temp dirs — shared with
+     every other process, so they are never ours to sweep */
+  if (!dir) return
   let entries: fs.Dirent[]
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true })

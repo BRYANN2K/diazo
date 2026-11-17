@@ -132,8 +132,9 @@ const schema = {
      beside the source — a bundle moves import.meta.url, so a packaged
      install names the copy it ships */
   DOOP_MIGRATIONS_DIR: str({ default: undefined }),
-  /* where the downloaded headless renderer (and its profile dirs) live;
-     unset = <data>/browser */
+  /* where the downloaded headless renderer lives — and the profile dirs,
+     when set or when DOOP_EMBEDDED is on; unset and not embedded = the
+     browser profile stays on the OS temp dir (the container behaviour) */
   DOOP_BROWSER_DIR: str({ default: undefined }),
   /* the desktop shell spawns the server as a sidecar (DOOP_INSTALL=desktop):
      it exits when stdin closes — the app died — and prints `ready <port>`

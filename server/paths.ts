@@ -5,9 +5,10 @@ import { fileURLToPath } from 'node:url'
 
 /**
  * Where the server's files live. Every stateful write lands under the data
- * dir (PGlite, assets, backups, the lock file, the browser's profile), so a
- * packaged install can sit in a read-only folder and nothing else is ever
- * touched. Read at call time so tests can flip the variables.
+ * dir (PGlite, assets, backups, the lock file; the renderer and its
+ * profiles too on the installs that manage them), so a packaged install
+ * can sit in a read-only folder and nothing else is ever touched. Read at
+ * call time so tests can flip the variables.
  */
 
 /** State: PGlite, uploaded assets (no BUCKET), backups, server.lock, the
@@ -28,10 +29,19 @@ export function distDir(): string {
   return fs.existsSync(beside) ? beside : path.join(HERE, '..', 'dist')
 }
 
-/** The downloaded headless renderer and its profile dirs. Unset =
- *  <data>/browser, keeping browser state inside the data dir. */
+/** The downloaded headless renderer. Unset = <data>/browser. */
 export function browserDir(): string {
   return env.DOOP_BROWSER_DIR ?? path.join(dataDir(), 'browser')
+}
+
+/** Parent dir for the per-launch `profile-*` dirs, where we manage it:
+ *  inside the (locked) data dir for the embedded install, or an explicit
+ *  DOOP_BROWSER_DIR. Undefined anywhere else — the profile then stays on
+ *  puppeteer's temp-dir default, the behaviour Docker and a source
+ *  checkout had before the data-dir layout (Chrome's singleton socket and
+ *  locks are unreliable on the volume's bind mounts and PVCs). */
+export function browserProfileDir(): string | undefined {
+  return env.DOOP_BROWSER_DIR || env.DOOP_EMBEDDED ? browserDir() : undefined
 }
 
 /** `pg-<date>.tar.gz` dumps plus their asset manifests. */

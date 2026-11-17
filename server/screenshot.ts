@@ -1,5 +1,5 @@
 import { env, windowsBrowserDirectories } from './env.ts'
-import { browserDir } from './paths.ts'
+import { browserDir, browserProfileDir } from './paths.ts'
 import { guardProcessTree } from './browserGuard.ts'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -99,15 +99,21 @@ function findBrowser(): string {
 /** A fresh headless Chrome with the server's flags. `timeout` bounds the wait
  *  for its DevTools endpoint (puppeteer's default, 30s, unless given);
  *  `protocolTimeout` bounds every DevTools command (puppeteer's 180s unless
- *  given). The profile lives under the data dir (nothing writes outside it)
- *  and the process tree is guarded so it dies with the server. */
+ *  given). The profile lives under the data dir where we manage it — the
+ *  embedded install or an explicit DOOP_BROWSER_DIR — and stays on
+ *  puppeteer's temp-dir default anywhere else (the container behaviour
+ *  before the data-dir layout). The process tree is guarded so the browser
+ *  dies with the server. */
 export async function launchBrowser(timeout?: number, protocolTimeout?: number): Promise<Browser> {
-  const dir = browserDir()
-  fs.mkdirSync(dir, { recursive: true })
-  /* one profile dir per launch: a recycling browser may still be closing
-     while its replacement launches, and a shared dir trips Chrome's
-     SingletonLock */
-  const profile = fs.mkdtempSync(path.join(dir, 'profile-'))
+  const dir = browserProfileDir()
+  let profile: string | undefined
+  if (dir) {
+    fs.mkdirSync(dir, { recursive: true })
+    /* one profile dir per launch: a recycling browser may still be closing
+       while its replacement launches, and a shared dir trips Chrome's
+       SingletonLock */
+    profile = fs.mkdtempSync(path.join(dir, 'profile-'))
+  }
   let browser: Browser
   try {
     browser = await puppeteer.launch({
@@ -128,13 +134,13 @@ export async function launchBrowser(timeout?: number, protocolTimeout?: number):
       ],
     })
   } catch (error) {
-    fs.rmSync(profile, { recursive: true, force: true })
+    if (profile) fs.rmSync(profile, { recursive: true, force: true })
     throw error
   }
   /* the browser dies with the server — an exit hook plus a watchdog for
      kill -9 (server/browserGuard.ts); release happens in terminate() */
   const child = browser.process()
-  if (child) guardProcessTree(child, { cleanupDir: profile })
+  if (child) guardProcessTree(child, profile ? { cleanupDir: profile } : {})
   return browser
 }
 

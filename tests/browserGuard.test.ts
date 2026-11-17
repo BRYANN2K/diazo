@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { sweepBrowserProfiles } from '../server/browserGuard.ts'
+import { browserProfileDir } from '../server/paths.ts'
 import { findBrowserPath, launchBrowser } from '../server/screenshot.ts'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
 
@@ -137,6 +138,43 @@ describe('sweepBrowserProfiles (server/browserGuard.ts)', () => {
     fs.rmSync(dir, { recursive: true })
     expect(() => sweepBrowserProfiles()).not.toThrow()
   })
+
+  it('manages profiles under the data dir only when DOOP_EMBEDDED or DOOP_BROWSER_DIR says so', () => {
+    const data = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-data-'))
+    dirs.push(data)
+    stubEnv('DOOP_DATA_DIR', data)
+    stubEnv('DOOP_BROWSER_DIR', undefined)
+    stubEnv('DOOP_EMBEDDED', undefined)
+    /* Docker and the checkout: puppeteer's temp-dir default, and a stale
+       profile-* under the data dir is not ours to touch */
+    expect(browserProfileDir()).toBeUndefined()
+    fs.mkdirSync(path.join(data, 'browser', 'profile-stale'), { recursive: true })
+    sweepBrowserProfiles()
+    expect(fs.existsSync(path.join(data, 'browser', 'profile-stale'))).toBe(true)
+
+    stubEnv('DOOP_EMBEDDED', '1')
+    expect(browserProfileDir()).toBe(path.join(data, 'browser'))
+    stubEnv('DOOP_EMBEDDED', undefined)
+    stubEnv('DOOP_BROWSER_DIR', '/somewhere/explicit')
+    expect(browserProfileDir()).toBe('/somewhere/explicit')
+  })
+
+  it('writes nothing under the data dir when the profile is unmanaged', async () => {
+    if (!findBrowserPath()) return
+    const data = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-data-'))
+    dirs.push(data)
+    stubEnv('DOOP_DATA_DIR', data)
+    stubEnv('DOOP_BROWSER_DIR', undefined)
+    stubEnv('DOOP_EMBEDDED', undefined)
+    const browser = await launchBrowser(30_000)
+    try {
+      /* the Docker profile contract: Chrome's singleton files stay in the
+         system temp dir, off the persistent volume */
+      expect(fs.existsSync(path.join(data, 'browser'))).toBe(false)
+    } finally {
+      await browser.close()
+    }
+  }, 60_000)
 
   it('never runs on browser launch — a launch keeps sibling profiles', async () => {
     if (!findBrowserPath()) return
