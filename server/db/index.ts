@@ -21,8 +21,9 @@ export type Db = NodePgDatabase<typeof schema>
 export let db: Db
 
 /* resolved from this file, not process.cwd() — the server may be launched
-   from anywhere (tests spawn it from a temp working directory) */
-const MIGRATIONS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations')
+   from anywhere (tests spawn it from a temp working directory). A bundled
+   build moves import.meta.url, so DOOP_MIGRATIONS_DIR names the copy it ships. */
+const MIGRATIONS = env.DOOP_MIGRATIONS_DIR ?? path.join(path.dirname(fileURLToPath(import.meta.url)), 'migrations')
 
 export async function initDb(): Promise<void> {
   const url = env.DATABASE_URL
@@ -34,7 +35,7 @@ export async function initDb(): Promise<void> {
   } else {
     const { PGlite } = await import('@electric-sql/pglite')
     const { drizzle } = await import('drizzle-orm/pglite')
-    const dir = path.join(process.cwd(), 'data', 'pg')
+    const dir = path.join(env.DOOP_DATA_DIR ?? path.join(process.cwd(), 'data'), 'pg')
     fs.mkdirSync(dir, { recursive: true }) // PGlite's own mkdir isn't recursive
     const client = new PGlite(dir)
     const pgliteDb = drizzle(client, { schema })

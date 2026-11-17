@@ -113,10 +113,25 @@ const nonNegativeInt = int(0)
 const schema = {
   NODE_ENV: str({ choices: ['development', 'test', 'production'], default: 'development' }),
   PORT: port({ default: 4400 }),
+  /* the interface the HTTP and websocket server binds; unset = every
+     interface, as the container needs — the embedded install sets 127.0.0.1 */
+  DOOP_LISTEN_HOST: str({ default: undefined }),
   /* the interface language for anyone who has not picked one in Settings */
   DEFAULT_LOCALE: str({ choices: LOCALES, default: FALLBACK_LOCALE }),
   /* unset = embedded Postgres (PGlite) under ./data/pg */
   DATABASE_URL: str({ default: undefined }),
+
+  /* -------------------------------------------------- install layout */
+  /* the directory the server keeps its state in — PGlite's data dir, uploaded
+     assets (no BUCKET) and the legacy store.json import; unset = ./data under
+     the working directory, the layout the checkout and the container use */
+  DOOP_DATA_DIR: str({ default: undefined }),
+  /* the built client the production server serves; unset = ./dist */
+  DOOP_DIST_DIR: str({ default: undefined }),
+  /* the drizzle migrations applied at boot; unset = server/db/migrations
+     beside the source — a bundle moves import.meta.url, so a packaged
+     install names the copy it ships */
+  DOOP_MIGRATIONS_DIR: str({ default: undefined }),
 
   /* ---------------------------------------------------------- auth */
   BETTER_AUTH_SECRET: str({

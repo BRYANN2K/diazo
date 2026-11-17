@@ -202,7 +202,7 @@ const PORT = env.PORT
 const BUILD_ID = (() => {
   try {
     return createHash('sha1')
-      .update(readFileSync(path.join(process.cwd(), 'dist', 'index.html')))
+      .update(readFileSync(path.join(env.DOOP_DIST_DIR ?? path.join(process.cwd(), 'dist'), 'index.html')))
       .digest('hex')
       .slice(0, 12)
   } catch {
@@ -4199,7 +4199,7 @@ app.get('/sitemap.xml', (_req, res) => {
 
 /* production: serve the built client */
 if (env.isProduction) {
-  const dist = path.join(process.cwd(), 'dist')
+  const dist = env.DOOP_DIST_DIR ?? path.join(process.cwd(), 'dist')
   app.use(express.static(dist))
   /* a missing bundle or source map is a 404, not the app shell: HTML served
      as a .js or .map breaks module loads and source map resolution */
@@ -4468,7 +4468,7 @@ wss.on('connection', (ws, upgradeReq) => {
   })
 })
 
-server.listen(PORT, () => {
+const onListening = () => {
   console.log(`⟡ diazo server    http://localhost:${PORT}`)
   /* frame HTML is loaded per canvas; a canvas nobody has used for
      CANVAS_IDLE_MS gives it back, unless a room, agent or stream is on it.
@@ -4528,4 +4528,9 @@ server.listen(PORT, () => {
   startScheduler()
   startMcpTokenPrune()
   for (const extension of extensions) extension.startWorker?.()
-})
+}
+
+/* the embedded install binds loopback only; unset keeps the container
+   behaviour of listening on every interface */
+if (env.DOOP_LISTEN_HOST) server.listen(PORT, env.DOOP_LISTEN_HOST, onListening)
+else server.listen(PORT, onListening)

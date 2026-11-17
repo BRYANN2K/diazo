@@ -3,6 +3,7 @@ import path from 'node:path'
 import { nanoid } from 'nanoid'
 import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm'
 import { db } from './index.ts'
+import { env } from '../env.ts'
 import * as t from './schema.ts'
 import { extractAssetIds } from '../assets.ts'
 import { canonicalAgentName, roleByAgentName } from '../../shared/agents.ts'
@@ -1723,7 +1724,7 @@ export async function hydrate(): Promise<Hydrated> {
 
 /** One-time import of the pre-DB data/store.json so existing canvases survive. */
 export async function importLegacyJson(): Promise<Canvas[] | null> {
-  const file = path.join(process.cwd(), 'data', 'store.json')
+  const file = path.join(env.DOOP_DATA_DIR ?? path.join(process.cwd(), 'data'), 'store.json')
   let parsed: Canvas[]
   try {
     parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
