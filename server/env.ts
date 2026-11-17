@@ -126,15 +126,18 @@ const schema = {
      assets (no BUCKET) and the legacy store.json import; unset = ./data under
      the working directory, the layout the checkout and the container use */
   DOOP_DATA_DIR: str({ default: undefined }),
-  /* the built client the production server serves; unset = ./dist */
+  /* the built client the production server serves; unset = dist/ beside
+     the server file (the bundle layout), else the checkout's ./dist */
   DOOP_DIST_DIR: str({ default: undefined }),
   /* the drizzle migrations applied at boot; unset = server/db/migrations
      beside the source — a bundle moves import.meta.url, so a packaged
      install names the copy it ships */
   DOOP_MIGRATIONS_DIR: str({ default: undefined }),
-  /* where the downloaded headless renderer lives — and the profile dirs,
-     when set or when DOOP_EMBEDDED is on; unset and not embedded = the
-     browser profile stays on the OS temp dir (the container behaviour) */
+  /* where the downloaded headless renderer lives — the download only:
+     managed profiles always stay under the locked data dir
+     (<data>/browser-profiles), so two servers may share one download dir;
+     unset and not embedded = the browser profile stays on the OS temp
+     dir (the container behaviour) */
   DOOP_BROWSER_DIR: str({ default: undefined }),
   /* the desktop shell spawns the server as a sidecar over piped stdio
      (DOOP_INSTALL=desktop): it exits when stdin closes — the app died —

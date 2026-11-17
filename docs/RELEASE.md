@@ -68,7 +68,10 @@ and run the Bun-built archive under Node, including its nested runtime dependenc
 No `DATABASE_URL`: PGlite and uploads live in `~/.diazo/data`, mounted at `/app/data`.
 The install backs its PGlite data dir up to `~/.diazo/data/backups/` itself — a
 `pg-<date>.tar.gz` dump plus an asset manifest before every migrating boot and once
-a day while running, keeping the newest seven (`server/backup.ts`).
+a day while running, keeping the newest seven (`server/backup.ts`). There is no
+restore command yet — the archives are plain tarballs of `<data>/pg` to unpack in
+its place — and an older image refuses to boot a data dir written by a newer
+build, so recovery today is "update the image, or unpack a backup by hand".
 `BETTER_AUTH_SECRET` and `SECRETS_ENCRYPTION_KEYS` are generated on the Mac into
 `~/.diazo/diazo.env` (mode 600). An install from before the rename keeps `~/.doop` and its
 `doop.env` where they are (nothing is moved; `DOOP_HOME` overrides), and its old `doop` container

@@ -136,17 +136,22 @@ What landed on top of P0:
 - `server/dataLock.ts`: one server per data dir via `<data>/server.lock` (pid + host +
   heartbeat); a live holder is refused, a dead pid or a stale foreign heartbeat is
   reclaimed. Skipped only when `DATABASE_URL` and `BUCKET` are both set (no local state).
-- `server/backup.ts`: `<data>/backups/pg-<date>.tar.gz` (PGlite `dumpDataDir('gzip')`) plus a
+- `server/backup.ts`: `<data>/backups/pg-<date>.tar.gz` plus a
   `<data>/backups/pg-<date>.assets.json` manifest of on-disk assets; runs before applying
-  pending migrations and once a day; keeps the newest 7 pairs.
+  pending migrations and once a day; keeps the newest 7 pairs. The daily dump is PGlite's
+  `dumpDataDir('gzip')` streamed to disk; the pre-migration one snapshots the closed `pg/`
+  with `fs.cp` and streams its own tar.gz, so a multi-GB data dir never lands in memory.
+  Archives go through a `.tmp` name + rename.
 - Migration guards in `server/db/index.ts`: refuses a data dir stamped by a newer migration
   set (newer `created_at` than the bundled journal, or more applied rows than the journal
   has), backs up first when rows exist and migrations are pending.
 - `server/browserGuard.ts`: the leak fix. Each launched browser is killed by its process
   group (`kill(-pid)` POSIX, `taskkill /t` Windows) from a synchronous `exit` hook, and a
-  detached `node -e` watchdog reaps the group when the server dies without hooks (kill -9).
-  A cleanly terminated browser is released (watchdog killed, profile removed), so a reused
-  pid is never reaped. Profiles live under `<data>/browser/profile-*`.
+  detached `node -e` watchdog reaps the group when the server dies without hooks (kill -9);
+  inside a container the namespace teardown already reaps it, so the watchdog is skipped
+  there. A cleanly terminated browser is released (watchdog killed, profile removed), so a
+  reused pid is never reaped. Profiles live under `<data>/browser-profiles/profile-*` —
+  inside the locked data dir, never in the (possibly shared) download dir.
 - `scripts/build-embedded-server.ts` (`bun run build:embedded-server`) replaces the P0
   script: minified bundle, `--web-src` for a prebuilt web root, and the prunes below.
 
