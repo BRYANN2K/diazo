@@ -9,6 +9,7 @@ import { resumeApplies } from './libraryCurationApply.ts'
 import { env } from './env.ts'
 import { dataDir, distDir } from './paths.ts'
 import { acquireDataLock } from './dataLock.ts'
+import { sweepBrowserProfiles } from './browserGuard.ts'
 import { startDailyBackups } from './backup.ts'
 import {
   catalogEntry,
@@ -216,8 +217,14 @@ const BUILD_ID = (() => {
 /* one writer per data dir, ahead of any state touching it — PGlite, on-disk
    assets, backups, the renderer's profile. Skipped only when no local state
    exists at all (a managed Postgres plus a bucket). A held lock is refused,
-   a crashed holder's stale one is retaken (server/dataLock.ts). */
-if (!(env.DATABASE_URL && env.BUCKET)) acquireDataLock(dataDir())
+   a crashed holder's stale one is retaken (server/dataLock.ts). Dead boots'
+   profile-* dirs are swept here, under the lock: sweeping on browser launch
+   instead let every test worker and managed-storage peer delete the live
+   profiles of the others. */
+if (!(env.DATABASE_URL && env.BUCKET)) {
+  acquireDataLock(dataDir())
+  sweepBrowserProfiles()
+}
 
 /* boot: connect the DB, hydrate memory, import pre-DB store.json once */
 await initDb()

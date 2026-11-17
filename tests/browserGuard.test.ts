@@ -1,6 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { sweepBrowserProfiles } from '../server/browserGuard.ts'
+import { findBrowserPath, launchBrowser } from '../server/screenshot.ts'
+import { stubEnv, unstubAllEnvs } from './envStub.ts'
 
 /**
  * server/browserGuard.ts against real process trees: a detached child plays
@@ -9,6 +14,10 @@ import { describe, expect, it } from 'vitest'
  *   exit-hook — a clean process.exit runs the synchronous 'exit' hook
  *   watchdog  — kill -9 runs no hooks, so a detached watcher reaps it
  * POSIX only: the watchdog's group kill relies on `kill(-pid)` semantics.
+ *
+ * The profile sweep at the bottom is plain fs work and runs on every
+ * platform: it must happen only where the server calls it (boot, under the
+ * data lock), never from a browser launch.
  */
 
 const ROOT = process.cwd()
@@ -96,4 +105,52 @@ posix('server/browserGuard.ts', () => {
     }
     await expectDead(pid, 5_000)
   })
+})
+
+describe('sweepBrowserProfiles (server/browserGuard.ts)', () => {
+  const dirs: string[] = []
+
+  function tmpBrowserDir(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-test-'))
+    dirs.push(dir)
+    stubEnv('DOOP_BROWSER_DIR', dir)
+    return dir
+  }
+
+  afterEach(() => {
+    unstubAllEnvs()
+    for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true })
+  })
+
+  it('drops leftover profile-* dirs and keeps everything else', () => {
+    const dir = tmpBrowserDir()
+    fs.mkdirSync(path.join(dir, 'profile-dead'))
+    fs.mkdirSync(path.join(dir, 'profile-older', 'nested'), { recursive: true })
+    fs.mkdirSync(path.join(dir, 'chrome-headless-shell-mac-arm64'))
+    fs.writeFileSync(path.join(dir, 'profile-loose-file'), 'x')
+    sweepBrowserProfiles()
+    expect(fs.readdirSync(dir).sort()).toEqual(['chrome-headless-shell-mac-arm64', 'profile-loose-file'])
+  })
+
+  it('tolerates a missing browser dir', () => {
+    const dir = tmpBrowserDir()
+    fs.rmSync(dir, { recursive: true })
+    expect(() => sweepBrowserProfiles()).not.toThrow()
+  })
+
+  it('never runs on browser launch — a launch keeps sibling profiles', async () => {
+    if (!findBrowserPath()) return
+    const dir = tmpBrowserDir()
+    fs.mkdirSync(path.join(dir, 'profile-live-peer'))
+    const browser = await launchBrowser(30_000)
+    try {
+      /* the launched browser did get a profile of its own — alongside, not
+         instead of, the one another live process is using */
+      const names = fs.readdirSync(dir)
+      expect(names.filter((n) => n.startsWith('profile-')).length).toBeGreaterThan(1)
+      expect(names).toContain('profile-live-peer')
+    } finally {
+      await browser.close()
+    }
+  }, 60_000)
 })

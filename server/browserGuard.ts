@@ -1,5 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
+import path from 'node:path'
+import { browserDir } from './paths.ts'
 
 /**
  * A launched browser dies with the server. Puppeteer detaches it into its
@@ -33,6 +35,29 @@ interface Guarded {
 
 const guarded = new Map<number, Guarded>()
 let exitHookInstalled = false
+
+/* dead boots leave `profile-*` dirs behind — kill -9 skips every cleanup
+   path. Swept once at boot while the data-dir lock proves them ours, never
+   on browser launch: test workers share this dir with each other and with
+   a running dev server, and a launch-time sweep deletes their live
+   profiles (it relied on the lock, which only server/index.ts takes) */
+export function sweepBrowserProfiles(): void {
+  const dir = browserDir()
+  let entries: fs.Dirent[]
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith('profile-')) continue
+    try {
+      fs.rmSync(path.join(dir, entry.name), { recursive: true, force: true })
+    } catch {
+      /* a file the OS still holds: the next boot's sweep gets it */
+    }
+  }
+}
 
 /** Watch the browser's whole tree: reap it on `exit`, and spawn the
  *  watchdog that covers the exits nothing can observe (kill -9). */

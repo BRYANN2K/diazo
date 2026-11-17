@@ -96,29 +96,6 @@ function findBrowser(): string {
   return path
 }
 
-/* leftover profile dirs of dead processes (a kill -9 leaves them) are
-   swept once per process — the data-dir lock guarantees no live server
-   shares the directory */
-let profilesSwept = false
-function sweepBrowserProfiles(dir: string): void {
-  profilesSwept = true
-  let entries: fs.Dirent[]
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
-  } catch {
-    return
-  }
-  for (const entry of entries) {
-    if (entry.isDirectory() && entry.name.startsWith('profile-')) {
-      try {
-        fs.rmSync(path.join(dir, entry.name), { recursive: true, force: true })
-      } catch {
-        /* a file the OS still holds: the next boot's sweep gets it */
-      }
-    }
-  }
-}
-
 /** A fresh headless Chrome with the server's flags. `timeout` bounds the wait
  *  for its DevTools endpoint (puppeteer's default, 30s, unless given);
  *  `protocolTimeout` bounds every DevTools command (puppeteer's 180s unless
@@ -126,7 +103,6 @@ function sweepBrowserProfiles(dir: string): void {
  *  and the process tree is guarded so it dies with the server. */
 export async function launchBrowser(timeout?: number, protocolTimeout?: number): Promise<Browser> {
   const dir = browserDir()
-  if (!profilesSwept) sweepBrowserProfiles(dir)
   fs.mkdirSync(dir, { recursive: true })
   /* one profile dir per launch: a recycling browser may still be closing
      while its replacement launches, and a shared dir trips Chrome's
