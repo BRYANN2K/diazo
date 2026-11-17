@@ -398,7 +398,7 @@ linux_version() {
       fi
       ;;
     appimage)
-      for file in "$(appimage_dir)"/*_amd64.AppImage; do
+      for file in "$(appimage_dir)"/Diazo_*_amd64.AppImage; do
         [ -f "$file" ] || continue
         printf '%s' "${file##*/}" | sed -n 's/Diazo_\([0-9][0-9.]*\)_amd64\.AppImage/\1/p'
         return 0
@@ -472,7 +472,7 @@ install_appimage() {
   dir=$(appimage_dir)
   mkdir -p "$dir" "$DESKTOP_DIR" || die "cannot create $dir"
   target="$dir/Diazo_${VERSION}_amd64.AppImage"
-  for old in "$dir"/*_amd64.AppImage; do
+  for old in "$dir"/Diazo_*_amd64.AppImage; do
     [ -f "$old" ] && [ "$old" != "$target" ] && rm -f "$old"
   done
   cp "$PACKAGE" "$target.tmp.$$"
@@ -621,7 +621,7 @@ EOF
     linux)
       kind=$(pick_kind)
       removed=0
-      for file in "$(appimage_dir)"/*_amd64.AppImage; do
+      for file in "$(appimage_dir)"/Diazo_*_amd64.AppImage; do
         if [ -f "$file" ]; then
           quit_linux_app
           rm -f "$file"

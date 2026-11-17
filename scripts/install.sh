@@ -730,7 +730,7 @@ app_installed() {
       [ -d "${DOOP_DESKTOP_DIR:-$SYSTEM_APPS}/Diazo.app" ] || [ -d "$SYSTEM_APPS/Diazo.app" ] || [ -d "$HOME/Applications/Diazo.app" ]
       ;;
     linux)
-      for file in "$HOME"/.local/bin/*_amd64.AppImage "$HOME"/Applications/*_amd64.AppImage; do
+      for file in "$HOME"/.local/bin/Diazo_*_amd64.AppImage "$HOME"/Applications/Diazo_*_amd64.AppImage; do
         [ -f "$file" ] && return 0
       done
       if command -v dpkg >/dev/null 2>&1 && dpkg -s diazo >/dev/null 2>&1; then

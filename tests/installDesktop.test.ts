@@ -432,6 +432,32 @@ describe('install-desktop.sh on Linux', () => {
     expect(calls()).not.toContain('_amd64.AppImage')
   })
 
+  it('never deletes another vendor’s AppImage, on install or uninstall', async () => {
+    publish('0.15.0')
+    const dir = path.join(home, '.local', 'bin')
+    mkdirSync(dir, { recursive: true })
+    const foreign = path.join(dir, 'OtherTool_9.9_amd64.AppImage')
+    writeFileSync(foreign, 'foreign\n')
+    const { code, out } = await runLinux(['--appimage'])
+    expect(code, out).toBe(0)
+    expect(existsSync(appimage('0.15.0'))).toBe(true)
+    expect(readFileSync(foreign, 'utf8')).toBe('foreign\n')
+
+    /* the foreign file alone does not count as an installed Diazo either */
+    rmSync(appimage('0.15.0'))
+    publish('0.16.0')
+    const again = await runLinux(['--appimage'])
+    expect(again.out).not.toMatch(/already installed/)
+    expect(existsSync(appimage('0.16.0'))).toBe(true)
+    expect(readFileSync(foreign, 'utf8')).toBe('foreign\n')
+
+    /* nor is it removed on uninstall */
+    const gone = await runLinux(['--uninstall'])
+    expect(gone.code, gone.out).toBe(0)
+    expect(existsSync(appimage('0.16.0'))).toBe(false)
+    expect(readFileSync(foreign, 'utf8')).toBe('foreign\n')
+  })
+
   it('refuses Linux arm64 with the releases link', async () => {
     publish('0.15.0')
     const { code, out } = await run([], { STUB_OS: 'Linux', STUB_ARCH: 'aarch64' })

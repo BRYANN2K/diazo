@@ -551,8 +551,12 @@ describe('install.sh on Linux', () => {
     const diazo = (args: string[], env: Record<string, string> = {}) =>
       run(args, { STUB_OS: 'Linux', DIAZO_LIB: '', ...env }, command())
 
-    /* status: the unit's login start, the app found through its AppImage */
+    /* status: the unit's login start; a foreign AppImage does not count as the app */
     mkdirSync(path.join(home, '.local', 'bin'), { recursive: true })
+    writeFileSync(path.join(home, '.local', 'bin', 'OtherTool_9.9_amd64.AppImage'), '')
+    const foreign = await diazo(['status'])
+    expect(foreign.out).toMatch(/the Diazo app is not installed/)
+
     writeFileSync(path.join(home, '.local', 'bin', 'Diazo_0.15.0_amd64.AppImage'), '')
     const status = await diazo(['status'])
     expect(status.code, status.out).toBe(0)
