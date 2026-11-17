@@ -382,7 +382,6 @@ pub struct OrcaState {
 #[serde(rename_all = "camelCase")]
 struct TrackedTask {
     task_id: String,
-    worktree_id: String,
     environment: Option<String>,
     /// the Diazo server the launch rode in on — identities are only ever
     /// polled and activated for the server this shell is currently on
@@ -836,12 +835,6 @@ pub async fn orca_launch_task(
             .and_then(Value::as_str)
             .or_else(|| out.get("identity").and_then(Value::as_str))
             .or_else(|| out.get("identityKey").and_then(Value::as_str));
-        let worktree_id = out
-            .get("id")
-            .and_then(Value::as_str)
-            .or_else(|| out.get("worktreeId").and_then(Value::as_str))
-            .unwrap_or_default()
-            .to_string();
         let final_branch = out
             .get("branch")
             .and_then(Value::as_str)
@@ -855,8 +848,6 @@ pub async fn orca_launch_task(
                 "operationId": launch.and_then(|l| l.get("operationId")).and_then(Value::as_str),
             }));
         };
-        let outcome = launch.and_then(|l| l.get("outcome"));
-
         /* remember it: polls and activation only ever reach this set —
            the insert rides the managed lock so two launches cannot lose
            each other's identity */
@@ -865,7 +856,6 @@ pub async fn orca_launch_task(
                 identity.to_string(),
                 TrackedTask {
                     task_id: task_id.clone(),
-                    worktree_id: worktree_id.clone(),
                     environment: spec.environment.clone(),
                     server: current_server(),
                     branch: final_branch.clone(),
@@ -877,22 +867,31 @@ pub async fn orca_launch_task(
             ((), true)
         })?;
 
-        Ok(json!({
-            "ok": true,
-            "orcaIdentity": identity,
-            "worktreeId": worktree_id,
-            "branch": final_branch,
-            "launchKind": outcome.and_then(|o| o.get("kind")).and_then(Value::as_str),
-            "launchHandle": outcome
-                .and_then(|o| o.get("handle"))
-                .and_then(Value::as_str)
-                .or_else(|| out.get("agentTerminalHandle").and_then(Value::as_str)),
-            "orcaSessionId": outcome.and_then(|o| o.get("orcaSessionId")).and_then(Value::as_str),
-            "operationId": launch.and_then(|l| l.get("operationId")).and_then(Value::as_str),
-        }))
+        Ok(launch_reply(&out, identity, &final_branch))
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// `worktree create`'s answer trimmed to what the page may see. The
+/// worktree's own id embeds its absolute path (`<repoId>::<path>` — over
+/// the report's caps as soon as the path is long), so it never crosses:
+/// the server only ever gets the `wt2:` identity.
+fn launch_reply(out: &Value, identity: &str, branch: &str) -> Value {
+    let launch = out.get("launch");
+    let outcome = launch.and_then(|l| l.get("outcome"));
+    json!({
+        "ok": true,
+        "orcaIdentity": identity,
+        "branch": branch,
+        "launchKind": outcome.and_then(|o| o.get("kind")).and_then(Value::as_str),
+        "launchHandle": outcome
+            .and_then(|o| o.get("handle"))
+            .and_then(Value::as_str)
+            .or_else(|| out.get("agentTerminalHandle").and_then(Value::as_str)),
+        "orcaSessionId": outcome.and_then(|o| o.get("orcaSessionId")).and_then(Value::as_str),
+        "operationId": launch.and_then(|l| l.get("operationId")).and_then(Value::as_str),
+    })
 }
 
 /// The main agent's row in a `worktree ps` entry: the one flagged
@@ -1369,6 +1368,32 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
         assert_eq!(poll_row("wt2:x:y", Some(&odd))["agentState"], "done");
     }
 
+    #[test]
+    fn the_launch_answer_never_carries_a_path() {
+        /* `worktree create` answers the worktree id as `<repoId>::<abs
+           path>`: nothing path-shaped may reach the page or the report —
+           the server only ever gets the `wt2:` identity */
+        let out = json!({
+            "id": "r1::/Users/x/very/secret/project",
+            "worktreeId": "r1::/Users/x/very/secret/project",
+            "identity": {"key": "wt2:local:i1"},
+            "branch": "refs/heads/doop/x",
+            "path": "/Users/x/very/secret/project",
+            "launch": {
+                "operationId": "op-1",
+                "outcome": {"kind": "structured", "handle": "chat-1", "orcaSessionId": "s-1"}
+            }
+        });
+        let reply = launch_reply(&out, "wt2:local:i1", "doop/x");
+        assert_eq!(reply["ok"], true);
+        assert_eq!(reply["orcaIdentity"], "wt2:local:i1");
+        assert_eq!(reply["branch"], "doop/x");
+        assert_eq!(reply["launchKind"], "structured");
+        let text = reply.to_string();
+        assert!(!text.contains("worktreeId"));
+        assert!(!text.contains("/Users/") && !text.contains("secret"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn run_orca_parses_and_reports() {
@@ -1436,7 +1461,6 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
     fn tracked_task(environment: Option<&str>, server: &str) -> TrackedTask {
         TrackedTask {
             task_id: "t1".to_string(),
-            worktree_id: "r1::/srv/app".to_string(),
             environment: environment.map(str::to_string),
             server: server.to_string(),
             branch: "doop/x".to_string(),
@@ -1495,7 +1519,6 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
             "wt2:local:i1".to_string(),
             TrackedTask {
                 task_id: "t".to_string(),
-                worktree_id: "r::/p".to_string(),
                 environment: None,
                 server: "https://diazo.example".to_string(),
                 branch: "doop/a".to_string(),

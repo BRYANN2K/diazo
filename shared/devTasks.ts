@@ -143,7 +143,6 @@ export interface DevTaskLaunchReport {
   /** Orca/CLI failure text when ok is false */
   error?: string
   orcaIdentity?: string
-  worktreeId?: string
   branch?: string
   /** `launch.outcome.kind`: 'structured' (a chat) or 'terminal' */
   launchKind?: string

@@ -307,6 +307,30 @@ describe('POST /api/frames/:id/dev-tasks', () => {
     const bad = await owner.post(`/api/dev-tasks/${task.id}/report`, { deviceId: 'x' })
     expect(bad.status).toBe(400)
   }, 30_000)
+
+  it('a launch report never carries the path-shaped worktree id', async () => {
+    const frame = await makeFrame('Pathless')
+    await approve(frame)
+    const { claimed } = await deviceOnline()
+    const { task } = await (await owner.post(`/api/frames/${frame.id}/dev-tasks`, { agent: 'claude' })).json()
+    const { request } = await claimed.then((r) => r.json())
+    /* real Orca ids are `<repoId>::<abs path>` — far past the old cap that
+       used to refuse the whole report with 400; the field is ignored now
+       and the launch only binds the opaque `wt2:` identity */
+    const report = await owner.post(`/api/dev-tasks/${task.id}/report`, {
+      deviceId: DEVICE,
+      requestId: request.id,
+      launch: {
+        ok: true,
+        orcaIdentity: 'wt2:mac:i7',
+        worktreeId: '7e43b59e-63b0-4f50-a863-da92f6886d02::/Users/x/Documents/Projects/a-rather-long-worktree-path',
+      },
+    })
+    expect(report.status).toBe(200)
+    const after = await report.json()
+    expect(after.task).toMatchObject({ state: 'starting', orcaIdentity: 'wt2:mac:i7' })
+    expect(JSON.stringify(after.task)).not.toMatch(/\/Users\/|worktreeId/)
+  }, 30_000)
 })
 
 describe('cancel and list', () => {

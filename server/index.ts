@@ -1410,7 +1410,6 @@ const devTaskReportSchema = z.object({
       cancelled: z.boolean().optional(),
       error: z.string().max(1_000).optional(),
       orcaIdentity: z.string().max(120).optional(),
-      worktreeId: z.string().max(120).optional(),
       branch: z.string().max(200).optional(),
       launchKind: z.string().max(40).optional(),
       launchHandle: z.string().max(200).optional(),
