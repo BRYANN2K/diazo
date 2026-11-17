@@ -1,7 +1,7 @@
 # Releasing Diazo
 
 How a Diazo release is versioned, built, published and verified: the server image, the local and desktop installers, and the desktop app. Read by Bryan and by agents that cut a release or change the pipeline.
-Status: last desktop release `desktop-v0.15.0` (2026-11-15), unverified; updated 2026-11-16
+Status: last desktop release `desktop-v0.15.0` (2026-11-15), unverified; updated 2026-11-17
 
 ## At a glance
 
@@ -120,6 +120,24 @@ the app's session; `--purge` removes everything. In the app: Diazo menu → Loca
 reaches users with the `desktop-v0.16.0` tag. Tests: `tests/install.test.ts` (stubbed
 `container`, `docker`, `podman`, `systemctl`, `launchctl`, `curl`, `uname`, `sw_vers`,
 `open`, `osascript`) and the Rust tests in `local_server.rs`.
+
+For real (not stubbed), `.github/workflows/install-smoke.yml` runs the installers
+on GitHub's runners — on `workflow_dispatch` and on pushes and pull requests to
+`dev`, `staging` and `main` that touch `scripts/install*.sh`,
+`scripts/install-desktop.ps1` or the workflow; it is not a required check. One job
+builds the server image from the checkout and shares it as an artifact; each Linux
+job pushes it to a `registry:2` on the runner and runs the installers with
+`DOOP_IMAGE=localhost:5000/diazo:smoke` and `DIAZO_LIB` pointing at the checkout's
+`scripts/`, so what runs is the change's code, not `main`'s (both are the
+installers' own overrides; the user-facing defaults are unchanged). `linux-docker`
+and `linux-podman` (Docker hidden from PATH; keep-id asserted) run
+`install-local.sh` and `install.sh --server-only`, drive `diazo
+status|stop|start|update` and check `--uninstall --purge` leaves nothing;
+`linux-desktop` installs the .deb then the AppImage of the latest `desktop-v*`
+release; `windows-desktop` runs `install-desktop.ps1` through `iex` against a
+server started from the checkout. Fedora with SELinux enforcing is not covered:
+there is no Fedora runner and a container inherits the host's kernel, so the `:Z`
+relabel and rpm branches stay covered by the unit tests only.
 
 ## Build identity and the update check (this fork)
 
