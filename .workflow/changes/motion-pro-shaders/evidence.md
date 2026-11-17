@@ -26,3 +26,39 @@ coverage`) and passes.
 Notes: `needsInput` effects self-map on `u_tex2` until instances can bind a
 second texture (spec non-goal). `docs/motion-api.md` picked up a stray
 prettier table-whitespace fix while normalizing the worktree.
+
+## Review round 2 (rebased onto origin/dev)
+
+The branch was rebased `--onto origin/dev 28a726fd`; the 16 commits replay
+cleanly and four fix commits close both review documents.
+
+- Multi-pass `mix < 1` blends against the `tex[2]` snapshot, not the
+  ping-pong buffer the sub-passes overwrote; the snapshot copy skips when
+  the input already sits on `tex[2]` (no self-sampling draw). A
+  vignette/bloom/lens-blur chain plus a scratch-buffer chain render with
+  zero drops and identical repeated hashes —
+  `tests/motionGoldenBrowser.test.ts`, `f9417401`.
+- The golden scene gained alpha (translucent third) and a bloom highlight;
+  neutral defaults got visible params; every effect's grid must now differ
+  from the untouched picture. Goldens regenerated —
+  `tests/fixtures/motion-golden.json`, `f9417401`.
+- 21 params are marked `unit: 'px'` and multiplied by the render scale
+  (`job.width / comp.width`, passed through `paintShutter`/`paintAt`/
+  `paintSceneFx` into `apply`) — `shared/motionFx.ts`, `src/lib/motion/`,
+  `f9417401`.
+- `list_motion_effects` reports `needs_input` and `self_mapped`; the
+  contract is written down in `docs/motion-fx.md` — `d2bdafa9`.
+- `parseTrack` refuses what the ops refuse — effects off
+  camera/adjustment tracks and any non-null track blend — so whole-body
+  writes meet the same contract as ops — `shared/motion.ts`, `7f29b6a2`.
+- `notesOnly` refuses an ancestor that is or contains an
+  img/picture/video/svg/canvas — `server/storyboard.ts`, `9e0e4bca`.
+- `bunx drizzle-kit generate` reports "No schema changes, nothing to
+  migrate"; `0081_motion_pro` sits after dev's `0080_motion_phase5` in the
+  journal.
+- Every look resolves into `GL_EFFECT_IDS` (test in `motionPro.test.ts`);
+  all 43 effects draw with zero drops in the browser sweep.
+- Verification: `bun run typecheck`, `bun run lint`, `bun run format:check`,
+  `bun run doc-lint` clean; motion + storyboard suites green — 212 tests,
+  including `motionGoldenBrowser` 8/8 against Chrome for Testing
+  (`CHROME_PATH`).
