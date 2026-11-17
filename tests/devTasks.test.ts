@@ -411,7 +411,7 @@ describe('devTaskSlug', () => {
   ]
   const ids = [
     'abcDEF1234',
-    'abcdef123-', // the draw Fable caught: nanoid's '-' lands last
+    'abcdef123-', // nanoid's '-' as the last character
     '----------',
     '__________',
     '-_-_-_-_-_',
