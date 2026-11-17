@@ -230,11 +230,39 @@ export function splitDecls(style: string): string[] {
   return decls
 }
 
+/** A value is one declaration only when `;` and braces appear inside
+ *  quotes or parens — a data URL's `;base64` is data, `red; position:fixed`
+ *  is a smuggled second declaration. */
+function singleDeclaration(value: string): boolean {
+  let depth = 0
+  let quote = ''
+  for (const ch of value) {
+    if (quote) {
+      if (ch === quote) quote = ''
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch
+      continue
+    }
+    if (ch === '(') depth++
+    else if (ch === ')') depth = Math.max(0, depth - 1)
+    if (depth === 0 && (ch === ';' || ch === '{' || ch === '}')) return false
+  }
+  return true
+}
+
 function styleSet(el: Element, property: string, value: string | null): void {
   const name = property.trim().toLowerCase()
   if (!/^[-a-z]+$/.test(name)) throw new Error(`invalid property “${property}”`)
   const decls = splitDecls(attr(el, 'style') ?? '').filter((d) => !d.toLowerCase().startsWith(name + ':'))
-  if (value !== null) decls.push(`${name}: ${value.trim().replace(/[;{}]/g, '')}`)
+  if (value !== null) {
+    const trimmed = value.trim()
+    /* refuse a second declaration smuggled in the value — never silently
+       sanitize it into a different style than the guest asked for */
+    if (!trimmed || !singleDeclaration(trimmed)) throw new Error(`invalid value “${value}”`)
+    decls.push(`${name}: ${trimmed}`)
+  }
   setAttr(el, 'style', decls.length ? decls.join('; ') : null)
 }
 
@@ -319,11 +347,11 @@ export function applyEditOps(source: string, ops: EditOp[]): EditOutcome {
 /* style inventory + token rewrite                                     */
 /* ------------------------------------------------------------------ */
 
-/* Values are inventoried inside style contexts only: style="" attributes,
-   <style> bodies and SVG presentation attributes. Scanning the raw document
-   reads &#8212; entities and href="#..." fragment ids as hex colours. */
-const STYLE_CTX_RE = /\bstyle\s*=\s*"([^"]*)"|\bstyle\s*=\s*'([^']*)'|<style[^>]*>([\s\S]*?)<\/style\s*>/gi
-const PRESENTATION_RE = /\b(?:fill|stroke|color|stop-color|flood-color|lighting-color)\s*=\s*"([^"]*)"/gi
+/* Values are inventoried inside style contexts only: real style=""
+   attributes, <style> bodies and SVG presentation attributes — walked on the
+   parsed document, so a "style=" string inside a text node, a data-style
+   attribute or a script literal is never read as CSS. */
+const PRESENTATION_ATTRS = new Set(['fill', 'stroke', 'color', 'stop-color', 'flood-color', 'lighting-color'])
 
 const COLOR_RE = /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/g
 const RADIUS_RE = /border(?:-top|-bottom|-left|-right)?(?:-start|-end)?-radius\s*:\s*([^;}]+)/g
@@ -333,11 +361,46 @@ const FAMILY_RE = /font-family\s*:\s*([^;}]+)/g
 const SIZE_RE = /font-size\s*:\s*([^;}]+)/g
 const VAR_RE = /var\(\s*(--[\w-]+)/g
 
+/** Style contexts found on the parsed tree: every element's style attribute
+ *  value, every <style> block's text, every SVG presentation attribute. */
 function styleBodies(html: string): string[] {
+  const doc = parseHtml(html)
   const bodies: string[] = []
-  for (const m of html.matchAll(STYLE_CTX_RE)) bodies.push(m[1] ?? m[2] ?? m[3]!)
-  for (const m of html.matchAll(PRESENTATION_RE)) bodies.push(m[1]!)
+  for (const el of walk(doc)) {
+    const style = attr(el, 'style')
+    if (style) bodies.push(style)
+    if (el.tagName === 'style') {
+      for (const node of el.childNodes) {
+        if (node.nodeName === '#text') bodies.push((node as { value: string }).value)
+      }
+    }
+    for (const a of el.attrs) if (PRESENTATION_ATTRS.has(a.name)) bodies.push(a.value)
+  }
   return bodies
+}
+
+/** The source ranges replaceValues may rewrite: inside the quotes of real
+ *  style attributes and inside <style> tags. Nothing else — not text that
+ *  says `style="..."`, not data-style, not script bodies. */
+function styleRanges(html: string): { start: number; end: number }[] {
+  const doc = parseHtml(html)
+  const ranges: { start: number; end: number }[] = []
+  for (const el of walk(doc)) {
+    const loc = el.sourceCodeLocation
+    if (!loc) continue
+    if (el.tagName === 'style' && loc.startTag && loc.endTag) {
+      ranges.push({ start: loc.startTag.endOffset, end: loc.endTag.startOffset })
+    }
+    const styleLoc = loc.attrs?.['style']
+    if (styleLoc) {
+      /* the attr range spans style="v" — the writable part is between quotes */
+      const inner = /^style\s*=\s*(["'])/.exec(html.slice(styleLoc.startOffset, styleLoc.endOffset))
+      if (inner) {
+        ranges.push({ start: styleLoc.startOffset + inner[0].length, end: styleLoc.endOffset - 1 })
+      }
+    }
+  }
+  return ranges
 }
 
 /** Colour literals inside one style body; `url(#id)` gradient refs are not. */
@@ -458,41 +521,71 @@ export function replaceValues(
     count++
     return `var(--${name.replace(/^--/, '')})`
   }
+  /* the declaration kinds each `kinds` entry reaches — a custom property
+     (--x) never matches: it holds a value, it is not a declaration to
+     tokenise, and rewriting it would build a var() self-reference */
+  const COLOR_PROPS = new Set([
+    'color',
+    'background',
+    'border',
+    'fill',
+    'stroke',
+    'outline',
+    'box-shadow',
+    'text-shadow',
+  ])
+  const RADIUS_PROPS = /^border(?:-(?:top|bottom|left|right))?(?:-(?:start|end))?-radius$/
+  const SPACING_PROPS = new Set([
+    'margin',
+    'padding',
+    'gap',
+    'inset',
+    'top',
+    'left',
+    'right',
+    'bottom',
+    'row-gap',
+    'column-gap',
+  ])
   /* url(...) contents are opaque to value matching — a data URL's inner
      markup is not a declaration value and must never be rewritten */
   const swapCss = (css: string) => {
     const urls: string[] = []
     let out = css.replace(/url\([^)]*\)/gi, (m) => {
       urls.push(m)
-      return ` URL${urls.length - 1} `
+      return `￿URL${urls.length - 1}￿`
     })
-    const unmask = (s: string) => s.replace(/ URL(\d+) /g, (_m, i: string) => urls[Number(i)]!)
-    if (input.kinds.includes('color')) {
-      out = out.replace(
-        /((?:color|background|border|fill|stroke|outline|box-shadow|text-shadow)\s*:\s*)([^;}]+)/g,
-        (_m, decl: string, value: string) => decl + value.replace(COLOR_RE, (lit) => swap(lit.trim(), 'color')),
-      )
-    }
-    if (input.kinds.includes('radius')) {
-      out = out.replace(RADIUS_RE, (m, value: string) => m.replace(value, swap(value, 'radius')))
-    }
-    if (input.kinds.includes('spacing')) {
-      out = out.replace(SPACING_RE, (m, value: string) => m.replace(value, swap(value, 'spacing')))
-    }
-    if (input.kinds.includes('font')) {
-      out = out.replace(FAMILY_RE, (m, value: string) => m.replace(value, swap(value, 'font')))
-    }
-    if (input.kinds.includes('fontSize')) {
-      out = out.replace(SIZE_RE, (m, value: string) => m.replace(value, swap(value, 'fontSize')))
-    }
+    const unmask = (s: string) => s.replace(/￿URL(\d+)￿/g, (_m, i: string) => urls[Number(i)]!)
+    /* real declarations only: a boundary (`{`, `;` or the block start), a
+       property name, a colon, a value */
+    out = out.replace(/(^|[;{])(\s*[-\w]+\s*:\s*)([^;}]+)/g, (m, sep: string, head: string, value: string) => {
+      const prop = head.slice(0, head.indexOf(':')).trim().toLowerCase()
+      if (prop.startsWith('--')) return m
+      const v = value.trim()
+      if (!v) return m
+      if (input.kinds.includes('color') && COLOR_PROPS.has(prop)) {
+        return sep + head + value.replace(COLOR_RE, (lit) => swap(lit.trim(), 'color'))
+      }
+      const kind =
+        RADIUS_PROPS.test(prop) && input.kinds.includes('radius')
+          ? 'radius'
+          : SPACING_PROPS.has(prop) && input.kinds.includes('spacing')
+            ? 'spacing'
+            : prop === 'font-family' && input.kinds.includes('font')
+              ? 'font'
+              : prop === 'font-size' && input.kinds.includes('fontSize')
+                ? 'fontSize'
+                : null
+      if (!kind) return m
+      return sep + head + value.replace(v, swap(v, kind))
+    })
     return unmask(out)
   }
-  const out = html
-    .replace(/(<style\b[^>]*>)([\s\S]*?)(<\/style>)/gi, (_m, a: string, css: string, b: string) => a + swapCss(css) + b)
-    .replace(
-      /(\bstyle\s*=\s*)(["'])([\s\S]*?)\2/gi,
-      (_m, prefix: string, quote: string, css: string) => prefix + quote + swapCss(css) + quote,
-    )
+  let out = html
+  /* splice right-to-left so every earlier range's offsets stay valid */
+  for (const { start, end } of styleRanges(html).sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, start) + swapCss(html.slice(start, end)) + out.slice(end)
+  }
   return { html: out, count, unmapped: [...unmapped.entries()].map(([value, kind]) => ({ value, kind })) }
 }
 

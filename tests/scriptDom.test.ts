@@ -48,3 +48,60 @@ it('replaceValues never rewrites inside url()', () => {
   expect(out.html).toContain(`url(${dataUrl})`)
   expect(out.html).toContain('color: var(--ink)')
 })
+
+it('a style op keeps a data URL inside url() intact', () => {
+  const html = '<html><body><div data-doop-id="d"></div></body></html>'
+  const out = applyEditOps(html, [
+    { op: 'style', element: 'd', property: 'background', value: 'url("data:image/png;base64,AAAA")' },
+  ])
+  expect(out.applied).toBe(1)
+  expect(out.failed).toHaveLength(0)
+  /* the ;base64 is the data — quotes may be entity-escaped, the semicolon
+     must not be eaten as a declaration split */
+  expect(out.html).toContain('data:image/png;base64,AAAA')
+})
+
+it('a style op refuses a second declaration smuggled into the value', () => {
+  const html = '<html><body><div data-doop-id="d" style="display: block"></div></body></html>'
+  const out = applyEditOps(html, [{ op: 'style', element: 'd', property: 'color', value: 'red; position: fixed' }])
+  expect(out.applied).toBe(0)
+  expect(out.failed).toHaveLength(1)
+  expect(out.html).toBe(html)
+  /* the same refusal for a brace — it would end the declaration early */
+  const braced = applyEditOps(html, [{ op: 'style', element: 'd', property: 'color', value: 'red } * {' }])
+  expect(braced.applied).toBe(0)
+  expect(braced.html).toBe(html)
+})
+
+it('replaceValues never rewrites a custom property declaration', () => {
+  const html =
+    '<html><head><style>:root{--text-color: #111111}</style></head>' +
+    '<body><div style="--card-background: #111111; color: #111111"></div></body></html>'
+  const out = replaceValues(
+    html,
+    [token('--text-color', 'color', '#111111'), token('--card-background', 'color', '#111111')],
+    { kinds: ['color'] },
+  )
+  /* a custom property holds a value, not a declaration to tokenise —
+     rewriting it as var(--itself) or var(--other) corrupts the theme */
+  expect(out.html).toContain('--text-color: #111111')
+  expect(out.html).toContain('--card-background: #111111')
+  expect(out.html).toContain('color: var(--text-color)')
+  expect(out.count).toBe(1)
+})
+
+it('replaceValues only touches real style declarations, never lookalike text', () => {
+  const html =
+    '<html><body>' +
+    '<div data-doop-id="d" style="color: #112233"></div>' +
+    '<div data-style="color: #112233"></div>' +
+    '<p>set style="color: #112233" later</p>' +
+    `<script>var s = 'style="color: #112233"';</script>` +
+    '</body></html>'
+  const out = replaceValues(html, [token('--ink', 'color', '#112233')], { kinds: ['color'] })
+  expect(out.count).toBe(1)
+  expect(out.html).toContain('style="color: var(--ink)"')
+  expect(out.html).toContain('data-style="color: #112233"')
+  expect(out.html).toContain('<p>set style="color: #112233" later</p>')
+  expect(out.html).toContain(`var s = 'style="color: #112233"';`)
+})
