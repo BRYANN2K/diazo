@@ -480,6 +480,10 @@ export const GL_EFFECT_IDS: ReadonlySet<string> = new Set([
   'displacement-map',
   'turbulent-displace',
   'slit-stretch',
+  'gradient-ramp',
+  'fractal-noise',
+  'grid',
+  'solid-fill',
 ])
 
 /** tool callers may send points as [u, v] arrays — the contract stores the

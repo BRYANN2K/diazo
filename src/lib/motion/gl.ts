@@ -316,6 +316,27 @@ const BODY: Record<string, string | readonly string[]> = {
     if(u_axis < .5) u2.x = u_position + d * f;
     else u2.y = u_position + d * f;
     col = texture(u_tex, u2);`,
+  'gradient-ramp': `vec2 dir = vec2(cos(radians(u_angle)), sin(radians(u_angle)));
+    float t = u_shape < .5 ? dot(uv - .5, dir) + .5 : distance(uv, vec2(.5)) * 1.4142;
+    col = mix(vec4(u_from, u_from_a), vec4(u_to, u_to_a), clamp(t, 0., 1.));`,
+  /* fbm over the integer-lattice value noise; evolution scrolls the field
+     with t, deterministic per seed */
+  'fractal-noise': `vec2 p = uv * u_scale * 8.;
+    float sum = 0., amp = .5, norm = 0.;
+    for(int o=0;o<8;o++){
+      if(float(o) >= u_octaves) break;
+      vec2 q = p + vec2(u_t * u_evolution * .5, -u_t * u_evolution * .3) + float(o) * 17.13;
+      sum += doopVnoise(q, uint(u_seed)) * amp;
+      norm += amp; amp *= .5; p *= 2.03;
+    }
+    float n = sum / max(norm, 1e-4);
+    col = vec4(vec3(clamp((n - .5) * u_contrast + .5, 0., 1.)), 1.);`,
+  grid: `vec2 g = mod(gl_FragCoord.xy, u_size);
+    float d = min(min(g.x, u_size - g.x), min(g.y, u_size - g.y));
+    float on = 1. - smoothstep(u_line * .5, u_line * .5 + 1., d);
+    vec4 ln = vec4(u_color, u_color_a);
+    col = mix(vec4(u_background, u_background_a), ln, on * ln.a);`,
+  'solid-fill': `col = vec4(u_color, u_color_a);`,
 }
 
 /* an integer hash, not a sine hash: sin()'s precision is implementation-
