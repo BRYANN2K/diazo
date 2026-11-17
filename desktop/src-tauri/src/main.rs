@@ -394,6 +394,7 @@ fn main() {
             blender::blender_revoke,
             speech::speech_models,
             speech::speech_engine_status,
+            speech::speech_choose_files,
             speech::speech_install,
             speech::speech_uninstall,
             speech::speech_run,

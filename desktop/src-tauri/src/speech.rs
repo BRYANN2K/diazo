@@ -23,6 +23,8 @@ use {
 /* limits                                                              */
 /* ------------------------------------------------------------------ */
 
+/* The install contract is fixed once in `shared/speech.ts`'s SPEECH_LIMITS
+   and mirrored here — tests/speechContract.test.ts holds the two equal. */
 /// A single model file may be up to 4 GiB (large ASR weights).
 const MAX_FILE_BYTES: u64 = 4 << 30;
 /// ...one model in total is bounded too (weights + configs + tokens).
@@ -35,9 +37,12 @@ const MAX_MANIFEST_BYTES: u64 = 1 << 20;
 const MAX_NAME: usize = 128;
 /// A job's input or output file riding the audio-in/audio-out commands.
 const MAX_JOB_FILE_BYTES: usize = 256 << 20;
-/// Download + engine timeouts, in seconds.
-const HTTP_TIMEOUT_SECS: u64 = 300;
+/// A multi-gigabyte download may run for hours: these bound the handshake,
+/// a stall between chunks, and the small whole-body fetches — never the
+/// transfer itself.
 const HTTP_CONNECT_SECS: u64 = 30;
+const HTTP_IDLE_SECS: u64 = 60;
+const HTTP_FETCH_SECS: u64 = 120;
 const ENGINE_TIMEOUT_SECS: u64 = 3600;
 
 /// The Hugging Face repos the bundled catalog (shared/speech.ts) may
@@ -322,6 +327,10 @@ enum SpeechSource {
     Mirror { release: String },
     /// A pinned Hugging Face commit: per-file `{repo}/resolve/{commit}/{path}`.
     Hf { repo: String, commit: String },
+    /// Files the person picked in the native panel (18.9): `speech_choose_files`
+    /// already copied them under `staging/<id>/`; the install checks each hash
+    /// and moves them in — nothing is ever downloaded for `local`.
+    Local,
 }
 
 #[derive(Deserialize)]
@@ -345,7 +354,6 @@ fn valid_runtime(s: &str) -> bool {
 
 fn http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
         .connect_timeout(std::time::Duration::from_secs(HTTP_CONNECT_SECS))
         .build()
         .map_err(|e| format!("could not build http client: {e}"))
@@ -360,10 +368,12 @@ async fn http_get(client: &reqwest::Client, url: &str, token: Option<&str>) -> R
     if !res.status().is_success() {
         return Err(format!("GET {url}: {}", res.status()));
     }
-    res.bytes()
+    /* manifests and tree listings are small — one bounded whole-body read */
+    let body = tokio::time::timeout(std::time::Duration::from_secs(HTTP_FETCH_SECS), res.bytes())
         .await
-        .map(|b| b.to_vec())
-        .map_err(|e| format!("GET {url}: {e}"))
+        .map_err(|_| format!("GET {url}: the response stalled past {HTTP_FETCH_SECS}s"))?
+        .map_err(|e| format!("GET {url}: {e}"))?;
+    Ok(body.to_vec())
 }
 
 /// Download `url` to `dest`, resuming a `.part` from its current size, and
@@ -379,7 +389,12 @@ async fn download_verified(
     if size > MAX_FILE_BYTES {
         return Err(format!("{} is {size} bytes, above the 4 GiB cap", dest.display()));
     }
-    let part = dest.with_extension("part");
+    /* `<name>.part`, not `<stem>.part` — model.onnx and model.json must not
+       share one resumable file */
+    let part = dest.with_file_name(format!(
+        "{}.part",
+        dest.file_name().and_then(|n| n.to_str()).unwrap_or("download")
+    ));
     let have = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
     let mut req = client.get(url);
     if have > 0 {
@@ -406,7 +421,19 @@ async fn download_verified(
         .map_err(|e| format!("could not open {}: {e}", part.display()))?;
     use std::io::Write;
     let mut written = have;
-    while let Some(chunk) = res.chunk().await.map_err(|e| format!("GET {url}: {e}"))? {
+    /* the bound is on a stall, not the transfer: bytes may keep arriving
+       for hours as long as no single gap exceeds the idle timeout */
+    loop {
+        let chunk = tokio::time::timeout(
+            std::time::Duration::from_secs(HTTP_IDLE_SECS),
+            res.chunk(),
+        )
+        .await
+        .map_err(|_| format!("GET {url}: the download stalled past {HTTP_IDLE_SECS}s"))?
+        .map_err(|e| format!("GET {url}: {e}"))?;
+        let Some(chunk) = chunk else {
+            break;
+        };
         file.write_all(&chunk)
             .map_err(|e| format!("write {}: {e}", part.display()))?;
         written += chunk.len() as u64;
@@ -477,15 +504,102 @@ pub async fn speech_engine_status(app: AppHandle) -> Result<Value, String> {
     Ok(json!({ "sidecar": resolve_sidecar(&app).ok().map(|p| p.display().to_string()) }))
 }
 
+/// Pick a local model's files in the native panel (18.9): copies them
+/// under `staging/<id>/`, reports each file's name, size and SHA-256 for
+/// the registration, and `speech_install` moves them in — the page never
+/// sees a path.
+#[tauri::command]
+pub async fn speech_choose_files(app: AppHandle) -> Result<Value, String> {
+    /* rfd blocks the calling thread — off the async runtime */
+    let picked = tauri::async_runtime::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .set_title("Choose the model's files")
+            .add_filter("model files", &["safetensors", "onnx", "gguf", "ggml", "onnx_data"])
+            .pick_files()
+    })
+    .await
+    .map_err(|e| format!("the file panel failed: {e}"))?;
+    let Some(paths) = picked else {
+        return Ok(json!({ "staged": null, "files": [] }));
+    };
+    if paths.is_empty() {
+        return Ok(json!({ "staged": null, "files": [] }));
+    }
+    if paths.len() > MAX_FILES {
+        return Err(format!("a model lists at most {MAX_FILES} files"));
+    }
+    /* a pick whose install never comes is dead weight — sweep stale
+       staging dirs each time a new one lands */
+    let staging_root = speech_root(&app)?.join("staging");
+    if let Ok(entries) = std::fs::read_dir(&staging_root) {
+        let day = std::time::Duration::from_secs(24 * 3600);
+        for e in entries.flatten() {
+            let stale = e
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.elapsed().ok())
+                .map(|age| age > day)
+                .unwrap_or(false);
+            if stale {
+                std::fs::remove_dir_all(e.path()).ok();
+            }
+        }
+    }
+    let staged = format!(
+        "pick-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    );
+    let staging = staging_root.join(&staged);
+    std::fs::create_dir_all(&staging)
+        .map_err(|e| format!("could not create {}: {e}", staging.display()))?;
+    let mut files = Vec::new();
+    let mut total: u64 = 0;
+    for path in &paths {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        if !valid_file_name(name) {
+            return Err(format!("{name:?} cannot be a model file name — use [a-zA-Z0-9._-]"));
+        }
+        let size = std::fs::metadata(path)
+            .map(|m| m.len())
+            .map_err(|e| format!("could not read {}: {e}", path.display()))?;
+        if size > MAX_FILE_BYTES {
+            return Err(format!("{name} is {size} bytes, above the 4 GiB cap"));
+        }
+        total += size;
+        if total > MAX_MODEL_BYTES {
+            return Err("the picked files total over 8 GiB".to_string());
+        }
+        let dest = staging.join(name);
+        std::fs::copy(path, &dest)
+            .map_err(|e| format!("could not stage {name}: {e}"))?;
+        files.push(json!({
+            "path": name,
+            "bytes": size,
+            "sha256": sha256_file(&dest)?,
+        }));
+    }
+    Ok(json!({ "staged": staged, "files": files }))
+}
+
 /// Install a catalog row's files under <appData>/speech/models/<id>/.
 /// `entry` is the catalog row JSON; `token` is the owner's HF token for
-/// gated repos (custom models only — it never reaches the mirror path).
+/// gated repos (custom models only — it never reaches the mirror path);
+/// `staged` is the id `speech_choose_files` returned for a `local` source.
 #[tauri::command]
 pub async fn speech_install(
     app: AppHandle,
     state: State<'_, SpeechState>,
     entry: Value,
     token: Option<String>,
+    staged: Option<String>,
 ) -> Result<Value, String> {
     let entry: InstallEntry =
         serde_json::from_value(entry).map_err(|e| format!("bad catalog entry: {e}"))?;
@@ -526,16 +640,24 @@ pub async fn speech_install(
             return Err("hf source commit must be 40 hex".to_string());
         }
         if !HF_CATALOG_REPOS.contains(&repo.as_str()) {
-            let accepted = rfd::MessageDialog::new()
-                .set_title(format!("Install speech model {}?", entry.id))
-                .set_description(format!(
-                    "This downloads {} files ({:.1} GiB) from huggingface.co/{repo} at commit {commit}. Only install if you added this model yourself.",
-                    entry.files.len(),
-                    total as f64 / (1u64 << 30) as f64,
-                ))
-                .set_level(rfd::MessageLevel::Warning)
-                .set_buttons(rfd::MessageButtons::OkCancel)
-                .show();
+            /* rfd blocks the calling thread — off the async runtime, as
+               claude.rs's own confirm does */
+            let question = format!(
+                "This downloads {} files ({:.1} GiB) from huggingface.co/{repo} at commit {commit}. Only install if you added this model yourself.",
+                entry.files.len(),
+                total as f64 / (1u64 << 30) as f64,
+            );
+            let title = format!("Install speech model {}?", entry.id);
+            let accepted = tauri::async_runtime::spawn_blocking(move || {
+                rfd::MessageDialog::new()
+                    .set_title(title)
+                    .set_description(question)
+                    .set_level(rfd::MessageLevel::Warning)
+                    .set_buttons(rfd::MessageButtons::OkCancel)
+                    .show()
+            })
+            .await
+            .map_err(|e| format!("the confirm dialog failed: {e}"))?;
             if accepted != rfd::MessageDialogResult::Ok {
                 return Err("the install was declined".to_string());
             }
@@ -548,7 +670,7 @@ pub async fn speech_install(
         }
         installing.push(entry.id.clone());
     }
-    let result = do_install(&app, &entry, token.as_deref()).await;
+    let result = do_install(&app, &entry, token.as_deref(), staged.as_deref()).await;
     state
         .installing
         .lock()
@@ -561,6 +683,7 @@ async fn do_install(
     app: &AppHandle,
     entry: &InstallEntry,
     token: Option<&str>,
+    staged: Option<&str>,
 ) -> Result<Value, String> {
     let client = http_client()?;
     let dir = model_dir(app, &entry.id)?;
@@ -571,6 +694,16 @@ async fn do_install(
     // file's sha256 empty — the hash then comes from HF's own file metadata
     // (`lfs.oid`) at the pinned commit, per shared/speech.ts's contract.
     let files: Vec<(String, u64, String)> = match &entry.source {
+        SpeechSource::Local => {
+            if token.is_some() {
+                return Err("a local source takes no HF token".to_string());
+            }
+            entry
+                .files
+                .iter()
+                .map(|f| Ok((f.path.clone(), f.bytes, f.sha256.clone())))
+                .collect::<Result<_, String>>()?
+        }
         SpeechSource::Mirror { release } => {
             if token.is_some() {
                 return Err("a mirror source takes no HF token".to_string());
@@ -644,9 +777,37 @@ async fn do_install(
         }
     };
 
+    /* a `local` model downloads nothing: the files the person picked wait
+       under staging/<id>/ and each one's size + SHA-256 is checked again
+       before it moves into the model dir */
+    let staging_dir = if let SpeechSource::Local = &entry.source {
+        let id = staged.ok_or("a local model needs its picked files — choose them first")?;
+        if !valid_name(id) {
+            return Err("bad staging id".to_string());
+        }
+        Some(speech_root(app)?.join("staging").join(id))
+    } else {
+        None
+    };
     for (name, size, hash) in &files {
         if !valid_hash(hash) {
             return Err(format!("{name} has a malformed sha256"));
+        }
+        if let Some(staging) = &staging_dir {
+            let picked = staging.join(name);
+            let len = std::fs::metadata(&picked)
+                .map(|m| m.len())
+                .map_err(|e| format!("{name} was not picked: {e}"))?;
+            if len != *size {
+                return Err(format!("{name} is {len} bytes, registration says {size}"));
+            }
+            let h = sha256_file(&picked)?;
+            if h != *hash {
+                return Err(format!("{name} SHA-256 is {h}, expected {hash}"));
+            }
+            std::fs::rename(&picked, dir.join(name))
+                .map_err(|e| format!("could not move {name} into place: {e}"))?;
+            continue;
         }
         let url = match &entry.source {
             SpeechSource::Mirror { release } => format!(
@@ -655,8 +816,12 @@ async fn do_install(
             SpeechSource::Hf { repo, commit } => {
                 format!("https://huggingface.co/{repo}/resolve/{commit}/{name}")
             }
+            SpeechSource::Local => unreachable!(),
         };
         download_verified(&client, &url, &dir.join(name), *size, hash, token).await?;
+    }
+    if let Some(staging) = &staging_dir {
+        std::fs::remove_dir_all(staging).ok();
     }
 
     let mut map = load_manifest(app)?;
@@ -809,13 +974,49 @@ pub async fn speech_run(
 
 /* -- job audio in / results out --------------------------------------- */
 
-fn work_dir(app: &AppHandle, job_id: &str) -> Result<PathBuf, String> {
+fn job_dir(root: &Path, job_id: &str) -> Result<PathBuf, String> {
     if !valid_name(job_id) {
         return Err("job_id must be [a-zA-Z0-9._-], <=128 chars".to_string());
     }
-    let dir = speech_root(app)?.join("work").join(job_id);
+    let dir = root.join("work").join(job_id);
     std::fs::create_dir_all(&dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
     Ok(dir)
+}
+
+fn work_dir(app: &AppHandle, job_id: &str) -> Result<PathBuf, String> {
+    job_dir(&speech_root(app)?, job_id)
+}
+
+/// Decode a staged job input: a plain file name and a base64 body under
+/// the cap. Kept pure — the contract is tested without an AppHandle.
+fn decode_stage_input(name: &str, data_base64: &str, max_bytes: usize) -> Result<Vec<u8>, String> {
+    use base64::Engine;
+    if !valid_file_name(name) {
+        return Err("input must be a plain file name".to_string());
+    }
+    if data_base64.len() > max_bytes * 4 / 3 + 8 {
+        return Err("the audio input is over the 256 MiB job cap".to_string());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data_base64)
+        .map_err(|e| format!("input is not base64: {e}"))?;
+    if bytes.len() > max_bytes {
+        return Err("the audio input is over the 256 MiB job cap".to_string());
+    }
+    Ok(bytes)
+}
+
+/// Read one file out of a job's work dir: a plain file name, under the cap.
+fn read_job_file(dir: &Path, name: &str, max_bytes: usize) -> Result<Vec<u8>, String> {
+    if !valid_file_name(name) {
+        return Err("output must be a plain file name".to_string());
+    }
+    let path = dir.join(name);
+    let bytes = std::fs::read(&path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    if bytes.len() > max_bytes {
+        return Err("the output file is over the 256 MiB job cap".to_string());
+    }
+    Ok(bytes)
 }
 
 /// Bring a claimed job's audio into the desktop path: the bytes ride the
@@ -829,19 +1030,7 @@ pub async fn speech_stage_input(
     name: String,
     data_base64: String,
 ) -> Result<Value, String> {
-    use base64::Engine;
-    if !valid_file_name(&name) {
-        return Err("input must be a plain file name".to_string());
-    }
-    if data_base64.len() > MAX_JOB_FILE_BYTES * 4 / 3 + 8 {
-        return Err("the audio input is over the 256 MiB job cap".to_string());
-    }
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(&data_base64)
-        .map_err(|e| format!("input is not base64: {e}"))?;
-    if bytes.len() > MAX_JOB_FILE_BYTES {
-        return Err("the audio input is over the 256 MiB job cap".to_string());
-    }
+    let bytes = decode_stage_input(&name, &data_base64, MAX_JOB_FILE_BYTES)?;
     let path = work_dir(&app, &job_id)?.join(&name);
     std::fs::write(&path, &bytes).map_err(|e| format!("could not write {}: {e}", path.display()))?;
     Ok(json!({ "path": path.display().to_string(), "bytes": bytes.len() }))
@@ -853,14 +1042,7 @@ pub async fn speech_stage_input(
 #[tauri::command]
 pub async fn speech_read_output(app: AppHandle, job_id: String, name: String) -> Result<String, String> {
     use base64::Engine;
-    if !valid_file_name(&name) {
-        return Err("output must be a plain file name".to_string());
-    }
-    let path = work_dir(&app, &job_id)?.join(&name);
-    let bytes = std::fs::read(&path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
-    if bytes.len() > MAX_JOB_FILE_BYTES {
-        return Err("the output file is over the 256 MiB job cap".to_string());
-    }
+    let bytes = read_job_file(&work_dir(&app, &job_id)?, &name, MAX_JOB_FILE_BYTES)?;
     Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
 }
 
@@ -946,5 +1128,54 @@ mod tests {
     #[test]
     fn pubkey_decodes() {
         assert!(release_pubkey().is_ok());
+    }
+
+    #[test]
+    fn staged_input_checks_name_and_cap() {
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(b"abc");
+        assert_eq!(decode_stage_input("clip.wav", &b64, 4).unwrap(), b"abc");
+        /* the decoded cap — three bytes do not fit a two-byte ceiling */
+        assert!(decode_stage_input("clip.wav", &b64, 2).is_err());
+        /* the base64-length cap fails before decoding */
+        assert!(decode_stage_input("clip.wav", &"A".repeat(100), 20).is_err());
+        /* a file name is never a path */
+        for bad in ["../clip.wav", "a/b", "a\\b", ".hidden", "..", ""] {
+            assert!(decode_stage_input(bad, &b64, 64).is_err(), "{bad:?} accepted");
+        }
+        assert!(decode_stage_input("clip.wav", "!!! not base64", 64).is_err());
+    }
+
+    #[test]
+    fn job_files_read_only_plain_names_under_the_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("out.wav"), b"hello").unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub").join("out.wav"), b"nested").unwrap();
+        assert_eq!(read_job_file(dir.path(), "out.wav", 16).unwrap(), b"hello");
+        /* the cap applies to what leaves the shell */
+        assert!(read_job_file(dir.path(), "out.wav", 4).is_err());
+        /* a file name is never a path — even a real subdir is refused */
+        for bad in ["sub/out.wav", "../out.wav", ".hidden", "..", ""] {
+            assert!(read_job_file(dir.path(), bad, 16).is_err(), "{bad:?} accepted");
+        }
+        assert!(read_job_file(dir.path(), "missing.wav", 16).is_err());
+        /* job ids are slugs too */
+        assert!(job_dir(dir.path(), "../x").is_err());
+        assert!(job_dir(dir.path(), "job-1").unwrap().ends_with("work/job-1"));
+    }
+
+    #[test]
+    fn local_source_parses_the_shared_contract() {
+        /* shared/speech.ts's `{ type: 'local' }` must deserialize — a model
+           the server registers must be installable on the desktop */
+        let entry: InstallEntry = serde_json::from_value(json!({
+            "id": "mine",
+            "runtime": "sherpa-onnx",
+            "source": { "type": "local" },
+            "files": [{ "path": "model.onnx", "bytes": 1, "sha256": "a".repeat(64) }],
+        }))
+        .unwrap();
+        assert!(matches!(entry.source, SpeechSource::Local));
     }
 }

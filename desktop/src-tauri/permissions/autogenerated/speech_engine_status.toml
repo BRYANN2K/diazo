@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-speech-engine-status"
+description = "Enables the speech_engine_status command without any pre-configured scope."
+commands.allow = ["speech_engine_status"]
+
+[[permission]]
+identifier = "deny-speech-engine-status"
+description = "Denies the speech_engine_status command without any pre-configured scope."
+commands.deny = ["speech_engine_status"]
