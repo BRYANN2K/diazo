@@ -234,6 +234,16 @@ export function FindBar({
       setScope('page')
     }
   }
+  /* the palette is modal: on close the focus goes back where ⌘F found it (this
+     runs before the field takes the focus) */
+  const paletteRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const before = document.activeElement
+    return () => {
+      if (before instanceof HTMLElement && before !== document.body && before.isConnected)
+        before.focus({ preventScroll: true })
+    }
+  }, [])
   useEffect(() => {
     if (mode === 'replace') scopeTouched.current = true
     inputRef.current?.focus()
@@ -471,10 +481,7 @@ export function FindBar({
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      onClose()
-    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
       const dir = e.key === 'ArrowDown' ? 1 : -1
       if (isRemote(scope)) point(dir)
@@ -540,8 +547,10 @@ export function FindBar({
         onPointerDown={onClose}
       />
       <div
+        ref={paletteRef}
         role="search"
         aria-label={t('actions.findLabel')}
+        onKeyDown={(e) => onPaletteKeyDown(e, paletteRef.current, onClose)}
         /* ⌘F 1: a palette centred over the stage, a paper sheet at elevation 4
          that opens on the soft spring; it widens into list + live preview
          once there is something to show */
@@ -618,8 +627,7 @@ export function FindBar({
                 value={replacement}
                 onChange={(e) => setReplacement(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Escape') onClose()
-                  else if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
                     e.preventDefault()
                     replaceOne()
                   }
@@ -837,4 +845,34 @@ function KeyHint({ keys, label }: { keys: string; label: string }) {
 
 function emptyFacets(): LibrarySearchResult['facets'] {
   return { kind: [], category: [], source: [], tag: [] }
+}
+
+const FOCUSABLE =
+  'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+
+/* a stop the person can see: a folded section's controls are skipped */
+const shown = (el: HTMLElement) => (typeof el.checkVisibility === 'function' ? el.checkVisibility() : true)
+
+/** The palette's own keys, from wherever the focus is inside it: Escape
+ *  closes, Tab and ⇧Tab cycle through the palette and never reach the
+ *  dimmed stage and panels behind it. */
+export function onPaletteKeyDown(e: KeyboardEvent<HTMLElement>, palette: HTMLElement | null, onClose: () => void) {
+  if (e.key === 'Escape' && !e.nativeEvent.isComposing) {
+    e.preventDefault()
+    onClose()
+    return
+  }
+  if (e.key !== 'Tab' || !palette) return
+  const stops = [...palette.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(shown)
+  const first = stops[0]
+  const last = stops[stops.length - 1]
+  if (!first || !last) return
+  const at = document.activeElement
+  if (e.shiftKey && (at === first || !palette.contains(at))) {
+    e.preventDefault()
+    last.focus()
+  } else if (!e.shiftKey && (at === last || !palette.contains(at))) {
+    e.preventDefault()
+    first.focus()
+  }
 }

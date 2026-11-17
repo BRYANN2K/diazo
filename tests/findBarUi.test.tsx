@@ -67,11 +67,11 @@ function openCanvas(over: Partial<Canvas> = {}) {
   })
 }
 
-async function mount(mode: 'find' | 'replace' = 'find') {
+async function mount(mode: 'find' | 'replace' = 'find', onClose: () => void = () => {}) {
   host = document.createElement('div')
   document.body.append(host)
   root = createRoot(host)
-  await act(async () => root.render(<FindBar mode={mode} step={null} onClose={() => {}} />))
+  await act(async () => root.render(<FindBar mode={mode} step={null} onClose={onClose} />))
 }
 
 const field = () => host.querySelector<HTMLInputElement>('input[aria-label="Find"]')!
@@ -263,5 +263,47 @@ describe('the preview pane and the keyboard', () => {
     await type('otp')
     expect(button('Insert into “Hero”')).toBeDefined()
     expect([...host.querySelectorAll('kbd')].map((k) => k.textContent)).toContain('⇧↩')
+  })
+})
+
+describe('a modal palette for the keyboard', () => {
+  const palette = () => host.querySelector<HTMLElement>('[role="search"]')!
+  const press = (el: Element, k: string, opts: KeyboardEventInit = {}) =>
+    act(async () => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...opts }))
+    })
+
+  it('closes on Escape from the field and from any control in the palette', async () => {
+    const onClose = vi.fn()
+    await mount('find', onClose)
+    await press(field(), 'Escape')
+    expect(onClose).toHaveBeenCalledTimes(1)
+    const scope = segment('Library')!
+    act(() => scope.focus())
+    await press(scope, 'Escape')
+    expect(onClose).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps Tab inside the palette, both ways', async () => {
+    await mount()
+    const stops = [...palette().querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])')]
+    const first = stops[0]!
+    const last = stops[stops.length - 1]!
+    act(() => last.focus())
+    await press(last, 'Tab')
+    expect(document.activeElement).toBe(first)
+    await press(first, 'Tab', { shiftKey: true })
+    expect(document.activeElement).toBe(last)
+  })
+
+  it('gives the focus back where it was on close', async () => {
+    const before = document.createElement('button')
+    document.body.append(before)
+    act(() => before.focus())
+    await mount()
+    expect(document.activeElement).toBe(field())
+    await act(async () => root.unmount())
+    expect(document.activeElement).toBe(before)
+    before.remove()
   })
 })
