@@ -1,4 +1,6 @@
 import { env, windowsBrowserDirectories } from './env.ts'
+import { browserDir } from './paths.ts'
+import { guardProcessTree } from './browserGuard.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
@@ -21,8 +23,7 @@ import {
 
 const windowsDirectories = process.platform === 'win32' ? windowsBrowserDirectories() : []
 
-const CHROME_PATHS = [
-  env.CHROME_PATH,
+const SYSTEM_CHROME_PATHS = [
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/Applications/Chromium.app/Contents/MacOS/Chromium',
   '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
@@ -33,11 +34,46 @@ const CHROME_PATHS = [
   ...windowsDirectories.map((dir) => path.join(dir, 'Google', 'Chrome', 'Application', 'chrome.exe')),
   ...windowsDirectories.map((dir) => path.join(dir, 'Microsoft', 'Edge', 'Application', 'msedge.exe')),
   ...windowsDirectories.map((dir) => path.join(dir, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe')),
-].filter((p): p is string => !!p)
+]
 
-/** The first usable local browser executable, or null when there is none. */
+/* the embedded install's own renderer, downloaded per version into
+   <data>/browser/<version>/ following Chrome for Testing's zip layout */
+const SHELL_CANDIDATES = [
+  'chrome-headless-shell',
+  'chrome-headless-shell.exe',
+  'chrome-headless-shell-mac-arm64/chrome-headless-shell',
+  'chrome-headless-shell-mac-x64/chrome-headless-shell',
+  'chrome-headless-shell-linux64/chrome-headless-shell',
+  'chrome-headless-shell-win64/chrome-headless-shell.exe',
+]
+
+function downloadedBrowserPath(): string | null {
+  const dir = browserDir()
+  let versions: string[]
+  try {
+    versions = fs.readdirSync(dir)
+  } catch {
+    return null
+  }
+  for (const version of versions.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))) {
+    for (const rel of SHELL_CANDIDATES) {
+      const candidate = path.join(dir, version, rel)
+      try {
+        fs.accessSync(candidate, fs.constants.X_OK)
+        return candidate
+      } catch {
+        /* keep looking */
+      }
+    }
+  }
+  return null
+}
+
+/** The first usable local browser executable: an explicit CHROME_PATH,
+ *  the downloaded headless shell, then a system install; null when none. */
 export function findBrowserPath(): string | null {
-  for (const p of CHROME_PATHS) {
+  for (const p of [env.CHROME_PATH, downloadedBrowserPath(), ...SYSTEM_CHROME_PATHS]) {
+    if (!p) continue
     try {
       fs.accessSync(p, fs.constants.X_OK)
       return p
@@ -60,27 +96,70 @@ function findBrowser(): string {
   return path
 }
 
+/* leftover profile dirs of dead processes (a kill -9 leaves them) are
+   swept once per process — the data-dir lock guarantees no live server
+   shares the directory */
+let profilesSwept = false
+function sweepBrowserProfiles(dir: string): void {
+  profilesSwept = true
+  let entries: fs.Dirent[]
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory() && entry.name.startsWith('profile-')) {
+      try {
+        fs.rmSync(path.join(dir, entry.name), { recursive: true, force: true })
+      } catch {
+        /* a file the OS still holds: the next boot's sweep gets it */
+      }
+    }
+  }
+}
+
 /** A fresh headless Chrome with the server's flags. `timeout` bounds the wait
  *  for its DevTools endpoint (puppeteer's default, 30s, unless given);
  *  `protocolTimeout` bounds every DevTools command (puppeteer's 180s unless
- *  given). */
-export function launchBrowser(timeout?: number, protocolTimeout?: number): Promise<Browser> {
-  return puppeteer.launch({
-    executablePath: findBrowser(),
-    headless: true,
-    timeout,
-    protocolTimeout,
-    args: [
-      '--no-first-run',
-      '--disable-extensions',
-      '--disable-quic',
-      '--disable-webrtc-multiple-routes',
-      '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
-      '--hide-scrollbars',
-      /* containers: no user namespaces for the sandbox, tiny /dev/shm */
-      ...(env.CHROME_NO_SANDBOX ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
-    ],
-  })
+ *  given). The profile lives under the data dir (nothing writes outside it)
+ *  and the process tree is guarded so it dies with the server. */
+export async function launchBrowser(timeout?: number, protocolTimeout?: number): Promise<Browser> {
+  const dir = browserDir()
+  if (!profilesSwept) sweepBrowserProfiles(dir)
+  fs.mkdirSync(dir, { recursive: true })
+  /* one profile dir per launch: a recycling browser may still be closing
+     while its replacement launches, and a shared dir trips Chrome's
+     SingletonLock */
+  const profile = fs.mkdtempSync(path.join(dir, 'profile-'))
+  let browser: Browser
+  try {
+    browser = await puppeteer.launch({
+      executablePath: findBrowser(),
+      headless: true,
+      timeout,
+      protocolTimeout,
+      userDataDir: profile,
+      args: [
+        '--no-first-run',
+        '--disable-extensions',
+        '--disable-quic',
+        '--disable-webrtc-multiple-routes',
+        '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+        '--hide-scrollbars',
+        /* containers: no user namespaces for the sandbox, tiny /dev/shm */
+        ...(env.CHROME_NO_SANDBOX ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
+      ],
+    })
+  } catch (error) {
+    fs.rmSync(profile, { recursive: true, force: true })
+    throw error
+  }
+  /* the browser dies with the server — an exit hook plus a watchdog for
+     kill -9 (server/browserGuard.ts); release happens in terminate() */
+  const child = browser.process()
+  if (child) guardProcessTree(child, { cleanupDir: profile })
+  return browser
 }
 
 /* a stuck DevTools command fails in a minute rather than puppeteer's three,
@@ -139,6 +218,12 @@ const renderer = createRenderer({
 /** The live shared browser, launched if need be. */
 export function getBrowser(): Promise<Browser> {
   return renderer.browser()
+}
+
+/** Close the shared browser and free its guard — part of the server's
+ *  orderly shutdown. */
+export function shutdownRenderer(): Promise<void> {
+  return renderer.shutdown()
 }
 
 /** Counters for logs and health checks. */
