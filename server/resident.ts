@@ -288,8 +288,12 @@ interface RunState {
   payerId?: string
   /** the human who asked — usually the payer, but not when the run pays on
    *  another person's connected account; speech/blender tools and job
-   *  ownership act as this person, never as the payer */
+   *  ownership act as this person, never as the payer. Set only when the
+   *  whole run serves that one person. */
   askerId?: string
+  /** the run's asks cannot be reduced to one person — requester-owned
+   *  tools (speech, blender) stay off rather than pick one at random */
+  mixedRequesters?: boolean
   /** the requester's own user id — set when they linked a local project to
    *  this canvas, so the repo_* tools read their folder through their app */
   repoUserId?: string
@@ -327,6 +331,29 @@ interface RunState {
   chatDone?: boolean
   /** a plan card already went out this run — a second call is refused */
   planProposed?: boolean
+}
+
+/** the requester fields of a run, from the owners of everything it
+ *  claimed. One batch can carry asks from several people: when the named
+ *  owners do not all agree — or an anonymous ask rides along — there is
+ *  no requester, and `mixedRequesters` tells the requester-owned tools to
+ *  stay off rather than act under one of the accounts at random. */
+function requesterFields(owners: (string | undefined)[]): Pick<RunState, 'askerId' | 'mixedRequesters'> {
+  const named = new Set(owners.filter((o): o is string => !!o))
+  const anonymous = owners.filter((o) => !o).length
+  const principals = named.size + (anonymous > 0 ? 1 : 0)
+  return {
+    ...(named.size === 1 && anonymous === 0 ? { askerId: [...named][0]! } : {}),
+    ...(principals > 1 ? { mixedRequesters: true } : {}),
+  }
+}
+
+/** why a requester-owned tool stays off on this run, when it does */
+function requesterGate(runState: RunState, what: string): string | undefined {
+  if (runState.askerId) return undefined
+  return runState.mixedRequesters
+    ? `this run serves asks from several people — ${what} tools act for one requester, so they stay off`
+    : `sign in to use ${what}`
 }
 
 export interface FramePlacement {
@@ -781,11 +808,13 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       lintResults: new Map(),
       vision: model.vision !== false,
       ...(model.userId ? { payerId: model.userId } : {}),
-      /* the requesting person: the first claimed ask's author — payerId is
-         whose account pays, not who asked */
-      ...((comments[0]?.fromUserId ?? claimed[0]?.fromUserId ?? allCards[0]?.queuedByUserId)
-        ? { askerId: comments[0]?.fromUserId ?? claimed[0]?.fromUserId ?? allCards[0]?.queuedByUserId }
-        : {}),
+      /* the requesting person, only when the whole batch provably comes
+         from them — payerId is whose account pays, not who asked */
+      ...requesterFields([
+        ...comments.map((c) => c.fromUserId),
+        ...claimed.map((c) => c.fromUserId),
+        ...allCards.map((c) => c.queuedByUserId),
+      ]),
       ...(repoLink && repoUserId ? { repoUserId } : {}),
       imagesGenerated: 0,
       /* a run about a comment delivers on that comment's page */
@@ -877,7 +906,9 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           ]
         : []
       const runTools = [
-        ...TOOLS,
+        /* a batched run serving several people is not offered the tools
+           that spend or read what only one of them owns */
+        ...TOOLS.filter((tool) => !runState.mixedRequesters || !REQUESTER_OWNED_TOOLS.has(tool.name)),
         ...(repoLink ? REPO_TOOLS : []),
         ...(cards.some((c) => c.kind === 'drift') ? DRIFT_TOOLS : []),
       ]
@@ -1596,7 +1627,7 @@ async function runChat(
     lintResults: new Map(),
     vision: model.vision !== false,
     ...(model.userId ? { payerId: model.userId } : {}),
-    ...(asks.find((m) => m.fromUserId)?.fromUserId ? { askerId: asks.find((m) => m.fromUserId)!.fromUserId } : {}),
+    ...requesterFields(asks.map((m) => m.fromUserId)),
     ...(repoLink && repoUserId ? { repoUserId } : {}),
     imagesGenerated: 0,
     repliedThreads: new Set(),
@@ -2878,6 +2909,11 @@ function canReadCanvas(userId: string, canvasId: string): boolean {
 /** The resident agents' tool names; tests hold them to the MCP server's (agentToolParity.test.ts). */
 export const RESIDENT_TOOL_NAMES = TOOLS.map((tool) => tool.name)
 
+/** The tools that spend or read something the requester owns — speech
+ *  jobs, voices and the ElevenLabs key, Blender ops on their desktop.
+ *  A run serving several people is not offered them. */
+const REQUESTER_OWNED_TOOLS = new Set<string>([...SPEECH_TOOLS, ...BLENDER_TOOLS].map((tool) => tool.name))
+
 /* tall frames (imported landing pages) are CROPPED to the top 4000px at full
    detail rather than downscaled to mush; width still scales down if it would
    breach the API's 8000px image limit */
@@ -3936,9 +3972,12 @@ export async function execTool(
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
         /* speech jobs belong to the person who asked, not the account that pays */
-        if (!runState.askerId) return fail('sign in to use speech')
+        {
+          const gate = requesterGate(runState, 'speech')
+          if (gate) return fail(gate)
+        }
         try {
-          return ok(JSON.stringify(await runSpeechTool(block.name, canvas, runState.askerId, block.input)))
+          return ok(JSON.stringify(await runSpeechTool(block.name, canvas, runState.askerId!, block.input)))
         } catch (error) {
           return fail(error instanceof Error ? error.message : 'speech tool failed')
         }
@@ -3952,9 +3991,12 @@ export async function execTool(
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
         /* blender ops queue under the person who asked, not the paying account */
-        if (!runState.askerId) return fail('sign in to use blender')
+        {
+          const gate = requesterGate(runState, 'blender')
+          if (gate) return fail(gate)
+        }
         try {
-          return ok(JSON.stringify(await runBlenderTool(block.name, canvas, runState.askerId, block.input)))
+          return ok(JSON.stringify(await runBlenderTool(block.name, canvas, runState.askerId!, block.input)))
         } catch (error) {
           return fail(error instanceof Error ? error.message : 'blender tool failed')
         }
