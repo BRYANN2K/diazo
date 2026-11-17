@@ -16,6 +16,7 @@ const HINTS: Record<InstallType, PlainMessageKey> = {
   docker: 'updates.hintDocker',
   kubernetes: 'updates.hintKubernetes',
   source: 'updates.hintSource',
+  desktop: 'updates.hintDesktop',
 }
 
 /** The server's "Update available" card (server/updateCheck.ts): a newer

@@ -132,6 +132,13 @@ const schema = {
      beside the source — a bundle moves import.meta.url, so a packaged
      install names the copy it ships */
   DOOP_MIGRATIONS_DIR: str({ default: undefined }),
+  /* where the downloaded headless renderer (and its profile dirs) live;
+     unset = <data>/browser */
+  DOOP_BROWSER_DIR: str({ default: undefined }),
+  /* the desktop shell spawns the server as a sidecar (DOOP_INSTALL=desktop):
+     it exits when stdin closes — the app died — and prints `ready <port>`
+     on stdout once listening */
+  DOOP_EMBEDDED: bool({ default: false }),
 
   /* ---------------------------------------------------------- auth */
   BETTER_AUTH_SECRET: str({

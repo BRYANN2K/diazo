@@ -222,5 +222,23 @@ describe('install type and visibility', () => {
     expect(updateCommand('docker')).toBe('docker compose pull && docker compose up -d')
     expect(updateCommand('kubernetes')).toBe('kubectl -n doop rollout restart deploy/doop')
     expect(updateCommand('source')).toContain('git pull')
+    /* the desktop app updates server and shell together — there is no
+       server-side command to show */
+    expect(updateCommand('desktop')).toBe('')
+  })
+
+  it('treats a desktop install as self-updating: no GitHub check, user sees the card', async () => {
+    stubEnv('DOOP_INSTALL', 'desktop')
+    expect(installType()).toBe('desktop')
+    expect(await updateStatus()).toMatchObject({ state: 'disabled', install: 'desktop' })
+    expect(calls).toHaveLength(0)
+    expect(maySeeUpdates({ role: 'user' })).toBe(true)
+  })
+
+  it('infers the desktop install type from DOOP_EMBEDDED alone', () => {
+    stubEnv('DOOP_INSTALL', undefined)
+    stubEnv('KUBERNETES_SERVICE_HOST', undefined)
+    stubEnv('DOOP_EMBEDDED', 'true')
+    expect(installType()).toBe('desktop')
   })
 })

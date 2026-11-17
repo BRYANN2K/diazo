@@ -55,22 +55,27 @@ export function resetUpdateCheck(): void {
 
 export function installType(): InstallType {
   if (env.DOOP_INSTALL) return env.DOOP_INSTALL as InstallType
+  /* the desktop shell's sidecar is a desktop install even if the variable
+     was not passed */
+  if (env.DOOP_EMBEDDED) return 'desktop'
   if (env.KUBERNETES_SERVICE_HOST) return 'kubernetes'
   if (existsSync('/.dockerenv')) return 'docker'
   return 'source'
 }
 
-/** Instance admins see updates; so does the one person a local install
- *  serves, who is rarely made an admin. */
+/** Instance admins see updates; so does the one person a local or desktop
+ *  install serves, who is rarely made an admin. */
 export function maySeeUpdates(user: { role?: string | null } | undefined): boolean {
-  return isAdmin(user) || installType() === 'local'
+  return isAdmin(user) || installType() === 'local' || installType() === 'desktop'
 }
 
 export async function updateStatus(): Promise<UpdateStatus> {
   const now = Date.now()
   const running = buildInfo().sha
   const base = baseStatus(running)
-  if (!env.DOOP_UPDATE_CHECK) return { ...base, state: 'disabled' }
+  /* a desktop install ships server and app in one bundle: the app's own
+     updater moves both, so the server never asks GitHub */
+  if (!env.DOOP_UPDATE_CHECK || installType() === 'desktop') return { ...base, state: 'disabled' }
   if (!running) return { ...base, state: 'unknown', reason: 'no-build-sha' }
 
   const key = `${base.repo}#${base.branch}@${running}`

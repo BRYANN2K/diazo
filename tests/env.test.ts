@@ -23,6 +23,26 @@ describe('server/env.ts', () => {
     expect(env.BETTER_AUTH_URL).toBe('https://doop.example')
   })
 
+  it('parses the embedded-install switches and leaves their defaults unset', () => {
+    stubEnv('DOOP_EMBEDDED', '1')
+    stubEnv('DOOP_LISTEN_HOST', '127.0.0.1')
+    stubEnv('DOOP_DATA_DIR', '/tmp/diazo-data')
+    stubEnv('DOOP_INSTALL', 'desktop')
+    expect(env.DOOP_EMBEDDED).toBe(true)
+    expect(env.DOOP_LISTEN_HOST).toBe('127.0.0.1')
+    expect(env.DOOP_DATA_DIR).toBe('/tmp/diazo-data')
+    expect(env.DOOP_INSTALL).toBe('desktop')
+    /* unset stays unset: the container keeps its all-interfaces bind and
+       its ./data layout */
+    stubEnv('DOOP_EMBEDDED', undefined)
+    stubEnv('DOOP_LISTEN_HOST', undefined)
+    stubEnv('DOOP_BROWSER_DIR', undefined)
+    expect(env.DOOP_EMBEDDED).toBe(false)
+    expect(env.DOOP_LISTEN_HOST).toBeUndefined()
+    expect(env.DOOP_BROWSER_DIR).toBeUndefined()
+    expect(() => stubEnv('DOOP_INSTALL', 'flatpak')).toThrow(/DOOP_INSTALL/)
+  })
+
   it('treats a blank value as unset and applies the default', () => {
     stubEnv('MCP_UPLOADS_PER_MIN', '')
     stubEnv('SMTP_SECURE', '   ')
