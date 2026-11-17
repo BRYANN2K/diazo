@@ -65,7 +65,10 @@ and run the Bun-built archive under Node, including its nested runtime dependenc
 `scripts/install-local.sh` (POSIX sh, served from `raw.githubusercontent.com` on
 `main` of `BRYANN2K/diazo` as `curl -fsSL … | sh`) runs one container, `diazo`, of
 `ghcr.io/bryann2k/diazo:main` with Apple's `container` CLI on `127.0.0.1:4400`.
-No `DATABASE_URL`: PGlite and uploads live in `~/.diazo/data`, mounted at `/app/data`;
+No `DATABASE_URL`: PGlite and uploads live in `~/.diazo/data`, mounted at `/app/data`.
+The install backs its PGlite data dir up to `~/.diazo/data/backups/` itself — a
+`pg-<date>.tar.gz` dump plus an asset manifest before every migrating boot and once
+a day while running, keeping the newest seven (`server/backup.ts`).
 `BETTER_AUTH_SECRET` and `SECRETS_ENCRYPTION_KEYS` are generated on the Mac into
 `~/.diazo/diazo.env` (mode 600). An install from before the rename keeps `~/.doop` and its
 `doop.env` where they are (nothing is moved; `DOOP_HOME` overrides), and its old `doop` container
