@@ -182,6 +182,12 @@ jobs:
             echo "$USER:200000:65536" | sudo tee -a /etc/subgid
           fi
           podman system migrate >/dev/null 2>&1 || true
+          # podman talks https to registries unless told otherwise; the
+          # throwaway registry is plain http (the installer's own `podman pull`
+          # reads the same config — a flag would not reach it)
+          mkdir -p "$HOME/.config/containers/registries.conf.d"
+          printf '[[registry]]\nlocation = "localhost:5000"\ninsecure = true\n' \
+            > "$HOME/.config/containers/registries.conf.d/localhost-5000.conf"
           # the installer must find no docker in PATH so it picks podman
           sudo mv "$(command -v docker)" /usr/local/share/docker.hidden-by-install-smoke
 
@@ -262,6 +268,12 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+
+      # the runner's apt index can be minutes-old and already point at
+      # superseded package versions (404 on fetch); refresh it like any user
+      # would before installing a package
+      - name: Refresh the apt index
+        run: sudo apt-get update
 
       - name: Install the .deb package
         run: sh scripts/install-desktop.sh 2>&1 | tee "$RUNNER_TEMP/desktop-deb.log"
@@ -352,6 +364,12 @@ jobs:
 
       - name: Install the app pointed at the local server
         run: |
+          Get-ChildItem env: | Where-Object Name -match 'proxy' | ForEach-Object { Write-Host "$($_.Name)=$($_.Value)" }
+          Get-Process node -ErrorAction SilentlyContinue | Select-Object Id, ProcessName
+          try {
+            $probe = Invoke-RestMethod 'http://127.0.0.1:4400/api/locale-config' -TimeoutSec 8
+            Write-Host "locale-config: $($probe | ConvertTo-Json -Compress)"
+          } catch { Write-Host "locale-config failed before the installer runs: $_" }
           $env:DOOP_DESKTOP_SERVER = 'http://127.0.0.1:4400'
           $out = Get-Content -Raw scripts/install-desktop.ps1 | iex 6>&1 | Out-String
           $out | Tee-Object "$env:RUNNER_TEMP/desktop-install.log"
