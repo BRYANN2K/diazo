@@ -71,13 +71,17 @@ Invalid input, unavailable models and active-job conflicts return 400 with an er
 
 ## Desktop shell commands
 
-`desktop/src-tauri/src/speech.rs` implements the install and engine half of the desktop target. Five Tauri commands, all re-validated natively:
+`desktop/src-tauri/src/speech.rs` implements the install and engine half of the desktop target. The Tauri commands are all re-validated natively:
 
 - `speech_models` returns `{ models: [{ id, engine, state }] }` — the list a poll heartbeat reports.
 - `speech_engine_status` resolves the `diazo-speech` sidecar binary (the app's engines dir, then PATH) and returns its path.
-- `speech_install` takes a `CatalogEntry` JSON plus an optional HF token. `mirror` sources download `SHA256SUMS` and `SHA256SUMS.minisig` from the release, verify the signature against the updater's release key (Ed25519 over the Blake2b-512 prehash), then verify each file's SHA-256. `hf` sources require a 40-hex commit and take each file's `sha256` from the catalog, or from HF's `lfs.oid` metadata at that commit when the catalog leaves it empty. Downloads land under `<appData>/speech/models/<id>/`, resume a `.part` with a Range request, and only rename into place after the hash passes. One install per model at a time; a token never reaches a mirror URL.
+- `speech_choose_files` opens the native file panel for a `local` custom model (18.9): the picked files are copied under `speech/staging/<id>/` and their name, size and SHA-256 come back for the registration — the page never sees a path.
+- `speech_install` takes a `CatalogEntry` JSON plus an optional HF token and, for a `local` source, the `staged` id from `speech_choose_files`. `mirror` sources download `SHA256SUMS` and `SHA256SUMS.minisig` from the release, verify the signature against the updater's release key (Ed25519 over the Blake2b-512 prehash), then verify each file's SHA-256. `hf` sources require a 40-hex commit and take each file's `sha256` from the catalog, or from HF's `lfs.oid` metadata at that commit when the catalog leaves it empty. `local` sources download nothing: each staged file is checked against the registered size and SHA-256 before it moves in. Downloads land under `<appData>/speech/models/<id>/`, resume a `<name>.part` with a Range request (a stall over a minute aborts; the transfer itself has no deadline), and only rename into place after the hash passes. One install per model at a time; a token never reaches a mirror URL.
 - `speech_uninstall` removes the manifest row and the model directory.
 - `speech_run` runs one claimed job: `diazo-speech --kind <asr|tts|speakers> --engine <runtime> --model <model_dir> --in <in> --out <out>` inside `<appData>/speech/work/<jobId>/`, killed past 10 minutes, output path returned. The input file is the media the poll downloaded; the engine log stays in the work dir.
+- `speech_stage_input` / `speech_read_output` move one job file each way under `work/<jobId>/` — plain file names only, 256 MiB cap.
+
+Install entries and registrations share one limits table (`SPEECH_LIMITS` in `shared/speech.ts`): flat `[a-zA-Z0-9._-]+` file names, 4 GiB a file, 8 GiB a model, 64 files. `tests/speechContract.test.ts` holds the server validator and the shell equal.
 
 The sidecar binary itself ships in a `speech-engines-v*` release (not built yet); `speech_run` fails cleanly until then.
 

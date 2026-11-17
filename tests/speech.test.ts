@@ -4,6 +4,7 @@ import {
   installableEntry,
   routeTarget,
   SPEECH_CATALOG,
+  SPEECH_LIMITS,
   speechRequestSchema,
 } from '../shared/speech.ts'
 import {
@@ -97,13 +98,30 @@ describe('speech routing and input contract', () => {
 describe('custom model validation', () => {
   it('requires closed runtimes, immutable revisions, hashes, safe paths and licence acknowledgement', () => {
     expect(validateCustomModel(custom)).toBeNull()
+    /* a desktop-target 'local' model is a valid registration — the shell
+       verifies the picked files itself */
+    expect(validateCustomModel({ ...custom, source: { type: 'local' } })).toBeNull()
     for (const change of [
       { runtime: 'shell' },
       { source: { type: 'hf', repo: 'owner/model', commit: 'main' } },
+      { source: { type: 'hf', repo: `${'a'.repeat(129)}/model`, commit: 'a'.repeat(40) } },
       { licenseAck: false },
       { files: [{ ...custom.files[0], path: '../weights.gguf' }] },
       { files: [{ ...custom.files[0], path: '/tmp/model.gguf' }] },
+      /* the desktop contract is flat names — a nested path cannot install */
+      { files: [{ ...custom.files[0], path: 'dir/model.gguf' }] },
+      { files: [{ ...custom.files[0], path: '.hidden.gguf' }] },
       { files: [{ ...custom.files[0], bytes: Infinity }] },
+      /* the shared limits table: 4 GiB a file, 8 GiB a model, 64 files */
+      { files: [{ ...custom.files[0], bytes: SPEECH_LIMITS.fileBytes + 1 }] },
+      {
+        files: [0, 1, 2].map((i) => ({
+          path: `w${i}.gguf`,
+          bytes: i === 2 ? SPEECH_LIMITS.fileBytes : SPEECH_LIMITS.fileBytes - 1,
+          sha256: 'b'.repeat(64),
+        })),
+      },
+      { files: Array.from({ length: SPEECH_LIMITS.files + 1 }, () => custom.files[0]) },
       { files: [null] },
       { files: [{ ...custom.files[0], sha256: '' }] },
       { files: [{ ...custom.files[0], path: 'model.pkl' }] },

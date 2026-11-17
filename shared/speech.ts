@@ -269,6 +269,22 @@ export interface CustomModel {
  *  download token. `listCustomModels` strips it into `hasToken`. */
 export type StoredCustomModel = CustomModel & { token?: string }
 
+/* ---- the install contract (18.9/18.10) -------------------------------
+ * One limits table both validators enforce: `validateCustomModel` in
+ * server/speech.ts on registration, `desktop/src-tauri/src/speech.rs` on
+ * install — the constants there mirror these, and
+ * tests/speechContract.test.ts holds the two equal. */
+export const SPEECH_LIMITS = {
+  /** one model file, bytes — large ASR weights */
+  fileBytes: 4 * 1024 ** 3,
+  /** all of a model's files together, bytes */
+  modelBytes: 8 * 1024 ** 3,
+  /** a model lists files, never a whole repo */
+  files: 64,
+  /** a model id or file name: one flat `[a-zA-Z0-9._-]+` component */
+  name: 128,
+} as const
+
 /** the POST body: shape is zod-checked, semantics go through
  *  `validateCustomModel` in server/speech.ts (18.9) */
 export const customModelInputSchema = z
@@ -281,9 +297,11 @@ export const customModelInputSchema = z
       z.object({ type: z.literal('local') }).strict(),
     ]),
     files: z
-      .array(z.object({ path: z.string().max(200), bytes: z.number(), sha256: z.string().max(80) }).strict())
+      .array(
+        z.object({ path: z.string().max(SPEECH_LIMITS.name), bytes: z.number(), sha256: z.string().max(80) }).strict(),
+      )
       .min(1)
-      .max(100),
+      .max(SPEECH_LIMITS.files),
     licenseId: z.string().max(200).optional(),
     licenseText: z.string().max(20_000).optional(),
     licenseAck: z.boolean(),

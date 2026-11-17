@@ -32,6 +32,7 @@ import {
   routeTarget,
   SCRIBE_PRICE_PER_HOUR,
   SPEECH_CATALOG,
+  SPEECH_LIMITS,
   type CustomModel,
   type RouteTarget,
   type SpeechInstall,
@@ -663,26 +664,38 @@ export function validateCustomModel(input: {
   if (!KIND_RUNTIMES[input.kind].includes(input.runtime as SpeechRuntime))
     return `${input.runtime} does not run ${input.kind}`
   if (src?.type === 'hf') {
-    if (typeof src.repo !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(src.repo)) return 'source.repo must be owner/name'
+    if (typeof src.repo !== 'string' || !/^[\w.-]{1,128}\/[\w.-]{1,128}$/.test(src.repo))
+      return 'source.repo must be owner/name'
     if (typeof src.commit !== 'string' || !/^[0-9a-f]{40}$/.test(src.commit))
       return 'source.commit must be a pinned commit hash'
   } else if (src?.type !== 'local') return 'source must be a Hugging Face repo or local files'
-  if (!Array.isArray(input.files) || input.files.length === 0 || input.files.length > 100)
+  /* the desktop contract (SPEECH_LIMITS): a model the server registers
+     must be installable by the shell — flat file names, the same file,
+     total and count caps */
+  if (!Array.isArray(input.files) || input.files.length === 0 || input.files.length > SPEECH_LIMITS.files)
     return 'files must name each model file'
+  let totalBytes = 0
   for (const f of input.files as { path?: unknown; bytes?: unknown; sha256?: unknown }[]) {
     if (
       !f ||
       typeof f.path !== 'string' ||
-      f.path.length > 200 ||
-      !/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/.test(f.path) ||
-      f.path.split('/').some((part) => part === '.' || part === '..')
+      f.path.length > SPEECH_LIMITS.name ||
+      !/^[a-zA-Z0-9_.-]+$/.test(f.path) ||
+      f.path.startsWith('.')
     )
-      return 'each file needs a safe relative path'
+      return 'each file needs a safe flat file name'
     if (![...SAFE_EXTS].some((ext) => (f.path as string).endsWith(ext))) {
       return `${f.path}: safetensors, ONNX and GGUF only — pickle files are refused`
     }
-    if (typeof f.bytes !== 'number' || !Number.isSafeInteger(f.bytes) || f.bytes <= 0 || f.bytes > 20 * 1024 ** 3)
+    if (
+      typeof f.bytes !== 'number' ||
+      !Number.isSafeInteger(f.bytes) ||
+      f.bytes <= 0 ||
+      f.bytes > SPEECH_LIMITS.fileBytes
+    )
       return 'each file needs its size'
+    totalBytes += f.bytes
+    if (totalBytes > SPEECH_LIMITS.modelBytes) return 'the model totals over the 8 GiB cap'
     if (typeof f.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(f.sha256)) return 'each file needs its SHA-256'
   }
   if (input.licenseId && input.licenseId.length > 200) return 'licence id is too long'
