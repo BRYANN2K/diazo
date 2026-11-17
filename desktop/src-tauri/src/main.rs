@@ -342,6 +342,7 @@ fn main() {
         .manage(live::LiveState::default())
         .manage(motion::MotionState::default())
         .manage(blender::BlenderState::default())
+        .manage(orca::OrcaState::default())
         .manage(app_menu::AppMenu::default())
         .invoke_handler(tauri::generate_handler![
             claude::claude_status,
@@ -376,6 +377,7 @@ fn main() {
             orca::orca_poll,
             orca::orca_ports,
             orca::orca_activate,
+            orca::orca_untrack,
             live::live_snapshot,
             live::live_snapshot_done,
             motion::motion_render,

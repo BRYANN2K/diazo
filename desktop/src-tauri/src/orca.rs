@@ -21,7 +21,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager};
 
@@ -34,6 +34,12 @@ const PS_LIMIT: &str = "100";
 /// How much of one output stream `run_orca` keeps — `worktree ps` over a
 /// busy install is the biggest answer and stays well under this.
 const MAX_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+/// An identity stays watchable this long after its poll row went terminal —
+/// enough for the terminal report to reach the server a few times before
+/// the entry leaves `orca-tasks.json`.
+const ENDED_PRUNE_MS: u64 = 5 * 60_000;
+/// How many identities one `orca_untrack` call may name.
+const MAX_UNTRACK: usize = 100;
 
 /* field caps — mirror shared/devTasks.ts, keep in step */
 const MAX_PROMPT_CHARS: usize = 8 * 1024;
@@ -322,8 +328,7 @@ fn resolve_repo(
     let root = crate::repo::grant_root(app, link_id)?;
     let mut args = argv(&["repo", "list"]);
     if let Some(env) = environment {
-        args.push("--environment".to_string());
-        args.push(env.to_string());
+        args.push(format!("--environment={env}"));
     }
     args.push("--json".to_string());
     let out = run_orca(bin, &args, None, QUICK_TIMEOUT)?;
@@ -366,15 +371,30 @@ fn grant_path_matches(repo: &Value, root: &Path) -> bool {
 /* the launches this shell owns — orca-tasks.json                      */
 /* ------------------------------------------------------------------ */
 
+/// Serialises every read-modify-write of `orca-tasks.json` — two launches
+/// in flight must not lose each other's identity.
+#[derive(Default)]
+pub struct OrcaState {
+    lock: Mutex<()>,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct TrackedTask {
     task_id: String,
     worktree_id: String,
     environment: Option<String>,
+    /// the Diazo server the launch rode in on — identities are only ever
+    /// polled and activated for the server this shell is currently on
+    #[serde(default)]
+    server: String,
     branch: String,
     agent: String,
     at: u64,
+    /// set on the first poll row that ended the task (terminal outcome or
+    /// a worktree that vanished); pruned once it has been reported on
+    #[serde(default)]
+    ended: Option<u64>,
 }
 
 fn tasks_file(dir: &Path) -> PathBuf {
@@ -407,13 +427,87 @@ fn tasks_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// The identities this shell launched on one environment — polls and
-/// activation are only ever allowed against that set.
-fn tracked(dir: &Path, environment: Option<&str>) -> BTreeMap<String, TrackedTask> {
-    load_tasks(dir)
-        .into_iter()
-        .filter(|(_, t)| t.environment.as_deref() == environment)
+/// The Diazo server this shell currently opens — identities launched
+/// under another server stay in the file but are never polled or
+/// activated from here.
+fn current_server() -> String {
+    crate::server::active_url()
+}
+
+/// Load–mutate–save under the managed lock: `f` reports whether the map
+/// changed so the file is only rewritten when it must be.
+fn edit_tasks<R>(
+    app: &AppHandle,
+    f: impl FnOnce(&mut BTreeMap<String, TrackedTask>) -> (R, bool),
+) -> Result<R, String> {
+    let state = app.state::<OrcaState>();
+    let _guard = state.lock.lock().map_err(|e| e.to_string())?;
+    let dir = tasks_dir(app)?;
+    let mut tasks = load_tasks(&dir);
+    let (out, dirty) = f(&mut tasks);
+    if dirty {
+        save_tasks(&dir, &tasks)?;
+    }
+    Ok(out)
+}
+
+/// The identities this shell launched on one server + environment — polls
+/// and activation are only ever allowed against that set.
+fn tracked(
+    tasks: &BTreeMap<String, TrackedTask>,
+    environment: Option<&str>,
+    server: &str,
+) -> BTreeMap<String, TrackedTask> {
+    tasks
+        .iter()
+        .filter(|(_, t)| t.environment.as_deref() == environment && t.server == server)
+        .map(|(k, t)| (k.clone(), t.clone()))
         .collect()
+}
+
+/// Drop entries whose task ended long enough ago that the terminal report
+/// has had every chance to land. Returns how many were removed.
+fn prune_ended(tasks: &mut BTreeMap<String, TrackedTask>, now: u64) -> usize {
+    let before = tasks.len();
+    tasks.retain(|_, t| t.ended.is_none_or(|at| now.saturating_sub(at) < ENDED_PRUNE_MS));
+    before - tasks.len()
+}
+
+/// A poll row that means the task is over: the worktree vanished from
+/// `worktree ps`, or the main agent's program ended.
+fn row_ended(row: &Value) -> bool {
+    row.get("found") == Some(&Value::Bool(false))
+        || row
+            .get("outcome")
+            .and_then(Value::as_str)
+            .is_some_and(|o| TERMINAL_OUTCOMES.contains(&o))
+}
+
+/// Stamp `ended` on the watched identities this poll's rows just ended —
+/// they keep being reported until `prune_ended` retires them.
+fn mark_ended(tasks: &mut BTreeMap<String, TrackedTask>, rows: &[Value], now: u64) -> bool {
+    let mut dirty = false;
+    for row in rows {
+        let Some(identity) = row.get("identity").and_then(Value::as_str) else {
+            continue;
+        };
+        if row_ended(row) {
+            if let Some(t) = tasks.get_mut(identity) {
+                if t.ended.is_none() {
+                    t.ended = Some(now);
+                    dirty = true;
+                }
+            }
+        }
+    }
+    dirty
+}
+
+fn millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /* ------------------------------------------------------------------ */
@@ -439,12 +533,35 @@ fn valid_branch(branch: &str) -> bool {
         && !matches!(last, Some('/' | '.' | '-'))
 }
 
+/// A single-line field value that must never read as a flag to `orca`:
+/// no leading dash and no control characters. (`--flag=value` argv makes
+/// this belt-and-suspenders; the parser can never see a bare `--x` value.)
+fn valid_line(value: &str, max: usize, allow_empty: bool) -> bool {
+    (allow_empty || !value.trim().is_empty())
+        && value.chars().count() <= max
+        && !value.starts_with('-')
+        && !value.chars().any(|c| c.is_control())
+}
+
 /// A worktree name: printable, one line.
 fn valid_name(name: &str) -> bool {
-    !name.trim().is_empty()
-        && name.chars().count() <= MAX_NAME_CHARS
-        && !name.contains('\n')
-        && !name.contains('\r')
+    valid_line(name, MAX_NAME_CHARS, false)
+}
+
+/// The `doop:` comment stamped on the worktree — one line, may be empty.
+fn valid_comment(comment: &str) -> bool {
+    valid_line(comment, MAX_COMMENT_CHARS, true)
+}
+
+/// The launch brief: a few lines of text — newlines and tabs pass, other
+/// control characters and a leading dash do not.
+fn valid_prompt(prompt: &str) -> bool {
+    !prompt.is_empty()
+        && prompt.chars().count() <= MAX_PROMPT_CHARS
+        && !prompt.starts_with('-')
+        && !prompt
+            .chars()
+            .any(|c| c.is_control() && c != '\n' && c != '\t')
 }
 
 /// `wt2:<host>:<instance>` — the only worktree handle the server ever sees.
@@ -456,9 +573,10 @@ fn valid_identity(identity: &str) -> bool {
 }
 
 /// A model id (`gpt-6-astra`, `claude-opus-4`) or an effort level — bounded
-/// flag values, never a sentence.
+/// flag values, never a sentence, never flag-shaped themselves.
 fn valid_flag_value(value: &str) -> bool {
     !value.is_empty()
+        && !value.starts_with('-')
         && value.chars().count() <= MAX_FIELD_CHARS
         && value
             .chars()
@@ -585,38 +703,27 @@ struct LaunchSpec {
     environment: Option<String>,
 }
 
-/// One `worktree create` argv: typed values as separate elements — never
-/// a shell string — and never `--surface`, because Orca's own Chat | CLI
-/// setting decides how the agent opens.
+/// One `worktree create` argv: every value rides as `--flag=value`, so a
+/// field's text can never be parsed as an option itself — never a shell
+/// string — and never `--surface`, because Orca's own Chat | CLI setting
+/// decides how the agent opens.
 fn launch_args(spec: &LaunchSpec) -> Vec<String> {
-    let mut args = argv(&[
-        "worktree",
-        "create",
-        "--name",
-        &spec.worktree_name,
-        "--repo",
-        format!("id:{}", spec.repo_id).as_str(),
-        "--branch",
-        &spec.branch,
-        "--agent",
-        &spec.agent,
-        "--prompt",
-        &spec.prompt,
-        "--comment",
-        &spec.comment,
-        "--no-parent",
-    ]);
+    let mut args = argv(&["worktree", "create"]);
+    args.push(format!("--name={}", spec.worktree_name));
+    args.push(format!("--repo=id:{}", spec.repo_id));
+    args.push(format!("--branch={}", spec.branch));
+    args.push(format!("--agent={}", spec.agent));
+    args.push(format!("--prompt={}", spec.prompt));
+    args.push(format!("--comment={}", spec.comment));
+    args.push("--no-parent".to_string());
     if let Some(model) = &spec.model {
-        args.push("--model".to_string());
-        args.push(model.clone());
+        args.push(format!("--model={model}"));
     }
     if let Some(effort) = &spec.effort {
-        args.push("--effort".to_string());
-        args.push(effort.clone());
+        args.push(format!("--effort={effort}"));
     }
     if let Some(env) = &spec.environment {
-        args.push("--environment".to_string());
-        args.push(env.clone());
+        args.push(format!("--environment={env}"));
     }
     args.push("--json".to_string());
     args
@@ -668,10 +775,10 @@ pub async fn orca_launch_task(
                 return Err(bad("effort"));
             }
         }
-        if prompt.is_empty() || prompt.chars().count() > MAX_PROMPT_CHARS {
+        if !valid_prompt(&prompt) {
             return Err(bad("prompt"));
         }
-        if comment.chars().count() > MAX_COMMENT_CHARS {
+        if !valid_comment(&comment) {
             return Err(bad("comment"));
         }
 
@@ -697,6 +804,11 @@ pub async fn orca_launch_task(
         }
         if let Some(effort) = &effort {
             detail.push_str(&format!(" · effort {effort}"));
+        }
+        if !comment.is_empty() {
+            /* stamped on the Orca worktree metadata — the person sees it
+               before it is written */
+            detail.push_str(&format!("\nComment: {comment}"));
         }
         detail.push_str(&format!("\n\nThe agent starts with this brief:\n\n{prompt}"));
         if !confirm_launch(&format!("Create Orca worktree \"{worktree_name}\"?"), &detail) {
@@ -745,24 +857,25 @@ pub async fn orca_launch_task(
         };
         let outcome = launch.and_then(|l| l.get("outcome"));
 
-        /* remember it: polls and activation only ever reach this set */
-        let dir = tasks_dir(&app)?;
-        let mut tasks = load_tasks(&dir);
-        tasks.insert(
-            identity.to_string(),
-            TrackedTask {
-                task_id: task_id.clone(),
-                worktree_id: worktree_id.clone(),
-                environment: spec.environment.clone(),
-                branch: final_branch.clone(),
-                agent: spec.agent.clone(),
-                at: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0),
-            },
-        );
-        save_tasks(&dir, &tasks)?;
+        /* remember it: polls and activation only ever reach this set —
+           the insert rides the managed lock so two launches cannot lose
+           each other's identity */
+        edit_tasks(&app, |tasks| {
+            tasks.insert(
+                identity.to_string(),
+                TrackedTask {
+                    task_id: task_id.clone(),
+                    worktree_id: worktree_id.clone(),
+                    environment: spec.environment.clone(),
+                    server: current_server(),
+                    branch: final_branch.clone(),
+                    agent: spec.agent.clone(),
+                    at: millis(),
+                    ended: None,
+                },
+            );
+            ((), true)
+        })?;
 
         Ok(json!({
             "ok": true,
@@ -828,22 +941,27 @@ fn poll_row(identity: &str, row: Option<&Value>) -> Value {
 }
 
 /// `orca_poll` — `worktree ps --json` trimmed to the identities this shell
-/// launched on the named environment (absent = this Mac). Rows for
-/// watched-but-gone identities come back `found: false`.
+/// launched on the named environment (absent = this Mac) for the server
+/// the shell currently opens. Rows for watched-but-gone identities come
+/// back `found: false`. Entries whose row went terminal are marked here
+/// and pruned once the terminal report has had time to land.
 #[tauri::command]
 pub async fn orca_poll(app: AppHandle, environment: Option<String>) -> Result<Value, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let bin = orca_bin().ok_or_else(|| "Orca is not installed on this computer".to_string())?;
         let environment = checked_environment(&bin, environment.as_deref())?;
-        let dir = tasks_dir(&app)?;
-        let watched = tracked(&dir, environment.as_deref());
+        let server = current_server();
+        let watched = edit_tasks(&app, |tasks| {
+            let dirty = prune_ended(tasks, millis()) > 0;
+            (tracked(tasks, environment.as_deref(), &server), dirty)
+        })?;
         if watched.is_empty() {
             return Ok(json!({ "rows": [] }));
         }
-        let mut args = argv(&["worktree", "ps", "--limit", PS_LIMIT]);
+        let mut args = argv(&["worktree", "ps"]);
+        args.push(format!("--limit={PS_LIMIT}"));
         if let Some(env) = &environment {
-            args.push("--environment".to_string());
-            args.push(env.clone());
+            args.push(format!("--environment={env}"));
         }
         args.push("--json".to_string());
         let out = run_orca(&bin, &args, None, PS_TIMEOUT)?;
@@ -861,7 +979,32 @@ pub async fn orca_poll(app: AppHandle, environment: Option<String>) -> Result<Va
                 poll_row(identity, row)
             })
             .collect();
+        /* stamp `ended` under the lock — entries whose row ended keep
+           reporting until prune_ended retires them */
+        edit_tasks(&app, |tasks| ((), mark_ended(tasks, &trimmed, millis())))?;
         Ok(json!({ "rows": trimmed }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// `orca_untrack` — stop watching identities: the page calls it once the
+/// server has answered a terminal state for a task, or refused the task
+/// outright. Only identities this shell tracks for the current server may
+/// be dropped.
+#[tauri::command]
+pub async fn orca_untrack(app: AppHandle, identities: Vec<String>) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if identities.len() > MAX_UNTRACK || identities.iter().any(|i| !valid_identity(i)) {
+            return Err(bad("identities"));
+        }
+        let server = current_server();
+        let removed = edit_tasks(&app, |tasks| {
+            let before = tasks.len();
+            tasks.retain(|id, t| !(t.server == server && identities.contains(id)));
+            (before - tasks.len(), before != tasks.len())
+        })?;
+        Ok(json!({ "removed": removed }))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -885,14 +1028,15 @@ pub async fn orca_ports(
         let bin = orca_bin().ok_or_else(|| "Orca is not installed on this computer".to_string())?;
         let environment = checked_environment(&bin, environment.as_deref())?;
         let dir = tasks_dir(&app)?;
-        if !tracked(&dir, environment.as_deref()).contains_key(&identity) {
+        if !tracked(&load_tasks(&dir), environment.as_deref(), &current_server())
+            .contains_key(&identity)
+        {
             return Err("this shell did not launch that worktree".to_string());
         }
-        let mut args = argv(&["ports", "--worktree"]);
-        args.push(format!("identity:{identity}"));
+        let mut args = argv(&["ports"]);
+        args.push(format!("--worktree=identity:{identity}"));
         if let Some(env) = &environment {
-            args.push("--environment".to_string());
-            args.push(env.clone());
+            args.push(format!("--environment={env}"));
         }
         args.push("--json".to_string());
         let out = run_orca(&bin, &args, None, QUICK_TIMEOUT)?;
@@ -938,14 +1082,15 @@ pub async fn orca_activate(
         let bin = orca_bin().ok_or_else(|| "Orca is not installed on this computer".to_string())?;
         let environment = checked_environment(&bin, environment.as_deref())?;
         let dir = tasks_dir(&app)?;
-        if !tracked(&dir, environment.as_deref()).contains_key(&identity) {
+        if !tracked(&load_tasks(&dir), environment.as_deref(), &current_server())
+            .contains_key(&identity)
+        {
             return Err("this shell did not launch that worktree".to_string());
         }
-        let mut args = argv(&["worktree", "activate", "--worktree"]);
-        args.push(format!("identity:{identity}"));
+        let mut args = argv(&["worktree", "activate"]);
+        args.push(format!("--worktree=identity:{identity}"));
         if let Some(env) = &environment {
-            args.push("--environment".to_string());
-            args.push(env.clone());
+            args.push(format!("--environment={env}"));
         }
         args.push("--json".to_string());
         run_orca(&bin, &args, None, ACTIVATE_TIMEOUT)?;
@@ -1060,16 +1205,18 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
 
     #[test]
     fn launch_args_builds_the_worktree_create_argv() {
+        /* every value rides as --flag=value: a field's text can never be
+           parsed as an option itself */
         assert_eq!(
             launch_args(&launch_spec()),
             argv(&[
                 "worktree", "create",
-                "--name", "doop-new-screen-a1b2",
-                "--repo", "id:r-1",
-                "--branch", "doop/new-screen-a1b2",
-                "--agent", "claude",
-                "--prompt", "implement the spec",
-                "--comment", "doop: https://diazo.test/c/c1?frame=f1 · task t1",
+                "--name=doop-new-screen-a1b2",
+                "--repo=id:r-1",
+                "--branch=doop/new-screen-a1b2",
+                "--agent=claude",
+                "--prompt=implement the spec",
+                "--comment=doop: https://diazo.test/c/c1?frame=f1 · task t1",
                 "--no-parent",
                 "--json",
             ])
@@ -1085,16 +1232,16 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
             launch_args(&full),
             argv(&[
                 "worktree", "create",
-                "--name", "doop-new-screen-a1b2",
-                "--repo", "id:r-1",
-                "--branch", "doop/new-screen-a1b2",
-                "--agent", "claude",
-                "--prompt", "implement the spec",
-                "--comment", "doop: https://diazo.test/c/c1?frame=f1 · task t1",
+                "--name=doop-new-screen-a1b2",
+                "--repo=id:r-1",
+                "--branch=doop/new-screen-a1b2",
+                "--agent=claude",
+                "--prompt=implement the spec",
+                "--comment=doop: https://diazo.test/c/c1?frame=f1 · task t1",
                 "--no-parent",
-                "--model", "opus",
-                "--effort", "high",
-                "--environment", "vps",
+                "--model=opus",
+                "--effort=high",
+                "--environment=vps",
                 "--json",
             ])
         );
@@ -1111,6 +1258,22 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
         assert!(valid_name("doop-checkout-1"));
         assert!(valid_name("A screen with spaces"));
         assert!(!valid_name("with\nnewline"));
+        /* values that could read as flags to the CLI are refused outright —
+           the --flag=value argv makes this belt-and-suspenders */
+        assert!(!valid_name("--surface"));
+        assert!(!valid_name("with\tcontrol"));
+        assert!(!valid_name("with\u{7}bell"));
+        assert!(valid_prompt("You are implementing a design.\nTwo lines.\tTabbed."));
+        assert!(!valid_prompt("--surface"));
+        assert!(!valid_prompt("with\u{7}bell"));
+        assert!(!valid_prompt(""));
+        assert!(valid_comment("doop: https://x/c/c1 · task t1"));
+        assert!(valid_comment(""));
+        assert!(!valid_comment("--agent=x"));
+        assert!(!valid_comment("two\nlines"));
+        assert!(valid_flag_value("gpt-6-astra"));
+        assert!(!valid_flag_value("-x"));
+        assert!(!valid_flag_value("--model"));
         assert!(valid_identity(
             "wt2:local:59ef3513-5c2d-4a86-a683-f11d3bfbc2f3"
         ));
@@ -1270,27 +1433,58 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
         assert!(none_env.is_none());
     }
 
+    fn tracked_task(environment: Option<&str>, server: &str) -> TrackedTask {
+        TrackedTask {
+            task_id: "t1".to_string(),
+            worktree_id: "r1::/srv/app".to_string(),
+            environment: environment.map(str::to_string),
+            server: server.to_string(),
+            branch: "doop/x".to_string(),
+            agent: "claude".to_string(),
+            at: 1,
+            ended: None,
+        }
+    }
+
     #[test]
-    fn tracked_is_per_environment() {
-        let dir = tempfile::tempdir().unwrap();
-        let tasks_dir = dir.path().join("tasks");
-        save_tasks(
-            &tasks_dir,
-            &BTreeMap::from([(
-                "wt2:vps:inst-9".to_string(),
-                TrackedTask {
-                    task_id: "t1".to_string(),
-                    worktree_id: "r1::/srv/app".to_string(),
-                    environment: Some("vps".to_string()),
-                    branch: "doop/x".to_string(),
-                    agent: "claude".to_string(),
-                    at: 1,
-                },
-            )]),
-        )
-        .unwrap();
-        assert!(tracked(&tasks_dir, Some("vps")).contains_key("wt2:vps:inst-9"));
-        assert!(!tracked(&tasks_dir, None).contains_key("wt2:vps:inst-9"));
+    fn tracked_is_per_environment_and_server() {
+        let tasks = BTreeMap::from([
+            ("wt2:vps:inst-9".to_string(), tracked_task(Some("vps"), "https://a")),
+            ("wt2:vps:other".to_string(), tracked_task(Some("vps"), "https://b")),
+            ("wt2:local:i1".to_string(), tracked_task(None, "https://a")),
+        ]);
+        /* another server's entries stay in the file but are never watched */
+        let on_a = tracked(&tasks, Some("vps"), "https://a");
+        assert!(on_a.contains_key("wt2:vps:inst-9"));
+        assert!(!on_a.contains_key("wt2:vps:other"));
+        assert!(!tracked(&tasks, None, "https://a").contains_key("wt2:vps:inst-9"));
+        assert!(tracked(&tasks, None, "https://a").contains_key("wt2:local:i1"));
+        /* entries from before the server keying (empty `server`) match nothing */
+        let mut legacy = BTreeMap::new();
+        legacy.insert("wt2:vps:old".to_string(), TrackedTask {
+            server: String::new(),
+            ..tracked_task(Some("vps"), "https://a")
+        });
+        assert!(!tracked(&legacy, Some("vps"), "https://a").contains_key("wt2:vps:old"));
+    }
+
+    #[test]
+    fn ended_entries_report_then_prune() {
+        let mut tasks = BTreeMap::from([(
+            "wt2:vps:inst-9".to_string(),
+            tracked_task(Some("vps"), "https://a"),
+        )]);
+        /* a working row marks nothing */
+        let working = json!([{ "identity": "wt2:vps:inst-9", "found": true, "agentState": "working" }]);
+        assert!(!mark_ended(&mut tasks, working.as_array().unwrap(), 1000));
+        /* a terminal outcome or a vanished worktree marks the entry */
+        let gone = json!([{ "identity": "wt2:vps:inst-9", "found": false }]);
+        assert!(mark_ended(&mut tasks, gone.as_array().unwrap(), 1000));
+        assert_eq!(tasks["wt2:vps:inst-9"].ended, Some(1000));
+        /* it stays watched and is reported again until the prune age */
+        assert_eq!(prune_ended(&mut tasks, 1000 + ENDED_PRUNE_MS - 1), 0);
+        assert_eq!(prune_ended(&mut tasks, 1000 + ENDED_PRUNE_MS), 1);
+        assert!(tasks.is_empty());
     }
 
     #[test]
@@ -1303,14 +1497,25 @@ if [ -f "$file" ]; then cat "$file"; else echo '{"ok":true,"result":{}}'; fi
                 task_id: "t".to_string(),
                 worktree_id: "r::/p".to_string(),
                 environment: None,
+                server: "https://diazo.example".to_string(),
                 branch: "doop/a".to_string(),
                 agent: "codex".to_string(),
                 at: 2,
+                ended: None,
             },
         );
         save_tasks(dir.path(), &tasks).unwrap();
         let loaded = load_tasks(dir.path());
         assert_eq!(loaded["wt2:local:i1"].task_id, "t");
         assert!(loaded["wt2:local:i1"].environment.is_none());
+        /* and a file written before server/ended keys existed still loads */
+        fs::write(
+            tasks_file(dir.path()),
+            r#"{"wt2:local:i2":{"taskId":"t2","worktreeId":"r::/q","environment":null,"branch":"b","agent":"claude","at":3}}"#,
+        )
+        .unwrap();
+        let loaded = load_tasks(dir.path());
+        assert_eq!(loaded["wt2:local:i2"].server, "");
+        assert_eq!(loaded["wt2:local:i2"].ended, None);
     }
 }
