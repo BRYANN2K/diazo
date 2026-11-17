@@ -48,6 +48,8 @@ function declarations(props: Record<string, number | string>): string[] {
 }
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,100}$/
+/** a text-animator unit target: `el[i]` — unit i of element el's split */
+const UNIT_ID = /^([A-Za-z0-9_-]{1,100})\[(\d{1,4})\]$/
 
 /** The CSS one frame needs at this instant, '' when no track touches it. */
 export function frameMotionCss(state: CompositionStateAt, frameId: string): string {
@@ -56,9 +58,17 @@ export function frameMotionCss(state: CompositionStateAt, frameId: string): stri
   for (const [key, props] of Object.entries(state.elements)) {
     if (!key.startsWith(prefix)) continue
     const elementId = key.slice(prefix.length)
-    if (!SAFE_ID.test(elementId)) continue
+    /* a unit target styles the split span, not the element — the same
+       [data-doop-unit] marker the export path writes (motionExport.ts) */
+    const unit = UNIT_ID.exec(elementId)
+    const selector = unit
+      ? `[data-doop-id="${unit[1]}"] [data-doop-unit="${unit[2]}"]`
+      : SAFE_ID.test(elementId)
+        ? `[data-doop-id="${elementId}"]`
+        : null
+    if (!selector) continue
     const body = declarations(props)
-    if (body.length) rules.push(`[data-doop-id="${elementId}"] { ${body.join('; ')} }`)
+    if (body.length) rules.push(`${selector} { ${body.join('; ')} }`)
   }
   return rules.join('\n')
 }

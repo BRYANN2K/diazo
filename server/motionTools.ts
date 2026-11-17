@@ -34,6 +34,7 @@ import {
   parseMotionBlock,
   parseOps,
   type Composition,
+  type Direction,
   type FrameMotionBlock,
   type MotionLintIssue,
 } from '../shared/motion.ts'
@@ -204,6 +205,9 @@ export async function animateStoryboard(
     width?: number
     height?: number
     frame_ids?: string[]
+    /** the director's treatment — beats set per-shot seconds and the
+     *  handover between shots; it persists on the composition */
+    direction?: Direction
   },
   actor: Actor,
 ): Promise<Outcome> {
@@ -230,6 +234,7 @@ export async function animateStoryboard(
     fps,
     shotSeconds,
     margin: input.margin,
+    direction: input.direction,
   })
   const composition = actions.setComposition(canvas.id, body, pageId, actor)
   /* a rebuilt film starts a new run: clear the old state and record the

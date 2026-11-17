@@ -2,6 +2,8 @@ import type { Frame } from '../../../shared/types'
 import { rasterizeFrame, rasterizeHtml } from '../frameRaster'
 import { frameStateAt, resolveEasing, type CameraState, type Composition } from './contract'
 import { frameMotionCss } from './elementCss'
+import { elementText, expandTextAnimator, splitUnitsForFrame } from '../../../shared/motionText'
+import { MOTION_BLOCK_ATTR, parseMotionBlock, type FrameMotionKeyframe, type TextSplit } from '../../../shared/motion'
 
 /**
  * Draws a film at any time `t` onto a 2D canvas: the page's frames seen
@@ -16,10 +18,41 @@ import { frameMotionCss } from './elementCss'
  * written in, so its own seek-safe animations step with the film.
  */
 export interface FilmStage {
-  frames: { frame: Frame; image: ImageBitmap; moving: boolean; scale: number }[]
+  frames: {
+    frame: Frame
+    image: ImageBitmap
+    moving: boolean
+    scale: number
+    /** frame-authored keyframes incl. expanded text animators */
+    motionKfs: FrameMotionKeyframe[]
+    /** elements the animators split → data-doop-unit spans at draw time */
+    unitEls: Map<string, TextSplit>
+  }[]
   /** the camera when the film has no camera keys: the whole page in view */
   fallback: CameraState
   ground: string
+}
+
+const MOTION_SCRIPT_RE = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi
+
+/** the frame's data-doop-motion block: its keyframes, its animators folded
+ *  to unit keyframes, and the elements the raster split must wrap */
+function frameMotion(html: string): { motionKfs: FrameMotionKeyframe[]; unitEls: Map<string, TextSplit> } {
+  const motionKfs: FrameMotionKeyframe[] = []
+  const unitEls = new Map<string, TextSplit>()
+  for (const m of html.matchAll(MOTION_SCRIPT_RE)) {
+    if (!(m[1] ?? '').includes(MOTION_BLOCK_ATTR)) continue
+    const block = parseMotionBlock(m[2] ?? '')
+    if (!block) continue
+    motionKfs.push(...block.keyframes)
+    for (const animator of block.animators ?? []) {
+      const text = elementText(html, animator.el)
+      if (text === undefined) continue
+      motionKfs.push(...expandTextAnimator(animator, text).keyframes)
+      unitEls.set(animator.el, animator.split)
+    }
+  }
+  return { motionKfs, unitEls }
 }
 
 /** the camera that fits every frame of the page in a `width × height` shot */
@@ -63,8 +96,9 @@ export async function prepareStage(
   for (const frame of frames) {
     try {
       const blob = await rasterizeFrame(frame, { scale, type: 'png', signal: opts.signal })
-      const moving = tracked.has(frame.id) || isScene(frame.html)
-      drawn.push({ frame, image: await createImageBitmap(blob), moving, scale })
+      const motion = frameMotion(frame.html)
+      const moving = tracked.has(frame.id) || isScene(frame.html) || motion.motionKfs.length > 0
+      drawn.push({ frame, image: await createImageBitmap(blob), moving, scale, ...motion })
     } catch (err) {
       /* a frame the browser cannot draw (a tainted canvas, a blocked image)
          is left out rather than failing the whole film */
@@ -84,14 +118,18 @@ export async function paintAt(
   t: number,
   signal?: AbortSignal,
 ): Promise<void> {
-  const state = frameStateAt(comp, t, { resolveEasing })
+  const frameBlocks = new Map<string, readonly FrameMotionKeyframe[]>()
+  for (const entry of stage.frames) if (entry.motionKfs.length > 0) frameBlocks.set(entry.frame.id, entry.motionKfs)
+  const state = frameStateAt(comp, t, { resolveEasing, frameBlocks })
   /* the moving frames are drawn again first, so the paint below is one pass */
   const images = await Promise.all(
     stage.frames.map(async (entry) => {
       if (!entry.moving) return entry.image
       try {
+        const splitHtml =
+          entry.unitEls.size > 0 ? splitUnitsForFrame(entry.frame.html, entry.unitEls) : entry.frame.html
         const blob = await rasterizeHtml(
-          htmlAt(entry.frame.html, frameMotionCss(state, entry.frame.id), state.t),
+          htmlAt(splitHtml, frameMotionCss(state, entry.frame.id), state.t),
           { width: entry.frame.width, height: entry.frame.height },
           { scale: entry.scale, type: 'png', signal },
         )

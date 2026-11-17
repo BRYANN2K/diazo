@@ -52,11 +52,12 @@ export function renderCookieName(): string {
   return env.BETTER_AUTH_URL.startsWith('https:') ? `__Secure-${RENDER_COOKIE}` : RENDER_COOKIE
 }
 
-/** Mint a token for one job's reads; `ttlMs` is the render's own budget,
- *  so the credential can never outlive the work it exists for. */
-export function mintRenderToken(job: RenderJob, ttlMs: number): string {
+/** Mint a token for one scope's reads; `ttlMs` is the work's own budget,
+ *  so the credential can never outlive it. A render job passes itself, a
+ *  snapshot/check pass its (canvasId, pageId). */
+export function mintRenderToken(scope: { canvasId: string; pageId: string }, ttlMs: number): string {
   const token = nanoid(48)
-  renderGrants.set(token, { canvasId: job.canvasId, pageId: job.pageId, expiresAt: Date.now() + ttlMs })
+  renderGrants.set(token, { canvasId: scope.canvasId, pageId: scope.pageId, expiresAt: Date.now() + ttlMs })
   return token
 }
 
