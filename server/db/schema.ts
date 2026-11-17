@@ -1456,7 +1456,6 @@ export const renderJobs = pgTable(
   (t) => [index('render_jobs_canvas_idx').on(t.canvasId), index('render_jobs_composition_idx').on(t.compositionId)],
 )
 
-<<<<<<< HEAD
 /** Dev tasks (shared/devTasks.ts, server/devTasks.ts): a coding agent sent
  *  to an Orca worktree from a ready-for-dev frame. The worktree's absolute
  *  path is never stored — `orca_identity` is the opaque `wt2:` key — and
