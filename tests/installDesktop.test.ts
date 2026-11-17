@@ -165,8 +165,8 @@ esac`,
     'rpm',
     `echo "rpm $*" >> "$STUB_DIR/calls.log"
 case "$1" in
-  -q) [ -f "$STUB_DIR/rpm-version" ] ;;
-  -i) echo "0.15.0" > "$STUB_DIR/rpm-version" ;;
+  -q) [ -f "$STUB_DIR/rpm-version" ] && cat "$STUB_DIR/rpm-version" ;;
+  -i | -U) echo "0.15.0" > "$STUB_DIR/rpm-version" ;;
   -e) rm -f "$STUB_DIR/rpm-version" ;;
 esac`,
   )
@@ -402,6 +402,29 @@ describe('install-desktop.sh on Linux', () => {
     expect(code, out).toBe(0)
     expect(calls()).toContain(`curl ${RELEASES}/desktop-v0.15.0/Diazo-0.15.0-1.x86_64.rpm`)
     expect(calls()).toMatch(/dnf install -y .*Diazo-0\.15\.0-1\.x86_64\.rpm/)
+  })
+
+  it('installs the unsigned local .rpm through zypper on a SUSE-family system', async () => {
+    publish('0.15.0')
+    rmSync(path.join(bin, 'dnf'))
+    const { code, out } = await runLinux([], { DOOP_OS_RELEASE: osRelease('ID=opensuse-tumbleweed\nID_LIKE=suse\n') })
+    expect(code, out).toBe(0)
+    /* --allow-unsigned-rpm: the local file's checksum is already verified,
+       and a signature prompt would abort --non-interactive */
+    expect(calls()).toMatch(/zypper --non-interactive install --allow-unsigned-rpm .*Diazo-0\.15\.0-1\.x86_64\.rpm/)
+    expect(calls()).not.toMatch(/dnf install|^rpm -U /m)
+  })
+
+  it('upgrades through rpm -U when neither dnf nor zypper is there', async () => {
+    publish('0.15.0')
+    rmSync(path.join(bin, 'dnf'))
+    rmSync(path.join(bin, 'zypper'))
+    /* an older diazo is already installed: -i would refuse, -U upgrades */
+    writeFileSync(path.join(root, 'rpm-version'), '0.14.0')
+    const { code, out } = await runLinux([], { DOOP_OS_RELEASE: osRelease('ID=fedora\n') })
+    expect(code, out).toBe(0)
+    expect(calls()).toMatch(/^rpm -U .*Diazo-0\.15\.0-1\.x86_64\.rpm/m)
+    expect(calls()).not.toMatch(/^rpm -i /m)
   })
 
   it('installs the AppImage on other families, or under --appimage', async () => {

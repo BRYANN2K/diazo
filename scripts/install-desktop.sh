@@ -450,9 +450,11 @@ install_rpm() {
   if command -v dnf >/dev/null 2>&1; then
     as_root dnf install -y "$PACKAGE" || die "dnf could not install $PACKAGE"
   elif command -v zypper >/dev/null 2>&1; then
-    as_root zypper --non-interactive install "$PACKAGE" || die "zypper could not install $PACKAGE"
+    # the local file's checksum is already verified: a signature prompt would abort --non-interactive
+    as_root zypper --non-interactive install --allow-unsigned-rpm "$PACKAGE" || die "zypper could not install $PACKAGE"
   elif command -v rpm >/dev/null 2>&1; then
-    as_root rpm -i "$PACKAGE" || die "rpm could not install $PACKAGE"
+    # -U installs, or upgrades the package of an older install (-i refuses one)
+    as_root rpm -U "$PACKAGE" || die "rpm could not install $PACKAGE"
   else
     die "neither dnf, zypper nor rpm is installed; use --appimage instead"
   fi
