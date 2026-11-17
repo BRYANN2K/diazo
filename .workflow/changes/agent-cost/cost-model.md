@@ -36,6 +36,7 @@ USD per million tokens, 2026-11-16.
 | Small  | `claude-haiku-5-5`  | 0.10  | 0.01       | 0.125       | 0.50   |
 
 - The medium tier's prices are also those listed for `gpt-6.1-sol`, and the small tier's those of `gpt-6-luna` (not re-checked on a second source).
+- The `bench/transcripts/` fixtures price `gpt-5.6-terra` — the OpenAI design-workhorse model, at the medium tier's rates in `shared/modelPrices.ts`. They are hand-written and marked `"estimate": "hand-written"`; anything `bench:agent-cost` prints from them is an estimate, not a measured run.
 - The Diazo Agent's server tier defaults to `claude-opus-5` (`DOOP_AGENT_MODEL`), at 5 and 25: add 25% to the large column for it.
 - On a subscription (a coding agent's plan, a local CLI) there is no bill per job. The same tokens count against the plan's rate limit instead.
 
