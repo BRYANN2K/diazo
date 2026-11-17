@@ -29,6 +29,10 @@ interface RunRequest {
   deadline: number
   memoryBytes: number
   callLimit: number
+  /** serialized bytes of one call's argument list — refused before posting */
+  argsBytes: number
+  /** serialized argument bytes across the whole run — past it the run dies */
+  argsTotalBytes: number
   paths?: string[]
   runInfo?: unknown
 }
@@ -49,6 +53,9 @@ let callCount = 0
 let callLimit = 0
 let callsOpen = true
 let deadline = 0
+let argsBytesMax = 0
+let argsTotalMax = 0
+let argsTotal = 0
 
 /** Builds `diazo` inside the guest: diazo.<ns>.<fn>(...args) -> Promise<value>. */
 const PRELUDE = `
@@ -95,9 +102,27 @@ function installDiazoCall(ctx: QuickJSContext): void {
       port.postMessage({ type: 'error', message: 'sdk_calls limit reached', limit: 'sdk_calls' })
       deferredJson(ctx, deferred, { __error: 'sdk_calls limit reached' })
     } else {
-      pending.set(seq, deferred)
-      port.postMessage({ type: 'sdk-call', seq, path, args: JSON.parse(argsJson) })
-      seq += 1
+      const callBytes = Buffer.byteLength(argsJson, 'utf8')
+      argsTotal += callBytes
+      if (callBytes > argsBytesMax) {
+        /* the payload never crosses the bridge — a posted argument list is
+           structured-cloned onto the host heap, where a guest-sized blob
+           would sit for the whole run */
+        deferredJson(ctx, deferred, {
+          __error: `call arguments exceed ${Math.round(argsBytesMax / 1024)} KB`,
+          code: 'limit',
+        })
+      } else if (argsTotal > argsTotalMax) {
+        /* the per-call cap alone lets a guest park unbounded payload bytes
+           across many small calls — the run total is the hard wall */
+        callsOpen = false
+        port.postMessage({ type: 'error', message: 'args_bytes limit reached', limit: 'args_bytes' })
+        deferredJson(ctx, deferred, { __error: 'args_bytes limit reached' })
+      } else {
+        pending.set(seq, deferred)
+        port.postMessage({ type: 'sdk-call', seq, path, args: JSON.parse(argsJson) })
+        seq += 1
+      }
     }
     return deferred.handle
   })
@@ -118,6 +143,8 @@ const WASM_PAGE = 64 * 1024
 async function run(req: RunRequest): Promise<void> {
   callLimit = req.callLimit
   deadline = req.deadline
+  argsBytesMax = req.argsBytes
+  argsTotalMax = req.argsTotalBytes
   /* setMemoryLimit counts but does not enforce in this build — the hard wall
      is a linear memory with a fixed maximum: past it, wasm allocation fails
      and the guest sees a catchable "out of memory" it cannot grow around */

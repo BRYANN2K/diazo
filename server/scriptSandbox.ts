@@ -26,13 +26,18 @@ export const SCRIPT_LIMITS = {
   resultBytesMax: 32 * 1024,
   /** serialized size of one SDK call's argument list */
   argsBytes: 1024 * 1024,
+  /** serialized argument bytes across a whole run — the per-call cap alone
+   *  lets a guest park unbounded payloads on the host heap */
+  argsTotalBytes: 8 * 1024 * 1024,
   /** operations in one frames.edit call */
   editOps: 64,
   /** QuickJS workers alive at once, across all canvases */
   workers: 4,
+  /** runs waiting for a worker slot — past it, refuse instead of queueing */
+  queueRuns: 16,
 } as const
 
-export type LimitName = 'wall' | 'memory' | 'sdk_calls' | 'frame_writes' | 'script_size' | 'result_size'
+export type LimitName = 'wall' | 'memory' | 'sdk_calls' | 'frame_writes' | 'script_size' | 'result_size' | 'args_bytes'
 
 /** The limits that kill a run when an SDK call reports them. Anything else
  *  an SdkError carries — renderer, search, args_bytes, ops — is an ordinary
@@ -44,12 +49,15 @@ const RUN_LIMITS = new Set<LimitName>(['wall', 'memory', 'sdk_calls', 'frame_wri
 let liveWorkers = 0
 const workerWaiters: (() => void)[] = []
 
-function acquireWorker(): Promise<void> | void {
+function acquireWorker(): boolean | Promise<boolean> {
   if (liveWorkers < SCRIPT_LIMITS.workers) {
     liveWorkers++
-    return
+    return true
   }
-  return new Promise<void>((resolve) => workerWaiters.push(resolve))
+  /* the wait queue is bounded too — an unbounded queue is an unbounded
+     promise list a single busy caller can grow without limit */
+  if (workerWaiters.length >= SCRIPT_LIMITS.queueRuns) return false
+  return new Promise<boolean>((resolve) => workerWaiters.push(() => resolve(true)))
 }
 
 function releaseWorker(): void {
@@ -89,8 +97,10 @@ export type SandboxOutcome =
 
 export async function runInSandbox(req: SandboxRequest): Promise<SandboxOutcome> {
   /* a queued run's wall clock starts when its worker starts, not while it
-     waits for a slot */
-  await acquireWorker()
+     waits for a slot — and past the queue bound it is refused outright */
+  if (!(await acquireWorker())) {
+    return { ok: false, error: 'the script run queue is full', name: 'QueueFull', ms: 0, calls: [] }
+  }
   const startedAt = Date.now()
   if (Buffer.byteLength(req.source, 'utf8') > SCRIPT_LIMITS.scriptBytes) {
     releaseWorker()
@@ -110,7 +120,13 @@ export async function runInSandbox(req: SandboxRequest): Promise<SandboxOutcome>
   const loader = pathToFileURL(createRequire(import.meta.url).resolve('tsx/esm/api')).href
   const entry = new URL('./scriptWorker.ts', import.meta.url).href
   const bootstrap = `import { register } from ${JSON.stringify(loader)}; register(); await import(${JSON.stringify(entry)});`
-  const worker = new Worker(new URL('data:text/javascript,' + encodeURIComponent(bootstrap)), { stderr: false })
+  const worker = new Worker(new URL('data:text/javascript,' + encodeURIComponent(bootstrap)), {
+    stderr: false,
+    /* the worker thread's own V8 heap is bounded too: the wasm linear
+       memory is capped separately, but tsx, the module and every posted
+       payload still live on this heap */
+    resourceLimits: { maxOldGenerationSizeMb: 256, maxYoungGenerationSizeMb: 32, stackSizeMb: 4 },
+  })
 
   return new Promise<SandboxOutcome>((resolve) => {
     let settled = false
@@ -251,6 +267,8 @@ export async function runInSandbox(req: SandboxRequest): Promise<SandboxOutcome>
       deadline,
       memoryBytes: Math.min(req.memoryBytes ?? SCRIPT_LIMITS.memoryBytes, SCRIPT_LIMITS.memoryBytesMax),
       callLimit: req.callLimit ?? SCRIPT_LIMITS.sdkCalls,
+      argsBytes: SCRIPT_LIMITS.argsBytes,
+      argsTotalBytes: SCRIPT_LIMITS.argsTotalBytes,
     } satisfies Record<string, unknown>)
   })
 }

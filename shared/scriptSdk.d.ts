@@ -367,6 +367,8 @@ declare namespace diazo {
   interface Tokens {
     /** The canvas's design tokens (name, type, value, per-theme overrides).
      *  (read) */
+    /** namePattern: case-insensitive substring, or a `*` glob over the whole
+     *  name (`--brand-*`, `*-color`). Not a regex. */
     get(opts?: { types?: string[]; namePattern?: string }): Promise<TokenSummary[]>
     /** Add tokens; a name already in use is an error. (write) */
     create(tokens: TokenInput[]): Promise<{ ok: true; created: string[]; failed: { name: string; reason: string }[] }>

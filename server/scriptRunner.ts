@@ -51,11 +51,32 @@ export async function executeScript(
         (!Number.isInteger(input.timeout_ms) || input.timeout_ms < 1 || input.timeout_ms > SCRIPT_LIMITS.wallMsMax)
       )
         throw new SdkError('invalid', `timeout_ms must be 1..${SCRIPT_LIMITS.wallMsMax}`)
+      checkRunRate(caller.userId)
       return execute(input, caller, write)
     })
   } finally {
     release()
   }
+}
+
+/** Per-account run rate: one account may start at most `max` runs inside
+ *  the window — a busy agent cannot monopolise the shared worker pool. */
+export const scriptRunRate = { windowMs: 60_000, max: 30 }
+const accountRuns = new Map<string, number[]>()
+
+function checkRunRate(userId: string | undefined): void {
+  if (!userId) return
+  const now = Date.now()
+  const seen = (accountRuns.get(userId) ?? []).filter((at) => now - at < scriptRunRate.windowMs)
+  if (seen.length >= scriptRunRate.max) {
+    accountRuns.set(userId, seen)
+    throw new SdkError(
+      'limit',
+      `run rate exceeded: at most ${scriptRunRate.max} runs per ${scriptRunRate.windowMs / 1000}s`,
+    )
+  }
+  seen.push(now)
+  accountRuns.set(userId, seen)
 }
 
 /** Per-canvas serialization includes queries and undo. A rejected run cannot poison the queue. */

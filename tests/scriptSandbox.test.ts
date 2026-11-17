@@ -141,6 +141,73 @@ describe('script sandbox', () => {
   })
 })
 
+describe('host-side bounds', () => {
+  it('refuses an oversized call in the worker before it posts', async () => {
+    const posted: string[] = []
+    const out = ok(
+      await runInSandbox({
+        source: `try { await diazo.frames.html('x'.repeat(1200000)) } catch (e) { return e.message } return 'no refusal'`,
+        call: async (path) => {
+          posted.push(path)
+          return null
+        },
+      }),
+    )
+    /* the payload never crossed the bridge to park on the main heap */
+    expect(out.value).toMatch(/exceed|too large|KB/i)
+    expect(posted).toEqual([])
+  })
+
+  it('kills a run whose calls carry too much argument data in total', async () => {
+    let posted = 0
+    const out = fail(
+      await runInSandbox({
+        source: `const big = 'x'.repeat(600000);
+          for (let i = 0; i < 20; i++) { try { await diazo.frames.html('f', big) } catch (e) {} }
+          return 'survived'`,
+        call: async () => {
+          posted++
+          return 'ok'
+        },
+        callLimit: 100,
+      }),
+    )
+    expect(out.limit).toBe('args_bytes')
+    /* died once the run's total crossed the cap, well before the 20th call */
+    expect(posted).toBeLessThan(16)
+  })
+
+  it('serialises runs past the worker cap and refuses when the queue is full', async () => {
+    const release: (() => void)[] = []
+    const busy = Array.from({ length: 4 }, () =>
+      runInSandbox({
+        source: `return await diazo.sys.ping()`,
+        call: () => new Promise<string>((resolve) => release.push(() => resolve('ok'))),
+      }),
+    )
+    /* every worker slot is busy — the next run queues, it does not start */
+    let started = false
+    const queued = runInSandbox({
+      source: `return await diazo.sys.ping()`,
+      call: async () => {
+        started = true
+        return 'ok'
+      },
+    })
+    await new Promise((r) => setTimeout(r, 400))
+    expect(started).toBe(false)
+    /* fill the wait queue to its bound — one run past it is refused outright */
+    const waiters = Array.from({ length: 15 }, () => runInSandbox({ source: `return 1`, call: noop }))
+    const refused = await runInSandbox({ source: `return 1`, call: noop })
+    expect(refused.ok).toBe(false)
+    if (!refused.ok) expect(refused.error).toMatch(/queue/i)
+    for (const r of release) r()
+    expect((await queued).ok).toBe(true)
+    expect(started).toBe(true)
+    await Promise.all([...busy, ...waiters])
+  }, 60_000)
+})
+
 it('refuses module loading and host-constructor escapes without host network calls', async () => {
   const requests = [] as string[]
   const fetchSpy = (await import('vitest')).vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {

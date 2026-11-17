@@ -12,7 +12,7 @@ vi.mock('../server/db/persist.ts', () => ({
   deleteComponent: () => {},
 }))
 
-import { dispatchScriptCall, sdkPaths, SdkError, type ScriptRunContext } from '../server/scriptSdk.ts'
+import { dispatchScriptCall, nameMatcher, sdkPaths, SdkError, type ScriptRunContext } from '../server/scriptSdk.ts'
 import { store } from '../server/store.ts'
 import { createFrame } from '../server/actions.ts'
 import { reloadEnv } from '../server/env.ts'
@@ -231,5 +231,44 @@ describe('diazo sdk dispatch', () => {
       expect(error).toBeInstanceOf(SdkError)
       expect((error as SdkError).code).toBe('not_found')
     }
+  })
+
+  it('caps the ops count of one frames.edit call', async () => {
+    const ops = Array.from({ length: 65 }, () => ({ op: 'text', element: 'title', text: 'x' }))
+    await expect(call(runCtx(), 'frames.edit', frameId, ops)).rejects.toThrowError(/64/)
+  })
+
+  it('caps the argument size of one call', async () => {
+    const big = 'x'.repeat(1024 * 1024 + 1)
+    await expect(call(runCtx(), 'frames.html', frameId, { query: big })).rejects.toThrowError(/KB/)
+    /* a call under the cap still goes through */
+    await call(runCtx(), 'frames.html', frameId, { query: 'title' })
+  })
+})
+
+describe('nameMatcher', () => {
+  it('never builds a RegExp from guest input — a killer pattern answers fast', () => {
+    const name = 'a'.repeat(26)
+    for (const pattern of ['^(a|a)*$', '^(a|aa)+$', '(x+x+)+y', 'a?'.repeat(26) + 'a'.repeat(26)]) {
+      const at = performance.now()
+      nameMatcher(pattern)(name)
+      expect(performance.now() - at).toBeLessThan(50)
+    }
+  })
+
+  it('matches a plain substring case-insensitively', () => {
+    expect(nameMatcher('ink')('--inky')).toBe(true)
+    expect(nameMatcher('INK')('--ink')).toBe(true)
+    expect(nameMatcher('paper')('--ink')).toBe(false)
+  })
+
+  it('treats * as a glob over the whole name', () => {
+    expect(nameMatcher('--brand-*')('--brand-ink')).toBe(true)
+    expect(nameMatcher('--brand-*')('x--brand-ink')).toBe(false)
+    expect(nameMatcher('*-color')('--text-color')).toBe(true)
+    expect(nameMatcher('--*-color')('--text-color')).toBe(true)
+    expect(nameMatcher('--*-color')('--text-size')).toBe(false)
+    expect(nameMatcher('*')('anything')).toBe(true)
+    expect(nameMatcher('**')('anything')).toBe(true)
   })
 })

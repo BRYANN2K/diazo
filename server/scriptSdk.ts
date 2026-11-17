@@ -510,6 +510,9 @@ const num = (v: unknown, name: string): number => {
   if (typeof v !== 'number' || !Number.isFinite(v)) throw invalid(`${name} must be a number`)
   return v
 }
+/** A guest-supplied result count, pinned to a sane page size. */
+const clampLimit = (v: unknown, dflt: number, max: number): number =>
+  typeof v === 'number' ? Math.max(1, Math.min(Math.floor(v), max)) : dflt
 
 const HANDLERS: Record<string, Entry> = {
   /* ---- diazo.canvas ---- */
@@ -913,7 +916,10 @@ const HANDLERS: Record<string, Entry> = {
       const opts = args[1] === undefined ? {} : obj(args[1], 'opts')
       const libs = await readableLibraries(ctx.userId ?? '')
       const canvases = libs.map((l) => store.getCanvas(l.id)).filter((c): c is Canvas => !!c)
-      const result = await searchLibraries(canvases, { query, limit: typeof opts.limit === 'number' ? opts.limit : 12 })
+      const result = await searchLibraries(canvases, {
+        query,
+        limit: clampLimit(opts.limit, 12, 60),
+      })
       return result.hits.map((h) => ({
         itemId: h.item.id,
         libraryId: h.libraryId,
@@ -1312,7 +1318,7 @@ const HANDLERS: Record<string, Entry> = {
       const opts = args[1] === undefined ? {} : obj(args[1], 'opts')
       try {
         const photos = await imageSearch.searchPhotos(str(args[0], 'query'), {
-          count: typeof opts.limit === 'number' ? opts.limit : 5,
+          count: clampLimit(opts.limit, 5, 8),
         })
         return photos.map((p) => ({
           url: p.image_url,
@@ -1331,7 +1337,7 @@ const HANDLERS: Record<string, Entry> = {
     fn: async (_ctx, args) => {
       const opts = args[1] === undefined ? {} : obj(args[1], 'opts')
       const icons = await imageSearch.searchIcons(str(args[0], 'query'), {
-        limit: typeof opts.limit === 'number' ? opts.limit : 24,
+        limit: clampLimit(opts.limit, 24, 48),
       })
       return icons.map((i) => ({ name: i.id, url: i.svg_url, tags: i.id.split(':') }))
     },
@@ -1521,21 +1527,28 @@ export async function finishScriptReviews(ctx: ScriptRunContext): Promise<Record
   return checks
 }
 
-/** A script-supplied name filter: a regex when it is short and cannot nest
- *  quantifiers, a case-insensitive substring otherwise. No user pattern
- *  reaches the engine unexamined. */
+/** A script-supplied name filter: a case-insensitive substring, or a glob
+ *  when the pattern holds a `*` (any run of characters, whole-name match).
+ *  No guest input ever reaches the regex engine — a pathological pattern
+ *  costs an indexOf, never exponential backtracking. */
 export function nameMatcher(pattern: string): (name: string) => boolean {
-  const safe = pattern.length <= 128 && !/\\[1-9]/.test(pattern) && !/\([^)]*[+*{][^)]*\)[+*?{]/.test(pattern)
-  if (safe) {
-    try {
-      const re = new RegExp(pattern, 'i')
-      return (name) => re.test(name)
-    } catch {
-      /* malformed pattern — fall through to a substring match */
-    }
-  }
   const needle = pattern.toLowerCase()
-  return (name) => name.toLowerCase().includes(needle)
+  if (!needle.includes('*')) return (name) => name.toLowerCase().includes(needle)
+  const parts = needle.split('*')
+  return (name) => {
+    const hay = name.toLowerCase()
+    let at = 0
+    for (const [i, part] of parts.entries()) {
+      if (!part) continue
+      const found = hay.indexOf(part, at)
+      /* the first literal anchors the match at the name's start */
+      if (found < 0 || (i === 0 && found !== 0)) return false
+      at = found + part.length
+    }
+    /* a non-empty last literal anchors at the end */
+    const last = parts[parts.length - 1]!
+    return last === '' || hay.endsWith(last)
+  }
 }
 
 /** The catalogue `get_sdk_docs` serves: which paths exist and which write. */

@@ -17,7 +17,7 @@ vi.mock('../server/db/persist.ts', () => ({
 }))
 import { store } from '../server/store.ts'
 import * as actions from '../server/actions.ts'
-import { executeScript, revertScriptRun, type ScriptCaller } from '../server/scriptRunner.ts'
+import { executeScript, revertScriptRun, scriptRunRate, type ScriptCaller } from '../server/scriptRunner.ts'
 import { scriptRunDeps, type StoredScriptRun } from '../server/scriptRuns.ts'
 import { reloadEnv } from '../server/env.ts'
 
@@ -156,4 +156,18 @@ it('refuses scripts when disabled and canvas access after revocation', async () 
   await expect(executeScript({ script: 'return 1' }, { ...caller, userId: 'stranger' }, false)).rejects.toThrow(
     /access/,
   )
+})
+
+it('refuses runs past the per-account rate', async () => {
+  const other = store.createCanvas('Rate', 'rate-user')
+  const rateCaller: ScriptCaller = { ...caller, canvasId: other.id, userId: 'rate-user' }
+  const max = scriptRunRate.max
+  scriptRunRate.max = 2
+  try {
+    expect((await executeScript({ script: 'return 1' }, rateCaller, false)).ok).toBe(true)
+    expect((await executeScript({ script: 'return 1' }, rateCaller, false)).ok).toBe(true)
+    await expect(executeScript({ script: 'return 1' }, rateCaller, false)).rejects.toThrow(/rate/i)
+  } finally {
+    scriptRunRate.max = max
+  }
 })
