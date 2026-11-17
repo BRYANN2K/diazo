@@ -11,6 +11,7 @@
 
 import { nanoid } from 'nanoid'
 import * as persist from './db/persist.ts'
+import { EFFECT_COST_CAP, effectCost } from '../shared/motionFx.ts'
 import type { ServerMessage } from '../shared/types.ts'
 import {
   BLENDER_ENGINES,
@@ -130,6 +131,16 @@ export function createRenderJob(
     const hCap = Math.round(num(input.height, comp.height))
     if (wCap > 1920 || hCap > 1080) return { ok: false, status: 400, error: 'server renders cap at 1080p' }
     if (fpsCap > 30) return { ok: false, status: 400, error: 'server renders cap at 30 fps' }
+    /* a stack over the shared effect budget would hog the instance's GPU —
+       the same cap check_scene reports as `cost_cap` */
+    const fxBill = comp.tracks.reduce((total, track) => total + effectCost(track), 0)
+    if (fxBill > EFFECT_COST_CAP) {
+      return {
+        ok: false,
+        status: 400,
+        error: `the effect stack costs ${fxBill}, over the ${EFFECT_COST_CAP}-point render cap — trim or merge effects`,
+      }
+    }
     for (const list of byCanvas.values()) {
       const open = list.find(
         (j) =>

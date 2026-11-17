@@ -12,6 +12,7 @@ import * as persist from './db/persist.ts'
 import { store } from './store.ts'
 import { createRenderJob } from './motionJobs.ts'
 import { elementHtml, lintComposition, lintMotionHtml, motionLintSummary } from '../shared/motionLint.ts'
+import { resetCritiques } from './motionSnapshot.ts'
 import { exportCompositionCode, type CompositionCodeExport } from '../shared/motionExport.ts'
 import { itemMeta, libraryItems, saveMeta } from './libraryIndex.ts'
 import { getLibrary } from './libraries.ts'
@@ -34,6 +35,7 @@ import {
   parseMotionBlock,
   parseOps,
   type Composition,
+  type Direction,
   type FrameMotionBlock,
   type MotionLintIssue,
 } from '../shared/motion.ts'
@@ -204,6 +206,9 @@ export async function animateStoryboard(
     width?: number
     height?: number
     frame_ids?: string[]
+    /** the director's treatment — beats set per-shot seconds and the
+     *  handover between shots; it persists on the composition */
+    direction?: Direction
   },
   actor: Actor,
 ): Promise<Outcome> {
@@ -230,10 +235,13 @@ export async function animateStoryboard(
     fps,
     shotSeconds,
     margin: input.margin,
+    direction: input.direction,
   })
   const composition = actions.setComposition(canvas.id, body, pageId, actor)
   /* a rebuilt film starts a new run: clear the old state and record the
-     shots this film uses, so noted frames outside frame_ids never pend */
+     shots this film uses, so noted frames outside frame_ids never pend —
+     and the critique pass budget restarts with it */
+  resetCritiques(canvas.id, pageId)
   fixPasses.set(passKey(canvas.id, pageId), {
     compositionId: composition.id,
     shots: new Set(frames.map((f) => f.id)),

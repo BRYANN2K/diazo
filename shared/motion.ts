@@ -13,6 +13,7 @@
  */
 
 import { nanoid } from 'nanoid'
+import { effectSpec } from './motionFx.ts'
 
 export const MOTION_SCHEMA_VERSION = 1
 
@@ -255,6 +256,18 @@ export const ELEMENT_PROPERTIES = [
 ] as const
 
 const PROPERTY_RE = /^(--)?[A-Za-z][A-Za-z0-9-]{0,59}$/
+/** effect-param lanes: `fx:<instanceId>.<param>` — e.g. `fx:g1.intensity` */
+const FX_PROPERTY_RE = /^fx:[A-Za-z0-9_-]{1,100}\.[A-Za-z][A-Za-z0-9-]{0,59}$/
+
+export function isFxProperty(v: unknown): v is string {
+  return typeof v === 'string' && FX_PROPERTY_RE.test(v)
+}
+
+/** the `{instanceId, param}` an `fx:` property names */
+export function fxPropertyParts(property: string): { effectId: string; param: string } | null {
+  const m = /^fx:([A-Za-z0-9_-]{1,100})\.([A-Za-z][A-Za-z0-9-]{0,59})$/.exec(property)
+  return m ? { effectId: m[1]!, param: m[2]! } : null
+}
 
 export interface MotionKeyframe {
   id: string
@@ -280,6 +293,9 @@ export type MotionClipSource =
    *  `words` carries per-word timings so word-highlight styles can light the
    *  current word — written by build_captions from a transcript */
   | { type: 'caption'; text: string; style?: string; words?: TranscriptWord[] }
+  /** an adjustment window: no pixels of its own, the track's effect stack
+   *  applies to the layers below over [start, start+duration) */
+  | { type: 'adjustment' }
   /** a 3D layer (phase 4): `assetId` is a glTF/GLB canvas asset rendered by a
    *  three.js layer in the frame; `fallbackAssetId` is the still image a
    *  non-3D surface (export, thumbnail, old shell) draws instead. `driver`
@@ -335,7 +351,82 @@ export interface MotionClip {
   transition?: MotionTransition
 }
 
-export const TRACK_KINDS = ['camera', 'element', 'clip', 'audio', 'caption'] as const
+/* ---- effects (motion-pro P1) ----
+ * An effect stack hangs on a track: element tracks grade their element,
+ * clip tracks their clips, the camera track the whole scene, and an
+ * `adjustment` track everything below it over its clip windows. Params are
+ * keyframable through the `fx:<instanceId>.<param>` property namespace, so
+ * an intensity can ease like any other number. Every effect ships seeded —
+ * pixels stay a pure function of (composition, t). */
+
+export const BLEND_MODES = [
+  'normal',
+  'multiply',
+  'screen',
+  'overlay',
+  'soft-light',
+  'hard-light',
+  'add',
+  'difference',
+] as const
+export type BlendMode = (typeof BLEND_MODES)[number]
+
+/** one effect on a track's stack — registry shapes are in shared/motionFx.ts */
+export interface EffectInstance {
+  /** stable id — keyframes address params as `fx:<id>.<param>` */
+  id: string
+  /** registry id: 'gaussian-blur', 'glow', 'film-grain', … */
+  fx: string
+  enabled?: boolean
+  /** resting values; fx: keyframes override them at render time */
+  params: Record<string, number | string | boolean>
+  /** deterministic noise/particles; defaults to a hash of `id` */
+  seed?: number
+  /** wet/dry, default 1 */
+  mix?: number
+  blend?: BlendMode
+}
+
+/* ---- the director's intent (motion-pro P0) ----
+ * The notes on a storyboard are intent, not a script; the Direction is the
+ * treatment the agent writes before building: mood, motion language,
+ * rhythm, look, the hero moment. It persists on the composition so a later
+ * pass — human or agent — re-reads why the film looks the way it does. */
+
+/** critique passes the director loop runs by default */
+export const CRITIQUE_PASS_DEFAULT = 3
+/** the bounded maximum — a run never critques more than this */
+export const CRITIQUE_PASS_MAX = 5
+
+export interface DirectionBeat {
+  /** seconds this beat holds on screen */
+  seconds: number
+  /** what the beat says — intent, not a script */
+  note?: string
+  /** how the beat hands over to the next: 'cut' (default — the camera
+   *  holds, then jumps), 'move' (an eased travel), 'push' (travel toward
+   *  the next shot with a slight dolly), 'whip' (a fast move), 'fade' (a
+   *  slow drift — the honest camera-film shape of a dissolve) */
+  transition?: string
+}
+
+export interface Direction {
+  /** one paragraph — mood, motion language, rhythm, the hero moment */
+  treatment?: string
+  /** the film's beats in order; their seconds tile the timeline */
+  beats?: DirectionBeat[]
+  /** a named look (shared/motionLooks.ts id) or a described one */
+  look?: string
+  /** reference/gallery ids the film riffs on */
+  references?: string[]
+  /** free notes: rhythm ('slow-fast-slow', bpm), palette, sound */
+  rhythm?: string
+  palette?: string
+  /** critique passes the director loop runs; default 3, hard max 5 */
+  passes?: number
+}
+
+export const TRACK_KINDS = ['camera', 'element', 'clip', 'audio', 'caption', 'adjustment'] as const
 export type MotionTrackKind = (typeof TRACK_KINDS)[number]
 
 export function isTrackKind(v: unknown): v is MotionTrackKind {
@@ -347,7 +438,9 @@ export function isTrackKind(v: unknown): v is MotionTrackKind {
  * bottom. `camera` (at most one) holds the camera keyframes. `element`
  * targets one element in one frame (`frameId` + its `data-doop-id`) and
  * holds that element's keyframes. `clip`, `audio` and `caption` hold clips.
- * `muted` silences audio lanes and hides visual lanes in output.
+ * `adjustment` holds effect stacks applied to everything below it (its clips
+ * gate the window). `muted` silences audio lanes and hides visual lanes in
+ * output.
  */
 export interface MotionTrack {
   id: string
@@ -360,6 +453,10 @@ export interface MotionTrack {
   elementId?: string
   keyframes?: MotionKeyframe[]
   clips?: MotionClip[]
+  /** the track's effect stack, applied in order (motion-pro P1) */
+  effects?: EffectInstance[]
+  /** how the layer composites onto what's below it */
+  blend?: BlendMode
 }
 
 /* ---- the composition ---- */
@@ -384,6 +481,11 @@ export interface Composition {
   /** the time a reduced-motion or static view rests on; default 0 */
   posterTime?: number
   tracks: MotionTrack[]
+  /** the director's treatment this film was built from (motion-pro P0) */
+  direction?: Direction
+  /** filmic shutter: samples the scene at K sub-times inside the window and
+   *  averages — deterministic by construction (motion-pro P1) */
+  motionBlur?: { shutter: number; samples?: number }
   revision: number
   createdAt: number
   updatedAt: number
@@ -441,6 +543,29 @@ export type CompositionOp =
       transition?: MotionTransition | null
     }
   | { op: 'remove_clip'; trackId: string; clipId: string }
+  /** the director's intent on the composition; null clears it */
+  | { op: 'set_direction'; direction: Direction | null }
+  /** filmic shutter on the composition; null clears it */
+  | { op: 'set_motion_blur'; motionBlur: { shutter: number; samples?: number } | null }
+  /* effect-stack ops (motion-pro P1): the stack lives on the track; the ops
+     address effects by their instance id */
+  | { op: 'add_effect'; trackId: string; effect: EffectInstance; index?: number }
+  | {
+      op: 'update_effect'
+      trackId: string
+      effectId: string
+      enabled?: boolean
+      params?: Record<string, number | string | boolean>
+      seed?: number
+      mix?: number
+      /** null clears the override back to 'normal' */
+      blend?: BlendMode | null
+    }
+  | { op: 'remove_effect'; trackId: string; effectId: string }
+  /** the whole stack reordered; every existing id must appear exactly once */
+  | { op: 'reorder_effects'; trackId: string; effectIds: string[] }
+  /** how the layer composites onto what's below; null back to normal */
+  | { op: 'set_blend'; trackId: string; blend: BlendMode | null }
 
 /* ---- per-frame motion data (the data-doop-motion block) ----
  * Frame-authored keyframes ride the frame's HTML — versions, copy and MCP
@@ -687,8 +812,11 @@ function parseKeyframe(input: unknown, duration: number): ParseResult<MotionKeyf
   if (!isRecord(input)) return bad('keyframe must be an object')
   const id = parseId(input.id, 'keyframe.id')
   if (!id.ok) return id
-  if (typeof input.property !== 'string' || !PROPERTY_RE.test(input.property)) {
-    return bad('keyframe.property must be a property name or --custom-property')
+  if (
+    typeof input.property !== 'string' ||
+    (!PROPERTY_RE.test(input.property) && !FX_PROPERTY_RE.test(input.property))
+  ) {
+    return bad('keyframe.property must be a property name, --custom-property or fx:<id>.<param>')
   }
   const t = parseSeconds(input.t, 'keyframe.t', 0, duration)
   if (!t.ok) return t
@@ -750,6 +878,11 @@ function parseClipSource(input: unknown): ParseResult<MotionClipSource> {
       out.words = words
     }
     return ok(out)
+  }
+  if (input.type === 'adjustment') {
+    /* an adjustment clip carries no pixels of its own — its window gates the
+       track's effect stack over the layers below it */
+    return ok({ type: 'adjustment' })
   }
   if (input.type === '3d') {
     const assetId = parseId(input.assetId, 'clip.source.assetId')
@@ -857,6 +990,118 @@ function parseTransition(input: unknown): MotionTransition | null {
   return out
 }
 
+/** shape-level check of one effect — the registry's param ranges are the
+ *  lint's job (shared/motionFx.ts), so an older effect id still parses */
+export function parseEffectInstance(input: unknown): ParseResult<EffectInstance> {
+  if (!isRecord(input)) return bad('effect must be an object')
+  const id = parseId(input.id, 'effect.id')
+  if (!id.ok) return id
+  if (typeof input.fx !== 'string' || !/^[a-z][a-z0-9-]{0,59}$/.test(input.fx)) {
+    return bad('effect.fx must be a registry id (lowercase, dashes)')
+  }
+  const spec = effectSpec(input.fx)
+  if (!spec) return bad(`effect.fx ${input.fx} is not in the registry`)
+  const out: EffectInstance = { id: id.value, fx: input.fx, params: {} }
+  if (input.params !== undefined) {
+    if (!isRecord(input.params)) return bad('effect.params must be an object')
+    for (const [k, v] of Object.entries(input.params)) {
+      if (typeof v !== 'number' && typeof v !== 'string' && typeof v !== 'boolean') {
+        return bad(`effect.params.${k} must be a number, string or boolean`)
+      }
+    }
+    const specError = spec.validate(input.params)
+    if (specError) return bad(specError)
+    out.params = input.params as Record<string, number | string | boolean>
+  }
+  if (input.enabled !== undefined) {
+    if (typeof input.enabled !== 'boolean') return bad('effect.enabled must be a boolean')
+    out.enabled = input.enabled
+  }
+  if (input.seed !== undefined) {
+    if (typeof input.seed !== 'number' || !Number.isInteger(input.seed) || input.seed < 0) {
+      return bad('effect.seed must be a non-negative integer')
+    }
+    out.seed = input.seed
+  }
+  if (input.mix !== undefined) {
+    if (typeof input.mix !== 'number' || !Number.isFinite(input.mix) || input.mix < 0 || input.mix > 1) {
+      return bad('effect.mix must be in [0, 1]')
+    }
+    out.mix = input.mix
+  }
+  if (input.blend !== undefined) {
+    if (!BLEND_MODES.includes(input.blend as BlendMode)) {
+      return bad(`effect.blend must be one of ${BLEND_MODES.join(', ')}`)
+    }
+    out.blend = input.blend as BlendMode
+  }
+  return ok(out)
+}
+
+function parseDirection(input: unknown): Direction | null {
+  if (!isRecord(input)) return null
+  const out: Direction = {}
+  if (input.treatment !== undefined) {
+    if (typeof input.treatment !== 'string' || input.treatment.length > 4000) return null
+    out.treatment = input.treatment
+  }
+  if (input.look !== undefined) {
+    if (typeof input.look !== 'string' || input.look.length > 200) return null
+    out.look = input.look
+  }
+  if (input.references !== undefined) {
+    if (!Array.isArray(input.references) || input.references.length > 50) return null
+    if (!input.references.every((r) => typeof r === 'string' && r.length <= 200)) return null
+    out.references = input.references as string[]
+  }
+  if (input.rhythm !== undefined) {
+    if (typeof input.rhythm !== 'string' || input.rhythm.length > 200) return null
+    out.rhythm = input.rhythm
+  }
+  if (input.palette !== undefined) {
+    if (typeof input.palette !== 'string' || input.palette.length > 400) return null
+    out.palette = input.palette
+  }
+  if (input.passes !== undefined) {
+    if (typeof input.passes !== 'number' || !Number.isInteger(input.passes) || input.passes < 1) return null
+    out.passes = Math.min(input.passes, CRITIQUE_PASS_MAX)
+  }
+  if (input.beats !== undefined) {
+    if (!Array.isArray(input.beats) || input.beats.length > 200) return null
+    const beats: DirectionBeat[] = []
+    for (const raw of input.beats) {
+      if (!isRecord(raw)) return null
+      if (typeof raw.seconds !== 'number' || !Number.isFinite(raw.seconds) || raw.seconds <= 0 || raw.seconds > 60) {
+        return null
+      }
+      const beat: DirectionBeat = { seconds: raw.seconds }
+      if (raw.note !== undefined) {
+        if (typeof raw.note !== 'string' || raw.note.length > 1000) return null
+        beat.note = raw.note
+      }
+      if (raw.transition !== undefined) {
+        if (typeof raw.transition !== 'string' || raw.transition.length > 40) return null
+        beat.transition = raw.transition
+      }
+      beats.push(beat)
+    }
+    out.beats = beats
+  }
+  return out
+}
+
+function parseMotionBlur(input: unknown): { shutter: number; samples?: number } | null {
+  if (!isRecord(input)) return null
+  const { shutter, samples } = input
+  if (typeof shutter !== 'number' || !Number.isFinite(shutter) || shutter < 0 || shutter > 360) return null
+  const out: { shutter: number; samples?: number } = { shutter }
+  if (samples !== undefined) {
+    if (typeof samples !== 'number' || !Number.isInteger(samples) || samples < 2 || samples > 64) return null
+    out.samples = samples
+  }
+  return out
+}
+
 export function parseTrack(input: unknown, duration: number): ParseResult<MotionTrack> {
   if (!isRecord(input)) return bad('track must be an object')
   const id = parseId(input.id, 'track.id')
@@ -881,6 +1126,34 @@ export function parseTrack(input: unknown, duration: number): ParseResult<Motion
     if (!elementId.ok) return elementId
     track.elementId = elementId.value
   }
+  if (input.effects !== undefined) {
+    if (!Array.isArray(input.effects) || input.effects.length > 20) {
+      return bad('track.effects must be an array of at most 20')
+    }
+    const effects: EffectInstance[] = []
+    const seen = new Set<string>()
+    for (const raw of input.effects) {
+      const fx = parseEffectInstance(raw)
+      if (!fx.ok) return fx
+      if (seen.has(fx.value.id)) return bad(`duplicate effect id ${fx.value.id}`)
+      seen.add(fx.value.id)
+      effects.push(fx.value)
+    }
+    track.effects = effects
+  }
+  if (input.blend !== undefined) {
+    if (input.blend !== null && !BLEND_MODES.includes(input.blend as BlendMode)) {
+      return bad(`track.blend must be one of ${BLEND_MODES.join(', ')}`)
+    }
+    if (input.blend !== null) track.blend = input.blend as BlendMode
+  }
+  /* same renderer limits the add_track/add_effect ops enforce — a whole-body
+     set_composition reparses through here, so refusing at parse time keeps an
+     undrawn effect stack or blend out of the model */
+  if (input.kind !== 'camera' && input.kind !== 'adjustment' && track.effects?.length) {
+    return bad(`effects only draw on camera and adjustment tracks, not ${input.kind} tracks`)
+  }
+  if (track.blend != null) return bad('track blend is not drawn yet')
   if (input.keyframes !== undefined) {
     if (!Array.isArray(input.keyframes)) return bad('track.keyframes must be an array')
     if (input.keyframes.length > MOTION_LIMITS.MAX_KEYFRAMES_PER_TRACK) {
@@ -924,6 +1197,8 @@ export interface CompositionBody {
   height: number
   posterTime?: number
   tracks: MotionTrack[]
+  direction?: Direction
+  motionBlur?: { shutter: number; samples?: number }
 }
 
 export function parseCompositionBody(input: unknown): ParseResult<CompositionBody> {
@@ -950,6 +1225,16 @@ export function parseCompositionBody(input: unknown): ParseResult<CompositionBod
     if (!pt.ok) return pt
     body.posterTime = pt.value
   }
+  if (input.direction !== undefined && input.direction !== null) {
+    const direction = parseDirection(input.direction)
+    if (!direction) return bad('direction is not a valid Direction')
+    body.direction = direction
+  }
+  if (input.motionBlur !== undefined && input.motionBlur !== null) {
+    const motionBlur = parseMotionBlur(input.motionBlur)
+    if (!motionBlur) return bad('motionBlur must be {shutter: 0..360, samples?: 2..64}')
+    body.motionBlur = motionBlur
+  }
   if (input.tracks !== undefined) {
     if (!Array.isArray(input.tracks)) return bad('tracks must be an array')
     if (input.tracks.length > MOTION_LIMITS.MAX_TRACKS) return bad(`over ${MOTION_LIMITS.MAX_TRACKS} tracks`)
@@ -963,8 +1248,8 @@ export function parseCompositionBody(input: unknown): ParseResult<CompositionBod
       if (track.value.kind === 'camera') camera += 1
       if (camera > 1) return bad('at most one camera track')
       for (const kf of track.value.keyframes ?? []) {
-        if (track.value.kind === 'camera' && !isCameraProperty(kf.property)) {
-          return bad(`camera keyframe property must be one of ${CAMERA_PROPERTIES.join(', ')}`)
+        if (track.value.kind === 'camera' && !isCameraProperty(kf.property) && !isFxProperty(kf.property)) {
+          return bad(`camera keyframe property must be one of ${CAMERA_PROPERTIES.join(', ')} or fx:<id>.<param>`)
         }
       }
       body.tracks.push(track.value)
@@ -1172,6 +1457,105 @@ function parseOp(input: unknown, duration: number): ParseResult<CompositionOp> {
       const clipId = parseId(input.clipId, 'clipId')
       return clipId.ok ? ok({ op: 'remove_clip', trackId: trackId.value, clipId: clipId.value }) : clipId
     }
+    case 'set_direction': {
+      if (input.direction === null || input.direction === undefined) {
+        return ok({ op: 'set_direction', direction: null })
+      }
+      const direction = parseDirection(input.direction)
+      if (!direction) return bad('direction is not a valid Direction')
+      return ok({ op: 'set_direction', direction })
+    }
+    case 'set_motion_blur': {
+      if (input.motionBlur === null || input.motionBlur === undefined) {
+        return ok({ op: 'set_motion_blur', motionBlur: null })
+      }
+      const motionBlur = parseMotionBlur(input.motionBlur)
+      if (!motionBlur) return bad('motionBlur must be {shutter: 0..360, samples?: 2..64}')
+      return ok({ op: 'set_motion_blur', motionBlur })
+    }
+    case 'add_effect': {
+      const trackId = parseId(input.trackId, 'trackId')
+      if (!trackId.ok) return trackId
+      const effect = parseEffectInstance(input.effect)
+      if (!effect.ok) return effect
+      const op: Extract<CompositionOp, { op: 'add_effect' }> = {
+        op: 'add_effect',
+        trackId: trackId.value,
+        effect: effect.value,
+      }
+      if (input.index !== undefined) {
+        if (typeof input.index !== 'number' || !Number.isInteger(input.index) || input.index < 0) {
+          return bad('index must be a non-negative integer')
+        }
+        op.index = input.index
+      }
+      return ok(op)
+    }
+    case 'update_effect': {
+      const trackId = parseId(input.trackId, 'trackId')
+      if (!trackId.ok) return trackId
+      const effectId = parseId(input.effectId, 'effectId')
+      if (!effectId.ok) return effectId
+      const op: Extract<CompositionOp, { op: 'update_effect' }> = {
+        op: 'update_effect',
+        trackId: trackId.value,
+        effectId: effectId.value,
+      }
+      if (input.enabled !== undefined) {
+        if (typeof input.enabled !== 'boolean') return bad('enabled must be a boolean')
+        op.enabled = input.enabled
+      }
+      if (input.params !== undefined) {
+        if (!isRecord(input.params)) return bad('params must be an object')
+        for (const [k, v] of Object.entries(input.params)) {
+          if (typeof v !== 'number' && typeof v !== 'string' && typeof v !== 'boolean') {
+            return bad(`params.${k} must be a number, string or boolean`)
+          }
+        }
+        op.params = input.params as Record<string, number | string | boolean>
+      }
+      if (input.seed !== undefined) {
+        if (typeof input.seed !== 'number' || !Number.isInteger(input.seed) || input.seed < 0) {
+          return bad('seed must be a non-negative integer')
+        }
+        op.seed = input.seed
+      }
+      if (input.mix !== undefined) {
+        if (typeof input.mix !== 'number' || !Number.isFinite(input.mix) || input.mix < 0 || input.mix > 1) {
+          return bad('mix must be in [0, 1]')
+        }
+        op.mix = input.mix
+      }
+      if (input.blend !== undefined) {
+        if (input.blend !== null && !BLEND_MODES.includes(input.blend as BlendMode)) {
+          return bad(`blend must be one of ${BLEND_MODES.join(', ')}`)
+        }
+        op.blend = input.blend as BlendMode | null
+      }
+      return ok(op)
+    }
+    case 'remove_effect': {
+      const trackId = parseId(input.trackId, 'trackId')
+      if (!trackId.ok) return trackId
+      const effectId = parseId(input.effectId, 'effectId')
+      return effectId.ok ? ok({ op: 'remove_effect', trackId: trackId.value, effectId: effectId.value }) : effectId
+    }
+    case 'reorder_effects': {
+      const trackId = parseId(input.trackId, 'trackId')
+      if (!trackId.ok) return trackId
+      if (!Array.isArray(input.effectIds) || input.effectIds.some((id) => typeof id !== 'string')) {
+        return bad('effectIds must be an array of ids')
+      }
+      return ok({ op: 'reorder_effects', trackId: trackId.value, effectIds: input.effectIds as string[] })
+    }
+    case 'set_blend': {
+      const trackId = parseId(input.trackId, 'trackId')
+      if (!trackId.ok) return trackId
+      if (input.blend !== null && input.blend !== undefined && !BLEND_MODES.includes(input.blend as BlendMode)) {
+        return bad(`blend must be one of ${BLEND_MODES.join(', ')}`)
+      }
+      return ok({ op: 'set_blend', trackId: trackId.value, blend: (input.blend ?? null) as BlendMode | null })
+    }
     default:
       return bad(`unknown op "${input.op}"`)
   }
@@ -1222,6 +1606,12 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
       if (findTrack(comp, op.track.id)) return `track ${op.track.id} already exists`
       if (op.track.kind === 'camera' && comp.tracks.some((t) => t.kind === 'camera'))
         return 'a camera track already exists'
+      /* only the camera and adjustment stacks reach the renderer — an
+         effect stack or a blend on any other track would sit in the model
+         undrawn, so the write is refused rather than stored silently */
+      if (op.track.kind !== 'camera' && op.track.kind !== 'adjustment' && op.track.effects?.length)
+        return `effects only draw on camera and adjustment tracks, not ${op.track.kind} tracks`
+      if (op.track.blend != null) return 'track blend is not drawn yet'
       comp.tracks.push(op.track)
       return null
     }
@@ -1270,8 +1660,8 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
     case 'add_keyframe': {
       const track = findTrack(comp, op.trackId)
       if (!track) return `no track ${op.trackId}`
-      if (track.kind === 'camera' && !isCameraProperty(op.keyframe.property)) {
-        return `camera keyframe property must be one of ${CAMERA_PROPERTIES.join(', ')}`
+      if (track.kind === 'camera' && !isCameraProperty(op.keyframe.property) && !isFxProperty(op.keyframe.property)) {
+        return `camera keyframe property must be one of ${CAMERA_PROPERTIES.join(', ')} or fx:<id>.<param>`
       }
       const keyframes = (track.keyframes ??= [])
       if (keyframes.length >= MOTION_LIMITS.MAX_KEYFRAMES_PER_TRACK) return 'too many keyframes'
@@ -1343,6 +1733,82 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
       track.clips!.splice(i, 1)
       return null
     }
+    case 'set_direction': {
+      if (op.direction === null) delete comp.direction
+      else comp.direction = op.direction
+      return null
+    }
+    case 'set_motion_blur': {
+      if (op.motionBlur === null) delete comp.motionBlur
+      else comp.motionBlur = op.motionBlur
+      return null
+    }
+    case 'add_effect': {
+      const track = findTrack(comp, op.trackId)
+      if (!track) return `no track ${op.trackId}`
+      if (track.kind !== 'camera' && track.kind !== 'adjustment')
+        return `effects only draw on camera and adjustment tracks, not ${track.kind} tracks`
+      const effects = (track.effects ??= [])
+      if (effects.length >= 20) return 'too many effects on the track'
+      if (effects.some((e) => e.id === op.effect.id)) return `effect ${op.effect.id} already exists`
+      const index = op.index === undefined ? effects.length : Math.min(op.index, effects.length)
+      effects.splice(index, 0, op.effect)
+      return null
+    }
+    case 'update_effect': {
+      const track = findTrack(comp, op.trackId)
+      const effect = track?.effects?.find((e) => e.id === op.effectId)
+      if (!track || !effect) return `no effect ${op.effectId}`
+      if (op.enabled !== undefined) effect.enabled = op.enabled
+      if (op.params !== undefined) {
+        const specError = effectSpec(effect.fx)?.validate(op.params)
+        if (specError) return specError
+        effect.params = { ...effect.params, ...op.params }
+      }
+      if (op.seed !== undefined) effect.seed = op.seed
+      if (op.mix !== undefined) effect.mix = op.mix
+      if (op.blend !== undefined) {
+        if (op.blend === null) delete effect.blend
+        /* per-effect blend is parsed but the GL pass draws only `mix` —
+           setting one would silently do nothing, so it is refused */
+        else return 'effect blend is not drawn yet'
+      }
+      return null
+    }
+    case 'remove_effect': {
+      const track = findTrack(comp, op.trackId)
+      const i = track?.effects?.findIndex((e) => e.id === op.effectId) ?? -1
+      if (!track || i < 0) return `no effect ${op.effectId}`
+      track.effects!.splice(i, 1)
+      if (track.keyframes?.some((kf) => isFxProperty(kf.property))) {
+        /* fx lanes pointing at the removed instance dangle — lint MO-13
+           reports them rather than silently rewriting the timeline */
+      }
+      return null
+    }
+    case 'reorder_effects': {
+      const track = findTrack(comp, op.trackId)
+      if (!track) return `no track ${op.trackId}`
+      if (!Array.isArray(op.effectIds)) return 'effectIds must be an array of effect ids'
+      const effects = track.effects ?? []
+      const ids = new Set(op.effectIds)
+      if (ids.size !== op.effectIds.length) return 'duplicate ids in effectIds'
+      if (effects.length !== ids.size || effects.some((e) => !ids.has(e.id))) {
+        return 'effectIds must name every effect on the track exactly once'
+      }
+      const byId = new Map(effects.map((e) => [e.id, e]))
+      track.effects = op.effectIds.map((id) => byId.get(id)!)
+      return null
+    }
+    case 'set_blend': {
+      const track = findTrack(comp, op.trackId)
+      if (!track) return `no track ${op.trackId}`
+      /* no renderer composites a track's blend mode — storing one would be
+         a silent no-op, so only clearing is allowed */
+      if (op.blend === null) delete track.blend
+      else return 'track blend is not drawn yet'
+      return null
+    }
   }
 }
 
@@ -1356,6 +1822,8 @@ function clipAllowed(track: MotionTrack, clip: MotionClip): string | null {
       return type === 'asset' ? null : 'audio tracks only take asset clips'
     case 'caption':
       return type === 'caption' ? null : 'caption tracks only take caption clips'
+    case 'adjustment':
+      return type === 'adjustment' ? null : 'adjustment tracks only take adjustment clips'
     case 'camera':
     case 'element':
       return `${track.kind} tracks do not take clips`
@@ -1407,6 +1875,8 @@ export const newComposition = (input: {
   height: input.body.height,
   ...(input.body.posterTime !== undefined ? { posterTime: input.body.posterTime } : {}),
   tracks: input.body.tracks,
+  ...(input.body.direction !== undefined ? { direction: input.body.direction } : {}),
+  ...(input.body.motionBlur !== undefined ? { motionBlur: input.body.motionBlur } : {}),
   revision: 1,
   createdAt: input.now,
   updatedAt: input.now,
@@ -1482,30 +1952,106 @@ export interface StoryboardOptions {
   shotSeconds?: number
   /** breathing room around each shot's frame; default 1.08 */
   margin?: number
+  /** the director's treatment — beats set per-shot seconds and how each shot
+   *  hands over to the next, and the direction rides the composition body so
+   *  the film keeps its intent */
+  direction?: Direction
+}
+
+export interface StoryboardShot {
+  frameId: string
+  t: number
+  duration: number
+  /** how this shot hands over to the next ('cut' when absent) */
+  transition?: string
+}
+
+/** transition names a DirectionBeat carries → how the camera gets to the
+ *  next shot. Returns the handover window in seconds and the eased curve;
+ *  null means a hard cut (the camera holds, then jumps). */
+function beatTransition(name: string | undefined): { tr: number; easing: MotionEasing } | null {
+  switch (name) {
+    case undefined:
+    case 'cut':
+      return null
+    case 'move':
+    case 'wipe':
+    case 'shared-element':
+      return { tr: 0.6, easing: { type: 'cubic-bezier', x1: 0.42, y1: 0, x2: 0.58, y2: 1 } }
+    case 'push':
+    case 'zoom':
+      return { tr: 0.8, easing: { type: 'cubic-bezier', x1: 0.25, y1: 0.1, x2: 0.25, y2: 1 } }
+    case 'whip':
+      return { tr: 0.3, easing: { type: 'cubic-bezier', x1: 0.7, y1: 0, x2: 0.3, y2: 1 } }
+    case 'fade':
+    case 'dissolve':
+      return { tr: 0.9, easing: { type: 'cubic-bezier', x1: 0.42, y1: 0, x2: 0.58, y2: 1 } }
+    default:
+      /* an unknown name reads as a cut rather than a guess */
+      return null
+  }
 }
 
 /**
  * Build the timeline a page of frames implies: one shot per frame in reading
- * order, a camera track that cuts from shot to shot (`hold` easings — the
- * agent or the editor turns cuts into moves afterwards).
+ * order, a camera track that cuts from shot to shot (`hold` easings) unless
+ * the direction's beats say otherwise. With beats, each shot takes its
+ * beat's `seconds` — durations stop being uniform — and a non-cut handover
+ * holds the pose for most of the shot then eases into the next frame inside
+ * the handover window.
  */
 export function buildStoryboard(opts: StoryboardOptions): { body: CompositionBody; shots: StoryboardShot[] } {
   const shotSeconds = opts.shotSeconds ?? 3
   const ordered = storyboardOrder(opts.frames)
+  const beats = opts.direction?.beats
   const shots: StoryboardShot[] = []
   const keyframes: MotionKeyframe[] = []
-  ordered.forEach((frame, i) => {
-    const t = i * shotSeconds
-    shots.push({ frameId: frame.id, t, duration: shotSeconds })
-    const cam = fitCameraToFrame(frame, opts.width, opts.height, opts.margin ?? 1.08)
+  const pose = (t: number, cam: { x: number; y: number; zoom: number; rotation: number }, easing: MotionEasing) => {
     for (const prop of CAMERA_PROPERTIES) {
-      keyframes.push({ id: newMotionId(), property: prop, t, value: cam[prop], easing: { type: 'hold' } })
+      keyframes.push({ id: newMotionId(), property: prop, t, value: cam[prop], easing })
+    }
+  }
+  const cams = ordered.map((frame) => fitCameraToFrame(frame, opts.width, opts.height, opts.margin ?? 1.08))
+  let cursor = 0
+  ordered.forEach((frame, i) => {
+    const duration = beats?.[i]?.seconds ?? shotSeconds
+    const t = cursor
+    cursor += duration
+    const handover = i < ordered.length - 1 ? beatTransition(beats?.[i]?.transition) : null
+    shots.push({ frameId: frame.id, t, duration, transition: handover ? beats?.[i]?.transition : undefined })
+    pose(t, cams[i]!, { type: 'hold' })
+    if (handover) {
+      const next = cams[i + 1]!
+      const nextDuration = beats?.[i + 1]?.seconds ?? shotSeconds
+      const tr = Math.min(handover.tr, duration * 0.45, nextDuration * 0.45)
+      if (tr >= 0.05) {
+        /* hold most of the shot, travel the last tr seconds into the next
+           pose — 'push' lands slightly tighter, 'fade' drifts through a
+           gentle dolly, the honest camera-film shapes of those moves */
+        const land =
+          beats?.[i]?.transition === 'push' || beats?.[i]?.transition === 'zoom'
+            ? { ...next, zoom: next.zoom * 1.08 }
+            : beats?.[i]?.transition === 'fade' || beats?.[i]?.transition === 'dissolve'
+              ? { ...next, zoom: next.zoom * 1.03 }
+              : next
+        pose(t + duration - tr, cams[i]!, handover.easing)
+        /* the eased segment lands exactly on the next shot's start — writing
+           the landing pose into the next shot keeps its hold consistent */
+        cams[i + 1] = land
+      }
     }
   })
-  const duration = Math.max(shotSeconds * ordered.length, MOTION_LIMITS.MIN_DURATION_S)
+  const duration = Math.max(cursor, MOTION_LIMITS.MIN_DURATION_S)
   const track: MotionTrack = { id: newMotionId(), kind: 'camera', name: 'Camera', keyframes }
   return {
-    body: { duration, fps: opts.fps, width: opts.width, height: opts.height, tracks: [track] },
+    body: {
+      duration,
+      fps: opts.fps,
+      width: opts.width,
+      height: opts.height,
+      tracks: [track],
+      direction: opts.direction,
+    },
     shots,
   }
 }

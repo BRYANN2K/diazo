@@ -2414,11 +2414,15 @@ export function setComposition(canvasId: string, body: CompositionBody, pageId: 
     height: body.height,
     posterTime: body.posterTime,
     tracks: body.tracks,
+    direction: body.direction,
+    motionBlur: body.motionBlur,
     revision: (existing?.revision ?? 0) + 1,
     updatedAt: Date.now(),
     updatedBy: actor.name,
   }
   if (comp.posterTime === undefined) delete comp.posterTime
+  if (comp.direction === undefined) delete comp.direction
+  if (comp.motionBlur === undefined) delete comp.motionBlur
   const saved = store.setComposition(canvasId, comp, { name: actor.name, kind: actor.kind, runId: actor.runId })
   broadcast(canvasId, { type: 'composition', pageId, composition: saved, actor })
   touch(canvasId, actor)

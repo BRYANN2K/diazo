@@ -84,7 +84,7 @@ describe('render-scoped tokens', () => {
    plumbing calls, the cookie/viewport/goto setup, then evaluate() doing
    the harness's seek/capture (or WebCodecs encode) work. `ready` is what
    the harness readiness race resolves — 'ready' unless the test fails it */
-function stubPage(evaluate: (expr: string) => unknown, ready: unknown = 'ready') {
+function stubPage(evaluate: (expr: string) => unknown, ready: unknown = 'ready', fx: unknown = []) {
   const calls = {
     seeks: [] as number[],
     cookie: undefined as Record<string, unknown> | undefined,
@@ -114,14 +114,20 @@ function stubPage(evaluate: (expr: string) => unknown, ready: unknown = 'ready')
         calls.seeks.push(Number(seek[1]))
       }
       if (expr.includes('__doopMotionReady')) return ready
-      return evaluate(expr)
+      const out = evaluate(expr)
+      /* the captures answer {png, fx} / {pending, fx} — the undrawn-effect
+         report rides every seek — so the stub wraps its own answer in the
+         same envelope */
+      if (expr.includes('__doopMotionCapture')) return { png: out, fx }
+      if (expr.includes('__doopWebm') && expr.includes('__doopMotionSeek')) return { pending: out, fx }
+      return out
     },
   }
   return { page, calls }
 }
 
-function openStub(evaluate: (expr: string) => unknown, ready: unknown = 'ready') {
-  const { page, calls } = stubPage(evaluate, ready)
+function openStub(evaluate: (expr: string) => unknown, ready: unknown = 'ready', fx: unknown = []) {
+  const { page, calls } = stubPage(evaluate, ready, fx)
   vi.spyOn(renderDeps, 'openIsolatedPage').mockResolvedValue({
     page: page as never,
     close: async () => {
@@ -249,6 +255,23 @@ describe('the render worker', () => {
       'server',
     )
     expect(vi.mocked(storeAsset)).not.toHaveBeenCalled()
+  })
+
+  it('fails the render when a captured frame reports an undrawn effect', async () => {
+    /* the harness leaves the drop list on the page; the first frame that
+       arrives without its look fails the job — nothing ships degraded */
+    openStub(() => PNG, 'ready', [{ fx: 'vignette', reason: 'no WebGL2 context' }])
+    await runServerRender(JOB)
+    expect(vi.mocked(patchRenderJob)).toHaveBeenCalledWith(
+      JOB,
+      expect.objectContaining({
+        status: 'failed',
+        error: expect.stringContaining('vignette (no WebGL2 context)'),
+      }),
+      'server',
+    )
+    expect(vi.mocked(storeAsset)).not.toHaveBeenCalled()
+    expect(vi.mocked(storeAssetFile)).not.toHaveBeenCalled()
   })
 
   it('fails a render whose frames pass the upload cap mid-sequence', async () => {

@@ -21,6 +21,7 @@ import {
   type Composition,
   type MotionLintIssue,
 } from './motion.ts'
+import { GL_EFFECT_IDS } from './motionFx.ts'
 
 /** the MO-* rule ids, in firing order */
 export const MO_RULES = {
@@ -36,6 +37,8 @@ export const MO_RULES = {
   MOTION_BLOCK: 'MO-10',
   COMPOSITION: 'MO-11',
   TEXT_SPLIT: 'MO-12',
+  FX_DANGLING: 'MO-13',
+  FX_UNSUPPORTED: 'MO-14',
 } as const
 
 const SCRIPT_RE = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi
@@ -325,7 +328,9 @@ export function lintComposition(comp: Composition, opts?: { frameIds?: ReadonlyS
             ? clip.source.type === 'asset'
             : track.kind === 'caption'
               ? clip.source.type === 'caption'
-              : false
+              : track.kind === 'adjustment'
+                ? clip.source.type === 'adjustment'
+                : false
       if (!allowed) push('error', `a ${clip.source.type} clip does not belong on a ${track.kind} track`)
       if (clip.transition && clip.transition.duration > clip.duration) {
         push(
@@ -342,6 +347,33 @@ export function lintComposition(comp: Composition, opts?: { frameIds?: ReadonlyS
     }
     if ((track.kind === 'camera' || track.kind === 'element') && (track.clips ?? []).length > 0) {
       push('error', `${track.kind} track ${track.id} carries clips`)
+    }
+
+    /* MO-13: an fx:<id>.<param> lane pointing at no instance on the stack
+       dangles — the value it would set is silently lost at eval time */
+    const stackIds = new Set((track.effects ?? []).map((e) => e.id))
+    for (const kf of track.keyframes ?? []) {
+      if (!kf.property.startsWith('fx:')) continue
+      const instance = kf.property.slice(3).split('.')[0]
+      if (instance && !stackIds.has(instance)) {
+        issues.push({
+          rule: 'MO-13',
+          severity: 'warning',
+          message: `keyframe ${kf.id} targets fx:${instance} but no effect ${instance} is on track ${track.id}`,
+        })
+      }
+    }
+    /* MO-14: an enabled effect the shipped renderer cannot draw — the stack
+       is valid, the pixels just will not show it */
+    for (const e of track.effects ?? []) {
+      if (e.enabled === false) continue
+      if (!GL_EFFECT_IDS.has(e.fx)) {
+        issues.push({
+          rule: 'MO-14',
+          severity: 'warning',
+          message: `effect ${e.fx} (${e.id}) on ${track.id} has no WebGL2 body — the compositor reports it instead of drawing it wrong`,
+        })
+      }
     }
   }
   return issues

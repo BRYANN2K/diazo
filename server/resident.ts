@@ -73,6 +73,8 @@ import {
   suggestCuts,
   videoModels,
 } from './motionTools.ts'
+import { execMotionPro } from './motionProTools.ts'
+import type { Direction } from '../shared/motion.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
 import { canvasesFor } from './workspaces.ts'
@@ -2585,6 +2587,242 @@ export const TOOLS: Anthropic.Tool[] = [
         width: { type: 'number', description: 'Output width px, default 1920' },
         height: { type: 'number', description: 'Output height px, default 1080' },
         frame_ids: { type: 'array', items: { type: 'string' }, description: 'Only these frames become shots' },
+        direction: { type: 'object', description: 'The Direction — beats set per-shot seconds and handovers' },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'get_direction',
+    description:
+      "Read the Direction a page's composition was directed with — treatment, beats, look, references, rhythm, palette, critique pass budget.",
+    input_schema: {
+      type: 'object',
+      properties: { page_id: { type: 'string' } },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'set_direction',
+    description:
+      "Write the film's Direction on the composition: treatment (one paragraph — mood, motion language, rhythm, hero moment), beats (ordered {seconds, note, transition: cut|move|push|whip|fade}), look, references, rhythm, palette, passes (default 3, max 5). Set it before animate_storyboard — beats set shot lengths and handovers.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        direction: { type: ['object', 'null'], description: 'The Direction, or null to clear' },
+      },
+      required: ['page_id', 'direction'],
+    },
+  },
+  {
+    name: 'list_motion_presets',
+    description:
+      'The motion vocabulary: 13 camera presets, clip transition kinds, six text animators and splits, blend modes.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'apply_camera_preset',
+    description:
+      'Write a named camera move as editable keyframes at t: push-in, pull-out, pans, whip-pan, crash-zoom, cranes, handheld (seeded), dolly-zoom, orbit. `from` is the camera at t unless frame_id re-frames first.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        preset: { type: 'string' },
+        t: { type: 'number' },
+        duration: { type: 'number' },
+        amount: { type: 'number' },
+        frame_id: { type: 'string' },
+        seed: { type: 'number' },
+        frequency: { type: 'number' },
+        easing: { type: 'object' },
+      },
+      required: ['page_id', 'preset'],
+    },
+  },
+  {
+    name: 'apply_transition',
+    description:
+      "Set a clip's transition: dissolve, push, wipe, zoom, shared-element — cut clears. duration is the overlap in seconds.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        track_id: { type: 'string' },
+        clip_id: { type: 'string' },
+        kind: { type: 'string' },
+        duration: { type: 'number' },
+        direction: { type: 'string' },
+        token: { type: 'string' },
+        easing: { type: 'object' },
+      },
+      required: ['page_id', 'track_id', 'clip_id', 'kind'],
+    },
+  },
+  {
+    name: 'apply_text_animation',
+    description:
+      "Animate a text element's units — rise-blur, typewriter, scale-pop, mask-wipe, tracking-in, scramble — over a line/word/char split. Lands in the frame's data-doop-motion block; the element's text stays editable.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        frame_id: { type: 'string' },
+        element_id: { type: 'string' },
+        preset: { type: 'string' },
+        split: { type: 'string' },
+        start: { type: 'number' },
+        duration: { type: 'number' },
+        stagger: { type: 'number' },
+        order: { type: 'string' },
+        seed: { type: 'number' },
+      },
+      required: ['page_id', 'frame_id', 'element_id', 'preset'],
+    },
+  },
+  {
+    name: 'get_scene_snapshot',
+    description:
+      'See your own render: a labelled contact-sheet PNG of the film at the asked times (default shot midpoints) plus per-cell luminance/contrast, motion energy and measured text boxes — drawn by the same compositor every render target uses.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        times: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Times on the clock (≤24); default shot midpoints',
+        },
+        max_side: { type: 'number', description: 'Max cell width px, default 480' },
+        columns: { type: 'number' },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'check_scene',
+    description:
+      'One scene report: MO-* lint, pacing stats with dead beats, safe-zone violations (90%/80%), effective text px, and the effect-stack cost per track. Pixel parts need the instance renderer and report unavailable without it.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        pixels: { type: 'boolean', description: 'false skips the render-dependent parts' },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'critique_scene',
+    description:
+      "The director's pass: check_scene folded into the fixed rubric (intent_coverage, hierarchy, legibility, pacing, motion_quality, continuity, polish, brand) with machine issues pre-filled, plus the pass budget (direction.passes, default 3, max 5). A new revision is a pass; stop when it says so.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        pixels: { type: 'boolean' },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'list_motion_effects',
+    description:
+      'The effect registry: ~30 effects (blur, light, lens, texture, distort, color, glitch, generators, matte) with params, ranges and GPU cost, plus blend modes. Stacks live on tracks; params keyframe through fx:<instanceId>.<param>.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'add_effect',
+    description:
+      "Push an effect onto a track's stack: fx is a registry id, params override defaults (points take [u,v]), index places it.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        track_id: { type: 'string' },
+        fx: { type: 'string' },
+        id: { type: 'string' },
+        params: { type: 'object' },
+        index: { type: 'number' },
+      },
+      required: ['page_id', 'track_id', 'fx'],
+    },
+  },
+  {
+    name: 'update_effect',
+    description: 'Patch one stacked effect: enabled, params (merged), seed, mix, blend (null clears).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        track_id: { type: 'string' },
+        effect_id: { type: 'string' },
+        enabled: { type: 'boolean' },
+        params: { type: 'object' },
+        seed: { type: 'number' },
+        mix: { type: 'number' },
+        blend: { type: ['string', 'null'] },
+      },
+      required: ['page_id', 'track_id', 'effect_id'],
+    },
+  },
+  {
+    name: 'remove_effect',
+    description: "Remove an effect instance from a track's stack by id.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        track_id: { type: 'string' },
+        effect_id: { type: 'string' },
+      },
+      required: ['page_id', 'track_id', 'effect_id'],
+    },
+  },
+  {
+    name: 'set_effects',
+    description: "Make a track's effect stack exactly `effects` (complete instances, in order) — one atomic batch.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        track_id: { type: 'string' },
+        effects: { type: 'array', items: { type: 'object' } },
+      },
+      required: ['page_id', 'track_id', 'effects'],
+    },
+  },
+  {
+    name: 'apply_look',
+    description:
+      'Apply a named look as an adjustment track: teal-orange, noir, film-35, crt, glitch, dream, product, riso. at/seconds gate the window; absent = the whole film.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        look: { type: 'string' },
+        at: { type: 'number' },
+        seconds: { type: 'number' },
+      },
+      required: ['page_id', 'look'],
+    },
+  },
+  {
+    name: 'list_looks',
+    description: 'The named looks apply_look can lay down.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'set_motion_blur',
+    description:
+      'The filmic shutter: {shutter} degrees 0–360 sampled across the frame, optional samples K 2–64. Deterministic re-evaluation, never accumulated. 0 or null clears.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        shutter: { type: 'number' },
+        samples: { type: 'number' },
       },
       required: ['page_id'],
     },
@@ -3846,10 +4084,43 @@ export async function execTool(
             width: num(raw.width),
             height: num(raw.height),
             frame_ids: Array.isArray(raw.frame_ids) ? raw.frame_ids.map(String) : undefined,
+            direction: raw.direction as Direction | undefined,
           },
           actor,
         )
         if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'get_direction':
+      case 'set_direction':
+      case 'list_motion_presets':
+      case 'apply_camera_preset':
+      case 'apply_transition':
+      case 'apply_text_animation':
+      case 'get_scene_snapshot':
+      case 'check_scene':
+      case 'critique_scene':
+      case 'list_motion_effects':
+      case 'add_effect':
+      case 'update_effect':
+      case 'remove_effect':
+      case 'set_effects':
+      case 'apply_look':
+      case 'list_looks':
+      case 'set_motion_blur': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as Record<string, unknown>
+        const out = await execMotionPro(block.name, canvas, raw, actor)
+        if (!out.ok) return fail(out.error)
+        if (block.name === 'get_scene_snapshot' && typeof (out.data as { png?: string }).png === 'string') {
+          const data = out.data as { png: string } & Record<string, unknown>
+          const { png, ...rest } = data
+          return ok([
+            { type: 'text', text: JSON.stringify({ ok: true, ...rest }) },
+            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png.split(',')[1] ?? '' } },
+          ])
+        }
         return ok(JSON.stringify(out.data))
       }
       case 'lint_motion': {

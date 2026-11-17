@@ -11,6 +11,7 @@
  * here are the contract: the player must produce the same count.
  */
 
+import { elementHtml } from './motionLint.ts'
 import { seededRandom } from './motionPresets.ts'
 import type { FrameMotionKeyframe, FrameTextAnimator, MotionEasing, TextOrder, TextSplit } from './motion.ts'
 
@@ -134,4 +135,95 @@ export function expandTextAnimator(
     }
   }
   return { units, keyframes }
+}
+
+/* ---- the raster split ----
+ * The DOM player wraps units live; a rasterizing renderer (the compositor's
+ * htmlAt, the export stills) needs the same `[data-doop-unit="i"]` nodes in
+ * the HTML. `splitUnitsHtml` does that as string surgery on flat-text
+ * elements — the exact unit indices `splitTextUnits` defines, kept by
+ * construction since both run the same split rules. */
+
+const escapeHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+const decodeText = (s: string): string =>
+  s
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+
+/**
+ * The element's flat text the way the split sees it: `<br>`s become
+ * newlines, other markup returns undefined (a nested element is not a flat
+ * text and cannot split safely).
+ */
+export function elementText(html: string, elementId: string): string | undefined {
+  const subtree = elementHtml(html, elementId)
+  if (!subtree) return undefined
+  const openEnd = subtree.indexOf('>')
+  if (openEnd < 0 || subtree[openEnd - 1] === '/') return undefined
+  const closeStart = subtree.search(/<\/[a-zA-Z]/)
+  if (closeStart < 0 || closeStart <= openEnd) return undefined
+  const inner = subtree.slice(openEnd + 1, closeStart)
+  const noBr = inner.replace(/<br\s*\/?>/gi, '\0')
+  if (/<[^>]+>/.test(noBr)) return undefined
+  return decodeText(inner.replace(/<br\s*\/?>/gi, '\n'))
+}
+
+/**
+ * Wrap the element's text units in `[data-doop-unit="i"]` spans (or divs
+ * for the line split), leaving whitespace between units as text so word
+ * and char splits keep their spacing. Null when the element is missing,
+ * nested, or already split.
+ */
+export function splitUnitsHtml(html: string, elementId: string, split: TextSplit): string | null {
+  const subtree = elementHtml(html, elementId)
+  if (!subtree || subtree.includes('data-doop-unit=')) return null
+  const openEnd = subtree.indexOf('>')
+  if (openEnd < 0 || subtree[openEnd - 1] === '/') return null
+  const closeStart = subtree.search(/<\/[a-zA-Z]/)
+  if (closeStart < 0 || closeStart <= openEnd) return null
+  const inner = subtree.slice(openEnd + 1, closeStart)
+  const noBr = inner.replace(/<br\s*\/?>/gi, ' ')
+  if (/<[^>]+>/.test(noBr)) return null
+  const text = decodeText(inner.replace(/<br\s*\/?>/gi, '\n'))
+  let rebuilt: string
+  if (split === 'line') {
+    rebuilt = text
+      .split('\n')
+      .map((line, i) => `<div data-doop-unit="${i}">${line.trim() ? escapeHtml(line) : '<br>'}</div>`)
+      .join('')
+  } else if (split === 'word') {
+    let i = 0
+    rebuilt = text.replace(
+      /\S+/g,
+      (word) => `<span data-doop-unit="${i++}" style="display:inline-block">${escapeHtml(word)}</span>`,
+    )
+  } else {
+    let i = 0
+    rebuilt = Array.from(text)
+      .map((ch) =>
+        /\s/.test(ch)
+          ? escapeHtml(ch)
+          : `<span data-doop-unit="${i++}" style="display:inline-block">${escapeHtml(ch)}</span>`,
+      )
+      .join('')
+  }
+  const idx = html.indexOf(subtree)
+  const next = subtree.slice(0, openEnd + 1) + rebuilt + subtree.slice(closeStart)
+  return html.slice(0, idx) + next + html.slice(idx + subtree.length)
+}
+
+/** every element a frame's animators split, applied at once */
+export function splitUnitsForFrame(html: string, units: ReadonlyMap<string, TextSplit>): string {
+  let out = html
+  for (const [el, split] of units) {
+    const next = splitUnitsHtml(out, el, split)
+    if (next) out = next
+  }
+  return out
 }
