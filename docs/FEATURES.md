@@ -253,11 +253,11 @@ compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per bu
   look, pass budget) that `animate_storyboard` consumes; preset tools writing editable keyframes
   (`apply_camera_preset`, `apply_transition`, `apply_text_animation`); agent-visible render checks
   (`get_scene_snapshot` contact sheets, `check_scene`, `critique_scene` with a bounded rubric loop);
-  and a P1 effect stack — ~30 registered effects on tracks with `fx:<id>.<param>` keyframe lanes,
+  and a P1 effect stack — 43 registered effects on tracks with `fx:<id>.<param>` keyframe lanes,
   blend modes, adjustment layers gating stacks over clip windows, named looks as adjustment tracks,
-  a deterministic filmic shutter (`motionBlur`), and a WebGL2 pass in the compositor covering the
-  single-pass subset while lint rule MO-14 reports the rest. Same tools on MCP and the resident
-  agent through `execMotionPro`.
+  a deterministic filmic shutter (`motionBlur`), and a WebGL2 pass in the compositor with a GLSL
+  body for every registered effect (lint rule MO-14 still guards anything unregistered). Same
+  tools on MCP and the resident agent through `execMotionPro`.
 - **Motion Studio ("Rostrum") — a page can be a film (backend, MVP)** — an ordinary page gains a
   seekable, deterministic timeline: duration/fps/size, camera tracks over the page's world,
   per-element property tracks, clips, audio and captions (contract in `shared/motion.ts`, API in

@@ -18,14 +18,17 @@ compositor all read; `docs/motion-api.md` lists the tool surface.
 - Seeds are deterministic: `effectSeed` = `seed ?? FNV-1a(id)`; noise/grain
   bodies take the seed as a uniform, never a clock.
 - `GL_EFFECT_IDS` names the registry ids `src/lib/motion/gl.ts` ships a GLSL
-  body for (25 of 43 today); lint MO-14 reports the rest rather than letting
-  a renderer silently skip them.
+  body for — all 43 today. Lint MO-14 still guards an unsupported effect
+  rather than letting a renderer silently skip it.
 
 ## Renderer
 
 `src/lib/motion/gl.ts` is a WebGL2 ping-pong pipeline: one fullscreen pass
-per effect, uniforms resolved at `t`, no state between calls — same
-(composition, t) → same pixels. `paintAt` (2D) feeds `paintSceneFx` which
+per effect body, uniforms resolved at `t`, no state between calls — same
+(composition, t) → same pixels. A body can name a bounded sub-pass chain
+(bloom thresholds, blurs horizontally then composites the vertical blur
+over the snapshot input on `u_tex2`; lens blur stacks three directional
+gathers). `paintAt` (2D) feeds `paintSceneFx` which
 hands the camera track's stack plus each covered adjustment track's stack
 to GL; element-track stacks render in preview through CSS filters. The
 browser harness and `paintShutter` (deterministic K-sample motion blur) go
