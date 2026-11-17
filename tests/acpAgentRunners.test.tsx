@@ -3,9 +3,9 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRunner, AgentRunners } from '../shared/agentRunner.ts'
-const mocks = vi.hoisted(() => ({ runners: vi.fn(), models: vi.fn(), capture: vi.fn() }))
+const mocks = vi.hoisted(() => ({ runners: vi.fn(), models: vi.fn(), capture: vi.fn(), acp: vi.fn() }))
 vi.mock('../src/lib/api', () => ({
-  api: { agentRunners: mocks.runners, agentModels: mocks.models },
+  api: { agentRunners: mocks.runners, agentModels: mocks.models, acpAgent: mocks.acp },
   ApiError: class extends Error {},
   errorMessage: (_err: unknown, fallback: string) => fallback,
 }))
@@ -14,7 +14,7 @@ vi.mock('../src/App', () => ({ navigate: vi.fn() }))
 import { ModelPicker } from '../src/components/ModelPicker'
 import { duelChoices } from '../src/components/DuelDialog'
 import { currentRunnerPick, useRunnerPick } from '../src/lib/runnerPick'
-import { acpResult, desktopAcpAgents } from '../src/lib/acpAgent'
+import { acpResult, desktopAcpAgents, refreshAcpAgent, useAcpAgents } from '../src/lib/acpAgent'
 import { acpMenu } from '../shared/acpAgent.ts'
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -38,7 +38,10 @@ const runners: AgentRunners = { runners: [grok, devin], default: 'grok-local' }
 
 let root: Root
 let container: HTMLDivElement
-const trigger = () => container.querySelector('button')!
+const buttons = () => [...container.querySelectorAll('button')]
+/* two pills: the model, then the effort */
+const trigger = () => buttons()[0]!
+const effortButton = () => buttons()[1]
 const radio = (label: string) =>
   [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((el) => el.textContent?.startsWith(label))
 
@@ -55,13 +58,15 @@ afterEach(() => {
   act(() => root.unmount())
   container.remove()
   delete (globalThis as { __DOOP_ACP_AGENTS__?: unknown }).__DOOP_ACP_AGENTS__
+  delete (globalThis as { __TAURI__?: unknown }).__TAURI__
 })
 
 describe('the desktop agents in the composer and the duel', () => {
   it('offers both agents with their models, and asks no provider catalog for them', async () => {
     await act(async () => root.render(<ModelPicker />))
     await act(async () => {})
-    expect(trigger().textContent).toBe('Grok 4.7High')
+    expect(trigger().textContent).toBe('Grok 4.7')
+    expect(effortButton()?.textContent).toBe('High')
     expect(currentRunnerPick()).toEqual({ provider: 'grok-local', model: 'grok-4.7', effort: 'high' })
     act(() => {
       trigger().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }))
@@ -92,6 +97,23 @@ describe('the page bridge', () => {
     expect(desktopAcpAgents()).toEqual([])
     ;(globalThis as { __DOOP_ACP_AGENTS__?: unknown }).__DOOP_ACP_AGENTS__ = ['devin', 'grok', 'evil']
     expect(desktopAcpAgents()).toEqual(['devin', 'grok'])
+  })
+  it('keeps whichever side of a status answered when the other fails', async () => {
+    ;(globalThis as { __DOOP_ACP_AGENTS__?: unknown }).__DOOP_ACP_AGENTS__ = ['devin']
+    const invoke = vi.fn()
+    ;(globalThis as { __TAURI__?: unknown }).__TAURI__ = { core: { invoke }, event: { listen: vi.fn() } }
+    /* the shell refuses: the account's saved preference still lands */
+    invoke.mockRejectedValue(new Error('acp_status is not allowed'))
+    mocks.acp.mockResolvedValue({ enabled: false, model: 'swe-2' })
+    await expect(refreshAcpAgent('alice', 'devin')).rejects.toThrow('acp_status is not allowed')
+    expect(useAcpAgents.getState().devin.preference?.model).toBe('swe-2')
+    expect(useAcpAgents.getState().devin.native).toBeNull()
+    /* the server is down: the shell's status still lands */
+    const native = { installed: true, connected: true, enabled: false, cliVersion: '3000.12.57' }
+    invoke.mockResolvedValue(native)
+    mocks.acp.mockRejectedValue(new Error('Server unreachable'))
+    await expect(refreshAcpAgent('alice', 'devin')).rejects.toThrow('Server unreachable')
+    expect(useAcpAgents.getState().devin.native).toEqual(native)
   })
   it('turns a run into the result the server records', () => {
     expect(

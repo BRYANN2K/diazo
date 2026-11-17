@@ -8,10 +8,20 @@
  * Work the resident picks up on its own — @mention comments, automations —
  * carries no pick and runs on the Settings default.
  */
-import { ACCOUNT_KIND_LABELS, ANTHROPIC_MODELS, openaiModelName, type AccountKindName } from './modelMenu.ts'
+import {
+  ACCOUNT_KIND_LABELS,
+  ANTHROPIC_MODELS,
+  DEEPSEEK_MODELS,
+  GEMINI_MODELS,
+  KIMI_CODE_MODELS,
+  KIMI_MODELS,
+  OPENROUTER_MODELS,
+  openaiModelName,
+  type AccountKindName,
+} from './modelMenu.ts'
 import { CLAUDE_PLAN_MODELS } from './localAgent.ts'
 import { isCustomProviderKind, type CustomProviderKind } from './customProvider.ts'
-import { ACP_AGENT_NAMES, ACP_RUNNER_PROVIDERS, type AcpRunnerProvider } from './acpAgent.ts'
+import { ACP_AGENT_NAMES, ACP_RUNNER_PROVIDERS, GROK_MODELS, type AcpRunnerProvider } from './acpAgent.ts'
 
 /** The connections that run on the person's own desktop: the Claude Plan,
  *  and the agents spoken to over ACP (shared/acpAgent.ts). */
@@ -91,10 +101,36 @@ export function knownModelName(provider: RunnerProvider, id: string): string {
   return id
 }
 
+/** Every curated roster, for a model id whose provider is not known. */
+const ROSTERS: readonly (readonly { id: string; name: string }[])[] = [
+  CLAUDE_PLAN_MODELS,
+  ANTHROPIC_MODELS,
+  OPENROUTER_MODELS,
+  GEMINI_MODELS,
+  DEEPSEEK_MODELS,
+  KIMI_MODELS,
+  KIMI_CODE_MODELS,
+  GROK_MODELS,
+]
+
+/** A model id as the menus name it when the line carries no provider (a
+ *  usage total, summed over runs): the first roster that lists it, the one
+ *  OpenAI spelling for a GPT or o-series id, else the id itself. */
+export function modelNameForId(id: string): string {
+  for (const roster of ROSTERS) {
+    const known = roster.find((m) => m.id === id)
+    if (known) return known.name
+  }
+  return /^(gpt|o)-?\d/i.test(id) ? openaiModelName(id) : id
+}
+
 export interface RunnerOption {
   id: string
   name: string
   blurb: string
+  /** a curated or alias entry the menus show up front; unflagged rows fold
+   *  under "Older" once any row of the group is flagged */
+  recommended?: boolean
 }
 
 /** One connection the composer may send a task to, as the server lists it. */

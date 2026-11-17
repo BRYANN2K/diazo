@@ -140,7 +140,7 @@ export function ConnectionRow({
           sub={sub}
           badges={
             <>
-              {isDefault && <Badge tone="brand">{t('models.isDefault')}</Badge>}
+              {isDefault && <Badge tone="signal">{t('models.isDefault')}</Badge>}
               {off && <Badge>{t('models.off')}</Badge>}
             </>
           }

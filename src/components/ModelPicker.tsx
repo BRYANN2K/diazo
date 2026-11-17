@@ -2,7 +2,7 @@ import { posthog } from '../lib/posthog'
 import { BrandMark } from './ui/brand-mark'
 import { RUNNER_BRAND } from '../lib/runnerMarks'
 import { DiazoAgentMark } from './Logo'
-import { ModelMenu } from './ModelMenu'
+import { EffortGlyph, EffortMenu, ModelMenu } from './ModelMenu'
 import { useAgentRunners, useRunnerPick } from '../lib/runnerPick'
 import { resolveRunnerPick, type AgentRunner } from '../../shared/agentRunner'
 import { useT } from '@/lib/i18n'
@@ -10,12 +10,13 @@ import { MenuButton } from './ui/menu-button'
 
 /**
  * Where the next task goes: every connection the person has — the Claude
- * Plan on their desktop, their ChatGPT or API key — with its models, as a
- * quiet dropdown beside the composer's send button. The pick rides on the
- * card (this browser remembers it) and is independent of the Settings
- * default, which is what comments, @mentions and automations run on. With
- * nothing connected there is nothing to choose between, so it says so and
- * links to Settings. The menu itself is `ModelMenu`, shared with the duel.
+ * Plan on their desktop, their ChatGPT or API key — as two quiet pills beside
+ * the composer's send button: the model, and the effort its connection
+ * supports. The pick rides on the card (this browser remembers it) and is
+ * independent of the Settings default, which is what comments, @mentions and
+ * automations run on. With nothing connected there is nothing to choose
+ * between, so the model pill says so and links to Settings. The menus
+ * themselves are `ModelMenu` and `EffortMenu`, shared with the duel.
  */
 export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
   const t = useT()
@@ -31,43 +32,78 @@ export function ModelPicker({ disabled = false }: { disabled?: boolean }) {
   }
 
   function chooseEffort(effort: string | undefined) {
-    if (!resolved || !effort) return
-    setPick({ ...resolved.pick, effort })
-    posthog.capture('agent_effort_changed', { effort, provider: resolved.runner.provider, via: 'composer' })
+    if (!resolved) return
+    /* "Default" is a real choice: the pick stops carrying an effort */
+    const { effort: _effort, ...rest } = resolved.pick
+    setPick(effort ? { ...rest, effort } : rest)
+    posthog.capture('agent_effort_changed', {
+      effort: effort ?? 'default',
+      provider: resolved.runner.provider,
+      via: 'composer',
+    })
   }
 
+  const pill = 'h-[26px] min-w-0 gap-[5px] rounded-pill px-[9px] text-ink shadow-ring hover:bg-well'
+  /* the model pill is the one that gives way in a narrow foot: MenuButton is
+     flex-none, so it opts back into shrinking and its label truncates; the
+     effort pill and the send button keep their size */
+  const modelPill = `${pill} flex-initial`
   return (
-    <ModelMenu
-      runners={runners?.runners ?? null}
-      value={resolved?.pick}
-      onModel={choose}
-      onEffort={chooseEffort}
-      trigger={(picked) => {
-        const label = picked?.name ?? 'Diazo Agent'
-        const mark = picked ? RUNNER_BRAND[picked.runner.provider] : undefined
-        return (
+    <>
+      <ModelMenu
+        runners={runners?.runners ?? null}
+        value={resolved?.pick}
+        onModel={choose}
+        trigger={(picked) => {
+          const label = picked?.name ?? 'Diazo Agent'
+          const mark = picked ? RUNNER_BRAND[picked.runner.provider] : undefined
+          return (
+            <MenuButton
+              variant="quiet"
+              disabled={disabled || !runners}
+              aria-label={t('panels.modelAria', { label })}
+              title={label}
+              className={modelPill}
+              icon={
+                <span className="grid size-3 flex-none place-items-center">
+                  {mark ? (
+                    <BrandMark brand={mark} size={12} />
+                  ) : (
+                    /* no connection behind it: the Diazo Agent's own face */
+                    <DiazoAgentMark size={12} className="block" />
+                  )}
+                </span>
+              }
+            >
+              <span className="truncate">{label}</span>
+            </MenuButton>
+          )
+        }}
+      />
+      <EffortMenu
+        runner={resolved?.runner}
+        effort={resolved?.pick.effort}
+        onEffort={chooseEffort}
+        effortDefault
+        trigger={(picked) => (
           <MenuButton
             variant="quiet"
             disabled={disabled || !runners}
-            aria-label={t('panels.modelAria', { label })}
-            className="h-[26px] min-w-0 gap-[5px] rounded-pill px-[9px] text-ink shadow-ring hover:bg-well"
+            aria-label={t('panels.modelEffortAria', { label: picked.text })}
+            title={picked.text}
+            className={pill}
             icon={
-              <span className="grid size-3 flex-none place-items-center">
-                {mark ? (
-                  <BrandMark brand={mark} size={12} />
-                ) : (
-                  /* no connection behind it: the Diazo Agent's own face */
-                  <DiazoAgentMark size={12} className="block" />
-                )}
+              <span className="grid size-3 flex-none place-items-center text-ink-2">
+                <EffortGlyph fraction={picked.fraction} />
               </span>
             }
           >
-            <span className="truncate">{label}</span>
-            {/* the effort reads after the model, lighter, as in Settings */}
-            {picked?.effortText && <span className="flex-none text-ink-faint">{picked.effortText}</span>}
+            {/* in a narrow composer foot (a `@container/foot`) the dial alone
+                stands for the level, which the label and title still name */}
+            <span className="truncate @max-[330px]/foot:hidden">{picked.text}</span>
           </MenuButton>
-        )
-      }}
-    />
+        )}
+      />
+    </>
   )
 }

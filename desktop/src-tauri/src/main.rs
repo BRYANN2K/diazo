@@ -92,16 +92,21 @@ fn focus_main_window(app: &AppHandle) {
     }
 }
 
-/// The hosted app this shell wraps unless the person picks another server
-/// (src/server.rs). Self-hosters can also build a shell that opens their own
-/// instance by default:
+/// The server this shell opens unless the person picks another one
+/// (src/server.rs): the Diazo server on this computer, as scripts/install.sh
+/// and `docker compose up` run it. Self-hosters can also build a shell that
+/// opens their own instance by default:
 ///   DOOP_APP_URL=https://doop.example.com npm run build
-/// (When overriding, also put the origin in capabilities/default.json or the
-/// page cannot reach the shell's IPC — external links then open in-window.)
+/// Whichever it is, the open server's origin gets the shell's IPC at launch
+/// (`server::grant`); capabilities/default.json names no remote origin.
 const APP_URL: &str = match option_env!("DOOP_APP_URL") {
     Some(url) => url,
-    None => "https://doop.design",
+    None => local_server::LOCAL_URL,
 };
+
+/// Built without DOOP_APP_URL: the fork's own installers, which update from
+/// its feed (src/updates.rs).
+const OFFICIAL_BUILD: bool = option_env!("DOOP_APP_URL").is_none();
 
 /// The server this launch opens (src/server.rs), without a trailing slash.
 fn base_url() -> String {
@@ -592,4 +597,103 @@ fn main() {
                 updates::install_on_quit(app);
             }
         });
+}
+
+#[cfg(test)]
+mod command_permissions {
+    //! A `#[tauri::command]` reaches the page only when it is declared in
+    //! build.rs's `commands()` (which generates its `allow-<command>`
+    //! permission) and that permission is granted in a capabilities/*.json.
+    //! The ACP commands landed registered but undeclared and ungranted, so
+    //! every `acp_*` invoke was refused: Connect looked dead. Keep the three
+    //! lists in step.
+
+    use std::collections::HashSet;
+    use std::path::PathBuf;
+
+    /// The crate holding build.rs and capabilities/; the Chromium build
+    /// compiles these sources with its own manifest dir, a sibling of it.
+    fn shell_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src-tauri")
+    }
+
+    /// The commands declared in `AppManifest::commands(&[ ... ])`.
+    fn declared() -> HashSet<String> {
+        let build = std::fs::read_to_string(shell_dir().join("build.rs")).unwrap();
+        let start = build.find("commands(&[").unwrap() + "commands(&[".len();
+        let end = build[start..].find(']').unwrap() + start;
+        build[start..end].split('"').skip(1).step_by(2).map(str::to_string).collect()
+    }
+
+    /// Every `#[tauri::command]` function across src/*.rs. Attributes and
+    /// comments between it and the function (`#[allow]`, doc lines) are
+    /// skipped; any other line ends the wait.
+    fn commands_in_source() -> Vec<String> {
+        let mut found = Vec::new();
+        for entry in std::fs::read_dir(shell_dir().join("src")).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|ext| ext != "rs") {
+                continue;
+            }
+            let mut pending = false;
+            for line in std::fs::read_to_string(&path).unwrap().lines() {
+                let line = line.trim();
+                if line.starts_with("#[tauri::command") {
+                    pending = true;
+                }
+                if !pending || line.is_empty() || line.starts_with("//") || line.starts_with('#') {
+                    continue;
+                }
+                if let Some(name) = line.split("fn ").nth(1).and_then(|rest| rest.split(['(', '<']).next()) {
+                    found.push(name.trim().to_string());
+                }
+                pending = false;
+            }
+        }
+        found
+    }
+
+    /// The `allow-*` permissions every capabilities file grants (plain
+    /// string entries; plugin entries given as objects are not commands).
+    fn granted() -> HashSet<String> {
+        let mut all = HashSet::new();
+        for entry in std::fs::read_dir(shell_dir().join("capabilities")).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|ext| ext != "json") {
+                continue;
+            }
+            let json: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            for permission in json["permissions"].as_array().into_iter().flatten() {
+                if let Some(name) = permission.as_str() {
+                    all.insert(name.to_string());
+                }
+            }
+        }
+        all
+    }
+
+    #[test]
+    fn every_command_is_declared_and_granted() {
+        let declared = declared();
+        let granted = granted();
+        for command in commands_in_source() {
+            assert!(
+                declared.contains(&command),
+                "{command} has #[tauri::command] but is missing from build.rs's commands()"
+            );
+            assert!(
+                granted.contains(&format!("allow-{}", command.replace('_', "-"))),
+                "{command} is not granted by any capabilities/*.json (allow-{} missing)",
+                command.replace('_', "-")
+            );
+        }
+        for command in &declared {
+            assert!(
+                granted.contains(&format!("allow-{}", command.replace('_', "-"))),
+                "{command} is declared but allow-{} is in no capabilities/*.json",
+                command.replace('_', "-")
+            );
+        }
+    }
 }

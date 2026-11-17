@@ -28,6 +28,7 @@ import { Integrations } from './pages/Integrations'
 import { Workspace } from './pages/Workspace'
 import { authClient } from './lib/auth'
 import { useStore } from './lib/store'
+import { setComposerDraftOwner } from './lib/composerDrafts'
 import { setName } from './lib/identity'
 import { posthog, setSupportWidgetVisible, syncReplayForUser, suspendAnalyticsWhileImpersonating } from './lib/posthog'
 import { useMe } from './lib/me'
@@ -58,7 +59,12 @@ function reportProviderSignup() {
 export function App() {
   const [route, setRoute] = useState(location.pathname + location.search)
   const path = route.split('?')[0]!
-  const { data: session, isPending } = authClient.useSession()
+  const { data: session, isPending, error: sessionError } = authClient.useSession()
+  /* parked composer drafts belong to the signed-in account. Set during
+     render, not in an effect: the composer reads its parked draft from a
+     mount effect, which runs before this component's own. A session that
+     failed to load is not a sign-out, so it leaves the owner alone. */
+  const draftOwnerChanged = !isPending && !sessionError && setComposerDraftOwner(session?.user.id ?? null)
   /* a signed-out guest on a share link asked for the sign-in form */
   const [guestAuth, setGuestAuth] = useState<'signin' | 'signup' | null>(null)
   const signInRequired = useStore((s) => s.signInRequired)
@@ -124,6 +130,11 @@ export function App() {
   useEffect(() => {
     if (session?.user?.name) setName(session.user.name)
   }, [session?.user?.name])
+
+  /* another account's in-memory drafts must not show either */
+  useEffect(() => {
+    if (draftOwnerChanged) useStore.setState({ composerDrafts: {} })
+  }, [draftOwnerChanged])
 
   /* the desktop tab strip is per-account state: restore this user's tabs,
      and clear the strip the moment the session goes away */

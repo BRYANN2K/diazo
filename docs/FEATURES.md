@@ -176,12 +176,19 @@ upstream pull requests it merged ahead of upstream. Resync notes are in
   canvas with `.doop.json`, `open` it, `find` frames, `pull` / `push` a frame as an HTML file
   (a push is refused when the frame changed on the canvas since the pull), and `doop mcp install`
   for Claude Code, Codex and Devin. It authenticates with an agent key.
+- **Model picker** — the composer's foot carries two pills: the model and, where the connection
+  has one, its reasoning effort. The model menu opens on a search field (model, id or connection
+  name; typing anywhere in the menu goes to it) over the connections, each showing its
+  recommended entries with the rest under "Older (N)". The effort pill opens a radio list with a
+  one-line blurb per level and wears a dial glyph; in a narrow foot the model name truncates and
+  the effort pill keeps only its dial.
 - **Model duel** — Duel in the agents composer sends one brief to 2-3 models, each picked from
   what the connection can actually run (its live provider catalog; on the Claude Plan the
   "Latest" aliases and every pinned Claude version). The dialog is just the brief, with three
-  compact slots in its foot (Model 1, Model 2, an optional Model 3); each opens the composer's own
-  model menu (connections, models, reasoning effort starting at the connection's setting) and
-  can be cleared. The same model can run twice at different efforts; two identical slots are
+  compact slots in its foot (Model 1, Model 2, an optional Model 3); each is a model button
+  plus an effort pill, opening the composer's own menus (a grouped, searchable model list, a
+  reasoning-effort radio starting at the connection's setting) and can be cleared. The same
+  model can run twice at different efforts; two identical slots are
   flagged and hold Start back. Each designs into its own sibling frame. A comparison card
   shows each render with its cost, time, effort and lint score, and the one you keep is saved as
   a canvas decision while the others are archived (hidden, not deleted).

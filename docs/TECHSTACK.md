@@ -1,6 +1,6 @@
 # TECHSTACK - Diazo
 
-Status: current, updated 2026-11-16
+Status: current, updated 2026-11-17
 
 ## 1. Language and Runtime
 
@@ -170,10 +170,10 @@ Status: current, updated 2026-11-16
   high / xhigh), set through `PATCH /api/model-account/:kind { effort }`, read by `effortFor` in
   `server/openaiAgent.ts` for every turn, with `DOOP_AGENT_OPENAI_EFFORT` as the default until a
   user picks. The status reports the resolved `effort` for the OpenAI kinds only, which is what
-  shows the `Segmented` switch in Settings and the radio group in the composer's `ModelPicker`.
-  A `RunnerPick` may carry its own `effort` for one run — the composer's picker and each duel
-  slot set it with the effort slider of the shared `ModelMenu` (in a duel slot, a "Default"
-  first step sends no effort where the connection has none configured) — and `pickModel` honours it (`accountWithPick` for the OpenAI
+  shows the `Segmented` switch in Settings and the effort pill's radio list in the composer's
+  `ModelPicker`. A `RunnerPick` may carry its own `effort` for one run — the composer's picker
+  and each duel slot set it in the shared `EffortMenu` popover (a "Default" row, where the
+  connection has none configured, sends no effort) — and `pickModel` honours it (`accountWithPick` for the OpenAI
   kinds, `isClaudeEffort` → `claude --effort` on the Plan); the localized names and blurbs for
   the dials live in `src/lib/effortLabels.ts`.
 - Image descriptions (`.workflow/specs/image-descriptions.md`, `server/imageDescriptions.ts`,
@@ -218,13 +218,25 @@ Status: current, updated 2026-11-16
   as `runner` (a `RunnerPick`: provider, model, effort; `tasks.runner` JSON, migration 0045)
   and the send button's meter names it. The model duel (`server/duels.ts`,
   `DuelDialog.tsx`/`DuelCards.tsx`, `shared/duel.ts`) builds one `RunnerPick` per filled slot
-  into one scoped card each. The dialog is the brief alone with three slot buttons in its foot
-  ("Model 1", "Model 2", "Model 3 (optional)"; filled: brand mark, model, effort). Each opens
-  `ModelMenu` (`src/components/ModelMenu.tsx`), the composer's `ModelPicker` menu extracted:
-  connections under their names ("· Desktop app not running" when `online` is false), the pick
-  highlighted, the picked connection's live catalog, the effort slider, Model settings; a slot
-  adds Clear (or Delete/Backspace on its button). A slot's effort starts at its connection's
-  own (`runner.effort`, else Default) and stays with the slot across that connection's models.
+  into one scoped card each. The dialog is the brief alone with three slot cards in its foot
+  ("Model 1", "Model 2", "Model 3 (optional)"), each a model button with an effort pill under
+  it (the pill only where the slot's connection has a dial). Both pills open the composer's
+  menus from `src/components/ModelMenu.tsx`: `ModelMenu` leads with a search field that
+  filters as it types (↑/↓/↩ work), then the connections under their names ("· Desktop app
+  not running" when `online` is false), each listing its `recommended` entries — the "Latest …"
+  aliases and live-confirmed curated rows, or all of them when none is flagged — with the
+  rest folded under "Older (N)", the pick checked and Model settings at the foot; `EffortMenu`
+  is the radio list of the connection's levels with their `effortLabels` blurbs, a "Default"
+  row where none is configured, a Faster/Smarter caption and a quarter→full dial on the pill.
+  The search keeps the keyboard: a character or Backspace typed with focus anywhere in the menu
+  goes to the field rather than Radix's typeahead, ↑ on the first row returns to it, Enter with
+  an empty query changes nothing, and the field is not focused on a coarse pointer. A query
+  matches a model's name or id, or a connection's name (all its rows). In a narrow composer
+  foot (`@container/foot` in `PromptBar` and `ChatPanel`) the model pill shrinks and truncates
+  while the effort pill drops to its dial below 330px.
+  A slot adds Clear (or Delete/Backspace on its model button). A slot's effort starts at its
+  connection's own (`runner.effort`, else Default) and stays with the slot across that
+  connection's models.
   The same model may fill two slots (at different efforts it is a fair duel), but two slots
   with the same model and effort (`duelRepeats`, by `runnerKey`) get a warning and hold Start
   back, since the server refuses equal picks. Start needs two filled slots ("Start duel · 2

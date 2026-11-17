@@ -215,12 +215,18 @@ in `.github/actions/setup-desktop`:
   `src/lib/viewMenu.ts`, `__DOOP_VIEW_MENU__`) an older page still drives. Needs a desktop release.
 - Server choice (`desktop/src-tauri/src/server.rs`, `src/components/ServerSettings.tsx`): the
   sign-in screen's cog (shells advertising `__DOOP_SERVER_CHOOSE__`) points an official build at a
-  self-hosted server. `server_choose` normalizes the address to an origin (https, or http on loopback only),
+  self-hosted server. With nothing chosen an official build opens `http://127.0.0.1:4400`, the
+  server on this computer (`APP_URL`, `DOOP_APP_URL` overrides it). `capabilities/default.json`
+  names no remote origin and `frontendDist` is the bundled `shell-dist/` page, so the only site
+  with IPC is the one a launch opens, granted at runtime (`grant`); doop.design and www.doop.design
+  are refused as a server and never granted. `server_choose` normalizes the address to an origin (https, or http on loopback only),
   checks `/api/locale-config` answers and takes the origin any redirect lands on, confirms natively, writes `server.json` in the app data dir and
   restarts; at launch the chosen origin gets `capabilities/default.json` as a runtime capability
-  and the navigation allowlist. A chosen server that does not answer at launch gets a native Try Again / Use doop.design dialog
-  (`check_on_launch`, every platform); macOS also has "Use doop.design…" in the app menu. Official builds
-  keep updating from the doop.design feed whatever server is chosen. Tests: the Rust unit tests in
+  and the navigation allowlist. A server that does not answer at launch gets a native dialog
+  (`check_on_launch`, every platform): Try Again, then "Use this computer’s server" for a chosen one or
+  "Choose a Server…" for the default, which opens the bundled page; macOS also has "Use this computer’s
+  server…" in the app menu. Official builds (no `DOOP_APP_URL`) keep updating from this fork's feed
+  whatever server is chosen. Needs a desktop release. Tests: the Rust unit tests in
   `server.rs`, `serverSettings.test.tsx`.
 - The shell tells the page its platform via `window.__DOOP_DESKTOP_PLATFORM__` (read in
   `src/lib/shell.ts`); only macOS gets the overlay title bar / traffic-light inset.

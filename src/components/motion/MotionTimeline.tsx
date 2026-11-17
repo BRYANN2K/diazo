@@ -26,7 +26,8 @@ import { Button } from '../ui/button'
 import { IconButton } from '../ui/icon-button'
 import { Skeleton } from '../ui/skeleton'
 import { Pressable } from '../ui/pressable'
-import { PauseIcon, PlayIcon, SkipBackIcon, XIcon } from '../ui/icons'
+import { MinusIcon, PauseIcon, PlayIcon, PlusIcon, SkipBackIcon, SparkIcon, XIcon } from '../ui/icons'
+import { Tooltip } from '../ui/tooltip'
 import { MotionExportDialog } from './MotionExportDialog'
 
 /** the label column of every lane, as 04 · Timeline editor draws it */
@@ -240,21 +241,34 @@ export function MotionTimeline({
           </span>
         )}
         <span aria-hidden className="h-[18px] w-px flex-none bg-line" />
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+        {/* the strip's labels fold to their glyph, each named by a tooltip, as
+            the timeline narrows: the key actions first (760px, a 1280 window
+            with both panels open), then the agent action (600px) */}
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
           {comp && (
-            <Button size="sm" title={t('motion.addKeyTitle')} onClick={keyCameraHere}>
-              {t('motion.addKey')}
-            </Button>
+            <Tooltip label={t('motion.addKeyTitle')}>
+              <Button size="sm" className="flex-none" onClick={keyCameraHere}>
+                <PlusIcon className="hidden size-3.5 @max-[760px]:block" />
+                <span className="@max-[760px]:sr-only">{t('motion.addKey')}</span>
+              </Button>
+            </Tooltip>
           )}
           {comp && onKey !== undefined && (
-            <Button size="sm" variant="ghost" onClick={() => removeKeysAt(onKey)}>
-              {t('motion.removeKey')}
-            </Button>
+            <Tooltip label={t('motion.removeKey')}>
+              <Button size="sm" variant="ghost" className="flex-none" onClick={() => removeKeysAt(onKey)}>
+                <MinusIcon className="hidden size-3.5 @max-[760px]:block" />
+                <span className="@max-[760px]:sr-only">{t('motion.removeKey')}</span>
+              </Button>
+            </Tooltip>
           )}
-          <Button size="sm" variant="agent" title={t('motion.animateTitle')} onClick={() => void animateStoryboard()}>
-            {t('motion.animate')}
-          </Button>
         </div>
+        {/* the agent action sits with Export, out of the strip (MotionTimeline frame) */}
+        <Tooltip label={t('motion.animateTitle')}>
+          <Button size="sm" variant="agent" className="flex-none" onClick={() => void animateStoryboard()}>
+            <SparkIcon className="hidden size-3.5 @max-[600px]:block" />
+            <span className="@max-[600px]:sr-only">{t('motion.animate')}</span>
+          </Button>
+        </Tooltip>
         {comp && (
           <Button size="sm" onClick={() => setExporting(true)}>
             {t('motion.export')}

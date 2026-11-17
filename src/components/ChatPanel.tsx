@@ -499,9 +499,10 @@ function AskFailed({ message }: { message: ChatMessage }) {
 
 /* ---- the plan card ---- */
 
-const STATUS_TONES: Record<ChatPlan['status'], 'outline' | 'brand' | 'success' | 'default'> = {
-  proposed: 'outline',
-  approved: 'brand',
+/* a proposal is the agent's (agent tone), an approval a person's (signal) */
+const STATUS_TONES: Record<ChatPlan['status'], 'agent' | 'signal' | 'success' | 'default'> = {
+  proposed: 'agent',
+  approved: 'signal',
   launched: 'success',
   revised: 'default',
   canceled: 'default',
@@ -532,8 +533,8 @@ function PlanCard({ message, plan }: { message: ChatMessage; plan: ChatPlan }) {
   return (
     <Card tone="flat" className="mt-1 p-3 text-body">
       <div className="flex items-center justify-between gap-2">
-        <span className="flex min-w-0 items-center gap-1.5 text-caption font-medium text-ink-soft">
-          <LayoutTemplateIcon size={12} className="flex-none text-ink-faint" />
+        <span className="flex min-w-0 items-center gap-1.5 font-display text-copy font-semibold text-ink">
+          <LayoutTemplateIcon size={14} className="flex-none text-ink-3" />
           {t('panels.chatPlanTitle')}
         </span>
         <Badge tone={STATUS_TONES[plan.status]}>{t(`panels.chatPlanStatus_${plan.status}`)}</Badge>
@@ -545,7 +546,8 @@ function PlanCard({ message, plan }: { message: ChatMessage; plan: ChatPlan }) {
           <p className="mt-1 break-words whitespace-pre-wrap text-ink">{plan.summary}</p>
           <ul className="mt-1.5 space-y-1">
             {plan.screens.map((screen, i) => (
-              <li key={i} className="min-w-0">
+              <li key={i} className="relative min-w-0 pl-5">
+                <span className="absolute top-0 left-0 font-mono text-caption text-ink-3 tabular-nums">{i + 1}</span>
                 <div className="flex min-w-0 items-baseline gap-1.5">
                   <span className="min-w-0 truncate font-medium text-ink">{screen.name}</span>
                   <span className="flex-none text-micro text-ink-faint tabular-nums">
@@ -611,22 +613,21 @@ function PlanCard({ message, plan }: { message: ChatMessage; plan: ChatPlan }) {
           {open && canEdit && (
             <div className="mt-2.5 flex items-center gap-1 border-t border-line-soft pt-2">
               <Button
-                variant="primary"
-                size="pill"
+                variant="ghost"
+                size="sm"
+                className="text-ink-3"
                 disabled={busy}
-                title={t('panels.chatPlanLaunchTitle')}
-                onClick={() =>
-                  act(() => api.launchChatPlan(message.id).then(() => posthog.capture('chat_plan_launched')))
-                }
+                title={t('panels.chatPlanCancelTitle')}
+                onClick={() => act(() => api.cancelChatPlan(message.id))}
               >
-                {t('panels.chatPlanLaunch')}
+                {t('panels.chatPlanCancel')}
               </Button>
-              <Button variant="bare" size="pill" disabled={busy} onClick={() => setEditing(true)}>
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => setEditing(true)}>
                 {t('panels.chatPlanEdit')}
               </Button>
               <Button
-                variant="bare"
-                size="pill"
+                size="sm"
+                className="ml-auto"
                 disabled={busy}
                 title={t('panels.chatPlanReviseTitle')}
                 onClick={() => setRevising((v) => !v)}
@@ -634,14 +635,15 @@ function PlanCard({ message, plan }: { message: ChatMessage; plan: ChatPlan }) {
                 {t('panels.chatPlanRevise')}
               </Button>
               <Button
-                variant="bare"
-                size="pill"
-                className="ml-auto text-ink-faint"
+                variant="primary"
+                size="sm"
                 disabled={busy}
-                title={t('panels.chatPlanCancelTitle')}
-                onClick={() => act(() => api.cancelChatPlan(message.id))}
+                title={t('panels.chatPlanLaunchTitle')}
+                onClick={() =>
+                  act(() => api.launchChatPlan(message.id).then(() => posthog.capture('chat_plan_launched')))
+                }
               >
-                {t('panels.chatPlanCancel')}
+                {t('panels.chatPlanLaunch')}
               </Button>
             </div>
           )}
@@ -979,7 +981,7 @@ function ChatComposer({
           onKeyDown={onKeyDown}
           onChange={(e) => setText(e.target.value)}
         />
-        <div className="flex min-w-0 items-center gap-1">
+        <div className="@container/foot flex min-w-0 items-center gap-1">
           {canEdit && <SkillMenu disabled={sending} onPick={pickSkill} />}
           {canEdit && <ModelPicker disabled={sending} />}
           <span className="flex-1" />

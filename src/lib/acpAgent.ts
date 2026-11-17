@@ -74,14 +74,26 @@ function patch(agent: AcpAgent, next: Partial<AcpAgentState> | ((s: AcpAgentStat
   }))
 }
 
-/** `fresh` asks the login shell and the CLI again (the Refresh button). */
+/** `fresh` asks the login shell and the CLI again (the Refresh button).
+ *  Each side is kept when it answered, even when the other failed: the row
+ *  then still shows the half it knows next to the error. */
 export async function refreshAcpAgent(userId: string, agent: AcpAgent, fresh = false) {
-  const [preference, native] = await Promise.all([
+  const [preference, native] = await Promise.allSettled([
     api.acpAgent(agent),
     hasAcpAgent(agent) ? invokeAcp<AcpNativeStatus>('acp_status', { userId, agent, fresh }) : Promise.resolve(null),
   ])
-  patch(agent, { preference, native })
-  return { preference, native }
+  patch(agent, {
+    ...(preference.status === 'fulfilled' ? { preference: preference.value } : {}),
+    ...(native.status === 'fulfilled' ? { native: native.value } : {}),
+  })
+  /* the shell's own failure is what blocks connecting, so it is reported first */
+  const failed = [native, preference].find((result) => result.status === 'rejected') as
+    PromiseRejectedResult | undefined
+  if (failed) throw failed.reason
+  return {
+    preference: preference.status === 'fulfilled' ? preference.value : null,
+    native: native.status === 'fulfilled' ? native.value : null,
+  }
 }
 
 export async function selectAcpAgent(userId: string, agent: AcpAgent, preference: AcpAgentPreference) {

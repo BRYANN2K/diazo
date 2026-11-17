@@ -11,6 +11,8 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { ANTHROPIC_MODELS } from '../shared/modelMenu.ts'
+import { CLAUDE_PINNED_MODELS } from '../shared/localAgent.ts'
 
 type Block = { type: string; text?: string; content?: unknown }
 type Message = { role: string; content: string | Block[] }
@@ -137,6 +139,25 @@ function reply(req: Request, writeFrame: FrameWriter): Reply {
   const tools = new Set((req.tools ?? []).map((t) => t.name))
   const done = hasToolResult(req.messages)
   const all = req.messages.map((m) => textOf(m.content)).join('\n')
+  /* the Memory distiller: a standing preference is in the demo decisions, so
+     the judge always finds one rule to propose */
+  if (tools.has('distill_result')) {
+    return {
+      tool: 'distill_result',
+      input: {
+        has_rule: true,
+        guide_name: 'fieldnote-brand',
+        guide_title: 'Fieldnote brand',
+        rule: '- Cards sit on a 12px radius with a 1px ring; never a drop shadow.',
+        rationale:
+          'Maya and Bryan both asked for quieter surfaces this week — the rounded, shadowed card is now a settled preference.',
+      },
+    }
+  }
+  /* the decision summarizer: raw feedback in, one short preference out */
+  if (all.includes('general style preference')) {
+    return { text: 'Prefer quiet surfaces: rounded corners and a hairline ring, no shadows' }
+  }
   if (tools.has('propose_plan') && !done) {
     return {
       tool: 'propose_plan',
@@ -197,6 +218,29 @@ function reply(req: Request, writeFrame: FrameWriter): Reply {
       text: 'Done. The frame uses the Fieldnote tokens, the Button component and a 44px tap target on every action.',
     }
   return { text: 'Noted.' }
+}
+
+/** A plain Message body for the non-streaming calls (the distiller). */
+function json(model: string, r: Reply): string {
+  const content: Record<string, unknown>[] = []
+  if (r.text) content.push({ type: 'text', text: r.text })
+  if ('tool' in r) {
+    content.push({
+      type: 'tool_use',
+      id: `toolu_${Math.random().toString(36).slice(2)}`,
+      name: r.tool,
+      input: r.input,
+    })
+  }
+  return JSON.stringify({
+    id: `msg_${Math.random().toString(36).slice(2)}`,
+    type: 'message',
+    role: 'assistant',
+    model,
+    content,
+    stop_reason: 'tool' in r ? 'tool_use' : 'end_turn',
+    usage: { input_tokens: 1200, output_tokens: 300 },
+  })
 }
 
 function sse(model: string, r: Reply): string {
@@ -268,18 +312,53 @@ function sse(model: string, r: Reply): string {
   return events.map(([event, data]) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`).join('')
 }
 
+/* what `/v1/models` lists: the curated rosters, as each API spells them */
+const ANTHROPIC_LIST = [...ANTHROPIC_MODELS, ...CLAUDE_PINNED_MODELS]
+  .filter((m, i, all) => all.findIndex((o) => o.id === m.id) === i)
+  .map((m, i) => ({
+    type: 'model',
+    id: m.id,
+    display_name: m.name,
+    created_at: new Date(Date.UTC(2026, 9, 1) - i * 86_400_000).toISOString(),
+  }))
+const OPENAI_LIST = ['gpt-6.1-sol', 'gpt-6.1', 'gpt-6-mini'].map((id, i) => ({
+  id,
+  object: 'model',
+  created: 1_790_000_000 - i * 86_400,
+  owned_by: 'demo',
+}))
+
 /** Start the stand-in on a free local port; resolves with its base URL. */
 export async function startDemoModel(writeFrame: FrameWriter): Promise<{ url: string; server: Server }> {
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     let body = ''
     req.on('data', (chunk: Buffer) => (body += chunk.toString()))
     req.on('end', () => {
+      /* the model lists Settings and the composer ask for, so a demo key
+         reads as a working connection without reaching a provider */
+      if (req.method === 'GET' && req.url?.startsWith('/openai/v1/models')) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ object: 'list', data: OPENAI_LIST }))
+        return
+      }
+      if (req.method === 'GET' && req.url?.startsWith('/v1/models')) {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(
+          JSON.stringify({
+            data: ANTHROPIC_LIST,
+            has_more: false,
+            first_id: ANTHROPIC_LIST[0]?.id ?? null,
+            last_id: ANTHROPIC_LIST.at(-1)?.id ?? null,
+          }),
+        )
+        return
+      }
       if (!req.url?.includes('/messages')) {
         res.writeHead(404, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ type: 'error', error: { type: 'not_found_error', message: 'demo model only' } }))
         return
       }
-      const parsed = JSON.parse(body) as Request
+      const parsed = JSON.parse(body) as Request & { stream?: boolean }
       if (process.env.DEMO_MODEL_DEBUG) {
         const last = parsed.messages[parsed.messages.length - 1]
         console.error('[demo-model]', last ? JSON.stringify(last.content).slice(0, 1500) : '')
@@ -287,8 +366,16 @@ export async function startDemoModel(writeFrame: FrameWriter): Promise<{ url: st
       /* a little latency, so runs have a believable duration */
       setTimeout(
         () => {
+          const r = reply(parsed, writeFrame)
+          /* streaming calls get the SSE envelope; a non-streaming call (the
+             distiller) gets the plain Message body */
+          if (parsed.stream !== true) {
+            res.writeHead(200, { 'content-type': 'application/json' })
+            res.end(json(parsed.model, r))
+            return
+          }
           res.writeHead(200, { 'content-type': 'text/event-stream' })
-          res.end(sse(parsed.model, reply(parsed, writeFrame)))
+          res.end(sse(parsed.model, r))
         },
         600 + Math.random() * 900,
       )

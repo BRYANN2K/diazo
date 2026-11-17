@@ -72,7 +72,7 @@ function ItemText({ children, description }: { children: React.ReactNode; descri
   return (
     <span data-slot="dropdown-menu-item-text" className="flex min-w-0 flex-1 flex-col">
       <span className="truncate">{children}</span>
-      <span data-slot="dropdown-menu-item-description" className="text-caption text-ink-faint">
+      <span data-slot="dropdown-menu-item-description" className="whitespace-normal text-caption text-ink-faint">
         {description}
       </span>
     </span>

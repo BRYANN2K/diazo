@@ -76,7 +76,10 @@ export function RunReplayModal({ canvasId, runId, onClose }: { canvasId: string;
           {timeline.events.length === 0 && <ListMeta className="px-4">{t('replay.noEvents')}</ListMeta>}
           {timeline.events.map((e) => (
             <ListItem key={e.id}>
-              <ListSummary>{e.message}</ListSummary>
+              {/* the feed's line reads on from its actor ("Diazo is working on…") */}
+              <ListSummary>
+                <span className="font-medium text-ink">{e.actorName}</span> {e.message}
+              </ListSummary>
               <ListMeta>{new Date(e.at).toLocaleTimeString()}</ListMeta>
             </ListItem>
           ))}

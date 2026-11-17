@@ -435,3 +435,15 @@ function onboarding(variant: 'split' | 'centered'): string {
 
 export const ONBOARDING_SPLIT = onboarding('split')
 export const ONBOARDING_CENTERED = onboarding('centered')
+
+/* -------------------------------------------------------------------- */
+/* the Motion page: one scene the demo timeline animates                  */
+/* -------------------------------------------------------------------- */
+
+/** A scene frame opts in with data-doop-scene (shared/motion.ts); its timed
+ *  elements carry the data-doop-id the composition's element tracks name. */
+export const SCENE = `<!doctype html><html><head><meta charset="utf-8">${FONT_LINK}<style>${ROOT}${RESET}</style></head><body data-doop-scene data-duration="8" data-fps="30" data-width="1280" data-height="720" style="background:var(--fn-ink);color:var(--fn-paper);display:grid;place-items:center;height:100vh;text-align:center">
+<div><h1 data-doop-id="title" style="font-size:88px;letter-spacing:-.04em;font-weight:700">Fieldnote</h1>
+<p data-doop-id="sub" style="font-size:26px;color:#9fb3a8;margin-top:18px">Every customer interview, searchable.</p>
+<span data-doop-id="chip" style="display:inline-block;margin-top:34px;padding:9px 18px;border-radius:99px;background:var(--fn-green);color:#fff;font-size:15px;font-weight:600">New · AI tags</span></div>
+</body></html>`

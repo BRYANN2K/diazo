@@ -45,6 +45,9 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 - The chat opens with canvas suggestions, a turn layout, a jump to the latest message and a calmer composer.
 - Server renders go through one bounded gate, recover from a wedged Chromium, and can run in a remote Chrome over CDP.
 - Work merges through `dev` and `staging` before `main`; CI runs on all three.
+- The model picker splits into two pills: the model opens a short searchable menu grouped by
+  connection (recommended entries up front, the rest under "Older"), and the reasoning effort
+  gets its own radio popover with a dial glyph on the pill. Duel slots split the same way.
 
 ### Fixed
 
@@ -56,5 +59,11 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 - A zoomed-out canvas shows frame designs instead of white boxes, with stored pictures sized to the zoom and a neutral placeholder while they load. Unchanged pictures survive restarts and moves; edits replace them without caching an older design as current. Busy renderers and network interruptions retry, off-screen pictures can leave the memory cache, and a frame going live fades its picture away.
 - Presence: no ghost presences on overlapping joins, and a leave is broadcast when a connection switches canvas.
 - `edit_frame_html` inserts its replacement text literally.
+- Settings → Diazo Agent: Connect on a Devin or Grok desktop agent did nothing — the shell refused the agent commands, and the row hid the error. Connect now shows progress and any error under the row.
+- An unsent Agents-tab composer draft survives a reload or an app relaunch: the text is parked per account and canvas in the browser, removed on sign-out, and pruned past 30 days or 50 canvases.
+
+### Security
+
+- The desktop app no longer gives doop.design (upstream's hosted service, which this fork does not control) access to the app's native features. Only the server the app opens gets them. With nothing chosen the app now opens the Diazo server on this computer (`http://127.0.0.1:4400`) and offers to choose another when it does not answer. Needs a desktop release.
 
 [Unreleased]: https://github.com/BRYANN2K/diazo/compare/v0.14.0...main
