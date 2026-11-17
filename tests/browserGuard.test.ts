@@ -111,11 +111,14 @@ posix('server/browserGuard.ts', () => {
 describe('sweepBrowserProfiles (server/browserGuard.ts)', () => {
   const dirs: string[] = []
 
-  function tmpBrowserDir(): string {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-test-'))
-    dirs.push(dir)
-    stubEnv('DOOP_BROWSER_DIR', dir)
-    return dir
+  /** a data dir and a separate browser download dir, both stubbed in */
+  function tmpInstall(): { data: string; browser: string; profiles: string } {
+    const data = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-data-'))
+    const browser = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-dl-'))
+    dirs.push(data, browser)
+    stubEnv('DOOP_DATA_DIR', data)
+    stubEnv('DOOP_BROWSER_DIR', browser)
+    return { data, browser, profiles: path.join(data, 'browser-profiles') }
   }
 
   afterEach(() => {
@@ -124,52 +127,68 @@ describe('sweepBrowserProfiles (server/browserGuard.ts)', () => {
   })
 
   it('drops leftover profile-* dirs and keeps everything else', () => {
-    const dir = tmpBrowserDir()
-    fs.mkdirSync(path.join(dir, 'profile-dead'))
-    fs.mkdirSync(path.join(dir, 'profile-older', 'nested'), { recursive: true })
-    fs.mkdirSync(path.join(dir, 'chrome-headless-shell-mac-arm64'))
-    fs.writeFileSync(path.join(dir, 'profile-loose-file'), 'x')
+    const { profiles } = tmpInstall()
+    fs.mkdirSync(path.join(profiles, 'profile-dead'), { recursive: true })
+    fs.mkdirSync(path.join(profiles, 'profile-older', 'nested'), { recursive: true })
+    fs.mkdirSync(path.join(profiles, 'keep-dir'), { recursive: true })
+    fs.writeFileSync(path.join(profiles, 'profile-loose-file'), 'x')
     sweepBrowserProfiles()
-    expect(fs.readdirSync(dir).sort()).toEqual(['chrome-headless-shell-mac-arm64', 'profile-loose-file'])
+    expect(fs.readdirSync(profiles).sort()).toEqual(['keep-dir', 'profile-loose-file'])
   })
 
-  it('tolerates a missing browser dir', () => {
-    const dir = tmpBrowserDir()
-    fs.rmSync(dir, { recursive: true })
+  it('tolerates a missing profile dir', () => {
+    const { profiles } = tmpInstall()
+    fs.rmSync(profiles, { recursive: true, force: true })
     expect(() => sweepBrowserProfiles()).not.toThrow()
   })
 
+  it('sweeps only our own profiles — never a neighbour sharing DOOP_BROWSER_DIR', () => {
+    const ours = tmpInstall()
+    /* a second server with its own locked data dir and the same download
+       dir: each boot's sweep must reach only the profiles beneath its own
+       data dir, which is what the lock actually covers */
+    const theirs = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-peer-'))
+    dirs.push(theirs)
+    fs.mkdirSync(path.join(ours.profiles, 'profile-dead'), { recursive: true })
+    fs.mkdirSync(path.join(theirs, 'browser-profiles', 'profile-live'), { recursive: true })
+    fs.mkdirSync(path.join(ours.browser, 'profile-stray'), { recursive: true })
+    sweepBrowserProfiles()
+    expect(fs.existsSync(path.join(ours.profiles, 'profile-dead'))).toBe(false)
+    expect(fs.existsSync(path.join(theirs, 'browser-profiles', 'profile-live'))).toBe(true)
+    /* a stray profile-* inside the download dir is nobody's to sweep */
+    expect(fs.existsSync(path.join(ours.browser, 'profile-stray'))).toBe(true)
+  })
+
   it('manages profiles under the data dir only when DOOP_EMBEDDED or DOOP_BROWSER_DIR says so', () => {
-    const data = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-data-'))
-    dirs.push(data)
-    stubEnv('DOOP_DATA_DIR', data)
+    const { profiles } = tmpInstall()
     stubEnv('DOOP_BROWSER_DIR', undefined)
     stubEnv('DOOP_EMBEDDED', undefined)
     /* Docker and the checkout: puppeteer's temp-dir default, and a stale
        profile-* under the data dir is not ours to touch */
     expect(browserProfileDir()).toBeUndefined()
-    fs.mkdirSync(path.join(data, 'browser', 'profile-stale'), { recursive: true })
+    fs.mkdirSync(path.join(profiles, 'profile-stale'), { recursive: true })
     sweepBrowserProfiles()
-    expect(fs.existsSync(path.join(data, 'browser', 'profile-stale'))).toBe(true)
+    expect(fs.existsSync(path.join(profiles, 'profile-stale'))).toBe(true)
 
     stubEnv('DOOP_EMBEDDED', '1')
-    expect(browserProfileDir()).toBe(path.join(data, 'browser'))
+    expect(browserProfileDir()).toBe(profiles)
     stubEnv('DOOP_EMBEDDED', undefined)
     stubEnv('DOOP_BROWSER_DIR', '/somewhere/explicit')
-    expect(browserProfileDir()).toBe('/somewhere/explicit')
+    /* the variable moves only the download — profiles stay beneath the
+       locked data dir, where a shared download can never be swept */
+    expect(browserProfileDir()).toBe(profiles)
   })
 
   it('writes nothing under the data dir when the profile is unmanaged', async () => {
     if (!findBrowserPath()) return
-    const data = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-data-'))
-    dirs.push(data)
-    stubEnv('DOOP_DATA_DIR', data)
+    const { data, profiles } = tmpInstall()
     stubEnv('DOOP_BROWSER_DIR', undefined)
     stubEnv('DOOP_EMBEDDED', undefined)
     const browser = await launchBrowser(30_000)
     try {
       /* the Docker profile contract: Chrome's singleton files stay in the
          system temp dir, off the persistent volume */
+      expect(fs.existsSync(profiles)).toBe(false)
       expect(fs.existsSync(path.join(data, 'browser'))).toBe(false)
     } finally {
       await browser.close()
@@ -178,13 +197,13 @@ describe('sweepBrowserProfiles (server/browserGuard.ts)', () => {
 
   it('never runs on browser launch — a launch keeps sibling profiles', async () => {
     if (!findBrowserPath()) return
-    const dir = tmpBrowserDir()
-    fs.mkdirSync(path.join(dir, 'profile-live-peer'))
+    const { profiles } = tmpInstall()
+    fs.mkdirSync(path.join(profiles, 'profile-live-peer'), { recursive: true })
     const browser = await launchBrowser(30_000)
     try {
       /* the launched browser did get a profile of its own — alongside, not
          instead of, the one another live process is using */
-      const names = fs.readdirSync(dir)
+      const names = fs.readdirSync(profiles)
       expect(names.filter((n) => n.startsWith('profile-')).length).toBeGreaterThan(1)
       expect(names).toContain('profile-live-peer')
     } finally {

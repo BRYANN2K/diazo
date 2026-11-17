@@ -35,13 +35,16 @@ export function browserDir(): string {
 }
 
 /** Parent dir for the per-launch `profile-*` dirs, where we manage it:
- *  inside the (locked) data dir for the embedded install, or an explicit
- *  DOOP_BROWSER_DIR. Undefined anywhere else — the profile then stays on
- *  puppeteer's temp-dir default, the behaviour Docker and a source
- *  checkout had before the data-dir layout (Chrome's singleton socket and
- *  locks are unreliable on the volume's bind mounts and PVCs). */
+ *  always inside the (locked) data dir — never inside the browser dir
+ *  itself, which DOOP_BROWSER_DIR may share between two servers for the
+ *  download, and a sweep there would delete the other's live profile.
+ *  Managed for the embedded install or an explicit DOOP_BROWSER_DIR;
+ *  undefined anywhere else — the profile then stays on puppeteer's
+ *  temp-dir default, the behaviour Docker and a source checkout had
+ *  before the data-dir layout (Chrome's singleton socket and locks are
+ *  unreliable on the volume's bind mounts and PVCs). */
 export function browserProfileDir(): string | undefined {
-  return env.DOOP_BROWSER_DIR || env.DOOP_EMBEDDED ? browserDir() : undefined
+  return env.DOOP_BROWSER_DIR || env.DOOP_EMBEDDED ? path.join(dataDir(), 'browser-profiles') : undefined
 }
 
 /** `pg-<date>.tar.gz` dumps plus their asset manifests. */

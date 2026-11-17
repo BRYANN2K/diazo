@@ -99,8 +99,9 @@ function findBrowser(): string {
 /** A fresh headless Chrome with the server's flags. `timeout` bounds the wait
  *  for its DevTools endpoint (puppeteer's default, 30s, unless given);
  *  `protocolTimeout` bounds every DevTools command (puppeteer's 180s unless
- *  given). The profile lives under the data dir where we manage it — the
- *  embedded install or an explicit DOOP_BROWSER_DIR — and stays on
+ *  given). The profile lives under the locked data dir where we manage it
+ *  — the embedded install or a DOOP_BROWSER_DIR download — never inside
+ *  the download dir itself, which two servers may share; it stays on
  *  puppeteer's temp-dir default anywhere else (the container behaviour
  *  before the data-dir layout). The process tree is guarded so the browser
  *  dies with the server. */

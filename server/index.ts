@@ -219,9 +219,10 @@ const BUILD_ID = (() => {
    assets, backups, the renderer's profile. Skipped only when no local state
    exists at all (a managed Postgres plus a bucket). A held lock is refused,
    a crashed holder's stale one is retaken (server/dataLock.ts). Dead boots'
-   profile-* dirs are swept here, under the lock: sweeping on browser launch
-   instead let every test worker and managed-storage peer delete the live
-   profiles of the others. */
+   profile-* dirs are swept here, beneath the same lock they live under
+   (<data>/browser-profiles): sweeping on browser launch instead let every
+   test worker and managed-storage peer delete the live profiles of the
+   others. */
 if (!(env.DATABASE_URL && env.BUCKET)) {
   acquireDataLock(dataDir())
   sweepBrowserProfiles()

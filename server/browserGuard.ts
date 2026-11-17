@@ -37,10 +37,11 @@ const guarded = new Map<number, Guarded>()
 let exitHookInstalled = false
 
 /* dead boots leave `profile-*` dirs behind — kill -9 skips every cleanup
-   path. Swept once at boot while the data-dir lock proves them ours, never
-   on browser launch: test workers share this dir with each other and with
-   a running dev server, and a launch-time sweep deletes their live
-   profiles (it relied on the lock, which only server/index.ts takes) */
+   path. Swept once at boot, inside the locked data dir where managed
+   profiles always live: only our own profiles can be there, so the sweep
+   can never delete a live peer's — not a test worker's, and not a second
+   server's that happens to share our DOOP_BROWSER_DIR download dir
+   (paths.ts keeps profiles out of it for exactly this reason) */
 export function sweepBrowserProfiles(): void {
   const dir = browserProfileDir()
   /* unmanaged profiles live wherever the OS keeps temp dirs — shared with
