@@ -1,30 +1,36 @@
 /**
- * Bundles the server for an embedded install: one ESM file plus the pieces it
- * resolves by path at runtime.
+ * Builds the embedded-server folder the desktop shell ships: one ESM bundle
+ * plus the pieces it resolves by path at runtime.
  *
- *   bun run build:server-bundle                            # -> out/embedded-server/
- *   bun run build:server-bundle -- --no-web                # reuse the existing dist/
- *   bun run build:server-bundle -- --os linux --cpu x64    # stage node_modules for another target (bun)
+ *   bun run build:embedded-server                            # -> out/embedded-server/
+ *   bun run build:embedded-server -- --no-web                # reuse the existing dist/
+ *   bun run build:embedded-server -- --web-src <dir>         # serve a prebuilt web root (tests)
+ *   bun run build:embedded-server -- --os linux --cpu x64    # stage node_modules for another target (bun)
  *
  * Produces:
  *   out/embedded-server/
- *     server.mjs       the whole server (express, ws, drizzle, auth, mcp)
+ *     server.mjs       the whole server (express, ws, drizzle, auth, mcp), minified
  *     node_modules/    only the externals the bundle does not carry — sharp
  *                      with the target's @img/* packages and libvips, and
  *                      @electric-sql/pglite (finds its .wasm and data files by
  *                      URL, so it cannot be inlined)
- *     migrations/      the drizzle SQL + journal applied at boot
+ *     migrations/      the drizzle SQL + journal applied at boot (the meta
+ *                      snapshots are drizzle-kit's, not the migrator's — dropped)
  *     backgrounds.json the catalog server/backgrounds.ts seeds from
- *     dist/            the web build the production server serves
+ *     dist/            the web build the production server serves (no .map)
  *
  * `pg` and `@aws-sdk/client-s3` are left external but not shipped: they are
  * only imported when DATABASE_URL or BUCKET is set, and the embedded install
  * sets neither.
  *
- * Boot it:
- *   DOOP_DATA_DIR=<data> DOOP_DIST_DIR=<out>/dist DOOP_MIGRATIONS_DIR=<out>/migrations \
- *   DOOP_LISTEN_HOST=127.0.0.1 NODE_ENV=production BETTER_AUTH_URL=http://127.0.0.1:4400 \
- *   BETTER_AUTH_SECRET=<secret> node <out>/server.mjs
+ * Boot it (a read-only install dir is fine — everything stateful lands in
+ * DOOP_DATA_DIR):
+ *   DOOP_DATA_DIR=<data> DOOP_LISTEN_HOST=127.0.0.1 DOOP_EMBEDDED=1 DOOP_INSTALL=desktop \
+ *   NODE_ENV=production BETTER_AUTH_URL=http://127.0.0.1:4400 BETTER_AUTH_SECRET=<secret> \
+ *   node <out>/server.mjs        # prints `ready <port>` once listening
+ *
+ * The shell sets NODE_COMPILE_CACHE=<app cache dir> for the V8 compile cache
+ * (Node honours the variable itself — nothing here wires it).
  */
 import { build } from 'esbuild'
 import { spawnSync } from 'node:child_process'
@@ -37,6 +43,7 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -61,6 +68,7 @@ const option = (name: string): string | undefined => {
 const outDir = path.resolve(ROOT, option('--out') ?? 'out/embedded-server')
 const targetOs = option('--os') // npm platform names: darwin, linux, win32
 const targetCpu = option('--cpu') // x64, arm64
+const webSrc = option('--web-src') ? path.resolve(ROOT, option('--web-src')!) : undefined
 if ((targetOs === undefined) !== (targetCpu === undefined)) {
   console.error('--os and --cpu go together')
   process.exit(1)
@@ -107,16 +115,19 @@ function sizeOf(file: string): number {
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
 /* the web build the server serves in production */
-if (!has('--no-web')) run('bun', ['run', 'build'])
-if (!existsSync(path.join(ROOT, 'dist', 'index.html'))) {
-  console.error('dist/index.html is missing — run `bun run build` or drop --no-web')
+if (!has('--no-web') && !webSrc) run('bun', ['run', 'build'])
+const distSrc = webSrc ?? path.join(ROOT, 'dist')
+if (!existsSync(path.join(distSrc, 'index.html'))) {
+  console.error('dist/index.html is missing — run `bun run build`, drop --no-web, or pass --web-src')
   process.exit(1)
 }
 
 rmSync(outDir, { recursive: true, force: true })
 mkdirSync(outDir, { recursive: true })
 
-/* 1. the bundle itself */
+/* 1. the bundle itself. Minified — the shipped file's stack traces are
+   already opaque to a user; keepNames keeps the error classes the code
+   matches on (renderer checks error.name, puppeteer errors included). */
 await build({
   entryPoints: [path.join(ROOT, 'server/index.ts')],
   outfile: path.join(outDir, 'server.mjs'),
@@ -124,6 +135,8 @@ await build({
   platform: 'node',
   format: 'esm',
   target: 'node22',
+  minify: true,
+  keepNames: true,
   external: EXTERNALS,
   /* bundled CommonJS deps keep dynamic require() calls (conditionals,
      optionals) that ESM has no answer for — give them a real one, named so it
@@ -157,12 +170,38 @@ if (targetOs && targetCpu) {
     const name = queue.shift()!
     if (seen.has(name)) continue
     seen.add(name)
-    let pkgPath: string
+    let pkgPath: string | undefined
     try {
       pkgPath = req.resolve(`${name}/package.json`)
     } catch {
-      continue /* an optional dep of another platform */
+      try {
+        /* exports maps may hide ./package.json (@electric-sql/pglite does):
+           resolve the entry and walk up to the manifest that names itself */
+        let dir = path.dirname(req.resolve(name))
+        for (;;) {
+          const candidate = path.join(dir, 'package.json')
+          if (existsSync(candidate)) {
+            const manifest = JSON.parse(readFileSync(candidate, 'utf8')) as { name?: string }
+            if (manifest.name === name) {
+              pkgPath = candidate
+              break
+            }
+          }
+          const up = path.dirname(dir)
+          if (up === dir) break
+          dir = up
+        }
+      } catch {
+        /* resolve failed: an optional dep of another platform */
+      }
     }
+    /* binary-only packages (@img/*) export nothing at all: find them by
+       name under this install's node_modules */
+    if (!pkgPath) {
+      const direct = path.join(ROOT, 'node_modules', name, 'package.json')
+      if (existsSync(direct)) pkgPath = direct
+    }
+    if (!pkgPath) continue
     cpSync(path.dirname(pkgPath), path.join(nodeModulesOut, name), { recursive: true, dereference: true })
     const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
       dependencies?: Record<string, string>
@@ -171,11 +210,61 @@ if (targetOs && targetCpu) {
     queue.push(...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.optionalDependencies ?? {}))
   }
 }
+pruneNodeModules(nodeModulesOut)
 
-/* 3. the pieces the code resolves by path */
-cpSync(path.join(ROOT, 'server/db/migrations'), path.join(outDir, 'migrations'), { recursive: true })
+/* 3. the pieces the code resolves by path. The migrator needs the .sql files
+   and the journal only — meta/*.json snapshots are drizzle-kit's inputs, not
+   runtime state (6.4 MB of the folder). dist/*.map are browser devtools
+   material the server never sends unprompted. */
+cpSync(path.join(ROOT, 'server/db/migrations'), path.join(outDir, 'migrations'), {
+  recursive: true,
+  filter: (src) =>
+    statSync(src).isDirectory() ||
+    src.endsWith('.sql') ||
+    src === path.join(ROOT, 'server/db/migrations/meta/_journal.json'),
+})
 cpSync(path.join(ROOT, 'server/backgrounds.json'), path.join(outDir, 'backgrounds.json'))
-cpSync(path.join(ROOT, 'dist'), path.join(outDir, 'dist'), { recursive: true })
+cpSync(distSrc, path.join(outDir, 'dist'), { recursive: true, filter: (src) => !src.endsWith('.map') })
+
+/* prune after copying so a removed file can never be re-added by a
+   dependency's own subtree */
+function pruneNodeModules(dir: string): void {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      /* PGlite ships per-extension tarballs and subpath trees the server
+         never loads (no CREATE EXTENSION in the journal; worker/live/
+         templating are other entry points), plus a browser-only fs. */
+      const inside = path.relative(nodeModulesOut, full).split(path.sep).join('/')
+      const deadDirs = [
+        'sharp/src',
+        '@electric-sql/pglite/dist/contrib',
+        '@electric-sql/pglite/dist/live',
+        '@electric-sql/pglite/dist/worker',
+      ]
+      if (deadDirs.includes(inside)) {
+        rmSync(full, { recursive: true, force: true })
+        continue
+      }
+      pruneNodeModules(full)
+      continue
+    }
+    const name = entry.name
+    const inPglite = full.includes(`${path.sep}@electric-sql${path.sep}pglite${path.sep}`)
+    if (
+      name.endsWith('.map') ||
+      name.endsWith('.d.ts') ||
+      name.endsWith('.d.cts') ||
+      (inPglite &&
+        (name.endsWith('.cjs') ||
+          name.endsWith('.tar.gz') ||
+          name.startsWith('templating.') ||
+          name.startsWith('opfs-ahp.')))
+    ) {
+      unlinkSync(full)
+    }
+  }
+}
 
 /* 4. the bill */
 const parts: [string, number][] = [

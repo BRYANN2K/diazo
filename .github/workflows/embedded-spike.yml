@@ -1,6 +1,6 @@
 name: Embedded spike
 
-# Boots the bundled server (out/embedded-server, see scripts/build-server-bundle.ts)
+# Boots the bundled server (out/embedded-server, see scripts/build-embedded-server.ts)
 # under plain Node 22 on every desktop OS and asks it for real work, not only
 # /healthz: a sign-up and a canvas write prove PGlite, the migrations and
 # better-auth survived bundling. Manual only — it proves a build shape, so it
@@ -22,14 +22,12 @@ jobs:
         with:
           node-version: 22
       - run: bun install --frozen-lockfile
-      - run: bun run build:server-bundle
+      - run: bun run build:embedded-server
       - name: Boot the bundle and check it answers
         shell: bash
         run: |
           set -euo pipefail
           export DOOP_DATA_DIR="$RUNNER_TEMP/diazo-data"
-          export DOOP_DIST_DIR="$PWD/out/embedded-server/dist"
-          export DOOP_MIGRATIONS_DIR="$PWD/out/embedded-server/migrations"
           export DOOP_LISTEN_HOST=127.0.0.1
           export NODE_ENV=production
           export BETTER_AUTH_URL=http://127.0.0.1:4455
