@@ -92,10 +92,17 @@ async function guardMigrations(client: PGlite): Promise<void> {
   /* timestamps normally order the two journals; the count catches the same
      newest `when` reached by extra entries the bundle does not carry */
   if (applied.newest > bundledNewest || applied.count > journal.length) {
-    await client.close().catch(() => {})
-    throw new Error(
-      `[db] this data dir was written by a newer build (applied migration at ${applied.newest} is past this bundle's ${bundledNewest}) — update Diazo instead of running an older build on it`,
-    )
+    const message = `[db] this data dir was written by a newer build (applied migration at ${applied.newest} is past this bundle's ${bundledNewest})`
+    /* a dev checkout moves the same data dir between branches — switching
+       back to dev after a branch with an extra migration must not refuse
+       to boot. Production and tests keep the hard refusal: an older build
+       on newer data is a silent downgrade */
+    if (env.isDev) {
+      console.warn(`${message} — booting anyway, NODE_ENV=development tolerates it`)
+    } else {
+      await client.close().catch(() => {})
+      throw new Error(`${message} — update Diazo instead of running an older build on it`)
+    }
   }
   /* a first boot applies the whole journal to an empty database: pending,
      yes, but there is nothing to lose, so the backup can be skipped */

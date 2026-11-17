@@ -2,7 +2,7 @@ import fs, { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { PGlite } from '@electric-sql/pglite'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { initDb, pglite } from '../server/db/index.ts'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
 
@@ -60,6 +60,19 @@ describe('migration guards (server/db/index.ts)', () => {
     await expect(initDb()).rejects.toThrow(/newer build/)
     /* the guard closes the client it opened rather than leaking it */
     await expect(pglite()!.query('select 1')).rejects.toThrow()
+  }, 120_000)
+
+  it('warns and boots past a newer data dir when NODE_ENV=development', async () => {
+    /* a dev checkout moves one data dir between branches — refusing here
+       would strand anyone switching back from a branch with an extra
+       migration */
+    stubEnv('NODE_ENV', 'development')
+    const dir = tmpDataDir()
+    await seedMigrationsTable(dir, [{ hash: 'future', created_at: Date.now() + 1e12 }])
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await expect(initDb()).resolves.toBeUndefined()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('newer build'))
+    warn.mockRestore()
   }, 120_000)
 
   it('backs the data dir up before applying pending migrations', async () => {
