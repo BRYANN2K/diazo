@@ -242,6 +242,34 @@ const BODY: Record<string, string | readonly string[]> = {
       a = u_amount < 0. ? min(a, b) : max(a, b);
     }
     col = vec4(s.rgb, a);`,
+  /* a core disc plus ghosts spread along the axis through the frame
+     centre — the mirrored line a lens flare draws; even ghosts land as
+     discs, odd ones as rings */
+  'lens-flare': `vec4 s = texture(u_tex, uv);
+    vec2 axis = vec2(.5) - u_position;
+    vec3 flare = vec3(smoothstep(.07, 0., distance(uv, u_position)) * 1.4);
+    for(int i=1;i<=8;i++){
+      if(float(i) > u_ghosts) break;
+      vec2 g = u_position + axis * (float(i) / (u_ghosts + 1.) * 2.);
+      float sz = .015 + .05 * float(i) / 8.;
+      float disc = smoothstep(sz, sz * .55, distance(uv, g));
+      float ring = smoothstep(.012, 0., abs(distance(uv, g) - sz));
+      flare += mix(disc, ring, mod(float(i), 2.)) * (.3 + .12 * float(i) / 8.);
+    }
+    col = vec4(clamp(s.rgb + flare * u_tint * u_intensity, 0., 1.), s.a);`,
+  /* crepuscular shafts: a decaying gather along the ray to the light
+     source, so bright matter streaks outward from it */
+  'god-rays': `vec4 s = texture(u_tex, uv);
+    vec2 d = (uv - u_source) * u_density / 48.;
+    vec2 p = uv;
+    float w = 1., ws = 0., acc = 0.;
+    for(int i=0;i<48;i++){
+      p -= d;
+      acc += doopLuma(texture(u_tex, p).rgb) * w;
+      ws += w;
+      w *= u_decay;
+    }
+    col = vec4(clamp(s.rgb + acc / max(ws, 1e-4) * u_intensity, 0., 1.), s.a);`,
 }
 
 /* an integer hash, not a sine hash: sin()'s precision is implementation-
