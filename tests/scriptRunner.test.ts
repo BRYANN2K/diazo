@@ -22,7 +22,14 @@ vi.mock('../shared/canonicalJson.ts', async (importOriginal) => {
 import { store } from '../server/store.ts'
 import * as actions from '../server/actions.ts'
 import { canonicalJson } from '../shared/canonicalJson.ts'
-import { executeScript, revertScriptRun, scriptRunRate, type ScriptCaller } from '../server/scriptRunner.ts'
+import {
+  executeScript,
+  revertScriptRun,
+  scriptCanvasQueue,
+  scriptRunRate,
+  serializeScript,
+  type ScriptCaller,
+} from '../server/scriptRunner.ts'
 import { scriptRunDeps, type StoredScriptRun } from '../server/scriptRuns.ts'
 import { reloadEnv } from '../server/env.ts'
 
@@ -239,5 +246,51 @@ it('refuses runs past the per-account rate', async () => {
     await expect(executeScript({ script: 'return 1' }, rateCaller, false)).rejects.toThrow(/rate/i)
   } finally {
     scriptRunRate.max = max
+  }
+})
+
+it('counts a run against the rate when it arrives, not when it starts', async () => {
+  const owned = store.createCanvas('Queued', 'queue-user')
+  const qCaller: ScriptCaller = {
+    canvasId: owned.id,
+    userId: 'queue-user',
+    actor: { kind: 'user', name: 'Queuer', color: '#000' },
+    source: 'mcp',
+  }
+  const max = scriptRunRate.max
+  scriptRunRate.max = 2
+  try {
+    /* hold the canvas queue — the two runs below are still waiting when the
+       third arrives, yet all three must count against the caller's minute */
+    let release!: () => void
+    const held = serializeScript(owned.id, () => new Promise<void>((resolve) => (release = resolve)))
+    const r1 = executeScript({ script: 'return 1' }, qCaller, false)
+    const r2 = executeScript({ script: 'return 2' }, qCaller, false)
+    await expect(executeScript({ script: 'return 3' }, qCaller, false)).rejects.toThrow(/rate/i)
+    release()
+    expect((await r1).ok).toBe(true)
+    expect((await r2).ok).toBe(true)
+    await held
+  } finally {
+    scriptRunRate.max = max
+  }
+})
+
+it('caps the runs pending on one canvas', async () => {
+  const maxPending = scriptCanvasQueue.maxPending
+  scriptCanvasQueue.maxPending = 2
+  try {
+    let release!: () => void
+    const held = serializeScript(caller.canvasId, () => new Promise<void>((resolve) => (release = resolve)))
+    const waiting = executeScript({ script: 'return 1' }, caller, false)
+    /* the queue holds one running and one waiting run — the next is refused */
+    await expect(executeScript({ script: 'return 2' }, caller, false)).rejects.toThrow(/queued/i)
+    release()
+    expect((await waiting).ok).toBe(true)
+    await held
+    /* a freed slot accepts the next run again */
+    expect((await executeScript({ script: 'return 3' }, caller, false)).ok).toBe(true)
+  } finally {
+    scriptCanvasQueue.maxPending = maxPending
   }
 })

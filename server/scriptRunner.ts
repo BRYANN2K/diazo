@@ -30,6 +30,10 @@ export async function executeScript(
   write: boolean,
 ): Promise<ScriptRunResult> {
   if (!env.DOOP_AGENT_SCRIPTS) throw new SdkError('refused', 'agent scripts are disabled')
+  /* the rate counts at arrival: a run that waited in the canvas queue still
+     consumed its slot of the caller's minute, and an over-rate caller must
+     not pile waiters onto the queue at all */
+  checkRunRate(caller.userId)
   await store.load(caller.canvasId)
   const release = store.hold(caller.canvasId)
   try {
@@ -51,7 +55,6 @@ export async function executeScript(
         (!Number.isInteger(input.timeout_ms) || input.timeout_ms < 1 || input.timeout_ms > SCRIPT_LIMITS.wallMsMax)
       )
         throw new SdkError('invalid', `timeout_ms must be 1..${SCRIPT_LIMITS.wallMsMax}`)
-      checkRunRate(caller.userId)
       return execute(input, caller, write)
     })
   } finally {
@@ -79,15 +82,27 @@ function checkRunRate(userId: string | undefined): void {
   accountRuns.set(userId, seen)
 }
 
-/** Per-canvas serialization includes queries and undo. A rejected run cannot poison the queue. */
+/** Per-canvas serialization includes queries and undo. A rejected run
+ *  cannot poison the queue — but the chain is bounded too, so one account
+ *  cannot park an unbounded list of waiters (and their script bodies) on a
+ *  single canvas. The running entry counts as one of `maxPending`. */
+export const scriptCanvasQueue = { maxPending: 8 }
 const queues = new Map<string, Promise<unknown>>()
+const queueDepth = new Map<string, number>()
 export async function serializeScript<T>(canvasId: string, fn: () => Promise<T>): Promise<T> {
+  const depth = queueDepth.get(canvasId) ?? 0
+  if (depth >= scriptCanvasQueue.maxPending)
+    throw new SdkError('limit', `too many runs queued on this canvas (at most ${scriptCanvasQueue.maxPending})`)
+  queueDepth.set(canvasId, depth + 1)
   const prior = queues.get(canvasId) ?? Promise.resolve()
   const next = prior.catch(() => {}).then(fn)
   queues.set(canvasId, next)
   try {
     return await next
   } finally {
+    const left = (queueDepth.get(canvasId) ?? 1) - 1
+    if (left > 0) queueDepth.set(canvasId, left)
+    else queueDepth.delete(canvasId)
     if (queues.get(canvasId) === next) queues.delete(canvasId)
   }
 }
