@@ -437,6 +437,37 @@ export function effectSpec(id: string): FxSpec | undefined {
   return BY_ID.get(id)
 }
 
+/** the registry ids src/lib/motion/gl.ts ships a WebGL2 body for — the lint's
+ *  MO-14 and the compositor's supportedStack read this, so a stack the
+ *  renderer cannot draw is reported, never silently skipped */
+export const GL_EFFECT_IDS: ReadonlySet<string> = new Set([
+  'gaussian-blur',
+  'directional-blur',
+  'radial-blur',
+  'glow',
+  'vignette',
+  'chromatic-aberration',
+  'barrel-distortion',
+  'film-grain',
+  'noise',
+  'scanlines',
+  'halftone',
+  'pixelate',
+  'wave-warp',
+  'bulge-pinch',
+  'mirror',
+  'color-grade',
+  'tint',
+  'duotone',
+  'invert',
+  'posterize',
+  'hue-shift',
+  'rgb-split',
+  'block-shift',
+  'scan-jitter',
+  'light-leak',
+])
+
 /** tool callers may send points as [u, v] arrays — the contract stores the
  *  "u,v" string form; every other value passes through unchanged */
 export function normalizeParams(

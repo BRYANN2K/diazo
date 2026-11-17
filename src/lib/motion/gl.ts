@@ -13,7 +13,7 @@
  * taps, luminance ops, hash noise) — no code is copied.
  */
 
-import { effectSpec } from '../../../shared/motionFx.ts'
+import { GL_EFFECT_IDS, effectSpec } from '../../../shared/motionFx.ts'
 import type { EffectInstance } from '../../../shared/motion.ts'
 
 const QUAD_VERT = `#version 300 es
@@ -148,9 +148,10 @@ void main(){
   col = vec4(mix(s.rgb, f.rgb, u_mix), mix(s.a, f.a, u_mix));
 }`
 
-/** The ids `apply` can draw in GL today; everything else must go the 2D path
- * or be reported as unsupported — never silently dropped. */
-export const GLSL_FX_IDS = new Set(Object.keys(BODY))
+/** The ids `apply` can draw in GL today — the registry's GL_EFFECT_IDS, every
+ * one of which must have a BODY below (a missing body fails closed: program()
+ * returns null and the caller reports the effect undrawn). */
+export const GLSL_FX_IDS = GL_EFFECT_IDS
 
 /** Splits a track stack into what this GL build can draw and what it cannot. */
 export function supportedStack(effects: readonly EffectInstance[]): {
