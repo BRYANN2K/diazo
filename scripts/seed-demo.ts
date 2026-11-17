@@ -468,8 +468,8 @@ export async function seedDemo(dataDir: string): Promise<Seeded> {
      for the demo: the landing trips errors, the dashboard warnings only, the
      pricing is clean — one badge of each tone. Written last, after every run
      that rewrites a frame, as passes with computed styles of the document
-     each frame shows now (`doc`): a client keeps such a verdict
-     (lintIsCurrent) instead of scoring it again */
+     each frame shows now (`doc`): a client keeps such a verdict instead
+     of scoring it again */
   const checkedAt = Date.now()
   const docOf = async (frameId: string) => lintDocKey(await c.json<LintDocument>('GET', `/api/frames/${frameId}`))
   await c.json('PUT', `/api/frames/${landing.id}/lint`, {

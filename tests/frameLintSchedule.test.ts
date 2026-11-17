@@ -14,7 +14,16 @@ const setFrameLint = vi.fn(async (_frameId: string, _lint: FrameLint | undefined
 
 vi.mock('../src/lib/posthog', () => ({ posthog: { capture: vi.fn() } }))
 vi.mock('../src/lib/frameBridge', () => ({ slopSnapshotOf: vi.fn(async () => ({})) }))
-vi.mock('../src/lib/api', () => ({ api: { setFrameLint } }))
+vi.mock('../src/lib/api', () => ({
+  api: { setFrameLint },
+  ApiError: class ApiError extends Error {
+    status: number
+    constructor(status: number, text: string) {
+      super(`${status} ${text}`)
+      this.status = status
+    }
+  },
+}))
 vi.mock('../shared/slopRules', async (original) => ({
   ...(await original<typeof import('../shared/slopRules')>()),
   lintSnapshot: () => ({
@@ -40,6 +49,7 @@ vi.mock('../src/lib/store', () => ({
 }))
 
 const { scheduleFrameLint } = await import('../src/lib/frameLint')
+const { ApiError } = await import('../src/lib/api')
 
 const verdictOf = (frame: Pick<Frame, 'html' | 'width' | 'height'>): FrameLint => ({
   score: 100,
@@ -94,6 +104,20 @@ describe('scheduleFrameLint', () => {
     expect(setFrameLint).not.toHaveBeenCalled()
   })
 
+  it('scores again a verdict that does not name this document', async () => {
+    /* a static pass, a pass under older rules, a verdict from before the
+       doc key: none of them stands for the document the frame shows */
+    const stale = verdictOf({ html: '<p>one</p>', width: 1440, height: 900 })
+    const staleFrames = [
+      addFrame({ lint: { ...stale, engine: 'static' } }),
+      addFrame({ lint: { ...stale, version: SLOP_RULES_VERSION - 1 } }),
+      addFrame({ lint: { ...stale, doc: undefined } }),
+    ]
+    for (const frame of staleFrames) scheduleFrameLint(frame)
+    await settle()
+    expect(setFrameLint).toHaveBeenCalledTimes(3)
+  })
+
   it('scores an own edit once: the optimistic html, then the server echo', async () => {
     let frame = addFrame()
     scheduleFrameLint(frame)
@@ -133,6 +157,31 @@ describe('scheduleFrameLint', () => {
     await settle()
     expect(setFrameLint).toHaveBeenCalledTimes(1)
     expect(setFrameLint.mock.calls[0]![1]!.doc).toBe(lintDocKey({ ...frame, width: 320 }))
+  })
+
+  it('scores a refused verdict again once the save echo lands', async () => {
+    let frame = addFrame()
+    scheduleFrameLint(frame)
+    /* a pointer held still mid-resize: the tab scores the previewed
+       size, the server still has the old document and answers 409 */
+    frame = write(frame, { width: 320 })
+    scheduleFrameLint(frame)
+    setFrameLint.mockRejectedValueOnce(new ApiError(409, 'the frame changed since this verdict was scored'))
+    await settle()
+    expect(setFrameLint).toHaveBeenCalledTimes(1)
+    /* the effect after the tab's own lint patch starts nothing */
+    scheduleFrameLint(frame)
+    /* on release the save's echo lands: the new size, the server's
+       older verdict */
+    frame = write(frame, { updatedAt: 9_000, lint: verdictOf({ html: frame.html, width: 1440, height: 900 }) })
+    scheduleFrameLint(frame)
+    await settle()
+    expect(setFrameLint).toHaveBeenCalledTimes(2)
+    expect(setFrameLint.mock.calls[1]![1]!.doc).toBe(lintDocKey(frame))
+    /* the accepted verdict closes it: no third PUT */
+    scheduleFrameLint(frame)
+    await settle()
+    expect(setFrameLint).toHaveBeenCalledTimes(2)
   })
 
   it('scores a remote edit once', async () => {
