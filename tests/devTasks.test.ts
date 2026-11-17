@@ -284,6 +284,33 @@ describe('applyDeviceReport', () => {
     expect(out.ok && out.task.finishedAt).toBeTypeOf('number')
   })
 
+  it('a replayed ok launch report does not drag a live row back to starting', async () => {
+    const { task } = await launch([frame.id])
+    await applyDeviceReport(owner.id, task.id, {
+      deviceId: DEVICE,
+      launch: { ok: true, orcaIdentity: 'wt2:mac:i1' },
+    })
+    await applyDeviceReport(owner.id, task.id, {
+      deviceId: DEVICE,
+      poll: { found: true, agentState: 'working' },
+    })
+    const replayed = await applyDeviceReport(owner.id, task.id, {
+      deviceId: DEVICE,
+      launch: { ok: true, orcaIdentity: 'wt2:mac:i1', branch: 'doop/new-screen-a1b2' },
+    })
+    expect(replayed.ok && replayed.task.state).toBe('working')
+    await applyAgentUpdate(owner.id, {
+      task_id: task.id,
+      state: 'pr_open',
+      pr_url: 'https://github.com/a/b/pull/5',
+    })
+    const replayedPr = await applyDeviceReport(owner.id, task.id, {
+      deviceId: DEVICE,
+      launch: { ok: true },
+    })
+    expect(replayedPr.ok && replayedPr.task.state).toBe('pr_open')
+  })
+
   it('ignores launch reports once the row is terminal', async () => {
     const { task } = await launch([frame.id])
     await applyDeviceReport(owner.id, task.id, {

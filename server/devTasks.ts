@@ -164,13 +164,13 @@ export function mergedPollState(task: StatusRow, next: DevTaskState | null): Dev
   return next
 }
 
-/** The launch answer against the row — never a terminal one: a late or
- *  replayed report must not move a `done` task back to `starting`. */
+/** The launch answer against the row — never a terminal one and never a
+ *  backwards one: a late or replayed report must not move a `done` task
+ *  back to `starting`, nor drag a `working`/`pr_open` row back either. */
 function launchState(task: StatusRow, launch: DevTaskLaunchReport): DevTaskState {
   if (launch.cancelled) return 'cancelled'
   if (launch.ok === false) return 'failed'
-  if (task.state === 'cancelled') return task.state
-  return 'starting'
+  return task.state === 'queued' ? 'starting' : task.state
 }
 
 const isTerminal = (state: DevTaskState) => TERMINAL.has(state)

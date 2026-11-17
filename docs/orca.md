@@ -59,10 +59,10 @@ The split of trust:
   row's `deviceId`. `requestId` settles the claimed bridge request — and
   must name that task's own `dev_task` job, not another launch's pending
   one. A `launch` with `cancelled` marks the task `cancelled`; `ok:false`
-  marks it `failed`; otherwise it stores the Orca identity and moves to
-  `starting`. Launch reports on a terminal row (`done`, `failed`,
-  `cancelled`) are ignored — a late or replayed answer cannot resurrect a
-  finished task.
+  marks it `failed`; an `ok` answer stores the Orca identity and only ever
+  moves `queued` to `starting` — a late or replayed report cannot drag a
+  `working`/`pr_open` row back, and launch reports on a terminal row
+  (`done`, `failed`, `cancelled`) are ignored outright.
 - `poll` carries a trimmed `worktree ps` row: `{ found, status?, agentState?,
 outcome?, lastAssistantMessage?, linkedPR?, orcaSessionId?, branch?,
 workspaceStatus?, devUrl? }`. `found:false` maps to `cancelled` — and is
