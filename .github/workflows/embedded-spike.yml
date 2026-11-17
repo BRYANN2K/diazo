@@ -1,0 +1,63 @@
+name: Embedded spike
+
+# Boots the bundled server (out/embedded-server, see scripts/build-server-bundle.ts)
+# under plain Node 22 on every desktop OS and asks it for real work, not only
+# /healthz: a sign-up and a canvas write prove PGlite, the migrations and
+# better-auth survived bundling. Manual only — it proves a build shape, so it
+# runs on demand instead of on every push.
+on:
+  workflow_dispatch:
+
+jobs:
+  boot-bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run build:server-bundle
+      - name: Boot the bundle and check it answers
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DOOP_DATA_DIR="$RUNNER_TEMP/diazo-data"
+          export DOOP_DIST_DIR="$PWD/out/embedded-server/dist"
+          export DOOP_MIGRATIONS_DIR="$PWD/out/embedded-server/migrations"
+          export DOOP_LISTEN_HOST=127.0.0.1
+          export NODE_ENV=production
+          export BETTER_AUTH_URL=http://127.0.0.1:4455
+          export BETTER_AUTH_SECRET=ci-spike-secret-not-a-real-one-32
+          export DOOP_UPDATE_CHECK=false
+          export PORT=4455
+          node out/embedded-server/server.mjs &
+          server_pid=$!
+          trap 'kill $server_pid 2>/dev/null || true' EXIT
+          up=
+          for _ in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:4455/healthz >/dev/null; then
+              up=1
+              break
+            fi
+            if ! kill -0 $server_pid 2>/dev/null; then
+              echo "the bundle exited before answering"
+              wait $server_pid || true
+              exit 1
+            fi
+            sleep 1
+          done
+          [ -n "$up" ] || { echo "/healthz did not answer in 60 s"; exit 1; }
+          curl -sf -c "$RUNNER_TEMP/cookies" -H 'Content-Type: application/json' \
+            -d '{"email":"ci@spike.local","password":"ci-spike-pass","name":"CI"}' \
+            "$BETTER_AUTH_URL/api/auth/sign-up/email" > /dev/null
+          canvas=$(curl -sf -b "$RUNNER_TEMP/cookies" -H 'Content-Type: application/json' \
+            -d '{"name":"spike"}' "$BETTER_AUTH_URL/api/canvases" \
+            | node -e "let s='';process.stdin.on('data',(d)=>s+=d).on('end',()=>console.log(JSON.parse(s).id))")
+          curl -sf -b "$RUNNER_TEMP/cookies" "$BETTER_AUTH_URL/api/canvases/$canvas" | grep -q '"spike"'
+          echo "the bundle serves a seeded canvas on $(uname -sm)"
