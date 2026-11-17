@@ -95,7 +95,7 @@ interface Pending {
   op: RepoOp
   args: RepoRequest['args']
   createdAt: number
-  /** how long the request may wait — write_change outlives reads, its
+  /** how long the request may wait — a write outlives reads, its
    *  native confirmation dialog can sit open on the device */
   ttl: number
   /** the device the request was handed to */

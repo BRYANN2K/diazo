@@ -1,6 +1,6 @@
 # Diazo product requirements
 
-What Diazo is, who it is for, and what it must do. Read by Bryan and by agents before they write a Stip proposal.
+What Diazo is, who it is for, and what it must do. Read by Bryan and by agents before they write a change proposal.
 
 Status: active, updated 2026-11-16
 
@@ -72,7 +72,7 @@ The full feature list is in [FEATURES.md](FEATURES.md).
 
 1. The builder links the canvas to a project folder in the desktop app.
 2. Tokens sync both ways and components are mapped to files.
-3. A frame marked ready for dev exports as a component or a Stip handoff, written only after a native dialog shows the diff.
+3. A frame marked ready for dev exports as a component, written only after a native dialog shows the diff — or launches an Orca dev task, which reads its brief over MCP.
 4. A preview deploy lands on the Built page beside its design, with a drift score.
 
 ### Reuse from a library
@@ -88,7 +88,7 @@ The full feature list is in [FEATURES.md](FEATURES.md).
 | M1  | A new Mac reaches a signed-in canvas on a local server      | one command                    | `.workflow/changes/mac-all-in-one-install/spec.md` AC-1 |
 | M2  | A film made from three frames exports without leaving Diazo | 15 s film, MP4 or WebM         | `.workflow/changes/motion-studio/spec.md` AC-2          |
 | M3  | ⌘F answers from a large library                             | 10,000 items within the budget | `.workflow/specs/design-libraries.md` (budget tests)    |
-| M4  | Every agent run is accounted for                            | tokens, time and cost recorded | usage meter tests; no Stip spec yet                     |
+| M4  | Every agent run is accounted for                            | tokens, time and cost recorded | usage meter tests; no spec yet                          |
 
 ## Principles
 

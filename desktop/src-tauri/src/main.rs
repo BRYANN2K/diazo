@@ -371,7 +371,6 @@ fn main() {
             repo::repo_list,
             repo::repo_read,
             repo::repo_search,
-            repo::repo_write_change,
             repo::repo_apply_patch,
             orca::orca_status,
             orca::orca_resolve_repo,

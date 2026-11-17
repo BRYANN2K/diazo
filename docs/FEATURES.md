@@ -122,14 +122,12 @@ upstream pull requests it merged ahead of upstream. Resync notes are in
   overflow, clipped text, tap targets under 44px) and walks it with the Tab key (WCAG AA text
   contrast, visible focus, tab order). An A11y badge on the frame and the Inspector's Quality
   section show the result, stored on the frame. Agents call `check_frame`.
-- **Handoff to Stip** — a frame marked ready for dev builds a Stip change pack, previewed in the
-  Inspector and plan cards, then written into the linked repo by the desktop app's single write
-  command (`repo_write_change`). Agents call `create_handoff`.
 - **Send to Orca** (desktop app) — a ready-for-dev frame can be sent to an Orca worktree on
   this Mac or a paired environment (the `vps` target): the desktop app creates the worktree
   and starts a coding agent in it after a native confirmation, and the canvas watches the
-  task's live state until the PR. The agent reads its handoff pack over MCP (`get_handoff`)
-  and reports with `update_dev_task`; nothing writes into the worktree and no absolute path
+  task's live state until the PR. The agent reads its brief — the frame's PNG export, the
+  canvas's design tokens and code links — over MCP (`get_handoff`) and reports with
+  `update_dev_task`; nothing writes into the worktree and no absolute path
   ever reaches the server ([docs/orca.md](orca.md)).
 - **Zoomed-out frame pictures** — frames too small for live documents show stored previews at
   their on-screen width. Edits keep the previous picture until its replacement loads. Unchanged
@@ -169,7 +167,7 @@ upstream pull requests it merged ahead of upstream. Resync notes are in
   the whole run back in one undo step (frames edited since need a confirmation).
 - **Component ↔ file mapping** — map a component or a frame to its file and export in the linked
   repo (`code_links`). The Inspector's Code row suggests the file from `repo_search` /
-  `repo_list`; `get_component`, `get_frame` and the Stip pack (`code-links.json`) carry the
+  `repo_list`; `get_component`, `get_frame` and a dev task's brief carry the
   mapping. Agents call `set_code_link` and `suggest_code_links`. Read-only on the repo.
 - **Token sync with the repo** — the Tokens panel reads the linked repo's CSS variables
   (`:root`, `@theme`, dark blocks as a theme) and Tailwind v3 theme, parsed without running them,

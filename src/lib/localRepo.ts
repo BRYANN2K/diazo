@@ -4,7 +4,7 @@ import type { RepoLink, RepoLinkStatus, RepoRequest, RepoResult } from '../../sh
 
 type Bridge = {
   __DOOP_LOCAL_REPO__?: boolean
-  /** the shell has repo_apply_patch (older shells only read and write_change) */
+  /** the shell has repo_apply_patch (older shells only read) */
   __DOOP_REPO_PATCH__?: boolean
   __TAURI__?: {
     core: { invoke: <T>(command: string, args?: Record<string, unknown>) => Promise<T> }

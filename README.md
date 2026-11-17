@@ -100,7 +100,7 @@ The canvas holds frames that render real HTML. People edit them in the browser o
 ### Design to code
 
 - The desktop app links a canvas to a project folder; the agent reads and searches it, and any write waits for a native confirmation.
-- A frame marked ready for dev becomes a Stip change pack, written into the repo after a dialog lists every file.
+- A frame marked ready for dev can be sent to an Orca dev task: the desktop app creates a worktree and starts a coding agent, which reads its brief — PNG export, design tokens, code links — over MCP.
 - Components and frames map to their files in the repo, and the Inspector suggests the file.
 - Token sync reads the repo's CSS variables and Tailwind theme, shows the diff and applies the ticked values in either direction as a reviewed patch.
 - A frame exports as a React or Astro component — token values become `var(--token)`, mapped components import from their files — previewed as a diff first.

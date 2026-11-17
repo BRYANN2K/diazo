@@ -37,7 +37,7 @@ export async function purgeUserData(userId: string): Promise<{ deletedCanvases: 
     }
   }
   /* dev tasks on canvases that outlive the account (shared, workspace):
-     the stored handoff packs must not — the rows on deleted canvases
+     the stored briefs must not — the rows on deleted canvases
      already went with them */
   await db.delete(frameDevTasks).where(eq(frameDevTasks.requestedByUserId, userId))
   for (const workspaceId of workspaceIdsFor(userId)) await leaveWorkspace(workspaceId, userId)

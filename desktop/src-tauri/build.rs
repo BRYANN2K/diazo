@@ -34,7 +34,6 @@ fn main() {
             "repo_list",
             "repo_read",
             "repo_search",
-            "repo_write_change",
             "repo_apply_patch",
             "orca_status",
             "orca_resolve_repo",

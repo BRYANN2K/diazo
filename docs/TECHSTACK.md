@@ -255,8 +255,9 @@ Status: current, updated 2026-11-17
   `localAgentRouting.test.ts`.
 - Orca dev tasks (`shared/devTasks.ts`, `server/devTasks.ts`,
   `desktop/src-tauri/src/orca.rs`, docs/orca.md): a `ready_for_dev` frame can be sent to an
-  Orca worktree. `POST /api/frames/:id/dev-tasks` builds the handoff pack, writes a
-  `frame_dev_tasks` row (migration 0072; `frameIds`, the pack, the Orca `wt2:` identity —
+  Orca worktree. `POST /api/frames/:id/dev-tasks` builds the brief (the frame's PNG export,
+  the canvas's design tokens and code links), writes a
+  `frame_dev_tasks` row (migration 0072; `frameIds`, the brief, the Orca `wt2:` identity —
   never a path) and hands a `dev_task` `RepoRequest` to the requester's desktop over the
   `/api/local-repo/poll` bridge, which only a device holding the canvas's repo grant may
   claim. The shell's typed commands (`orca_status`, `orca_resolve_repo`,

@@ -19,10 +19,9 @@ import {
 import { buildMcpServer } from '../server/mcp.ts'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import type { HandoffPack } from '../shared/handoff.ts'
 import { REPO_POLL_MS, type RepoLink } from '../shared/localRepo.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
-import { DEV_TASK_LAUNCH_TTL_MS, type DevTaskState } from '../shared/devTasks.ts'
+import { DEV_TASK_LAUNCH_TTL_MS, type DevTaskBrief, type DevTaskState } from '../shared/devTasks.ts'
 
 /**
  * Dev tasks against an in-memory PGlite: the launch job really rides the
@@ -55,18 +54,10 @@ let canvas: Canvas
 let frame: Frame
 let broadcasts: { canvasId: string; msg: unknown }[]
 
-const fakePack = (changeId = 'new-screen-a1b2'): HandoffPack => ({
-  changeId,
-  dir: `.workflow/changes/${changeId}`,
+const fakeBrief = (): DevTaskBrief => ({
   title: 'New screen',
-  proposal: '# Proposal\n',
-  spec: '# Spec\n\n- AC-1: it works\n',
-  tasks: '# Tasks\n',
-  files: [
-    { path: `.workflow/changes/${changeId}/spec.md`, text: '# Spec\n\n- AC-1: it works\n' },
-    { path: `.workflow/changes/${changeId}/assets/frame-1.png`, base64: 'aGVsbG8=' },
-  ],
-  draftedBy: 'template',
+  canvasId: canvas.id,
+  frames: [{ id: 'frame-1', name: 'Checkout', width: 800, height: 600, png: 'aGVsbG8=' }],
   warnings: [],
 })
 
@@ -77,7 +68,7 @@ async function launch(frameIds: string[], extra: Partial<Parameters<typeof creat
     canvasId: canvas.id,
     frameIds,
     frameRevision: 42,
-    pack: fakePack(),
+    brief: fakeBrief(),
     link: LINK,
     userId: owner.id,
     userName: owner.name,
@@ -156,8 +147,8 @@ describe('createDevTask', () => {
       args: {
         devTask: {
           taskId: task.id,
-          worktreeName: 'doop-new-screen-a1b2',
-          branch: 'doop/new-screen-a1b2',
+          worktreeName: `doop-new-screen-${task.id.toLowerCase()}`,
+          branch: `doop/new-screen-${task.id.toLowerCase()}`,
           agent: 'claude',
           model: 'opus',
           effort: 'high',
@@ -169,9 +160,9 @@ describe('createDevTask', () => {
     expect(args.prompt).toContain(`get_handoff({ task_id: "${task.id}" })`)
     expect(args.prompt).toContain('update_dev_task')
     expect(args.comment).toContain(`/c/${canvas.id}?frame=${frame.id}`)
-    /* nothing on the row carries a path or the pack itself */
+    /* nothing on the row carries a path or the brief itself */
     const stored = await row(task.id)
-    expect(stored?.handoff.changeId).toBe('new-screen-a1b2')
+    expect(stored?.handoff.title).toBe('New screen')
     expect(JSON.stringify(task)).not.toContain('/Users/')
     expect(broadcasts.at(-1)).toMatchObject({ canvasId: canvas.id, msg: { type: 'dev-task', task: { id: task.id } } })
   })
@@ -182,7 +173,7 @@ describe('createDevTask', () => {
       canvasId: canvas.id,
       frameIds: [frame.id],
       frameRevision: null,
-      pack: fakePack(),
+      brief: fakeBrief(),
       link: LINK,
       userId: 'user-without-device',
       userName: 'Ghost',
@@ -448,7 +439,7 @@ describe('cancel', () => {
       canvasId: canvas.id,
       frameIds: [frame.id],
       frameRevision: null,
-      pack: fakePack(),
+      brief: fakeBrief(),
       link: LINK,
       userId: owner.id,
       userName: owner.name,
@@ -509,16 +500,15 @@ describe('failStaleDevTasks', () => {
 })
 
 describe('MCP tools', () => {
-  it('get_handoff hands the requester’s agent the stored pack', async () => {
+  it('get_handoff hands the requester’s agent the stored brief', async () => {
     const { task } = await launch([frame.id])
     const mcp = await mcpFor(owner.id)
     const result = await mcp.call('get_handoff', { task_id: task.id })
     const content = result.content as { type: string; text?: string; data?: string; mimeType?: string }[]
     const header = JSON.parse(content[0]!.text!)
     expect(header.task).toMatchObject({ id: task.id, canvasId: canvas.id, frameIds: [frame.id] })
-    expect(header.files).toContain('.workflow/changes/new-screen-a1b2/spec.md')
-    const spec = content.find((b) => b.type === 'text' && b.text!.startsWith('--- '))
-    expect(spec?.text).toContain('AC-1: it works')
+    expect(header.title).toBe('New screen')
+    expect(header.frames).toEqual([{ id: 'frame-1', name: 'Checkout', width: 800, height: 600 }])
     const png = content.find((b) => b.type === 'image')
     expect(png).toMatchObject({ mimeType: 'image/png', data: 'aGVsbG8=' })
     await mcp.close()
@@ -559,7 +549,7 @@ describe('MCP tools', () => {
       canvasId: canvas.id,
       frameIds: [frame.id],
       frameRevision: null,
-      pack: fakePack(),
+      brief: fakeBrief(),
       link: LINK,
       userId: 'user-2',
       userName: 'Agent Two',

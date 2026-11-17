@@ -1,7 +1,7 @@
 # Releasing Diazo
 
 How a Diazo release is versioned, built, published and verified: the server image, the local and desktop installers, and the desktop app. Read by Bryan and by agents that cut a release or change the pipeline.
-Status: last desktop release `desktop-v0.15.0` (2026-11-15), unverified under Stip; updated 2026-11-16
+Status: last desktop release `desktop-v0.15.0` (2026-11-15), unverified; updated 2026-11-16
 
 ## At a glance
 

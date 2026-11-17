@@ -4,7 +4,7 @@ What gets built, in what order, and where each piece stands. Read by Bryan and b
 
 Status: active, updated 2026-11-16
 
-Each row is a Stip change in `.workflow/changes/<id>/`. Status is its Stip phase. No change below has been checked under Stip yet: the code on the branches exists, but its evidence is not recorded.
+Each row is a change in `.workflow/changes/<id>/`. Status is its workflow phase. No change below has been checked yet: the code on the branches exists, but its evidence is not recorded.
 
 ## Now
 
@@ -46,13 +46,13 @@ Orca phases, from [its proposal](../.workflow/changes/orca-integration/proposal.
 
 | Change                   | AC         | What is missing                                                          |
 | ------------------------ | ---------- | ------------------------------------------------------------------------ |
-| `motion-studio-backend`  | AC-1–AC-11 | Approval, then `stip-check` on the branch: CI suite and Rust tests       |
+| `motion-studio-backend`  | AC-1–AC-11 | Approval, then the change check on the branch: CI suite and Rust tests   |
 | `frontend-redesign`      | AC-1–AC-7  | Approval, then screenshots in light and dark against the redesign frames |
 | `mac-all-in-one-install` | AC-1–AC-9  | Approval, then a run on a clean Apple silicon Mac with macOS 26          |
 
 ## Done
 
-Built before Stip and migrated by hand; each `archive-note.md` names the merge commits. No Stip evidence.
+Built before the change workflow and migrated by hand; each `archive-note.md` names the merge commits. No recorded evidence.
 
 | Change               | Archived   | Spec                                    |
 | -------------------- | ---------- | --------------------------------------- |

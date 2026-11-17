@@ -19,20 +19,20 @@ ADRs 0001 to 0012 record decisions Bryan made before this index existed; their d
 
 ## Index
 
-| ADR                                                                   | Decision                                                                           | Status                       |
-| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ---------------------------- |
-| [0001](0001-fork-doop-as-an-independent-project.md)                   | Fork doop as an independent project                                                | Accepted, 2026-11-12         |
-| [0002](0002-rename-the-fork-to-diazo.md)                              | Rename the fork to Diazo and keep internal doop identifiers                        | Accepted, 2026-11-15         |
-| [0003](0003-keep-agpl-and-stay-non-commercial.md)                     | Keep the AGPL-3.0 licence and stay non-commercial                                  | Accepted, 2026-11-15         |
-| [0004](0004-expose-the-instance-over-tailscale-only.md)               | Expose the owner instance over Tailscale only                                      | Accepted, 2026-11-12         |
-| [0005](0005-use-pglite-when-no-database-is-configured.md)             | Use an embedded PGlite when no database is configured                              | Accepted, 2026-11-14         |
-| [0006](0006-merge-through-dev-staging-and-main.md)                    | Merge through dev, staging and main by pull request                                | Accepted, 2026-11-16         |
-| [0007](0007-ship-the-desktop-app-from-our-own-releases.md)            | Ship the desktop app from the fork releases, unnotarized, through a curl installer | Accepted, 2026-11-15         |
-| [0008](0008-run-local-cli-agents-over-acp-through-the-desktop-app.md) | Run local CLI agents over ACP through the desktop app                              | Accepted, 2026-11-15         |
-| [0009](0009-store-one-motion-composition-per-page.md)                 | Store one motion composition per ordinary page                                     | Accepted, 2026-11-15         |
-| [0010](0010-adopt-the-hyperframes-contract-with-a-waapi-runtime.md)   | Adopt the HyperFrames timing contract with a WAAPI and CSS runtime, without GSAP   | Accepted, 2026-11-15         |
-| [0011](0011-reach-blender-through-the-desktop-app.md)                 | Reach Blender as an MCP server through the desktop app                             | Accepted, 2026-11-15         |
-| [0012](0012-self-host-the-ui-fonts.md)                                | Self-host the UI fonts (Direction B Hyperlegible)                                  | Accepted, 2026-11-15         |
-| [0013](0013-plan-work-with-stip.md)                                   | Plan and track work with Stip                                                      | Accepted, updated 2026-11-16 |
-| [0014](0014-run-speech-engines-on-the-desktop-or-the-server.md)       | Run speech engines on the desktop or the server, voice-over on ElevenLabs too      | Accepted, 2026-11-16         |
-| [0015](0015-run-agent-scripts-in-a-quickjs-wasm-sandbox.md)           | Run agent scripts as TypeScript in a QuickJS WebAssembly sandbox                   | Accepted, 2026-11-16         |
+| ADR                                                                   | Decision                                                                           | Status                                     |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------ |
+| [0001](0001-fork-doop-as-an-independent-project.md)                   | Fork doop as an independent project                                                | Accepted, 2026-11-12                       |
+| [0002](0002-rename-the-fork-to-diazo.md)                              | Rename the fork to Diazo and keep internal doop identifiers                        | Accepted, 2026-11-15                       |
+| [0003](0003-keep-agpl-and-stay-non-commercial.md)                     | Keep the AGPL-3.0 licence and stay non-commercial                                  | Accepted, 2026-11-15                       |
+| [0004](0004-expose-the-instance-over-tailscale-only.md)               | Expose the owner instance over Tailscale only                                      | Accepted, 2026-11-12                       |
+| [0005](0005-use-pglite-when-no-database-is-configured.md)             | Use an embedded PGlite when no database is configured                              | Accepted, 2026-11-14                       |
+| [0006](0006-merge-through-dev-staging-and-main.md)                    | Merge through dev, staging and main by pull request                                | Accepted, 2026-11-16                       |
+| [0007](0007-ship-the-desktop-app-from-our-own-releases.md)            | Ship the desktop app from the fork releases, unnotarized, through a curl installer | Accepted, 2026-11-15                       |
+| [0008](0008-run-local-cli-agents-over-acp-through-the-desktop-app.md) | Run local CLI agents over ACP through the desktop app                              | Accepted, 2026-11-15                       |
+| [0009](0009-store-one-motion-composition-per-page.md)                 | Store one motion composition per ordinary page                                     | Accepted, 2026-11-15                       |
+| [0010](0010-adopt-the-hyperframes-contract-with-a-waapi-runtime.md)   | Adopt the HyperFrames timing contract with a WAAPI and CSS runtime, without GSAP   | Accepted, 2026-11-15                       |
+| [0011](0011-reach-blender-through-the-desktop-app.md)                 | Reach Blender as an MCP server through the desktop app                             | Accepted, 2026-11-15                       |
+| [0012](0012-self-host-the-ui-fonts.md)                                | Self-host the UI fonts (Direction B Hyperlegible)                                  | Accepted, 2026-11-15                       |
+| [0013](0013-plan-work-with-stip.md)                                   | Plan and track work with Stip                                                      | Superseded — product dropped the Stip pack |
+| [0014](0014-run-speech-engines-on-the-desktop-or-the-server.md)       | Run speech engines on the desktop or the server, voice-over on ElevenLabs too      | Accepted, 2026-11-16                       |
+| [0015](0015-run-agent-scripts-in-a-quickjs-wasm-sandbox.md)           | Run agent scripts as TypeScript in a QuickJS WebAssembly sandbox                   | Accepted, 2026-11-16                       |

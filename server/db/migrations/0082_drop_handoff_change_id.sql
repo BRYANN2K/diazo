@@ -1,0 +1,1 @@
+ALTER TABLE "frame_dev_tasks" DROP COLUMN "handoff_change_id";

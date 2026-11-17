@@ -93,8 +93,8 @@ Avoid: battle, A/B.
 **Code link.** A mapping from a component or frame to a file and export in the linked project.
 Code: `code_links`.
 
-**Handoff.** The Stip change pack built from a frame marked ready for dev, written into the linked project after a native confirmation.
-Code: `create_handoff`, `repo_write_change`.
+**Handoff.** The brief stored on a dev task launched from a ready-for-dev frame: title, frame PNG exports, the canvas's design tokens and code links, served to the coding agent over MCP.
+Code: `get_handoff`.
 
 **Built page.** A page that receives the routes of a preview deploy, each beside its designed frame with a drift score.
 
