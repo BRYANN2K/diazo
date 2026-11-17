@@ -133,8 +133,8 @@ installers' own overrides; the user-facing defaults are unchanged). `linux-docke
 and `linux-podman` (Docker hidden from PATH; keep-id asserted) run
 `install-local.sh` and `install.sh --server-only`, drive `diazo
 status|stop|start|update` and check `--uninstall --purge` leaves nothing;
-`linux-desktop` installs the .deb then the AppImage of the latest `desktop-v*`
-release; `windows-desktop` runs `install-desktop.ps1` through `iex` against a
+`linux-desktop` installs the .deb then the AppImage of the pinned
+`desktop-v0.15.0` release (`--version 0.15.0`, asserted after the install); `windows-desktop` runs `install-desktop.ps1` through `iex` against a
 server started from the checkout. Fedora with SELinux enforcing is not covered:
 there is no Fedora runner and a container inherits the host's kernel, so the `:Z`
 relabel and rpm branches stay covered by the unit tests only.

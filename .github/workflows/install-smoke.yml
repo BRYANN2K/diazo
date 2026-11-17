@@ -320,8 +320,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # The .deb path needs no image: it downloads the latest desktop-v* release
-  # assets from GitHub, like a user's machine does.
+  # The .deb path needs no image: it downloads the pinned desktop-v0.15.0
+  # release assets from GitHub, like a user's machine does with --version.
   linux-desktop:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -339,21 +339,23 @@ jobs:
         run: sudo apt-get update
 
       - name: Install the .deb package
-        run: sh scripts/install-desktop.sh 2>&1 | tee "$RUNNER_TEMP/desktop-deb.log"
+        run: sh scripts/install-desktop.sh --version 0.15.0 2>&1 | tee "$RUNNER_TEMP/desktop-deb.log"
 
       - name: Assert the package is installed
         run: |
           dpkg -s diazo | grep -E '^(Package|Version|Status):'
+          # epoch and Debian revision stripped, like the installer's own check
+          test "$(dpkg-query -W -f '${Version}' diazo | sed -e 's/^[0-9]*://' -e 's/[+-].*//')" = 0.15.0
           command -v doop-desktop
           dpkg -L diazo | tee "$RUNNER_TEMP/dpkg-files.log"
           grep -q 'share/applications/.*\.desktop$' "$RUNNER_TEMP/dpkg-files.log"
 
       - name: Install the AppImage
-        run: sh scripts/install-desktop.sh --appimage 2>&1 | tee "$RUNNER_TEMP/desktop-appimage.log"
+        run: sh scripts/install-desktop.sh --appimage --version 0.15.0 2>&1 | tee "$RUNNER_TEMP/desktop-appimage.log"
 
       - name: Assert the AppImage is in place
         run: |
-          appimage=$(find "$HOME" -name 'Diazo_*_amd64.AppImage' -print -quit)
+          appimage=$(find "$HOME" -name 'Diazo_0.15.0_amd64.AppImage' -print -quit)
           test -n "$appimage"
           test -x "$appimage"
           test -f "$HOME/.local/share/applications/doop-desktop-appimage.desktop"
