@@ -24,7 +24,8 @@ every measured metric except cold render, where it is within noise.
   `bun add --os --cpu` (npm's same flags skip the optional `@img/*` packages entirely).
 - Env switches added in `server/env.ts` and honoured by the server: `DOOP_DATA_DIR` (PGlite,
   assets, legacy `store.json`), `DOOP_DIST_DIR`, `DOOP_MIGRATIONS_DIR`, `DOOP_LISTEN_HOST`
-  (bind `127.0.0.1` for embedded; unset keeps the container's all-interfaces behaviour).
+  (override for the non-embedded bind; `DOOP_EMBEDDED` always binds `127.0.0.1` and warns
+  when a non-loopback value is set).
 - `.github/workflows/embedded-spike.yml`: workflow-dispatch only, builds and boots the
   bundle on `ubuntu-latest`, `macos-latest`, `windows-latest`, hits `/healthz`, then signs up
   and writes a canvas. **Not run** — the branch is not pushed.
@@ -133,15 +134,23 @@ What landed on top of P0:
   `/dev/null` and the server would exit at once), `DOOP_BROWSER_DIR`, `DOOP_INSTALL=desktop`
   (also inferred from `DOOP_EMBEDDED`; the server skips its own update check — the app's
   updater ships both).
-- `server/dataLock.ts`: one server per data dir via `<data>/server.lock` (pid + host +
-  heartbeat); a live holder is refused, a dead pid or a stale foreign heartbeat is
-  reclaimed. Skipped only when `DATABASE_URL` and `BUCKET` are both set (no local state).
+- `server/dataLock.ts`: one server per data dir, proven by the OS. `<data>/server.lock` is
+  an O_EXCL claim file (holder pid + host + heartbeat); `<data>/server.lock.sock` is a unix
+  socket the holder binds for its lifetime — a refused connection is the kernel's proof the
+  holder is gone, so no pid or hostname comparison decides liveness (a same-pid neighbour in
+  another container cannot fake it). A live holder is refused before any protected state is
+  touched; a provably dead claim is moved aside and re-created under the same O_EXCL gate.
+  Skipped only when `DATABASE_URL` and `BUCKET` are both set (no local state).
 - `server/backup.ts`: `<data>/backups/pg-<date>.tar.gz` plus a
   `<data>/backups/pg-<date>.assets.json` manifest of on-disk assets; runs before applying
-  pending migrations and once a day; keeps the newest 7 pairs. The daily dump is PGlite's
-  `dumpDataDir('gzip')` streamed to disk; the pre-migration one snapshots the closed `pg/`
-  with `fs.cp` and streams its own tar.gz, so a multi-GB data dir never lands in memory.
-  Archives go through a `.tmp` name + rename.
+  pending migrations (on any populated database — journal or not — an empty cluster has
+  nothing to lose) and once a day; keeps the newest 7 complete pairs. Both paths stream a
+  ustar.gz a block at a time, so a multi-GB data dir never lands in memory: the live one
+  brackets the file copy with `pg_backup_start`/`pg_backup_stop`, then a second `pg_wal`
+  pass and the `backup_label` pg_backup_stop hands back — the same file-level backup
+  Postgres sanctions, which a bare `tar -xzf` restores. The pre-migration one tars the
+  quiescent `pg/` in place. The manifest renames in before the archive, whose name is the
+  completion marker, and real file modes are kept so an extracted dir stays traversable.
 - Migration guards in `server/db/index.ts`: refuses a data dir stamped by a newer migration
   set (newer `created_at` than the bundled journal, or more applied rows than the journal
   has), backs up first when rows exist and migrations are pending.
