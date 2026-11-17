@@ -366,9 +366,6 @@ export const SCRIPT_TOOL_COVERAGE: Record<string, { sdk: string } | { excluded: 
   get_frame_screenshot: {
     excluded: 'Images must return through a dedicated screenshot tool; SDK checks return numbers.',
   },
-  create_handoff: {
-    excluded: 'External resource, generation, upload or export; requires its dedicated tool.',
-  },
   get_handoff: {
     excluded: 'External resource, generation, upload or export; requires its dedicated tool.',
   },
