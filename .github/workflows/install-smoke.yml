@@ -97,7 +97,7 @@ jobs:
       - name: Load the image and serve it from a local registry
         run: |
           gunzip -c "$RUNNER_TEMP/diazo-image.tar.gz" | docker load
-          docker run -d --name registry -p 5000:5000 registry:2
+          docker run -d --name registry -p 127.0.0.1:5000:5000 registry:2
           for i in $(seq 1 30); do
             curl -fsS -o /dev/null http://localhost:5000/v2/ && break
             [ "$i" = 30 ] && exit 1
@@ -226,7 +226,7 @@ jobs:
       - name: Load the image and serve it from a local registry
         run: |
           gunzip -c "$RUNNER_TEMP/diazo-image.tar.gz" | podman load
-          podman run -d --name registry -p 5000:5000 docker.io/library/registry:2
+          podman run -d --name registry -p 127.0.0.1:5000:5000 docker.io/library/registry:2
           for i in $(seq 1 30); do
             curl -fsS -o /dev/null http://localhost:5000/v2/ && break
             [ "$i" = 30 ] && exit 1
