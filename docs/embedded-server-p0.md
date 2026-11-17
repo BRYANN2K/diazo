@@ -117,7 +117,61 @@ stopped-container start, not a fresh VM.
   What the bundle buys instead is startup, disk footprint and no container runtime.
 - Observed leak risk for embedded mode: ~16 orphaned headless-Chrome processes (ppid=1, up to
   2 days old, ~45 MB each) sat on this machine from earlier kills of dev servers. A sidecar
-  that dies without reaping its render browser leaves real memory behind — P2 should track it.
+  that dies without reaping its render browser leaves real memory behind — fixed in P1
+  (`server/browserGuard.ts`, see below).
+
+## P1 — relocatable server (measured 2026-11-17, `feat/embedded-server-spike`)
+
+What landed on top of P0:
+
+- `server/paths.ts`: every mutable path resolves under `DOOP_DATA_DIR` (PGlite, assets,
+  backups, `server.lock`, browser profiles); runtime resources resolve beside the bundle
+  (`import.meta.url`) so `DOOP_DIST_DIR`/`DOOP_MIGRATIONS_DIR` are only overrides, never
+  required. The install dir stays read-only at runtime.
+- Env switches: `DOOP_EMBEDDED=1` (stdin-close shutdown + `ready <port>` on stdout once
+  listening), `DOOP_BROWSER_DIR`, `DOOP_INSTALL=desktop` (also inferred from
+  `DOOP_EMBEDDED`; the server skips its own update check — the app's updater ships both).
+- `server/dataLock.ts`: one server per data dir via `<data>/server.lock` (pid + host +
+  heartbeat); a live holder is refused, a dead pid or a stale foreign heartbeat is
+  reclaimed. Skipped only when `DATABASE_URL` and `BUCKET` are both set (no local state).
+- `server/backup.ts`: `<data>/backups/pg-<date>.tar.gz` (PGlite `dumpDataDir('gzip')`) plus a
+  `<data>/backups/pg-<date>.assets.json` manifest of on-disk assets; runs before applying
+  pending migrations and once a day; keeps the newest 7 pairs.
+- Migration guards in `server/db/index.ts`: refuses a data dir stamped by a newer migration
+  set (newer `created_at` than the bundled journal, or more applied rows than the journal
+  has), backs up first when rows exist and migrations are pending.
+- `server/browserGuard.ts`: the leak fix. Each launched browser is killed by its process
+  group (`kill(-pid)` POSIX, `taskkill /t` Windows) from a synchronous `exit` hook, and a
+  detached `node -e` watchdog reaps the group when the server dies without hooks (kill -9).
+  A cleanly terminated browser is released (watchdog killed, profile removed), so a reused
+  pid is never reaped. Profiles live under `<data>/browser/profile-*`.
+- `scripts/build-embedded-server.ts` (`bun run build:embedded-server`) replaces the P0
+  script: minified bundle, `--web-src` for a prebuilt web root, and the prunes below.
+
+### Bundle sizes after the P1 prunes (darwin-arm64, measured)
+
+| Part                                    | P0          | P1          |
+| --------------------------------------- | ----------- | ----------- |
+| `server.mjs`                            | 12.9 MB     | 6.6 MB      |
+| `node_modules` (sharp + PGlite, native) | 41.8 MB     | 33.2 MB     |
+| `migrations/`                           | 6.7 MB      | 0.05 MB     |
+| `dist/` (web)                           | 24.4 MB     | 15.2 MB     |
+| `backgrounds.json`                      | 0.1 MB      | 0.1 MB      |
+| **Total**                               | **85.8 MB** | **55.1 MB** |
+
+Cheap wins only: esbuild minify (12.9 → 6.6), `dist/*.map` dropped (browser devtools fetch
+them only on demand, never needed by the server), `migrations/meta/*.json` snapshots dropped
+(drizzle-kit inputs; the migrator reads only `.sql` + `_journal.json`), and inside
+`node_modules` — `.d.ts`/`.map` everywhere, PGlite's 37 contrib `.tar.gz` extensions (no
+`CREATE EXTENSION` in the journal), its `cjs`/`live`/`worker`/`templating`/`opfs-ahp` trees,
+and sharp's `src/`. PGlite's `pglite.wasm`/`initdb.wasm`/`pglite.data` and every `@img/*`
+package stay — they are loaded by path.
+
+Verified by `tests/embeddedBundle.test.ts`: builds the bundle, copies it to a read-only
+install dir, boots `node server.mjs` from a separate cwd, reads `ready <port>`, answers on
+`127.0.0.1` (refuses every external interface), writes nothing outside `DOOP_DATA_DIR`, and
+exits when stdin closes. `tests/browserGuard.test.ts` proves the exit-hook and the kill -9
+watchdog paths both reap the browser process group.
 
 ### Verdicts against plan §3 targets
 
@@ -131,8 +185,8 @@ stopped-container start, not a fresh VM.
 ## Go / no-go — Node + esbuild + PGlite
 
 **Go.** The build shape works on every system it could be checked on, boots in ~1 s, and the
-only bundling bugs found (eager `pg` import, skipped platform packages) are fixed in
-`build-server-bundle.ts`, not in the architecture.
+only bundling bugs found (eager `pg` import, skipped platform packages) are fixed in the
+build script, not in the architecture.
 
 On the three PGlite risks the plan called out:
 
@@ -159,10 +213,9 @@ Windows remains unproven until the workflow can run; Linux x64/arm64 were proven
 ## Reproduce
 
 ```sh
-# build and boot the bundle
-bun run build:server-bundle
-DOOP_DATA_DIR=/tmp/diazo-data DOOP_DIST_DIR=$PWD/out/embedded-server/dist \
-DOOP_MIGRATIONS_DIR=$PWD/out/embedded-server/migrations DOOP_LISTEN_HOST=127.0.0.1 \
+# build and boot the bundle (P1: dist/ and migrations/ resolve beside server.mjs)
+bun run build:embedded-server
+DOOP_DATA_DIR=/tmp/diazo-data DOOP_LISTEN_HOST=127.0.0.1 \
 NODE_ENV=production BETTER_AUTH_URL=http://127.0.0.1:4455 PORT=4455 \
 BETTER_AUTH_SECRET=<32+ chars> node out/embedded-server/server.mjs
 
