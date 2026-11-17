@@ -69,8 +69,9 @@ export function ZoomControls({
   return (
     <Toolbar
       className={cn(
-        /* above the Motion timeline while it is open (--chrome-bottom, set by the page) */
-        'absolute bottom-[calc(64px+env(safe-area-inset-bottom))] z-[35] h-9 gap-0.5 px-1 py-0 transition-[right,bottom] duration-150 ease-[ease] md:bottom-[calc(var(--chrome-bottom,0px)+14px)]',
+        /* above the Motion timeline while it is open (--chrome-bottom, set by the page);
+           on phones it jumps to its new place, as before */
+        'absolute bottom-[calc(64px+env(safe-area-inset-bottom))] z-[35] h-9 gap-0.5 px-1 py-0 transition-[right] duration-150 ease-[ease] md:bottom-[calc(var(--chrome-bottom,0px)+14px)] md:transition-[right,bottom]',
         /* on phones the tool strip runs along the bottom, with its drawing hint above it */
         drawing && 'max-md:bottom-[calc(124px+env(safe-area-inset-bottom))]',
         /* beside the account island and whatever panels are open — the page
