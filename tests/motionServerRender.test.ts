@@ -1,3 +1,7 @@
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RenderJob } from '../shared/motion.ts'
 
@@ -78,8 +82,9 @@ describe('render-scoped tokens', () => {
 
 /* a page stub shaped like what renderInPage touches: the network guard's
    plumbing calls, the cookie/viewport/goto setup, then evaluate() doing
-   the harness's seek/capture (or WebCodecs encode) work */
-function stubPage(evaluate: (expr: string) => unknown) {
+   the harness's seek/capture (or WebCodecs encode) work. `ready` is what
+   the harness readiness race resolves — 'ready' unless the test fails it */
+function stubPage(evaluate: (expr: string) => unknown, ready: unknown = 'ready') {
   const calls = {
     seeks: [] as number[],
     cookie: undefined as Record<string, unknown> | undefined,
@@ -108,14 +113,15 @@ function stubPage(evaluate: (expr: string) => unknown) {
       if (seek && expr.includes('__doopMotionSeek') && !expr.includes('__doopWebm')) {
         calls.seeks.push(Number(seek[1]))
       }
+      if (expr.includes('__doopMotionReady')) return ready
       return evaluate(expr)
     },
   }
   return { page, calls }
 }
 
-function openStub(evaluate: (expr: string) => unknown) {
-  const { page, calls } = stubPage(evaluate)
+function openStub(evaluate: (expr: string) => unknown, ready: unknown = 'ready') {
+  const { page, calls } = stubPage(evaluate, ready)
   vi.spyOn(renderDeps, 'openIsolatedPage').mockResolvedValue({
     page: page as never,
     close: async () => {
@@ -203,24 +209,46 @@ describe('the render worker', () => {
 
   it('encodes webm frame by frame at explicit timestamps', async () => {
     const job: RenderJob = { ...JOB, format: 'webm' }
-    const calls = openStub((expr) => {
+    const frames: { t: number; ts: number; key: boolean }[] = []
+    openStub((expr) => {
       if (expr.includes('VideoEncoder.isConfigSupported')) return 'vp8'
       if (expr.includes('encoder.flush')) return []
-      const m = /\(\{\\"t\\":(-?[\d.]+),\\"ts\\":(\d+)/.exec(JSON.stringify(expr))
-      void m
-      if (expr.includes('VideoFrame')) {
-        const ts = Number(/"ts":(\d+)/.exec(expr.replace(/\\/g, ''))?.[1] ?? 0)
+      const args = /\(\{"t":(-?[\d.]+),"ts":(\d+),"key":(true|false)\}\)\s*$/.exec(expr)
+      if (args && expr.includes('VideoFrame')) {
+        const ts = Number(args[2])
+        frames.push({ t: Number(args[1]), ts, key: args[3] === 'true' })
         return [{ type: ts === 0 ? 'key' : 'delta', ts, data: Buffer.from([ts % 251]).toString('base64') }]
       }
       return PNG
     })
     await runServerRender(job)
+    /* 2 s at 2 fps: four seeks in seconds and a microsecond timestamp on
+       each VideoFrame — the clock is the job's, never the wall's */
+    expect(frames).toEqual([
+      { t: 0, ts: 0, key: true },
+      { t: 0.5, ts: 500_000, key: false },
+      { t: 1, ts: 1_000_000, key: false },
+      { t: 1.5, ts: 1_500_000, key: false },
+    ])
     const stored = vi.mocked(storeAsset).mock.calls[0]!
     /* EBML magic: the file was muxed server-side from encoded chunks */
     expect(stored[0].subarray(0, 4)).toEqual(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))
     expect(stored[1]).toMatchObject({ mime: 'video/webm', ext: 'webm' })
     expect(stored[0].includes(Buffer.from('V_VP8'))).toBe(true)
-    void calls
+  })
+
+  it('fails fast and surfaces the error when the harness never readies', async () => {
+    openStub((expr) => (expr.includes('.text-danger') ? 'this page has no film' : PNG), 'stalled')
+    await runServerRender(JOB)
+    expect(vi.mocked(patchRenderJob)).toHaveBeenCalledWith(
+      JOB,
+      expect.objectContaining({
+        status: 'failed',
+        error: expect.stringContaining('did not become ready: this page has no film'),
+      }),
+      'server',
+    )
+    expect(vi.mocked(storeAsset)).not.toHaveBeenCalled()
   })
 
   it('fails a render whose frames pass the upload cap mid-sequence', async () => {
@@ -239,6 +267,39 @@ describe('the render worker', () => {
     } finally {
       Object.assign(MOTION_LIMITS, { RENDER_MAX_BYTES: cap })
     }
+  })
+
+  const strayZips = (seen: Set<string>) =>
+    readdirSync(tmpdir()).filter((f) => f.startsWith('doop-render-') && !seen.has(f))
+
+  it('closes and deletes the temp zip when a sequence capture fails', async () => {
+    const before = new Set(readdirSync(tmpdir()).filter((f) => f.startsWith('doop-render-')))
+    let n = 0
+    openStub(() => {
+      if (++n === 3) throw new Error('capture died')
+      return PNG
+    })
+    await runServerRender(JOB)
+    /* the failed writer was closed then unlinked: nothing left behind */
+    expect(strayZips(before)).toEqual([])
+    expect(vi.mocked(patchRenderJob)).toHaveBeenCalledWith(
+      JOB,
+      expect.objectContaining({ status: 'failed', error: 'capture died' }),
+      'server',
+    )
+  })
+
+  it('deletes the temp zip when the asset store fails', async () => {
+    const before = new Set(readdirSync(tmpdir()).filter((f) => f.startsWith('doop-render-')))
+    vi.mocked(storeAssetFile).mockRejectedValueOnce(new Error('disk full'))
+    openStub(() => PNG)
+    await runServerRender(JOB)
+    expect(strayZips(before)).toEqual([])
+    expect(vi.mocked(patchRenderJob)).toHaveBeenCalledWith(
+      JOB,
+      expect.objectContaining({ status: 'failed', error: 'disk full' }),
+      'server',
+    )
   })
 })
 
@@ -275,7 +336,81 @@ describe('webm muxing', () => {
   it('refuses an empty stream', () => {
     expect(() => muxWebm([], { codec: 'vp8', width: 8, height: 8, durationMs: 0 })).toThrow('no encoded chunks')
   })
+
+  it('produces a container ffprobe accepts at every vint size boundary', () => {
+    /* a SimpleBlock's payload is 4 header bytes + the frame, so a
+     * 123-byte frame sizes its block at exactly 127 — the value an old
+     * 32-bit vint wrote as 0xff, the 'unknown size' marker, which
+     * corrupted every element after it. 16379 lands a block on the
+     * 2-byte reserved value 16383 for the same reason. */
+    const sizes = [1, 100, 122, 123, 124, 1000, 16_378, 16_379, 16_380, 60_000]
+    const probe = spawnSync('ffprobe', ['-version'], { stdio: 'ignore' })
+    for (const n of sizes) {
+      const buf = muxWebm(
+        [
+          { type: 'key', timestampUs: 0, data: Buffer.alloc(n, 0x11) },
+          { type: 'delta', timestampUs: 33_333, data: Buffer.alloc(10, 0x22) },
+        ],
+        { codec: 'vp8', width: 64, height: 64, durationMs: 66 },
+      )
+      if (probe.error) {
+        /* no ffprobe on this machine: walk the EBML instead and require
+         * every element to end inside its parent, flush to the byte */
+        expect(walkEbml(buf)).toContain(0x1f43b675)
+        continue
+      }
+      const dir = mkdtempSync(join(tmpdir(), 'webm-'))
+      try {
+        writeFileSync(join(dir, 'f.webm'), buf)
+        const r = spawnSync('ffprobe', [
+          '-v',
+          'error',
+          '-show_entries',
+          'format=format_name',
+          '-of',
+          'default=nw=1',
+          join(dir, 'f.webm'),
+        ])
+        expect(r.status).toBe(0)
+        expect(r.stdout.toString()).toContain('matroska,webm')
+        expect(r.stderr.toString()).not.toMatch(/unknown-sized|invalid ebml|truncat/i)
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  })
 })
+
+/* walks the element tree and returns the ids seen; throws via expect if
+ * a declared size overruns its parent or elements do not pack flush */
+function walkEbml(buf: Buffer): number[] {
+  const masters = new Set([0x1a45dfa3, 0x18538067, 0x1549a966, 0x1654ae6b, 0xae, 0xe0, 0x1f43b675])
+  const widthOf = (b: number) => {
+    for (let w = 1; w <= 8; w++) if (b & (1 << (8 - w))) return w
+    throw new Error('bad vint')
+  }
+  const ids: number[] = []
+  const walk = (start: number, end: number) => {
+    let pos = start
+    while (pos < end) {
+      const iw = widthOf(buf.readUInt8(pos))
+      const id = buf.readUIntBE(pos, iw)
+      pos += iw
+      const sw = widthOf(buf.readUInt8(pos))
+      let size = buf.readUInt8(pos) & (sw >= 8 ? 0 : 0xff >>> sw)
+      for (let i = 1; i < sw; i++) size = size * 256 + buf.readUInt8(pos + i)
+      pos += sw
+      const elemEnd = size === 2 ** (7 * sw) - 1 ? end : pos + size
+      expect(elemEnd).toBeLessThanOrEqual(end)
+      ids.push(id)
+      if (masters.has(id)) walk(pos, elemEnd)
+      pos = elemEnd
+    }
+    expect(pos).toBe(end)
+  }
+  walk(0, buf.length)
+  return ids
+}
 
 describe('zipStore', () => {
   it('round-trips through a real zip reader shape', () => {

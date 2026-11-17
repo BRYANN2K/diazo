@@ -172,17 +172,28 @@ export class ZipWriter {
     this.count++
   }
 
+  /** close the handle without a central directory: the partial file is
+   *  garbage the caller deletes. Never throws — a failed close on a dead
+   *  render must not mask the error that killed it. */
+  async abort(): Promise<void> {
+    await this.file.close().catch(() => {})
+  }
+
   async finish(): Promise<number> {
-    const centBuf = Buffer.concat(this.central)
-    const eocd = Buffer.alloc(22)
-    eocd.writeUInt32LE(0x06054b50, 0)
-    eocd.writeUInt16LE(this.count, 8)
-    eocd.writeUInt16LE(this.count, 10)
-    eocd.writeUInt32LE(centBuf.length, 12)
-    eocd.writeUInt32LE(this.offset, 16)
-    await this.writeAll(Buffer.concat([centBuf, eocd]))
-    await this.file.close()
-    return this.offset + centBuf.length + eocd.length
+    try {
+      const centBuf = Buffer.concat(this.central)
+      const eocd = Buffer.alloc(22)
+      eocd.writeUInt32LE(0x06054b50, 0)
+      eocd.writeUInt16LE(this.count, 8)
+      eocd.writeUInt16LE(this.count, 10)
+      eocd.writeUInt32LE(centBuf.length, 12)
+      eocd.writeUInt32LE(this.offset, 16)
+      await this.writeAll(Buffer.concat([centBuf, eocd]))
+      return this.offset + centBuf.length + eocd.length
+    } finally {
+      /* a write that dies halfway still owes the handle a close */
+      await this.file.close().catch(() => {})
+    }
   }
 }
 
@@ -312,6 +323,9 @@ async function capturePngseq(
     if (size > MOTION_LIMITS.RENDER_MAX_BYTES) throw new Error('the sequence is over the upload limit')
     return { file, mime: 'application/zip', ext: 'zip' }
   } catch (e) {
+    /* close the writer first — deleting a file its handle still holds
+     * leaks the descriptor (and keeps the bytes on windows) */
+    await zip.abort()
     await fs.promises.rm(file, { force: true }).catch(() => {})
     throw e
   }
@@ -352,9 +366,18 @@ async function captureWebm(
   return { buf, mime: 'video/webm', ext: 'webm' }
 }
 
-async function renderInPage(job: RenderJob, url: string, frames: number, renderToken: string): Promise<RenderOutput> {
-  const duration = job.range.end - job.range.start
-  const budget = OVERHEAD_MS + Math.round(duration * 1000) * 2
+/** How long the harness gets to become ready after load — a failed one
+ *  (a 401, a missing composition) never resolves `__doopMotionReady` and
+ *  would hold the render slot for the whole budget otherwise. */
+const HARNESS_READY_MS = 60_000
+
+async function renderInPage(
+  job: RenderJob,
+  url: string,
+  frames: number,
+  renderToken: string,
+  budget: number,
+): Promise<RenderOutput> {
   /* the page keeps its render slot for the whole budget — the renderer's
      default 120 s lease would close a long render mid-capture */
   const iso = await renderDeps.openIsolatedPage({ priority: 'background', leaseMs: budget })
@@ -380,16 +403,34 @@ async function renderInPage(job: RenderJob, url: string, frames: number, renderT
       expires: Math.floor((Date.now() + budget) / 1000),
     })
     await page.setViewport({ width: job.width, height: job.height })
-    await page.goto(url, { waitUntil: 'networkidle0', timeout: 60_000 })
+    await page.goto(url, { waitUntil: 'networkidle0', timeout: HARNESS_READY_MS })
     await page.waitForFunction(
       'typeof window.__doopMotionSeek === "function" && typeof window.__doopMotionCapture === "function"',
-      { timeout: 60_000 },
+      { timeout: HARNESS_READY_MS },
     )
+    /* the two hooks exist before the film loads — a harness that failed
+       (a 401, a missing composition) leaves `__doopMotionReady` pending
+       and the first seek would wait out the whole budget; race it and
+       surface the error the harness renders */
+    const ready = await page.evaluate(
+      `Promise.race([window.__doopMotionReady.then(() => 'ready'), new Promise((r) => setTimeout(() => r('stalled'), ${HARNESS_READY_MS}))])`,
+    )
+    if (ready !== 'ready') {
+      const hint = await page.evaluate(`document.querySelector('.text-danger')?.innerText ?? ''`)
+      throw new Error(`the render harness did not become ready${typeof hint === 'string' && hint ? `: ${hint}` : ''}`)
+    }
     /* one deadline around the whole capture, whatever the format */
-    return await Promise.race([
-      job.format === 'webm' ? captureWebm(page, job, frames) : capturePngseq(page, job, frames),
-      new Promise<never>((_r, rej) => setTimeout(() => rej(new Error('render timed out')), budget)),
-    ])
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        job.format === 'webm' ? captureWebm(page, job, frames) : capturePngseq(page, job, frames),
+        new Promise<never>((_r, rej) => {
+          timer = setTimeout(() => rej(new Error('render timed out')), budget)
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
   } finally {
     await iso.close()
   }
@@ -416,19 +457,25 @@ export async function runServerRender(job: RenderJob): Promise<void> {
     const claimed = patchRenderJob(job, { status: 'rendering', progress: 0 }, CLAIMANT)
     if (!claimed.ok) return
     const duration = job.range.end - job.range.start
-    token = mintRenderToken(job, Math.round(duration * 1000) + OVERHEAD_MS)
+    /* one budget for the page's slot and the render token's life */
+    const budget = OVERHEAD_MS + Math.round(duration * 1000) * 2
+    token = mintRenderToken(job, budget)
     const origin = env.BETTER_AUTH_URL
     const url = `${origin}/c/${job.canvasId}/motion-render?page=${job.pageId}&start=${job.range.start}`
     const frames = Math.max(1, Math.round(duration * job.fps))
-    const out = await renderInPage(job, url, frames, token)
+    const out = await renderInPage(job, url, frames, token, budget)
     patchRenderJob(job, { status: 'encoding', progress: 0.95 }, CLAIMANT)
     const meta = { canvasId: job.canvasId, ownerId: job.createdBy, uploadedBy: job.createdByName }
-    const asset =
-      'file' in out
-        ? await storeAssetFile(out.file, { mime: out.mime, ext: out.ext }, meta)
-        : await storeAsset(out.buf, { mime: out.mime, ext: out.ext }, meta)
-    if ('file' in out) await fs.promises.rm(out.file, { force: true }).catch(() => {})
-    finishRenderJob(job, asset.id)
+    try {
+      const asset =
+        'file' in out
+          ? await storeAssetFile(out.file, { mime: out.mime, ext: out.ext }, meta)
+          : await storeAsset(out.buf, { mime: out.mime, ext: out.ext }, meta)
+      finishRenderJob(job, asset.id)
+    } finally {
+      /* a failed store must not strand the temp sequence on disk */
+      if ('file' in out) await fs.promises.rm(out.file, { force: true }).catch(() => {})
+    }
   } catch (error) {
     fail(error instanceof Error ? error.message : 'server render failed')
   } finally {
