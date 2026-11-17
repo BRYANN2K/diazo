@@ -7,6 +7,9 @@ import { wireLibraryDescribe } from './libraryDescribe.ts'
 import { hydrateCurations, resumeCurations } from './libraryCuration.ts'
 import { resumeApplies } from './libraryCurationApply.ts'
 import { env } from './env.ts'
+import { dataDir, distDir } from './paths.ts'
+import { acquireDataLock } from './dataLock.ts'
+import { startDailyBackups } from './backup.ts'
 import {
   catalogEntry,
   changeInstances,
@@ -123,7 +126,7 @@ import { extensions } from './extensions.ts'
 import * as workspaces from './workspaces.ts'
 import * as billing from './billing.ts'
 import * as demo from './demo.ts'
-import { db, initDb } from './db/index.ts'
+import { db, initDb, pglite } from './db/index.ts'
 import { resealSecrets } from './secretBackfill.ts'
 import { encryptionConfigured } from './secretBox.ts'
 import * as authSchema from './db/auth-schema.ts'
@@ -202,7 +205,7 @@ const PORT = env.PORT
 const BUILD_ID = (() => {
   try {
     return createHash('sha1')
-      .update(readFileSync(path.join(env.DOOP_DIST_DIR ?? path.join(process.cwd(), 'dist'), 'index.html')))
+      .update(readFileSync(path.join(distDir(), 'index.html')))
       .digest('hex')
       .slice(0, 12)
   } catch {
@@ -210,8 +213,18 @@ const BUILD_ID = (() => {
   }
 })()
 
+/* one writer per data dir, ahead of any state touching it — PGlite, on-disk
+   assets, backups, the renderer's profile. Skipped only when no local state
+   exists at all (a managed Postgres plus a bucket). A held lock is refused,
+   a crashed holder's stale one is retaken (server/dataLock.ts). */
+if (!(env.DATABASE_URL && env.BUCKET)) acquireDataLock(dataDir())
+
 /* boot: connect the DB, hydrate memory, import pre-DB store.json once */
 await initDb()
+/* the PGlite install backs itself up daily (a migrating boot got one ahead
+   of the migrator already) */
+const embeddedDb = pglite()
+if (embeddedDb) startDailyBackups(embeddedDb)
 await backgrounds.initBackgrounds()
 initAuth()
 await syncAdmins() // ADMIN_EMAILS -> user.role, for accounts that already exist
@@ -290,16 +303,35 @@ process.on('unhandledRejection', (reason) => {
   console.error('[unhandled-rejection]', reason)
 })
 
-/* flush debounced frame writes before the process dies — with a hard-exit
-   timeout so a wedged DB can never keep the process (and the port) alive */
-for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(sig, () => {
-    setTimeout(() => process.exit(0), 1500).unref()
-    persist
-      .flush((id) => store.getFrame(id))
-      .catch((err) => console.error('flush on shutdown failed', err))
-      .finally(() => process.exit(0))
-  })
+/* flush debounced frame writes, close the render browser and the embedded
+   database before the process dies — with a hard-exit timeout so a wedged
+   DB can never keep the process (and the port) alive. The browser's process
+   group is also reaped by an `exit` hook (server/browserGuard.ts) and by a
+   watchdog in the kill -9 case nothing can catch. */
+let shutdownStarted = false
+function shutdown(): void {
+  if (shutdownStarted) return
+  shutdownStarted = true
+  setTimeout(() => process.exit(0), 1500).unref()
+  void Promise.allSettled([
+    persist.flush((id) => store.getFrame(id)),
+    import('./screenshot.ts').then((m) => m.shutdownRenderer()),
+  ])
+    /* the db closes only after the flush settles — closing it mid-flush
+       drops the frame writes the flush exists to save */
+    .then(() => (pglite()?.close() ?? Promise.resolve()).catch(() => {}))
+    .then(() => process.exit(0))
+}
+for (const sig of ['SIGINT', 'SIGTERM'] as const) process.once(sig, shutdown)
+
+/* the desktop shell spawns the server as a sidecar over piped stdio: the
+   app dying closes our stdin — leave with it, through the same flush the
+   signals get (DOOP_EMBEDDED). A terminal or a service leaves stdin open,
+   so nothing else notices this */
+if (env.DOOP_EMBEDDED) {
+  process.stdin.resume()
+  process.stdin.once('end', shutdown)
+  process.stdin.once('close', shutdown)
 }
 
 /* ------------------------------------------------- realtime rooms */
@@ -4199,7 +4231,7 @@ app.get('/sitemap.xml', (_req, res) => {
 
 /* production: serve the built client */
 if (env.isProduction) {
-  const dist = env.DOOP_DIST_DIR ?? path.join(process.cwd(), 'dist')
+  const dist = distDir()
   app.use(express.static(dist))
   /* a missing bundle or source map is a 404, not the app shell: HTML served
      as a .js or .map breaks module loads and source map resolution */
@@ -4469,6 +4501,12 @@ wss.on('connection', (ws, upgradeReq) => {
 })
 
 const onListening = () => {
+  /* the sidecar's handshake: the shell reads one `ready <port>` line to
+     learn when (and where) the server came up */
+  if (env.DOOP_EMBEDDED) {
+    const address = server.address()
+    console.log(`ready ${typeof address === 'object' && address ? address.port : PORT}`)
+  }
   console.log(`⟡ diazo server    http://localhost:${PORT}`)
   /* frame HTML is loaded per canvas; a canvas nobody has used for
      CANVAS_IDLE_MS gives it back, unless a room, agent or stream is on it.
