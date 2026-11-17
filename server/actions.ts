@@ -676,6 +676,7 @@ export async function commitElementStamps(
   html: string,
   ids: readonly string[],
   by: string,
+  kind: ActorKind = 'user',
 ): Promise<Frame | undefined> {
   const next = store.updateFrame(frame.id, { html }, by, { annotation: true })
   if (!next) return undefined
@@ -689,7 +690,7 @@ export async function commitElementStamps(
   }
   /* deleted meanwhile: an update now would put it back on every screen */
   if (!store.getFrame(frame.id)) return undefined
-  broadcast(next.canvasId, { type: 'frame:updated', frame: next, actor: resolveActor({ name: by, kind: 'user' }) })
+  broadcast(next.canvasId, { type: 'frame:updated', frame: next, actor: resolveActor({ name: by, kind }) })
   return next
 }
 

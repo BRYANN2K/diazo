@@ -135,22 +135,30 @@ function of time t, nothing else.
   mouvement, transition, son, voix off or notes (motion, transition, sound, voice-over, notes in
   English) — and its animatable elements: headline and text blocks, images, key UI, each a
   data-doop-id an element track can target.
-- Then animate EVERY shot the way its notes describe — that is the film, camera cuts alone are
-  not. Add element tracks (add_track kind element, then add_keyframe): text reveals by word or
-  line (drive the frame's own animator — its data-doop-motion block — when it carries one),
-  entrances and exits with stagger,
-  pulses and glows, parallax between layers. Drive the camera the way the notes describe — a
-  travelling avant is a slow push-in, a whip pan a fast one. Keep every move on the motion easing
-  tokens (--dur-*, --ease-*, --spring-*).
+- Then direct the film from those notes — they are the intent and the minimum, not a
+  script. Animate every shot, and go beyond the notes where the story asks for it: staging,
+  rhythm, extra moves they do not name. Your tools are element tracks (add_track kind
+  element, then add_keyframe on a target's data-doop-id) and camera keyframes (set_camera,
+  add_keyframe on the camera track): entrances and exits with stagger, pulses and glows,
+  parallax between layers — a slow push-in for a travelling avant, a fast one for a whip
+  pan. Keep every move on the motion easing tokens (--dur-*, --ease-*, --spring-*).
 - The transition into the next shot is part of the shot: match cut, push, crossfade, whip —
-  a clip on the timeline, or camera and element moves that land it. Voice-over text becomes
-  captions when a captions track exists. Music and SFX notes become a TODO marker clip when no
-  audio generation is available. Notes and caption bars stay out of the film: hide the notes
-  panel layer from the render (an element track that keeps it at opacity 0) when the frame
-  carries one.
+  it is camera and element keyframes across the cut, not a clip kind. Voice-over becomes a
+  caption track you add (add_track kind caption, then add_clip {type:'caption', text});
+  animate_storyboard builds the camera track only, so the lane does not exist until you
+  make it. Music and SFX notes with no audio asset to play go on a muted caption track
+  named "Audio TODO" — muted lanes never reach the render, so the note is kept on the
+  timeline, not shown in the film.
+- For a word-by-word or line reveal, key the word or line elements the frame already
+  wraps — their data-doop-ids come back as targets — or use the frame's own
+  data-doop-motion block when it has one. Splitting words yourself rewrites the design
+  and ends its sign-off. Keep the notes out of the film: hide the notes blocks or the
+  whole notes bar — the ids are in shots[].notes and panelId — with an element track
+  that holds it at opacity 0.
 - Each set_composition writes back a storyboard field: every noted shot still without an
-  element track is named in it. Fix them before finishing — you get two passes; after that,
-  finish the composition and name the shots you left still.
+  element track on a real element of its frame is named in it. A pass counts only when a
+  write leaves the pending set unchanged — you get two; after that, finish the
+  composition and name the shots you left.
 - Everything on screen at time t comes from the timeline and the frames' markup only. Never
   animate with Date.now, setInterval, requestAnimationFrame, unseeded Math.random, CSS animations
   or GSAP — a seek must redraw the same pixels. Bind motion to keyframes on tracks, or to the

@@ -236,10 +236,13 @@ export function stampElements(
   html: string,
   elements: readonly Element[],
 ): { html: string; ids: Map<Element, string>; freshIds: string[]; stamped: number } {
-  const edits: { start: number; end: number; text: string }[] = []
+  const edits: { el: Element; id: string; start: number; end: number; text: string }[] = []
   const ids = new Map<Element, string>()
   const freshIds: string[] = []
   for (const el of elements) {
+    /* one element listed twice would take two edits on the same offsets —
+       the second overwrites the first and verification drops it: skip */
+    if (ids.has(el)) continue
     const existing = attr(el, ELEMENT_ID_ATTR)
     if (isElementId(existing)) {
       ids.set(el, existing)
@@ -259,16 +262,39 @@ export function stampElements(
       const to = stale.endOffset - tag.startOffset
       open = open.slice(0, from).replace(/\s+$/, '') + open.slice(to)
     }
-    edits.push({ start: tag.startOffset, end: tag.endOffset, text: open })
+    edits.push({ el, id, start: tag.startOffset, end: tag.endOffset, text: open })
     ids.set(el, id)
   }
   /* start tags never overlap, so applying edits from the end of the
      document backwards keeps every other offset valid */
-  let out = html
-  for (const edit of edits.sort((a, b) => b.start - a.start)) {
-    out = out.slice(0, edit.start) + edit.text + out.slice(edit.end)
+  const apply = (todo: typeof edits) => {
+    let out = html
+    for (const edit of [...todo].sort((a, b) => b.start - a.start)) {
+      out = out.slice(0, edit.start) + edit.text + out.slice(edit.end)
+    }
+    return out
   }
-  return { html: out, ids, freshIds, stamped: edits.length }
+  let out = apply(edits)
+  /* stampElementId's safety net, batched: a start tag malformed in a way
+     the parser forgives can take a stamp it cannot keep — verify every
+     fresh id resolves in the written markup and drop the edits that did
+     not take, rather than handing out an id nothing carries */
+  let applied = edits.length
+  if (freshIds.length > 0) {
+    const written = parseDocument(out)
+    const failed = edits.filter((edit) => !findByElementId(written, edit.id))
+    if (failed.length > 0) {
+      const lost = new Set(failed.map((edit) => edit.el))
+      for (const edit of failed) {
+        ids.delete(edit.el)
+        freshIds.splice(freshIds.indexOf(edit.id), 1)
+      }
+      const kept = edits.filter((edit) => !lost.has(edit.el))
+      applied = kept.length
+      out = apply(kept)
+    }
+  }
+  return { html: out, ids, freshIds, stamped: applied }
 }
 
 /** Whether a stamped element is still in the HTML. */

@@ -4,9 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
    animate_storyboard and set_composition against the in-memory store —
    persist is stubbed, so a committed stamp resolves like any save. */
 
+const mocks = vi.hoisted(() => ({ saveFrameNow: vi.fn(async () => {}) }))
+
 vi.mock('../server/db/persist.ts', () => ({
   saveFrame: () => {},
-  saveFrameNow: async () => {},
+  saveFrameNow: mocks.saveFrameNow,
   saveCanvas: () => {},
   saveTask: () => {},
   saveFeedback: () => {},
@@ -60,6 +62,7 @@ let pageId: string
 let frameId: string
 
 beforeEach(() => {
+  mocks.saveFrameNow.mockReset().mockResolvedValue(undefined)
   actions.wire(
     () => {},
     () => {},
@@ -84,7 +87,12 @@ beforeEach(() => {
 
 interface StoryResult {
   composition: { tracks: { kind: string }[] }
-  shots: { frameId: string; notes: { text: string; id?: string }[]; targets: { id: string; tag: string }[] }[]
+  shots: {
+    frameId: string
+    notes: { text: string; id?: string }[]
+    targets: { id: string; tag: string }[]
+    panelId?: string
+  }[]
   storyboard?: { noted: number; animated: number; pending: { frameId: string }[]; pass: number; message: string }
 }
 
@@ -93,6 +101,18 @@ async function toolJson(name: string, input: unknown) {
   expect(result.is_error, String(result.content)).toBeUndefined()
   return JSON.parse(String(result.content)) as StoryResult
 }
+
+const elementTrack = (frame: string, elementId: string, extra: Record<string, unknown> = {}) => ({
+  op: 'add_track',
+  track: {
+    id: `t-${elementId}`,
+    kind: 'element',
+    frameId: frame,
+    elementId,
+    keyframes: [{ id: 'k1', property: 'opacity', t: 0, value: 0 }],
+    ...extra,
+  },
+})
 
 describe('animate_storyboard — notes, targets and coverage', () => {
   it('returns each shot’s notes and animatable elements, and stamps their ids', async () => {
@@ -111,7 +131,8 @@ describe('animate_storyboard — notes, targets and coverage', () => {
   })
 
   it('reports noted shots without an element track, then clears them as ops land', async () => {
-    await toolJson('animate_storyboard', { page_id: pageId })
+    const created = await toolJson('animate_storyboard', { page_id: pageId })
+    const target = created.shots.find((s) => s.frameId === frameId)!.targets[0]!.id
 
     const first = await toolJson('set_composition', {
       page_id: pageId,
@@ -122,30 +143,114 @@ describe('animate_storyboard — notes, targets and coverage', () => {
 
     const animated = await toolJson('set_composition', {
       page_id: pageId,
-      ops: [
-        {
-          op: 'add_track',
-          track: {
-            id: 'headline-in',
-            kind: 'element',
-            frameId,
-            elementId: 'el_any',
-            keyframes: [{ id: 'k1', property: 'opacity', t: 0, value: 0 }],
-          },
-        },
-      ],
+      ops: [elementTrack(frameId, target)],
     })
     expect(animated.storyboard?.pending).toEqual([])
     expect(animated.storyboard?.animated).toBe(1)
   })
 
-  it('stops asking after two fix passes and tells the agent to name what is left', async () => {
+  it('never clears a shot on an elementId the frame does not carry', async () => {
+    await toolJson('animate_storyboard', { page_id: pageId })
+    const data = await toolJson('set_composition', {
+      page_id: pageId,
+      ops: [elementTrack(frameId, 'el_notreal')],
+    })
+    expect(data.storyboard?.pending.map((p) => p.frameId)).toEqual([frameId])
+  })
+
+  it('never clears a shot on the track that only hides the notes block', async () => {
+    const created = await toolJson('animate_storyboard', { page_id: pageId })
+    const noteId = created.shots.find((s) => s.frameId === frameId)!.notes.find((n) => n.id)!.id!
+    const data = await toolJson('set_composition', {
+      page_id: pageId,
+      ops: [elementTrack(frameId, noteId)],
+    })
+    /* hiding the notes is needed, but it is not the shot's animation */
+    expect(data.storyboard?.pending.map((p) => p.frameId)).toEqual([frameId])
+  })
+
+  it('counts no-progress rounds, not writes: progress resets the counter', async () => {
+    const created = await toolJson('animate_storyboard', { page_id: pageId })
+    const target = created.shots.find((s) => s.frameId === frameId)!.targets[0]!.id
+
+    /* two rounds reporting the same pending set: pass 0 then pass 1 */
+    const r1 = await toolJson('set_composition', { page_id: pageId, ops: [{ op: 'set_meta', duration: 6 }] })
+    const r2 = await toolJson('set_composition', { page_id: pageId, ops: [{ op: 'set_meta', duration: 7 }] })
+    expect(r1.storyboard?.pass).toBe(0)
+    expect(r2.storyboard?.pass).toBe(1)
+
+    /* a write that fixes the shot resets — the next pending set is empty */
+    const r3 = await toolJson('set_composition', { page_id: pageId, ops: [elementTrack(frameId, target)] })
+    expect(r3.storyboard?.pending).toEqual([])
+  })
+
+  it('stops asking after two no-progress passes and tells the agent to name what is left', async () => {
     await toolJson('animate_storyboard', { page_id: pageId })
     for (let i = 0; i < 3; i++) {
       const data = await toolJson('set_composition', { page_id: pageId, ops: [{ op: 'set_meta', duration: 6 }] })
       if (i < 2) expect(data.storyboard?.message).toContain(`fix pass ${i + 1} of 2`)
       else expect(data.storyboard?.message).toContain('finish')
     }
+  })
+
+  it('scopes the check to the run: a noted frame outside frame_ids never pends', async () => {
+    const otherId = actions.createFrame(
+      canvasId,
+      { name: 'Shot 3', width: 1000, height: 600, html: SHOT_HTML('Séquence 03'), x: 2400, y: 0 },
+      actor(),
+      { reveal: false },
+    )!.id
+    await toolJson('animate_storyboard', { page_id: pageId, frame_ids: [frameId] })
+    const data = await toolJson('set_composition', { page_id: pageId, ops: [{ op: 'set_meta', duration: 6 }] })
+    expect(data.storyboard?.pending.map((p) => p.frameId)).toEqual([frameId])
+    expect(data.storyboard?.pending.map((p) => p.frameId)).not.toContain(otherId)
+  })
+
+  it('refuses to hand out ids for a frame still streaming', async () => {
+    const streaming = actions.createFrame(
+      canvasId,
+      { name: 'Live', width: 1000, height: 600, html: SHOT_HTML('En direct'), x: 2400, y: 0 },
+      actor(),
+      { reveal: true },
+    )!
+    expect(actions.isFrameStreaming(streaming.id)).toBe(true)
+    const data = await toolJson('animate_storyboard', { page_id: pageId, frame_ids: [streaming.id] })
+    const shot = data.shots.find((s) => s.frameId === streaming.id)!
+    /* the notes are reported, but no fresh id leaves the server before the
+       frame carrying it is on disk */
+    expect(shot.notes.length).toBeGreaterThan(0)
+    expect(shot.notes.every((n) => n.id === undefined)).toBe(true)
+    expect(shot.targets).toEqual([])
+    expect(store.getFrame(streaming.id)!.html).not.toContain('data-doop-id')
+  })
+
+  it('keeps fresh ids to itself when the stamp write fails', async () => {
+    mocks.saveFrameNow.mockRejectedValue(new Error('disk full'))
+    const data = await toolJson('animate_storyboard', { page_id: pageId, frame_ids: [frameId] })
+    const shot = data.shots.find((s) => s.frameId === frameId)!
+    expect(shot.notes.every((n) => n.id === undefined)).toBe(true)
+    expect(shot.targets).toEqual([])
+  })
+
+  it('keeps a frame’s sign-off while stamping ids into it', async () => {
+    actions.setFrameApproval(frameId, true, { id: 'u1', name: 'kevin' })
+    expect(store.getFrame(frameId)!.approval?.status).toBe('ready_for_dev')
+    await toolJson('animate_storyboard', { page_id: pageId, frame_ids: [frameId] })
+    expect(store.getFrame(frameId)!.approval?.status).toBe('ready_for_dev')
+  })
+
+  it('is idempotent: a second call stamps nothing and writes nothing', async () => {
+    const first = await toolJson('animate_storyboard', { page_id: pageId })
+    const html = store.getFrame(frameId)!.html
+    const writes = mocks.saveFrameNow.mock.calls.length
+
+    const second = await toolJson('animate_storyboard', { page_id: pageId })
+    expect(store.getFrame(frameId)!.html).toBe(html)
+    expect(mocks.saveFrameNow.mock.calls.length).toBe(writes)
+    /* and the agent gets the same ids back, still addressable */
+    const before = first.shots.find((s) => s.frameId === frameId)!
+    const after = second.shots.find((s) => s.frameId === frameId)!
+    expect(after.targets.map((t) => t.id).sort()).toEqual(before.targets.map((t) => t.id).sort())
   })
 })
 
@@ -164,5 +269,29 @@ describe('the words the agent sees', () => {
     /* and the run prompt names the shot notes, not only camera moves */
     expect(en.animatePrompt).toMatch(/data-doop-id/)
     expect(MOTION).toMatch(/data-doop-id/)
+  })
+
+  it('only names mechanisms the motion model really has', () => {
+    for (const words of [
+      MOTION,
+      TOOLS.find((t) => t.name === 'animate_storyboard')!.description,
+      en.animatePrompt,
+      pt.animatePrompt,
+    ]) {
+      /* no invented clip kinds: a transition is keyframes across a cut,
+         a TODO note lives on a muted caption lane */
+      expect(words).not.toMatch(/transition clip/i)
+      expect(words).not.toMatch(/TODO marker clip/i)
+      expect(words).not.toMatch(/clipes marcadores/i)
+    }
+  })
+
+  it('frames the notes as intent and a minimum, not a script to execute', () => {
+    expect(MOTION).toMatch(/intent and the minimum/i)
+    expect(en.animatePrompt).toMatch(/intent and the minimum/i)
+    expect(pt.animatePrompt).toMatch(/intenção e o mínimo/i)
+    /* and every voice asks the agent to say where it went further */
+    expect(en.animatePrompt).toMatch(/went beyond the notes/i)
+    expect(pt.animatePrompt).toMatch(/além das notas/i)
   })
 })
