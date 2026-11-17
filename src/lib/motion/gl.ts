@@ -213,6 +213,35 @@ const BODY: Record<string, string | readonly string[]> = {
   curves: `vec4 s = texture(u_tex, uv);
     vec3 x = clamp((s.rgb - vec3(u_black)) / max(u_white - u_black, 1e-3), 0., 1.);
     col = vec4(clamp(pow(x, vec3(1. / u_gamma)) + vec3(u_lift), 0., 1.), s.a);`,
+  /* the matte channel comes off the second input (u_tex2 — the layer's own
+     picture until instances can bind a texture), so a luma matte keys the
+     layer on its own luminance */
+  'luma-matte': `vec4 s = texture(u_tex, uv);
+    vec4 m4 = texture(u_tex2, uv);
+    float m = u_channel < .5 ? doopLuma(m4.rgb)
+      : u_channel < 1.5 ? m4.a
+      : u_channel < 2.5 ? m4.r
+      : u_channel < 3.5 ? m4.g
+      : m4.b;
+    if(u_invert > .5) m = 1. - m;
+    m = smoothstep(u_softness * .5, 1. - u_softness * .5, m);
+    col = vec4(s.rgb, s.a * m);`,
+  feather: `vec4 s = texture(u_tex, uv);
+    float r = u_amount / u_res.x;
+    float a = 0.;
+    for(int i=-2;i<=2;i++)
+      for(int j=-2;j<=2;j++)
+        a += texture(u_tex, uv + vec2(float(i), float(j)) * r * .5).a;
+    col = vec4(s.rgb, a / 25.);`,
+  choke: `vec4 s = texture(u_tex, uv);
+    float r = abs(u_amount) / u_res.x;
+    float a = s.a;
+    for(int i=0;i<8;i++){
+      float an = float(i) * .7853982;
+      float b = texture(u_tex, uv + vec2(cos(an), sin(an)) * r).a;
+      a = u_amount < 0. ? min(a, b) : max(a, b);
+    }
+    col = vec4(s.rgb, a);`,
 }
 
 /* an integer hash, not a sine hash: sin()'s precision is implementation-

@@ -469,6 +469,9 @@ export const GL_EFFECT_IDS: ReadonlySet<string> = new Set([
   'lens-blur',
   'bloom',
   'curves',
+  'luma-matte',
+  'feather',
+  'choke',
 ])
 
 /** tool callers may send points as [u, v] arrays — the contract stores the
