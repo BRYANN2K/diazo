@@ -3639,7 +3639,7 @@ export function buildMcpServer(
       if (!found) return err(`no dev task ${task_id} — the id comes from the launch prompt`)
       const { row, brief } = found
       if (!ownerId || row.requestedByUserId !== ownerId)
-        return err('only the account that launched this dev task may read its handoff')
+        return err('only the account that launched this dev task may read its brief')
       if (!canvasFor(row.canvasId, 'view')) return noCanvas(row.canvasId)
       const content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [
         {
