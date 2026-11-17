@@ -12,6 +12,7 @@ import { acquireDataLock } from './dataLock.ts'
 import { sweepBrowserProfiles } from './browserGuard.ts'
 import { startDailyBackups } from './backup.ts'
 import { listenHost } from './listenHost.ts'
+import { installShutdown } from './shutdown.ts'
 import {
   catalogEntry,
   changeInstances,
@@ -313,36 +314,8 @@ process.on('unhandledRejection', (reason) => {
 })
 
 /* flush debounced frame writes, close the render browser and the embedded
-   database before the process dies — with a hard-exit timeout so a wedged
-   DB can never keep the process (and the port) alive. The browser's process
-   group is also reaped by an `exit` hook (server/browserGuard.ts) and by a
-   watchdog in the kill -9 case nothing can catch. */
-let shutdownStarted = false
-function shutdown(): void {
-  if (shutdownStarted) return
-  shutdownStarted = true
-  setTimeout(() => process.exit(0), 1500).unref()
-  void Promise.allSettled([
-    persist.flush((id) => store.getFrame(id)),
-    import('./screenshot.ts').then((m) => m.shutdownRenderer()),
-  ])
-    /* the db closes only after the flush settles — closing it mid-flush
-       drops the frame writes the flush exists to save */
-    .then(() => (pglite()?.close() ?? Promise.resolve()).catch(() => {}))
-    .then(() => process.exit(0))
-}
-for (const sig of ['SIGINT', 'SIGTERM'] as const) process.once(sig, shutdown)
-
-/* the desktop shell spawns the server as a sidecar over piped stdio: the
-   app dying closes our stdin — leave with it, through the same flush the
-   signals get (DOOP_EMBEDDED). The flag is for that piped sidecar only:
-   under systemd, launchd or nohup stdin is /dev/null and 'end' fires at
-   once, ending the server as soon as it starts */
-if (env.DOOP_EMBEDDED) {
-  process.stdin.resume()
-  process.stdin.once('end', shutdown)
-  process.stdin.once('close', shutdown)
-}
+   database before the process dies — server/shutdown.ts */
+installShutdown()
 
 /* ------------------------------------------------- realtime rooms */
 
