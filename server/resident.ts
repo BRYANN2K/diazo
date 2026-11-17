@@ -1,3 +1,5 @@
+import { SPEECH_TOOLS, runSpeechTool } from './speechTools.ts'
+import { BLENDER_TOOLS, runBlenderTool } from './blenderTools.ts'
 import { env } from './env.ts'
 import { skillSlug } from '../shared/skills.ts'
 import { DRIFT_SEVERITIES, isDriftSeverity } from '../shared/drift.ts'
@@ -56,10 +58,20 @@ import { searchIndex } from '../shared/librarySearch.ts'
 import { CodeLinkError, SET_CODE_LINK_DESCRIPTION, componentCodeLink, setCodeLinkTool } from './codeLinks.ts'
 import {
   animateStoryboard,
+  buildCaptions,
+  checkLibraryItemMotion,
+  duckAudio,
+  exportComposition,
+  generateVideoClip,
   getCompositionData,
+  insertClip,
   lintMotion,
+  listMedia,
   renderComposition,
   setCompositionData,
+  setMedia,
+  suggestCuts,
+  videoModels,
 } from './motionTools.ts'
 import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
@@ -274,6 +286,14 @@ interface RunState {
   vision: boolean
   /** whose account pays for generated images: the run's payer, else the server key */
   payerId?: string
+  /** the human who asked — usually the payer, but not when the run pays on
+   *  another person's connected account; speech/blender tools and job
+   *  ownership act as this person, never as the payer. Set only when the
+   *  whole run serves that one person. */
+  askerId?: string
+  /** the run's asks cannot be reduced to one person — requester-owned
+   *  tools (speech, blender) stay off rather than pick one at random */
+  mixedRequesters?: boolean
   /** the requester's own user id — set when they linked a local project to
    *  this canvas, so the repo_* tools read their folder through their app */
   repoUserId?: string
@@ -311,6 +331,29 @@ interface RunState {
   chatDone?: boolean
   /** a plan card already went out this run — a second call is refused */
   planProposed?: boolean
+}
+
+/** the requester fields of a run, from the owners of everything it
+ *  claimed. One batch can carry asks from several people: when the named
+ *  owners do not all agree — or an anonymous ask rides along — there is
+ *  no requester, and `mixedRequesters` tells the requester-owned tools to
+ *  stay off rather than act under one of the accounts at random. */
+function requesterFields(owners: (string | undefined)[]): Pick<RunState, 'askerId' | 'mixedRequesters'> {
+  const named = new Set(owners.filter((o): o is string => !!o))
+  const anonymous = owners.filter((o) => !o).length
+  const principals = named.size + (anonymous > 0 ? 1 : 0)
+  return {
+    ...(named.size === 1 && anonymous === 0 ? { askerId: [...named][0]! } : {}),
+    ...(principals > 1 ? { mixedRequesters: true } : {}),
+  }
+}
+
+/** why a requester-owned tool stays off on this run, when it does */
+function requesterGate(runState: RunState, what: string): string | undefined {
+  if (runState.askerId) return undefined
+  return runState.mixedRequesters
+    ? `this run serves asks from several people — ${what} tools act for one requester, so they stay off`
+    : `sign in to use ${what}`
 }
 
 export interface FramePlacement {
@@ -765,6 +808,13 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       lintResults: new Map(),
       vision: model.vision !== false,
       ...(model.userId ? { payerId: model.userId } : {}),
+      /* the requesting person, only when the whole batch provably comes
+         from them — payerId is whose account pays, not who asked */
+      ...requesterFields([
+        ...comments.map((c) => c.fromUserId),
+        ...claimed.map((c) => c.fromUserId),
+        ...allCards.map((c) => c.queuedByUserId),
+      ]),
       ...(repoLink && repoUserId ? { repoUserId } : {}),
       imagesGenerated: 0,
       /* a run about a comment delivers on that comment's page */
@@ -856,7 +906,9 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           ]
         : []
       const runTools = [
-        ...TOOLS,
+        /* a batched run serving several people is not offered the tools
+           that spend or read what only one of them owns */
+        ...TOOLS.filter((tool) => !runState.mixedRequesters || !REQUESTER_OWNED_TOOLS.has(tool.name)),
         ...(repoLink ? REPO_TOOLS : []),
         ...(cards.some((c) => c.kind === 'drift') ? DRIFT_TOOLS : []),
       ]
@@ -1575,6 +1627,7 @@ async function runChat(
     lintResults: new Map(),
     vision: model.vision !== false,
     ...(model.userId ? { payerId: model.userId } : {}),
+    ...requesterFields(asks.map((m) => m.fromUserId)),
     ...(repoLink && repoUserId ? { repoUserId } : {}),
     imagesGenerated: 0,
     repliedThreads: new Set(),
@@ -2539,24 +2592,53 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'lint_motion',
     description:
-      "Check a page is seek-safe before rendering: wall clocks, free-running loops, unseeded Math.random, CSS animations not bound to the timeline, GSAP, network calls at seek time, autoplaying media, malformed motion blocks and bad track references (MO-* rules), over the composition and every frame's HTML.",
+      "Check a page is seek-safe before rendering: wall clocks, free-running loops, unseeded Math.random, CSS animations not bound to the timeline, GSAP, network calls at seek time, autoplaying media, malformed motion blocks and bad track references (MO-* rules), over the composition and every frame's HTML. With library_id + item_id it seek-safety checks a library Motion item and stores the verdict insert_clip trusts.",
     input_schema: {
       type: 'object',
       properties: {
         page_id: { type: 'string', description: 'The page to lint (or give frame_id to lint its page)' },
         frame_id: { type: 'string' },
+        library_id: { type: 'string', description: 'With item_id: check a library Motion item instead' },
+        item_id: { type: 'string', description: 'The library item to seek-safety check' },
       },
+    },
+  },
+  {
+    name: 'insert_clip',
+    description:
+      "Insert a design library's Motion item onto a page's clip track at start seconds. The item must be seek-safe — its stored verdict is checked (computed on first use via lint_motion) and an unsafe item is refused with the lint reasons to fix. variant_id picks one variant of a family.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        library_id: { type: 'string', description: 'The library canvas the item lives in' },
+        item_id: { type: 'string' },
+        variant_id: { type: 'string' },
+        start: { type: 'number', description: 'Seconds the clip opens' },
+        duration: { type: 'number', description: 'Clip length, default the item’s own motion length' },
+      },
+      required: ['page_id', 'library_id', 'item_id', 'start'],
+    },
+  },
+  {
+    name: 'export_composition',
+    description:
+      "Compile a page's timeline to pasteable code: composition.css (@keyframes per element, token easings kept as var(--*)) and composition.js (WAAPI animate calls, the camera on the world wrapper, transitions as pairing notes).",
+    input_schema: {
+      type: 'object',
+      properties: { page_id: { type: 'string', description: 'The page whose timeline to export' } },
+      required: ['page_id'],
     },
   },
   {
     name: 'render_composition',
     description:
-      "Queue a video render of a page's timeline — mp4 or webm, the whole composition or a range. A browser tab or the desktop app claims the job and the file lands as an /a/ asset; progress shows in the room as render:progress.",
+      "Queue a render of a page's timeline — mp4, webm, gif or pngseq, the whole composition or a range. A browser tab or the desktop app claims the job and the file lands as an /a/ asset; progress shows in the room as render:progress.",
     input_schema: {
       type: 'object',
       properties: {
         page_id: { type: 'string' },
-        format: { type: 'string', enum: ['mp4', 'webm'], description: 'Container, default mp4' },
+        format: { type: 'string', enum: ['mp4', 'webm', 'gif', 'pngseq'], description: 'Container, default mp4' },
         target: { type: 'string', enum: ['browser', 'desktop'], description: 'Who renders it, default browser' },
         width: { type: 'number' },
         height: { type: 'number' },
@@ -2570,7 +2652,129 @@ export const TOOLS: Anthropic.Tool[] = [
       required: ['page_id'],
     },
   },
+  {
+    name: 'list_media',
+    description:
+      "The page's scene_media rows: every video/audio asset on the timeline with trim, transcript-cut ranges, beats, transcript (word timings, speakers) and the generation recipe.",
+    input_schema: { type: 'object', properties: { page_id: { type: 'string' } }, required: ['page_id'] },
+  },
+  {
+    name: 'set_media',
+    description:
+      "Create or update a page's media row for an asset: kind, trimIn/trimOut, cuts (source-time ranges playback and export skip), beats, transcript ({language, words[], speakers}), generation recipe.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        asset_id: { type: 'string' },
+        kind: { type: 'string', enum: ['video', 'audio'] },
+        trimIn: { type: 'number' },
+        trimOut: { type: ['number', 'null'] },
+        cuts: {
+          type: 'array',
+          items: { type: 'object', properties: { start: { type: 'number' }, end: { type: 'number' } } },
+        },
+        beats: { type: 'object' },
+        transcript: { type: 'object' },
+        generation: { type: 'object' },
+      },
+      required: ['page_id', 'asset_id', 'kind'],
+    },
+  },
+  {
+    name: 'build_captions',
+    description:
+      "Fold a media row's transcript into word-timed caption clips on the page's caption track. Words inside cut ranges are dropped; times shift onto the clip's window (or `at` seconds).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        media_id: { type: 'string' },
+        style: { type: 'string' },
+        at: { type: 'number' },
+      },
+      required: ['page_id', 'media_id'],
+    },
+  },
+  {
+    name: 'duck_audio',
+    description:
+      'Duck the music under speech: editable gain keyframes on an audio track. Pass ranges on the clock or a media_id whose transcript marks the voice; depth (default 0.25), attack, release, gain.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        media_id: { type: 'string' },
+        ranges: {
+          type: 'array',
+          items: { type: 'object', properties: { start: { type: 'number' }, end: { type: 'number' } } },
+        },
+        track_id: { type: 'string' },
+        depth: { type: 'number' },
+        attack: { type: 'number' },
+        release: { type: 'number' },
+        gain: { type: 'number' },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'suggest_cuts',
+    description:
+      'Filler words and silences over min_silence seconds in a media transcript, as source-time ranges — write the kept-out ones with set_media cuts.',
+    input_schema: {
+      type: 'object',
+      properties: { media_id: { type: 'string' }, min_silence: { type: 'number' } },
+      required: ['media_id'],
+    },
+  },
+  {
+    name: 'list_video_models',
+    description:
+      "The generate_video registry: video models the person's own accounts can run, lengths, aspects and dated per-second prices, plus the estimate for a model/seconds pair.",
+    input_schema: {
+      type: 'object',
+      properties: { model: { type: 'string' }, seconds: { type: 'number' } },
+    },
+  },
+  {
+    name: 'generate_video',
+    description:
+      "Generate a video clip on the person's own OpenRouter or Gemini account (list_video_models first — show the estimate). Lands as an /a/ asset, keeps its recipe on scene_media, and a clip is placed at `at` seconds. Long-running. UI/text/logos are HTML — generated video is B-roll.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        prompt: { type: 'string' },
+        model: { type: 'string' },
+        seconds: { type: 'number' },
+        aspect: { type: 'string', enum: ['16:9', '9:16', '1:1'] },
+        seed: { type: 'number' },
+        first_frame: { type: 'string', maxLength: 8_000_000 },
+        last_frame: { type: 'string', maxLength: 8_000_000 },
+        refs: { type: 'array', items: { type: 'string', maxLength: 8_000_000 }, maxItems: 5 },
+        at: { type: 'number' },
+      },
+      required: ['page_id', 'prompt'],
+    },
+  },
 ]
+
+for (const tool of SPEECH_TOOLS) {
+  TOOLS.push({
+    name: tool.name,
+    description: tool.description,
+    input_schema: zodToJsonSchema(z.object(tool.shape)) as Anthropic.Tool['input_schema'],
+  })
+}
+
+for (const tool of BLENDER_TOOLS) {
+  TOOLS.push({
+    name: tool.name,
+    description: tool.description,
+    input_schema: zodToJsonSchema(z.object(tool.shape)) as Anthropic.Tool['input_schema'],
+  })
+}
 
 /* the same tools as MCP, minus the arguments a resident run already has */
 for (const tool of COMPONENT_TOOLS) {
@@ -2704,6 +2908,11 @@ function canReadCanvas(userId: string, canvasId: string): boolean {
 
 /** The resident agents' tool names; tests hold them to the MCP server's (agentToolParity.test.ts). */
 export const RESIDENT_TOOL_NAMES = TOOLS.map((tool) => tool.name)
+
+/** The tools that spend or read something the requester owns — speech
+ *  jobs, voices and the ElevenLabs key, Blender ops on their desktop.
+ *  A run serving several people is not offered them. */
+const REQUESTER_OWNED_TOOLS = new Set<string>([...SPEECH_TOOLS, ...BLENDER_TOOLS].map((tool) => tool.name))
 
 /* tall frames (imported landing pages) are CROPPED to the top 4000px at full
    detail rather than downscaled to mush; width still scales down if it would
@@ -3647,10 +3856,181 @@ export async function execTool(
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
         const raw = block.input as Record<string, unknown>
+        if (typeof raw.library_id === 'string' || typeof raw.item_id === 'string') {
+          if (typeof raw.library_id !== 'string' || typeof raw.item_id !== 'string') {
+            return fail('send library_id and item_id together')
+          }
+          const out = await checkLibraryItemMotion(raw.library_id, raw.item_id)
+          if (!out.ok) return fail(out.error)
+          return ok(JSON.stringify({ library_id: raw.library_id, item_id: raw.item_id, ...(out.data as object) }))
+        }
         const out = await lintMotion(canvas, {
           page_id: typeof raw.page_id === 'string' ? raw.page_id : undefined,
           frame_id: typeof raw.frame_id === 'string' ? raw.frame_id : undefined,
         })
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'insert_clip': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as Record<string, unknown>
+        const out = await insertClip(
+          canvas,
+          String(raw.page_id ?? ''),
+          {
+            library_id: String(raw.library_id ?? ''),
+            item_id: String(raw.item_id ?? ''),
+            variant_id: typeof raw.variant_id === 'string' ? raw.variant_id : undefined,
+            start: Number(raw.start),
+            duration: typeof raw.duration === 'number' ? raw.duration : undefined,
+          },
+          actor,
+        )
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'export_composition': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const out = await exportComposition(canvas, String(input.page_id ?? ''))
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'list_media': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const out = await listMedia(canvas, String(input.page_id ?? ''))
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'set_media': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as Record<string, unknown>
+        const out = await setMedia(canvas, String(raw.page_id ?? ''), {
+          asset_id: String(raw.asset_id ?? ''),
+          ...raw,
+        })
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'build_captions': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const out = await buildCaptions(
+          canvas,
+          String(input.page_id ?? ''),
+          {
+            media_id: String(input.media_id ?? ''),
+            style: typeof input.style === 'string' ? input.style : undefined,
+            at: typeof input.at === 'number' ? input.at : undefined,
+          },
+          actor,
+        )
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'duck_audio': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as Record<string, unknown>
+        const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+        const out = await duckAudio(
+          canvas,
+          String(raw.page_id ?? ''),
+          {
+            media_id: typeof raw.media_id === 'string' ? raw.media_id : undefined,
+            ranges: Array.isArray(raw.ranges) ? (raw.ranges as { start: number; end: number }[]) : undefined,
+            track_id: typeof raw.track_id === 'string' ? raw.track_id : undefined,
+            depth: num(raw.depth),
+            attack: num(raw.attack),
+            release: num(raw.release),
+            gain: num(raw.gain),
+          },
+          actor,
+        )
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'suggest_cuts': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const out = await suggestCuts(canvas, {
+          media_id: String(input.media_id ?? ''),
+          min_silence: typeof input.min_silence === 'number' ? input.min_silence : undefined,
+        })
+        if (!out.ok) return fail(out.error)
+        return ok(JSON.stringify(out.data))
+      }
+      case 'list_speech_engines':
+      case 'estimate_speech':
+      case 'transcribe_clip':
+      case 'generate_voiceover':
+      case 'get_transcript':
+      case 'list_voices': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        /* speech jobs belong to the person who asked, not the account that pays */
+        {
+          const gate = requesterGate(runState, 'speech')
+          if (gate) return fail(gate)
+        }
+        try {
+          return ok(JSON.stringify(await runSpeechTool(block.name, canvas, runState.askerId!, block.input)))
+        } catch (error) {
+          return fail(error instanceof Error ? error.message : 'speech tool failed')
+        }
+      }
+      case 'blender_get_scene':
+      case 'blender_get_object':
+      case 'blender_set_material':
+      case 'blender_add_light':
+      case 'blender_render_frame':
+      case 'get_blender_result': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        /* blender ops queue under the person who asked, not the paying account */
+        {
+          const gate = requesterGate(runState, 'blender')
+          if (gate) return fail(gate)
+        }
+        try {
+          return ok(JSON.stringify(await runBlenderTool(block.name, canvas, runState.askerId!, block.input)))
+        } catch (error) {
+          return fail(error instanceof Error ? error.message : 'blender tool failed')
+        }
+      }
+      case 'list_video_models': {
+        const raw = block.input as Record<string, unknown>
+        const out = videoModels({
+          model: typeof raw.model === 'string' ? raw.model : undefined,
+          seconds: typeof raw.seconds === 'number' ? raw.seconds : undefined,
+        })
+        return ok(JSON.stringify(out))
+      }
+      case 'generate_video': {
+        const canvas = store.getCanvas(canvasId)
+        if (!canvas) return fail('canvas not found')
+        const raw = block.input as Record<string, unknown>
+        const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
+        const out = await generateVideoClip(
+          canvas,
+          String(raw.page_id ?? ''),
+          {
+            prompt: String(raw.prompt ?? ''),
+            model: typeof raw.model === 'string' ? raw.model : undefined,
+            seconds: num(raw.seconds),
+            aspect: typeof raw.aspect === 'string' ? (raw.aspect as '16:9' | '9:16' | '1:1') : undefined,
+            seed: num(raw.seed),
+            first_frame: typeof raw.first_frame === 'string' ? raw.first_frame : undefined,
+            last_frame: typeof raw.last_frame === 'string' ? raw.last_frame : undefined,
+            refs: Array.isArray(raw.refs) ? (raw.refs as string[]) : undefined,
+            at: num(raw.at),
+          },
+          actor,
+          runState.payerId,
+        )
         if (!out.ok) return fail(out.error)
         return ok(JSON.stringify(out.data))
       }
@@ -3671,7 +4051,7 @@ export async function execTool(
             range:
               raw.range && typeof raw.range === 'object' ? (raw.range as { start?: number; end?: number }) : undefined,
           },
-          { id: runState.payerId ?? `resident:${actor.name}`, name: actor.name },
+          { id: runState.askerId ?? runState.payerId ?? `resident:${actor.name}`, name: actor.name },
         )
         if (!out.ok) return fail(out.error)
         return ok(JSON.stringify(out.data))
@@ -3686,7 +4066,7 @@ export async function execTool(
         if (DESIGN_LIBRARY_TOOL_NAMES.includes(block.name)) {
           const canvas = store.getCanvas(canvasId)
           /* libraries are read as the person who asked, plus this canvas when it is one */
-          const reader = runState.payerId ?? canvas?.ownerId
+          const reader = runState.askerId ?? runState.payerId ?? canvas?.ownerId
           const outcome = await runLibraryTool(block.name, block.input as Record<string, unknown>, {
             userId: reader,
             actor,
@@ -3712,7 +4092,7 @@ export async function execTool(
         if (!COMPONENT_TOOL_NAMES.includes(block.name)) return fail(`unknown tool ${block.name}`)
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
-        const reader = runState.payerId
+        const reader = runState.askerId ?? runState.payerId
         const outcome = runComponentTool(block.name, block.input as Record<string, unknown>, {
           canvas,
           actor,

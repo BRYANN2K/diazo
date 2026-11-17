@@ -57,6 +57,22 @@ export async function putObject(key: string, body: Buffer, mime: string): Promis
   await fs.writeFile(path.join(DISK_DIR, key), body)
 }
 
+/** The same upload from a file on disk — for payloads built incrementally
+ *  (server renders) that should not be read back into memory to be stored. */
+export async function putObjectFile(key: string, file: string, mime: string): Promise<void> {
+  assertKey(key)
+  if (BUCKET) {
+    const { PutObjectCommand } = await import('@aws-sdk/client-s3')
+    const { createReadStream } = await import('node:fs')
+    await (
+      await client()
+    ).send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: createReadStream(file), ContentType: mime }))
+    return
+  }
+  await fs.mkdir(path.dirname(path.join(DISK_DIR, key)), { recursive: true })
+  await fs.copyFile(file, path.join(DISK_DIR, key))
+}
+
 export async function deleteObject(key: string): Promise<void> {
   assertKey(key)
   if (BUCKET) {

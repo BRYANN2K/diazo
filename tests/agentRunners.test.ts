@@ -183,3 +183,20 @@ describe('accountWithPick', () => {
     })
   })
 })
+
+it('keeps voice connections in settings and out of runner menus and defaults', async () => {
+  const voice: ModelAccount = {
+    kind: 'elevenlabs-key',
+    userId: 'alice',
+    apiKey: 'private-voice-key',
+    enabled: true,
+    connectedAt: 0,
+  }
+  mocks.preference.mockResolvedValue({ enabled: false, model: 'default' })
+  mocks.accounts.mockResolvedValue([voice])
+  expect(resolveDefault(undefined, false, [voice])).toBeUndefined()
+  expect((await listRunners('alice')).runners).toEqual([])
+  const view = await accountsView('alice')
+  expect(view.accounts).toEqual([expect.objectContaining({ kind: 'elevenlabs-key' })])
+  expect(JSON.stringify(view)).not.toContain('private-voice-key')
+})

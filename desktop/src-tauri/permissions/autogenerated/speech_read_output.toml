@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-speech-read-output"
+description = "Enables the speech_read_output command without any pre-configured scope."
+commands.allow = ["speech_read_output"]
+
+[[permission]]
+identifier = "deny-speech-read-output"
+description = "Denies the speech_read_output command without any pre-configured scope."
+commands.deny = ["speech_read_output"]

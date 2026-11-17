@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-blender-revoke"
+description = "Enables the blender_revoke command without any pre-configured scope."
+commands.allow = ["blender_revoke"]
+
+[[permission]]
+identifier = "deny-blender-revoke"
+description = "Denies the blender_revoke command without any pre-configured scope."
+commands.deny = ["blender_revoke"]

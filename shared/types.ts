@@ -558,6 +558,10 @@ export interface ElementComment {
   y?: number
   /** Element top-left at placement time; a moved element uses its current top-left. */
   elementOrigin?: { x: number; y: number }
+  /** Scene anchor (Motion Studio): the range on the page's composition
+   *  clock the thread is about, in seconds. Set on page comments. */
+  timeStart?: number
+  timeEnd?: number
   from: string
   /** account id of the human who left it — decides which model credential runs it */
   fromUserId?: string
@@ -803,6 +807,8 @@ export type ServerMessage =
   | { type: 'render:progress'; job: RenderJob }
   /** a dev task (a coding agent launched in an Orca worktree) changed state */
   | { type: 'dev-task'; task: DevTask }
+  | { type: 'speech:progress'; job: import('./speech.ts').SpeechJob }
+  | { type: 'media:transcribed'; mediaId: string; transcript: import('./motionMedia.ts').Transcript }
 
 export const CURSOR_PALETTE = [
   '#2743EE', // cursor blue — the brand accent leads

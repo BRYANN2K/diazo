@@ -1058,9 +1058,24 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   MediaRecorder/WebCodecs, or the desktop shell renders deterministically —
   `desktop/src-tauri/src/motion.rs` drives a hidden webview through the page's seek/capture hooks
   and encodes with an allowlisted local `ffmpeg` (`__DOOP_MOTION_RENDER__`, capability
-  `motion-render.json`); `src/blender.rs` is the disabled-by-default (`DOOP_BLENDER_BRIDGE`)
-  Blender-MCP spawn + read-only relay groundwork. MCP tools (`server/motionTools.ts`, parity in
+  `motion-render.json`); `src/blender.rs` spawns the disabled-by-default (`DOOP_BLENDER_BRIDGE`)
+  allowlisted blender-mcp process and relays server-queued ops behind read/write/render grants.
+  MCP tools (`server/motionTools.ts`, parity in
   `server/resident.ts`): `get_composition`, `set_composition`, `animate_storyboard`, `lint_motion`,
+  `render_composition`. Phases 2 to 5 (`feat/motion-backend-next`): transitions, camera presets,
+  text animators, `3d` clip sources with a scroll/pointer driver, `scene_media` (speed, cuts,
+  beats, transcript, recipe, ducking, captions), `generate_video`, the speech engine
+  (`server/speech*.ts`, `desktop/src-tauri/src/speech.rs` — the `diazo-speech` sidecar and the
+  Pocket TTS weight mirror are designed, not yet shipped; `docs/speech-mirror.md`), the Blender
+  op relay (`server/blender*.ts`, approvals in `desktop/src-tauri/src/blender.rs`), `blender` and
+  `server` render targets — the server target renders on the instance's own headless Chromium at
+  background priority under 60 s / 1080p / 30 fps / one-per-account caps, off with
+  `SERVER_RENDER_DISABLED` (`server/motionRender.ts`) — Lottie and HyperFrames interchange
+  (`shared/motionInterchange.ts`, `GET …/composition/export?format=`, `POST …/composition/import`),
+  and the motion duel (`POST …/motion-duels`: one storyboard page copied per pick,
+  `model_duels.kind = 'motion'`). Tests: `motion.test.ts`, `motionPhase2.test.ts`,
+  `motionMedia.test.ts`, `motionHttp.test.ts`, `motionPhase5.test.ts`, `blender.test.ts`,
+  `motion::tests`, `blender::tests`, `speech::tests`.
   `render_composition`. `server/storyboard.ts` is the storyboard read `animate_storyboard` adds to
   each shot — the frame's notes (elements labelled mouvement / transition / son / voix off / notes,
   or the English words, by text or by markup) and its animatable elements with `data-doop-id`s
@@ -1305,3 +1320,22 @@ The shared font library serves public font assets with CORS so sandboxed frames 
 Migrations 0040 (agent feedback) and 0041 (custom fonts) retain their shared timestamps; their OSS
 snapshots omit the deferred Figma `integrations.refresh_token` column, as does the credential
 encryption backfill. Desktop downloads use the platform-neutral `https://doop.design/download` page.
+
+## Speech backend (phase 3, partial)
+
+`shared/speech.ts` defines the catalog, preferences, routing and validated job
+request. `server/speech.ts` persists jobs and preferences, claims desktop work
+atomically and adapts cloud providers and the internal sidecar protocol.
+`server/speechJobs.ts` validates canvas assets, requires cloud estimate
+acknowledgement, normalizes results and writes transcripts/audio media.
+`server/speechRoutes.ts` exposes the authenticated REST relay;
+`server/speechTools.ts` supplies the same tools to MCP and the resident agent.
+Migrations 0074–0076 add speech tables, durable request parameters and a partial
+unique index allowing one active job per person. Restarted jobs fail without
+automatic retries. Voice accounts are excluded from runner selection.
+
+Contract and limitations: [speech-api.md](speech-api.md). Tests:
+`tests/speech.test.ts`, `tests/speechHttp.test.ts`, `tests/agentToolParity.test.ts`
+and `tests/agentRunners.test.ts`. The desktop engine worker, installer, model
+release manifests and actual sidecar remain pending. No speech engine is
+bundled or downloaded by this change.

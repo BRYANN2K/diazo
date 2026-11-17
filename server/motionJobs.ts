@@ -13,9 +13,11 @@ import { nanoid } from 'nanoid'
 import * as persist from './db/persist.ts'
 import type { ServerMessage } from '../shared/types.ts'
 import {
+  BLENDER_ENGINES,
   MOTION_LIMITS,
   RENDER_FORMATS,
   RENDER_TARGETS_MVP,
+  type BlenderEngine,
   type Composition,
   type RenderJob,
 } from '../shared/motion.ts'
@@ -80,6 +82,7 @@ export type CreateRenderJobInput = {
   composition: Composition
   format: string
   target: string
+  engine?: string
   width?: number
   height?: number
   fps?: number
@@ -99,10 +102,44 @@ export function createRenderJob(
     return {
       ok: false,
       status: 400,
-      error: `target must be one of ${RENDER_TARGETS_MVP.join(', ')} (server and blender renders land in a later phase)`,
+      error: `target must be one of ${RENDER_TARGETS_MVP.join(', ')}`,
     }
   }
+  let engine: BlenderEngine | undefined
+  if (target === 'blender') {
+    engine = (input.engine ?? 'eevee') as BlenderEngine
+    if (!BLENDER_ENGINES.includes(engine)) {
+      return { ok: false, status: 400, error: `engine must be one of ${BLENDER_ENGINES.join(', ')}` }
+    }
+  } else if (input.engine !== undefined) {
+    return { ok: false, status: 400, error: 'engine only applies to target blender' }
+  }
   const num = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback)
+  const start = num(input.range?.start, 0)
+  const end = num(input.range?.end, comp.duration)
+  if (target === 'server') {
+    /* the phase-5 caps: short renders at background priority so the
+       interactive gate always keeps a slot; mp4/gif need ffmpeg, which a
+       server does not promise — the desktop keeps those formats */
+    if (input.format !== 'webm' && input.format !== 'pngseq') {
+      return { ok: false, status: 400, error: 'server renders emit webm or pngseq — mp4 and gif stay on the desktop' }
+    }
+    if (end - start > 60) return { ok: false, status: 400, error: 'server renders cap at 60 seconds' }
+    const fpsCap = Math.round(num(input.fps, comp.fps))
+    const wCap = Math.round(num(input.width, comp.width))
+    const hCap = Math.round(num(input.height, comp.height))
+    if (wCap > 1920 || hCap > 1080) return { ok: false, status: 400, error: 'server renders cap at 1080p' }
+    if (fpsCap > 30) return { ok: false, status: 400, error: 'server renders cap at 30 fps' }
+    for (const list of byCanvas.values()) {
+      const open = list.find(
+        (j) =>
+          j.target === 'server' &&
+          j.createdBy === input.by.id &&
+          (j.status === 'queued' || j.status === 'rendering' || j.status === 'encoding'),
+      )
+      if (open) return { ok: false, status: 429, error: 'one server render at a time — let the open one finish' }
+    }
+  }
   const width = Math.round(num(input.width, comp.width))
   const height = Math.round(num(input.height, comp.height))
   const fps = Math.round(num(input.fps, comp.fps))
@@ -121,8 +158,6 @@ export function createRenderJob(
   if (fps < MOTION_LIMITS.MIN_FPS || fps > MOTION_LIMITS.MAX_FPS) {
     return { ok: false, status: 400, error: `fps must be in [${MOTION_LIMITS.MIN_FPS}, ${MOTION_LIMITS.MAX_FPS}]` }
   }
-  const start = num(input.range?.start, 0)
-  const end = num(input.range?.end, comp.duration)
   if (!(start >= 0) || !(end > start) || end - start > MOTION_LIMITS.MAX_DURATION_S) {
     return { ok: false, status: 400, error: 'range must satisfy 0 ≤ start < end ≤ duration' }
   }
@@ -144,6 +179,7 @@ export function createRenderJob(
     compositionId: comp.id,
     format: input.format as RenderJob['format'],
     target: target as RenderJob['target'],
+    engine,
     width,
     height,
     fps,

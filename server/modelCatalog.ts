@@ -225,7 +225,7 @@ export async function modelCatalogFor(account: ModelAccount, curated: ModelOptio
   if (account.custom) return { models: curated, live: true }
   const kind = account.kind as BuiltinAccountKind
   const load = LOADERS[kind]
-  const label = ACCOUNT_KIND_LABELS[kind]
+  const label = kind === 'elevenlabs-key' ? 'ElevenLabs' : ACCOUNT_KIND_LABELS[kind]
   if (!load) return { models: curated, live: false }
   try {
     const models = merge(curated, await load(account, AbortSignal.timeout(8_000)))

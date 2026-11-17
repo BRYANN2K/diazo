@@ -1,3 +1,8 @@
+import { registerSpeechRoutes } from './speechRoutes.ts'
+import { registerBlenderRoutes } from './blenderRoutes.ts'
+import { queueServerRender, renderAccess } from './motionRender.ts'
+import { recoverSpeechJobs } from './speechJobs.ts'
+import { recoverBlenderOps } from './blenderOps.ts'
 import * as libraries from './libraries.ts'
 import * as libraryThumbQueue from './libraryThumbQueue.ts'
 import * as libraryIndex from './libraryIndex.ts'
@@ -76,7 +81,7 @@ import { compareFrameWithUrl, driftErrorMessage, getComparison, listComparisons 
 import { classifyDriftUrl } from '../shared/drift.ts'
 import { usageReport } from './agentRuns.ts'
 import { RollbackConflictError, rollbackRun, runTimeline } from './runReplay.ts'
-import { DuelInputError, listDuels, pickDuel, startDuel } from './duels.ts'
+import { DuelInputError, listDuels, pickDuel, startDuel, startMotionDuel } from './duels.ts'
 import { handleGeminiCloudMcp } from './geminiCloudMcp.ts'
 import { geminiCloudWorkerFor } from './geminiCloudRuns.ts'
 import http from 'node:http'
@@ -159,7 +164,16 @@ import {
   patchRenderJob,
   wireRenderJobs,
 } from './motionJobs.ts'
+import { nanoid } from 'nanoid'
 import { MOTION_LIMITS, parseCompositionBody, parseOps } from '../shared/motion.ts'
+import {
+  compositionToHyperframes,
+  compositionToLottie,
+  hyperframesToTracks,
+  lottieToTracks,
+} from '../shared/motionInterchange.ts'
+import { parseMediaBody } from '../shared/motionMedia.ts'
+import { exportComposition } from './motionTools.ts'
 import { placeImage, placedImageResult } from './placeImage.ts'
 import * as ingest from './ingest.ts'
 import * as agentKeys from './agentKeys.ts'
@@ -255,6 +269,8 @@ resumeCurations()
 resumeApplies()
 await hydrateInstanceSettings() // the sign-in policy, read on every signup
 await webhooks.hydrateWebhooks()
+await recoverSpeechJobs()
+await recoverBlenderOps()
 await hydrateFonts() // before the first request: frame writes add the faces they use
 billing.reportBillingConfig()
 actions.hydrateLogs(data)
@@ -1000,6 +1016,8 @@ declare global {
       user?: SessionUser
       /** admin's user id when this session is a "view as" — see /api/admin */
       impersonatedBy?: string
+      /** a server render's scoped read token — server/motionRender.ts */
+      renderGrant?: { canvasId: string; pageId: string }
     }
   }
 }
@@ -1013,6 +1031,15 @@ app.use('/api', compression())
 app.use('/api/live-activities', logLiveActivityRequests)
 app.use('/api', async (req, res, next) => {
   try {
+    /* a server render's token stands in for a session on exactly the two
+       harness GETs it was minted for — renderAccess checks method, path,
+       (canvasId, pageId) and expiry; anything else falls through to the
+       session gate (server/motionRender.ts) */
+    const grant = renderAccess(req.headers.cookie, req.method, req.path)
+    if (grant) {
+      req.renderGrant = grant
+      return next()
+    }
     const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) })
     if (!session) return res.status(401).json({ error: 'unauthorized' })
     req.user = session.user
@@ -1192,6 +1219,17 @@ function requireCanvas(req: express.Request, res: express.Response, canvasId: st
     return null
   }
   return checkRole(req, res, c, need) ? c : null
+}
+
+/* a server render's token reads its own canvas like a viewer — it only
+   exists on the two harness GETs renderAccess admits (motionRender.ts) */
+function requireCanvasOrRenderGrant(req: express.Request, res: express.Response, canvasId: string) {
+  if (req.renderGrant?.canvasId === canvasId) {
+    const c = store.getCanvas(canvasId)
+    if (!c) res.status(404).json({ error: 'not found' })
+    return c ?? null
+  }
+  return requireCanvas(req, res, canvasId, 'view')
 }
 
 function checkRole(req: express.Request, res: express.Response, canvas: Canvas, need: CanvasRole): boolean {
@@ -1886,6 +1924,7 @@ const KEY_CONNECTS = {
   'deepseek-key': modelAccounts.connectDeepSeekKey,
   'kimi-key': modelAccounts.connectKimiKey,
   'kimi-code': modelAccounts.connectKimiCodeKey,
+  'elevenlabs-key': modelAccounts.connectElevenLabsKey,
 } as const
 for (const [kind, connect] of Object.entries(KEY_CONNECTS)) {
   app.post(`/api/model-account/${kind}`, async (req, res) => {
@@ -2183,10 +2222,10 @@ app.post('/api/canvases/:id/duplicate', async (req, res) => {
    the rest arrive `htmlDeferred` (GET /api/frames/:id has the HTML of any). With
    no `pageId` every frame is complete, as it always was. */
 app.get('/api/canvases/:id', (req, res) => {
-  const c = requireCanvas(req, res, req.params.id, 'view')
+  const c = requireCanvasOrRenderGrant(req, res, req.params.id)
   if (!c) return
   /* the caller's own role rides along, so the editor knows to go read-only */
-  const role = canvasRole(req.user!.id, c)
+  const role = req.renderGrant ? ('view' as const) : canvasRole(req.user!.id, c)
   const { pageId } = req.query
   if (pageId === undefined) return res.json({ ...c, role })
   if (typeof pageId !== 'string' || !canvasPages(c).some((page) => page.id === pageId))
@@ -3011,6 +3050,9 @@ app.post('/api/canvases/:id/pages/:pageId/duplicate', async (req, res) => {
 })
 
 /* ------------------------------------------------------------------ */
+registerSpeechRoutes(app)
+registerBlenderRoutes(app)
+
 /* Motion Studio: a page's timeline (shared/motion.ts, docs/motion-api)  */
 /* ------------------------------------------------------------------ */
 
@@ -3018,8 +3060,11 @@ app.post('/api/canvases/:id/pages/:pageId/duplicate', async (req, res) => {
    (PATCH) or removes it (DELETE). expectedRevision guards concurrent
    writers: 409 when the timeline moved under them. */
 app.get('/api/canvases/:id/pages/:pageId/composition', (req, res) => {
-  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  const canvas = requireCanvasOrRenderGrant(req, res, req.params.id)
   if (!canvas) return
+  /* the token is page-bound as well: it only reads its own page */
+  if (req.renderGrant && req.renderGrant.pageId !== req.params.pageId)
+    return res.status(403).json({ error: 'this canvas is private — ask the owner for access' })
   res.json({ composition: store.getComposition(canvas.id, req.params.pageId) ?? null })
 })
 
@@ -3065,6 +3110,34 @@ app.patch('/api/canvases/:id/pages/:pageId/composition', (req, res) => {
   res.json({ composition: applied.composition })
 })
 
+/* interchange (phase 5): import a Lottie or HyperFrames document as this
+   page's composition — restricted to the shared vector subset; the export
+   side rides the ?format switch on the code-export route below */
+app.post('/api/canvases/:id/pages/:pageId/composition/import', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const pageId = req.params.pageId
+  if (!canvasPages(canvas).some((p) => p.id === pageId)) return res.status(404).json({ error: 'page not found' })
+  const format = String(req.body?.format ?? '')
+  const converted =
+    format === 'lottie'
+      ? lottieToTracks(req.body?.data, Number(req.body?.fps) || 30)
+      : format === 'hyperframes'
+        ? hyperframesToTracks(req.body?.data)
+        : { ok: false as const, error: 'format must be lottie or hyperframes' }
+  if (!converted.ok) return res.status(400).json({ error: converted.error })
+  /* the imported tracks ride through the same validator a PUT takes */
+  const parsed = parseCompositionBody({
+    duration: req.body?.duration ?? 5,
+    fps: req.body?.fps ?? 30,
+    width: req.body?.width ?? 1920,
+    height: req.body?.height ?? 1080,
+    tracks: converted.tracks,
+  })
+  if (!parsed.ok) return res.status(400).json({ error: parsed.error })
+  res.json({ composition: actions.setComposition(canvas.id, parsed.value, pageId, userActor(req)) })
+})
+
 app.delete('/api/canvases/:id/pages/:pageId/composition', (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'edit')
   if (!canvas) return
@@ -3086,10 +3159,14 @@ app.post('/api/canvases/:id/pages/:pageId/composition/renders', (req, res) => {
   const pageId = req.params.pageId
   const comp = store.getComposition(canvas.id, pageId)
   if (!comp) return res.status(404).json({ error: 'the page has no composition — make the timeline first' })
+  if (req.body?.target === 'server' && env.SERVER_RENDER_DISABLED) {
+    return res.status(503).json({ error: 'server renders are off on this instance' })
+  }
   const created = createRenderJob({
     composition: comp,
     format: req.body?.format,
     target: req.body?.target,
+    engine: req.body?.engine,
     width: req.body?.width,
     height: req.body?.height,
     fps: req.body?.fps,
@@ -3097,7 +3174,104 @@ app.post('/api/canvases/:id/pages/:pageId/composition/renders', (req, res) => {
     by: { id: req.user!.id, name: req.user!.name },
   })
   if (!created.ok) return res.status(created.status).json({ error: created.error })
+  /* a server-target job renders on the instance itself, in the background */
+  if (created.job.target === 'server') queueServerRender(created.job)
   res.status(201).json({ job: created.job })
+})
+
+/* the undo history: every write files the replaced state; restoring one
+   re-saves it as the live composition (which files the state it replaced —
+   so a restore is itself undoable) */
+app.get('/api/canvases/:id/pages/:pageId/composition/versions', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  const comp = store.getComposition(canvas.id, req.params.pageId)
+  if (!comp) return res.status(404).json({ error: 'the page has no composition' })
+  const versions = (await persist.listCompositionVersions(canvas.id, comp.id)).map((v) => ({
+    id: v.id,
+    savedAt: v.savedAt,
+    savedBy: v.savedBy,
+    savedByKind: v.savedByKind,
+    duration: v.state.duration,
+    trackCount: v.state.tracks.length,
+    revision: v.state.revision,
+  }))
+  res.json({ versions })
+})
+
+app.post('/api/canvases/:id/pages/:pageId/composition/versions/:versionId/restore', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const pageId = req.params.pageId
+  const comp = store.getComposition(canvas.id, pageId)
+  if (!comp) return res.status(404).json({ error: 'the page has no composition' })
+  const version = await persist.getCompositionVersion(canvas.id, req.params.versionId)
+  if (!version || version.compositionId !== comp.id) {
+    return res.status(404).json({ error: 'no such version on this composition' })
+  }
+  const parsed = parseCompositionBody(version.state)
+  if (!parsed.ok) return res.status(409).json({ error: `the stored version no longer validates: ${parsed.error}` })
+  res.json({ composition: actions.setComposition(canvas.id, parsed.value, pageId, userActor(req)) })
+})
+
+/* "copy as code": the composition compiled to CSS + WAAPI with motion
+   token names kept (docs/motion-api.md § code export). ?format=lottie or
+   hyperframes instead ships the interchange document (phase 5). */
+app.get('/api/canvases/:id/pages/:pageId/composition/export', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  const format = typeof req.query.format === 'string' ? req.query.format : ''
+  if (format === 'lottie' || format === 'hyperframes') {
+    const comp = store.getComposition(canvas.id, req.params.pageId)
+    if (!comp) return res.status(404).json({ error: 'the page has no composition' })
+    return res.json(format === 'lottie' ? compositionToLottie(comp) : compositionToHyperframes(comp))
+  }
+  if (format && format !== 'code') {
+    return res.status(400).json({ error: 'format must be code, lottie or hyperframes' })
+  }
+  const out = await exportComposition(canvas, req.params.pageId)
+  if (!out.ok) return res.status(404).json({ error: out.error })
+  res.json(out.data)
+})
+
+/* ---- scene_media (phase 3): per-page state of a media asset — trim, cuts,
+   beats, transcript, generation recipe (shared/motionMedia.ts) ---- */
+
+app.get('/api/canvases/:id/pages/:pageId/media', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  res.json({ media: await persist.listSceneMedia(canvas.id, req.params.pageId) })
+})
+
+app.put('/api/canvases/:id/pages/:pageId/media/:assetId', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const body = parseMediaBody(req.body)
+  if (!body) return res.status(400).json({ error: 'not a valid scene_media body' })
+  const pageId = req.params.pageId
+  const assetId = req.params.assetId
+  const now = Date.now()
+  const prev = await persist.findSceneMediaByAsset(canvas.id, pageId, assetId)
+  const media = {
+    id: prev?.id ?? nanoid(10),
+    canvasId: canvas.id,
+    pageId,
+    assetId,
+    ...body,
+    createdAt: prev?.createdAt ?? now,
+    updatedAt: now,
+  }
+  persist.saveSceneMedia(media)
+  res.json({ media })
+})
+
+app.delete('/api/canvases/:id/pages/:pageId/media/:mediaId', async (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'edit')
+  if (!canvas) return
+  const media = await persist.getSceneMedia(canvas.id, req.params.mediaId)
+  if (!media || media.pageId !== req.params.pageId) return res.status(404).json({ error: 'no such media row' })
+  persist.deleteSceneMedia(canvas.id, media.id)
+  res.json({ ok: true })
 })
 
 app.get('/api/renders/:id', (req, res) => {
@@ -3148,12 +3322,23 @@ app.put(
     }
     const isMp4 = buf.length > 11 && buf.subarray(4, 8).toString('latin1') === 'ftyp'
     const isWebm = buf.length > 3 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3
-    const mime = isMp4 ? 'video/mp4' : isWebm ? 'video/webm' : null
-    if (!mime) return res.status(400).json({ error: 'not an mp4 or webm file' })
-    if ((job.format === 'mp4') !== isMp4) {
-      return res.status(400).json({ error: `the job wants ${job.format}, the file is ${isMp4 ? 'mp4' : 'webm'}` })
+    /* GIF89a/GIF87a magic, or a PK zip for a pngseq */
+    const isGif = buf.length > 5 && buf.subarray(0, 4).toString('latin1') === 'GIF8'
+    const isZip = buf.length > 3 && buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04
+    const sniffed = isMp4
+      ? { format: 'mp4', mime: 'video/mp4', ext: 'mp4' }
+      : isWebm
+        ? { format: 'webm', mime: 'video/webm', ext: 'webm' }
+        : isGif
+          ? { format: 'gif', mime: 'image/gif', ext: 'gif' }
+          : isZip
+            ? { format: 'pngseq', mime: 'application/zip', ext: 'zip' }
+            : null
+    if (!sniffed) return res.status(400).json({ error: 'not an mp4, webm, gif or zip file' })
+    if (job.format !== sniffed.format) {
+      return res.status(400).json({ error: `the job wants ${job.format}, the file is ${sniffed.format}` })
     }
-    const ext = isMp4 ? 'mp4' : 'webm'
+    const { mime, ext } = sniffed
     const asset = await storeAsset(
       buf,
       { mime, ext },
@@ -3671,11 +3856,17 @@ app.post('/api/frames/:id/drift/:driftId/analyze', async (req, res) => {
 app.post('/api/canvases/:id/comments', async (req, res) => {
   const canvas = requireCanvas(req, res, req.params.id, 'comment')
   if (!canvas) return
-  const { pageId, x, y, text } = req.body ?? {}
+  const { pageId, x, y, text, timeStart, timeEnd } = req.body ?? {}
   if (typeof pageId !== 'string' || !canvasPages(canvas).some((page) => page.id === pageId)) {
     return res.status(400).json({ error: 'page not found' })
   }
   if (!Number.isFinite(x) || !Number.isFinite(y)) return res.status(400).json({ error: 'x and y must be numbers' })
+  if (
+    (timeStart !== undefined || timeEnd !== undefined) &&
+    (!Number.isFinite(timeStart) || !Number.isFinite(timeEnd))
+  ) {
+    return res.status(400).json({ error: 'timeStart/timeEnd must both be seconds on the page composition' })
+  }
   const body = String(text ?? '')
   if (!body.trim()) return res.status(400).json({ error: 'empty text' })
   if (refuseAgentMention(req, res, canvas.id, body)) return
@@ -3688,7 +3879,14 @@ app.post('/api/canvases/:id/comments', async (req, res) => {
   }
   const comment = actions.addCanvasComment(
     canvas.id,
-    { pageId, x: Number(x), y: Number(y), text: body },
+    {
+      pageId,
+      x: Number(x),
+      y: Number(y),
+      text: body,
+      ...(Number.isFinite(timeStart) ? { timeStart: Number(timeStart) } : {}),
+      ...(Number.isFinite(timeEnd) ? { timeEnd: Number(timeEnd) } : {}),
+    },
     req.user!.name,
     req.user!.id,
   )
@@ -4181,6 +4379,34 @@ app.post('/api/canvases/:id/duels/:duelId/pick', async (req, res) => {
 app.get('/api/canvases/:id/duels', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   res.json(await listDuels(req.params.id))
+})
+
+/* motion duels: one storyboard page, one copy per pick, each pick animates
+   its own copy and queues a render for comparison */
+app.post('/api/canvases/:id/motion-duels', async (req, res) => {
+  if (!requireCanvas(req, res, req.params.id, 'edit')) return
+  const picks: unknown[] = Array.isArray(req.body?.picks) ? req.body.picks : []
+  const brief = String(req.body?.brief ?? '')
+  const pageId = String(req.body?.pageId ?? '')
+  for (let i = 0; i < Math.min(picks.length, 3); i++) {
+    const gate = await allowance.consumeResidentTask(req.user!.id)
+    if (!gate.ok) return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
+  }
+  try {
+    const duel = await startMotionDuel({
+      canvasId: req.params.id,
+      pageId,
+      brief,
+      picks,
+      actor: userActor(req),
+      userId: req.user!.id,
+    })
+    res.json(duel)
+  } catch (err) {
+    if (err instanceof DuelInputError) return res.status(400).json({ error: err.message })
+    console.error('[duel] could not start the motion duel', err)
+    res.status(500).json({ error: 'The motion duel could not start' })
+  }
 })
 
 app.post('/api/canvases/:id/cards', async (req, res) => {

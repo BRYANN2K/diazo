@@ -9,6 +9,18 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 
 ## [Unreleased]
 
+- Add the partial speech job backend: estimates, persisted transcripts, voice-over
+  audio clips, secure desktop relay, and matching canvas tools. Local engine
+  installers and the speech sidecar remain pending.
+- Extend the Motion Studio backend through phases 2 to 5: transitions, camera
+  presets, text animators and 3D clips on the composition contract; GIF and
+  PNG-sequence renders; media rows with transcripts and ducking; video
+  generation on OpenRouter and Gemini keys; the speech engine catalog with
+  desktop installs; the Blender op relay behind grants; server-side renders
+  (webm/pngseq, 60 s, 1080p, 30 fps, one per account); Lottie and HyperFrames
+  interchange; and the motion duel.
+
+
 ### Added
 
 - Design libraries: turn a canvas into a library with rules, then browse it in a gallery (`/libraries`, `/l/<id>`), search it from ⌘F and the Layers panel's Library tab, and insert an item into a frame as a linked block that offers updates.

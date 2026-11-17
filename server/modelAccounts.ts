@@ -82,6 +82,7 @@ export type BuiltinAccountKind =
   | 'deepseek-key'
   | 'kimi-key'
   | 'kimi-code'
+  | 'elevenlabs-key'
 
 /** A built-in provider, or one a person connected by URL (`custom:<id>`). */
 export type AccountKind = BuiltinAccountKind | CustomProviderKind
@@ -95,6 +96,7 @@ const ACCOUNT_KINDS: readonly string[] = [
   'deepseek-key',
   'kimi-key',
   'kimi-code',
+  'elevenlabs-key',
 ] satisfies BuiltinAccountKind[]
 
 export interface ModelAccount {
@@ -314,6 +316,7 @@ const MODEL_POLICY: Record<BuiltinAccountKind, ModelPolicy> = {
   'deepseek-key': rosterPolicy(DEEPSEEK_MODELS, DEFAULT_DEEPSEEK),
   'kimi-key': rosterPolicy(KIMI_MODELS, DEFAULT_KIMI),
   'kimi-code': rosterPolicy(KIMI_CODE_MODELS, DEFAULT_KIMI_CODE),
+  'elevenlabs-key': { resolve: () => '', isKnown: () => false },
 }
 
 /* a custom provider runs the models its person listed, and only those: an
@@ -981,6 +984,10 @@ const KEY_SHAPES: Partial<Record<BuiltinAccountKind, { test(key: string): boolea
     test: (key) => key.length >= 20 && !/\s/.test(key),
     hint: 'That does not look like a Kimi Code key (copy it from the Kimi Code console)',
   },
+  'elevenlabs-key': {
+    test: (key) => key.startsWith('sk_') && key.length >= 20 && !/\s/.test(key),
+    hint: 'That does not look like an ElevenLabs key (they start with "sk_")',
+  },
 }
 
 async function connectKey(userId: string, kind: BuiltinAccountKind, apiKey: string): Promise<void> {
@@ -1024,6 +1031,12 @@ export function connectKimiKey(userId: string, apiKey: string): Promise<void> {
 
 export function connectKimiCodeKey(userId: string, apiKey: string): Promise<void> {
   return connectKey(userId, 'kimi-code', apiKey)
+}
+
+/* the Voice connection (proposal 18.6): Scribe + voice-over only — it is
+   never an agent runner, so the roster policies above never list it */
+export function connectElevenLabsKey(userId: string, apiKey: string): Promise<void> {
+  return connectKey(userId, 'elevenlabs-key', apiKey)
 }
 
 /* ---------------------------------------------------------------- */

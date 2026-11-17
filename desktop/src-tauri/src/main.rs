@@ -62,6 +62,7 @@ mod local_server;
 mod orca;
 mod repo;
 mod server;
+mod speech;
 #[cfg(test)]
 mod test_support;
 mod updates;
@@ -343,6 +344,7 @@ fn main() {
         .manage(motion::MotionState::default())
         .manage(blender::BlenderState::default())
         .manage(orca::OrcaState::default())
+        .manage(speech::SpeechState::default())
         .manage(app_menu::AppMenu::default())
         .invoke_handler(tauri::generate_handler![
             claude::claude_status,
@@ -387,6 +389,17 @@ fn main() {
             blender::blender_status,
             blender::blender_start,
             blender::blender_call,
+            blender::blender_approvals,
+            blender::blender_approve,
+            blender::blender_revoke,
+            speech::speech_models,
+            speech::speech_engine_status,
+            speech::speech_choose_files,
+            speech::speech_install,
+            speech::speech_uninstall,
+            speech::speech_run,
+            speech::speech_stage_input,
+            speech::speech_read_output,
             server::server_status,
             server::server_choose,
             view_menu::view_menu_state,

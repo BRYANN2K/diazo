@@ -169,6 +169,11 @@ export interface LibraryItemMeta {
   updatedBy: string | null
   /** a model's description and tags for a thin item, until accepted */
   suggested?: ItemSuggestion | null
+  /** Motion Studio: stored verdict of the last seek-safety check
+   *  (shared/motionLint over the item's HTML); insert_clip trusts 'safe' */
+  seekSafe?: 'safe' | 'issues' | null
+  seekSafeFindings?: { rule: string; message: string }[] | null
+  seekSafeAt?: number | null
 }
 
 /** What a model proposed for an item whose person left the fields empty:

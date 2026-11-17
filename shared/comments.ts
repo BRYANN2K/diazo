@@ -45,7 +45,7 @@ export type CommentAnchorInput =
       y: number
       elementOrigin?: { x: number; y: number }
     }
-  | { pageId: string; x: number; y: number }
+  | { pageId: string; x: number; y: number; timeStart?: number; timeEnd?: number }
 
 /** Whether a dropped anchor is where the thread already sits: the same
  *  element and placement, or a frame-wide or canvas pin at the same point. */
