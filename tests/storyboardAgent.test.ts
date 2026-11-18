@@ -27,7 +27,7 @@ const { store } = await import('../server/store.ts')
 const { execTool, TOOLS } = await import('../server/resident.ts')
 const { canvasPages } = await import('../shared/pages.ts')
 const { DEFAULT_ROLE_ID, roleName } = await import('../shared/agents.ts')
-const { MOTION } = await import('../server/guide.ts')
+const { MOTION, DIRECTOR } = await import('../server/guide.ts')
 const { motion: en } = await import('../src/lib/i18n/en/motion.ts')
 const { motion: pt } = await import('../src/lib/i18n/pt-BR/motion.ts')
 
@@ -326,6 +326,18 @@ describe('the words the agent sees', () => {
       expect(words).not.toMatch(/TODO marker clip/i)
       expect(words).not.toMatch(/clipes marcadores/i)
     }
+  })
+
+  it('the animate kind drives the director tools, not the text on the card', () => {
+    /* end_stage and wait_for_job are resident tools; the DIRECTOR briefs
+       name the stages the server walks */
+    expect(TOOLS.map((t) => t.name)).toEqual(expect.arrayContaining(['end_stage', 'wait_for_job']))
+    for (const stage of ['plan', 'build', 'refine', 'finish'] as const) {
+      expect(DIRECTOR[stage]).toBeTruthy()
+    }
+    /* and the button's own prompt is still the catalog key — the kind is
+       passed by the client, never inferred from card text */
+    expect(en.animatePrompt).not.toMatch(/director/i)
   })
 
   it('frames the notes as intent and a minimum, not a script to execute', () => {

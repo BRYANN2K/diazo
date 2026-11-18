@@ -83,6 +83,20 @@ it('keeps the exception lists honest', async () => {
   for (const names of Object.values(EQUIVALENT)) for (const name of names) expect(resident.has(name)).toBe(true)
 })
 
+/** Resident-only tools: they drive the director run the resident hosts; an MCP agent has no run to close. */
+const RESIDENT_ONLY = [
+  'end_stage', // closing a stage only exists inside a director run, which an MCP agent never runs
+]
+
+it('keeps resident-only tools off MCP', async () => {
+  const mcp = new Set(await mcpToolNames())
+  const resident = new Set(RESIDENT_TOOL_NAMES)
+  for (const name of RESIDENT_ONLY) {
+    expect(resident.has(name), `${name} is no longer a resident tool`).toBe(true)
+    expect(mcp.has(name), `${name} is now an MCP tool`).toBe(false)
+  }
+})
+
 it('gives resident agents the prototype tools', () => {
   expect(RESIDENT_TOOL_NAMES).toEqual(expect.arrayContaining(['get_prototype', 'set_prototype_start']))
 })
