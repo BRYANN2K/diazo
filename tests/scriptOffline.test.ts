@@ -67,7 +67,7 @@ function runCtx(over: Partial<ScriptRunContext> = {}): ScriptRunContext {
     write: true,
     dryRun: false,
     runId: 'run-1',
-    budgets: { frameWrites: 40 },
+    budgets: { frameWrites: 40, snapshotBytes: 64 * 1024 * 1024 },
     snapshots: new Map(),
     writes: [],
     ...over,

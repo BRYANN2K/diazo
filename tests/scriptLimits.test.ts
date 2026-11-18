@@ -23,7 +23,16 @@ vi.mock('../server/libraryQueries.ts', () => ({
   itemDetail: vi.fn(async () => null),
 }))
 
+/* deterministic sizes for the snapshot budget: a 64-byte PNG of 10×10 */
+vi.mock('../server/screenshot.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../server/screenshot.ts')>()),
+  renderFrame: vi.fn(async () => Buffer.alloc(64, 0x89)),
+  rendererAvailable: () => true,
+}))
+vi.mock('sharp', () => ({ default: () => ({ metadata: async () => ({ width: 10, height: 10 }) }) }))
+
 import { dispatchScriptCall, type ScriptRunContext } from '../server/scriptSdk.ts'
+import { createFrame } from '../server/actions.ts'
 import { store } from '../server/store.ts'
 
 const OWNER = 'owner-1'
@@ -38,7 +47,7 @@ function runCtx(): ScriptRunContext {
     write: true,
     dryRun: false,
     runId: 'run-1',
-    budgets: { frameWrites: 40 },
+    budgets: { frameWrites: 40, snapshotBytes: 64 * 1024 * 1024 },
     snapshots: new Map(),
     writes: [],
   }
@@ -63,5 +72,29 @@ describe('search call limits are clamped', () => {
     expect(searchLibraries.mock.calls[0]![1]?.limit).toBeLessThanOrEqual(60)
     await dispatchScriptCall(runCtx(), 'libraries.search', ['button', { limit: 0 }])
     expect(searchLibraries.mock.calls[1]![1]?.limit).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('snapshot memory budget', () => {
+  /* one shot costs 64 compressed bytes + 10×10 raw pixels = 464 */
+  const COST = 64 + 10 * 10 * 4
+  const mkFrame = () =>
+    createFrame(
+      canvasId,
+      { name: 'S', html: '<html><body><h1>x</h1></body></html>', width: 10, height: 10 },
+      { kind: 'user', name: 'O', color: '#000' },
+    )!
+
+  it('charges bytes and pixels before retaining, and refuses past the budget', async () => {
+    const ctx = runCtx()
+    ctx.budgets.snapshotBytes = COST + 1
+    const frame = mkFrame()
+    const first = (await dispatchScriptCall(ctx, 'checks.snapshot', [frame.id])) as { id: string }
+    expect(first.id).toMatch(/^snap-/)
+    expect(ctx.budgets.snapshotBytes).toBe(1)
+    expect(ctx.snapshots.size).toBe(1)
+    /* the second render never gets kept — the buffer is refused, not parked */
+    await expect(dispatchScriptCall(ctx, 'checks.snapshot', [frame.id])).rejects.toThrow(/snapshot_bytes/)
+    expect(ctx.snapshots.size).toBe(1)
   })
 })

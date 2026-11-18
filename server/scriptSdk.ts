@@ -83,7 +83,7 @@ export interface ScriptRunContext {
   dryRun: boolean
   runId: string
   /** per-run budgets, decremented here */
-  budgets: { frameWrites: number }
+  budgets: { frameWrites: number; snapshotBytes: number }
   /** checks.snapshot renders kept until the run ends (checks.diff reads them) */
   snapshots: Map<string, { frameId: string; png: Buffer; width: number; height: number }>
   /** audit: the writes this run made (path + frame target) */
@@ -1292,14 +1292,21 @@ const HANDLERS: Record<string, Entry> = {
       if (!rendererAvailable()) throw new SdkError('unavailable', 'snapshot needs the server renderer', 'renderer')
       const png = await renderFrame(frame, 1, { offline: true })
       const meta = await sharp(png).metadata()
+      const width = meta.width ?? frame.width
+      const height = meta.height ?? frame.height
+      /* every kept shot is host memory the guest's own heap never sees —
+         charge its compressed bytes plus its raw pixels before retaining */
+      const cost = png.byteLength + width * height * 4
+      if (cost > ctx.budgets.snapshotBytes)
+        throw new SdkError(
+          'limit',
+          `snapshot_bytes limit reached: ${cost} needed, ${ctx.budgets.snapshotBytes} left`,
+          'snapshot_bytes',
+        )
+      ctx.budgets.snapshotBytes -= cost
       const id = `snap-${++snapshotSeq}-${randomUUID().slice(0, 8)}`
-      ctx.snapshots.set(id, {
-        frameId: frame.id,
-        png,
-        width: meta.width ?? frame.width,
-        height: meta.height ?? frame.height,
-      })
-      return { id, frameId: frame.id, width: meta.width ?? frame.width, height: meta.height ?? frame.height }
+      ctx.snapshots.set(id, { frameId: frame.id, png, width, height })
+      return { id, frameId: frame.id, width, height }
     },
   },
   'checks.diff': {
@@ -1603,4 +1610,11 @@ export function nameMatcher(pattern: string): (name: string) => boolean {
 /** The catalogue `get_sdk_docs` serves: which paths exist and which write. */
 export function sdkPaths(): { path: string; write: boolean }[] {
   return Object.entries(HANDLERS).map(([path, e]) => ({ path, write: !!e.write }))
+}
+
+/** Host memory a run was holding only for its own duration: the PNG buffers
+ *  behind `snapshots` live in Node, not the guest heap, so they are dropped
+ *  here when the run ends — success, failure or cut alike. */
+export function releaseSnapshots(ctx: ScriptRunContext): void {
+  ctx.snapshots.clear()
 }

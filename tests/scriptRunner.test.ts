@@ -20,6 +20,7 @@ vi.mock('../shared/canonicalJson.ts', async (importOriginal) => {
   const orig = await importOriginal<typeof import('../shared/canonicalJson.ts')>()
   return { ...orig, canonicalJson: vi.fn(orig.canonicalJson) }
 })
+vi.mock('sharp', () => ({ default: () => ({ metadata: async () => ({ width: 10, height: 10 }) }) }))
 import { store } from '../server/store.ts'
 import * as actions from '../server/actions.ts'
 import { canonicalJson } from '../shared/canonicalJson.ts'
@@ -36,6 +37,8 @@ import { reloadEnv } from '../server/env.ts'
 import { canvasPages } from '../shared/pages.ts'
 import * as motionJobs from '../server/motionJobs.ts'
 import * as persist from '../server/db/persist.ts'
+import * as screenshot from '../server/screenshot.ts'
+import * as scriptSdk from '../server/scriptSdk.ts'
 
 let caller: ScriptCaller
 let frameId: string
@@ -264,11 +267,38 @@ it('refuses the run unaudited when the first audit save fails, without the param
     actor: { kind: 'user', name: 'Fs', color: '#000' },
   }
   const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-  const error = await executeScript({ script: 'return 1' }, firstSaveCaller, true).catch((e: Error) => e)
+  const error = (await executeScript({ script: 'return 1' }, firstSaveCaller, true).catch((e: unknown) => e)) as Error
   expect(error.message).toMatch(/could not be audited/)
   expect(error.message).not.toContain('SECRET-MARKER-42')
   for (const args of errorSpy.mock.calls) for (const arg of args) expect(String(arg)).not.toContain('SECRET-MARKER-42')
   errorSpy.mockRestore()
+})
+
+it('drops the PNG buffers a run retained, whatever way it ends', async () => {
+  /* an own account — the suite's shared caller would hit the per-minute rate */
+  store.setLinkAccess(caller.canvasId, 'view')
+  const snapCaller: ScriptCaller = {
+    ...caller,
+    userId: 'snap-user',
+    actor: { kind: 'user', name: 'Snap', color: '#000' },
+  }
+  vi.spyOn(screenshot, 'rendererAvailable').mockReturnValue(true)
+  vi.spyOn(screenshot, 'renderFrame').mockResolvedValue(Buffer.alloc(64, 0x89))
+  const released: scriptSdk.ScriptRunContext[] = []
+  const releaseSpy = vi.spyOn(scriptSdk, 'releaseSnapshots').mockImplementation((ctx) => {
+    released.push(ctx)
+    ctx.snapshots.clear()
+  })
+  const result = await executeScript(
+    { script: `const s = await diazo.checks.snapshot(${JSON.stringify(frameId)}); return s.id` },
+    snapCaller,
+    false,
+  )
+  expect(result.ok).toBe(true)
+  expect(releaseSpy).toHaveBeenCalledOnce()
+  /* the buffers went out with the run — nothing retained afterwards */
+  expect(released[0]!.snapshots.size).toBe(0)
+  vi.restoreAllMocks()
 })
 
 it('refuses runs past the per-account rate', async () => {

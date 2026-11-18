@@ -5,7 +5,14 @@ import { canvasRole } from './access.ts'
 import { roleAllows } from '../shared/canvasRole.ts'
 import type { Actor } from '../shared/types.ts'
 import type { ScriptRunRecord, ScriptRunResult } from '../shared/scriptRuns.ts'
-import { dispatchScriptCall, finishScriptReviews, sdkPaths, SdkError, type ScriptRunContext } from './scriptSdk.ts'
+import {
+  dispatchScriptCall,
+  finishScriptReviews,
+  releaseSnapshots,
+  sdkPaths,
+  SdkError,
+  type ScriptRunContext,
+} from './scriptSdk.ts'
 import { runInSandbox, stripTypes, SCRIPT_LIMITS } from './scriptSandbox.ts'
 import { scriptRunDeps, type StoredScriptRun } from './scriptRuns.ts'
 import { logActivity, restoreScriptState, scriptActivityRuns } from './actions.ts'
@@ -178,7 +185,10 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
     active: true,
     dryRun: !!input.dry_run,
     runId: id,
-    budgets: { frameWrites: SCRIPT_LIMITS.frameWrites },
+    budgets: {
+      frameWrites: SCRIPT_LIMITS.frameWrites,
+      snapshotBytes: SCRIPT_LIMITS.snapshotBytes,
+    },
     snapshots: new Map(),
     writes: [],
     changedFrames: new Set(),
@@ -276,6 +286,9 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
     }
   } finally {
     ctx.active = false
+    /* PNG buffers retained for checks.diff live on the host — let them go
+       whatever way the run ended */
+    releaseSnapshots(ctx)
     scriptActivityRuns.delete(id)
   }
   record.writes = ctx.writes.map((w) => ({ fn: w.path, target: w.frameId ?? caller.canvasId }))

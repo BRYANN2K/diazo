@@ -75,7 +75,7 @@ beforeEach(() => {
     write: true,
     dryRun: false,
     runId: 'checks',
-    budgets: { frameWrites: 40 },
+    budgets: { frameWrites: 40, snapshotBytes: 64 * 1024 * 1024 },
     snapshots: new Map(),
     writes: [],
   }

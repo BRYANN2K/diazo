@@ -28,7 +28,10 @@ const ACTOR = { kind: 'agent' as const, name: 'Script', color: '#000', runId: 'r
 let canvasId: string
 let frameId: string
 
-function runCtx(opts: Partial<ScriptRunContext> = {}): ScriptRunContext {
+function runCtx(
+  opts: Omit<Partial<ScriptRunContext>, 'budgets'> & { budgets?: Partial<ScriptRunContext['budgets']> } = {},
+): ScriptRunContext {
+  const { budgets, ...rest } = opts
   return {
     canvasId,
     userId: OWNER,
@@ -36,10 +39,10 @@ function runCtx(opts: Partial<ScriptRunContext> = {}): ScriptRunContext {
     write: true,
     dryRun: false,
     runId: 'run-1',
-    budgets: { frameWrites: 40 },
+    budgets: { frameWrites: 40, snapshotBytes: 64 * 1024 * 1024, ...budgets },
     snapshots: new Map(),
     writes: [],
-    ...opts,
+    ...rest,
   }
 }
 

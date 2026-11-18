@@ -29,6 +29,9 @@ export const SCRIPT_LIMITS = {
   /** serialized argument bytes across a whole run — the per-call cap alone
    *  lets a guest park unbounded payloads on the host heap */
   argsTotalBytes: 8 * 1024 * 1024,
+  /** host-side memory for the PNGs checks.snapshot retains — compressed
+   *  bytes plus raw pixels, per run */
+  snapshotBytes: 64 * 1024 * 1024,
   /** operations in one frames.edit call */
   editOps: 64,
   /** QuickJS workers alive at once, across all canvases */
