@@ -2806,7 +2806,7 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'set_layer',
     description:
-      'The layer contract on an element: layer {mode: auto|on|off, visible, transform: compositor|css, pad, scale, motionBlur} (null clears), blend one of the 26 modes (null = normal), matte {source, channel, invert?} and masks (the full id-keyed list) store now and draw in P1.',
+      'The layer contract on an element: layer {mode: auto|on|off, visible, transform: compositor|css, pad, scale, motionBlur} or the same fields flat (mode, visible, transform, pad, scale, motion_blur — never both at once), null clears. blend one of the 26 modes (null = normal), matte {source, channel, invert?} and masks (the full id-keyed list) store now and draw in P1.',
     input_schema: {
       type: 'object',
       properties: {
@@ -2814,6 +2814,12 @@ export const TOOLS: Anthropic.Tool[] = [
         track_id: { type: 'string' },
         frame_id: { type: 'string' },
         element_id: { type: 'string' },
+        mode: { type: 'string', description: 'Flat layer field: auto|on|off' },
+        visible: { type: 'boolean', description: 'Flat layer field' },
+        transform: { type: 'string', description: 'Flat layer field: compositor|css' },
+        pad: { type: 'number', description: 'Flat layer field' },
+        scale: { type: 'number', description: 'Flat layer field' },
+        motion_blur: { type: 'boolean', description: 'Flat layer field' },
         layer: { type: ['object', 'null'] },
         blend: { type: ['string', 'null'] },
         matte: { type: ['object', 'null'] },
@@ -2851,7 +2857,6 @@ export const TOOLS: Anthropic.Tool[] = [
         page_id: { type: 'string' },
         frame_id: { type: 'string' },
         element_ids: { type: 'array', items: { type: 'string' } },
-        element_id: { type: 'string', description: 'Single element shorthand' },
         preset: { type: 'string' },
         at: { type: 'number' },
         duration: { type: 'number' },
@@ -2872,7 +2877,7 @@ export const TOOLS: Anthropic.Tool[] = [
           },
         },
       },
-      required: ['page_id', 'frame_id', 'preset'],
+      required: ['page_id', 'frame_id', 'element_ids', 'preset'],
     },
   },
   {

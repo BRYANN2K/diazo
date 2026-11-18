@@ -456,6 +456,55 @@ describe('effect stack tools', () => {
     expect(blend.ok).toBe(false)
   })
 
+  it('set_layer takes the documented flat fields and rejects conflicting duplicates', async () => {
+    camTrack()
+    const flat = await pro.setLayer(
+      canvas,
+      pageId,
+      { frame_id: frameId, element_id: 'hero', mode: 'on', pad: 24, motion_blur: true },
+      actor(),
+    )
+    expect(flat.ok).toBe(true)
+    const track = comp().tracks.find((t) => t.kind === 'element' && t.elementId === 'hero')
+    expect(track?.layer).toMatchObject({ mode: 'on', pad: 24, motionBlur: true })
+    /* flat and nested at once with different values is a conflict */
+    const clash = await pro.setLayer(
+      canvas,
+      pageId,
+      { track_id: track!.id, mode: 'off', layer: { mode: 'on' } },
+      actor(),
+    )
+    expect(clash.ok).toBe(false)
+    /* layer: null clears — a flat field beside it is ambiguous */
+    const ambiguous = await pro.setLayer(canvas, pageId, { track_id: track!.id, layer: null, visible: false }, actor())
+    expect(ambiguous.ok).toBe(false)
+    /* and masks replace atomically via set_masks */
+    const masked = await pro.setLayer(
+      canvas,
+      pageId,
+      {
+        track_id: track!.id,
+        masks: [{ id: 'm1', shape: { type: 'rect', x: 0, y: 0, width: 10, height: 10 } }],
+      },
+      actor(),
+    )
+    expect(masked.ok).toBe(true)
+    expect(track && comp().tracks.find((t) => t.id === track.id)?.masks?.[0]?.id).toBe('m1')
+  })
+
+  it('list_motion_effects reports alpha, grow and scopes', () => {
+    const out = pro.listMotionEffects()
+    const effects = (out as { ok: true; data: { effects: Record<string, unknown>[] } }).data.effects
+    const blur = effects.find((e) => e.id === 'gaussian-blur')!
+    expect(blur.grow).toBeGreaterThan(0)
+    expect(blur.scopes).toBeTruthy()
+    for (const e of effects) {
+      expect(e).toHaveProperty('alpha')
+      expect(e).toHaveProperty('grow')
+      expect(e).toHaveProperty('scopes')
+    }
+  })
+
   it('a render job over the layer budget is refused at creation (AC-9)', () => {
     /* 25 glowing elements on one frame > MAX_LAYERS_PER_FRAME (24) */
     const tracks = Array.from({ length: 25 }, (_, i) => ({
@@ -644,5 +693,190 @@ describe('the deterministic hash (no GPU sin())', () => {
     expect(src).not.toContain('fract(sin(')
     expect(src).toContain('doopHash')
     expect(src).toContain('u_fps')
+  })
+})
+
+describe('apply_element_preset — atomic batches', () => {
+  const SIX_HTML = `<!doctype html><html><body>${Array.from(
+    { length: 6 },
+    (_, i) => `<p data-doop-id="el${i}">line ${i}</p>`,
+  ).join('')}</body></html>`
+
+  const sixFrame = () =>
+    actions.createFrame(canvas.id, { name: 'Six', width: 800, height: 600, html: SIX_HTML, x: 900, y: 0 }, actor(), {
+      reveal: false,
+    })!.id
+
+  it('a staggered preset on six untracked elements lands six tracks, atomically', async () => {
+    const fid = sixFrame()
+    const out = await pro.applyElementPreset(
+      canvas,
+      pageId,
+      {
+        frame_id: fid,
+        element_ids: ['el0', 'el1', 'el2', 'el3', 'el4', 'el5'],
+        preset: 'rise',
+        stagger: { each: 0.1, from: 'start' },
+      },
+      actor(),
+    )
+    expect(out.ok).toBe(true)
+    const tracks = comp().tracks.filter((t) => t.kind === 'element' && t.frameId === fid)
+    expect(tracks).toHaveLength(6)
+    for (const t of tracks) {
+      /* every track carries its keyframes — no empty shells from a
+         half-applied batch */
+      expect(t.keyframes?.length ?? 0).toBeGreaterThan(0)
+    }
+    const report = (out as { ok: true; data: { elements: { offset: number }[] } }).data
+    expect(report.elements).toHaveLength(6)
+    expect(Math.max(...report.elements.map((e) => e.offset))).toBeCloseTo(0.5)
+  })
+
+  it('a rejected batch leaves no tracks — empty or otherwise', async () => {
+    const fid = sixFrame()
+    /* one element does not exist: the whole batch refuses */
+    const missing = await pro.applyElementPreset(
+      canvas,
+      pageId,
+      { frame_id: fid, element_ids: ['el0', 'el1', 'nope'], preset: 'rise' },
+      actor(),
+    )
+    expect(missing.ok).toBe(false)
+    expect(comp().tracks.filter((t) => t.frameId === fid)).toHaveLength(0)
+    /* a stagger that ends past the film refuses the same way */
+    const late = await pro.applyElementPreset(
+      canvas,
+      pageId,
+      {
+        frame_id: fid,
+        element_ids: ['el0', 'el1'],
+        preset: 'rise',
+        at: 5.5,
+        stagger: { each: 0.4 },
+      },
+      actor(),
+    )
+    expect(late.ok).toBe(false)
+    expect(comp().tracks.filter((t) => t.frameId === fid)).toHaveLength(0)
+    /* and a nonsensical duration never reaches generation */
+    const bad = await pro.applyElementPreset(
+      canvas,
+      pageId,
+      { frame_id: fid, element_ids: ['el0'], preset: 'rise', duration: NaN },
+      actor(),
+    )
+    expect(bad.ok).toBe(false)
+    expect(comp().tracks.filter((t) => t.frameId === fid)).toHaveLength(0)
+  })
+
+  it('retries when a peer creates the element track mid-flight', async () => {
+    const real = pro.presetDeps.patchComposition
+    let raced = false
+    pro.presetDeps.patchComposition = ((...args: Parameters<typeof real>) => {
+      if (!raced) {
+        raced = true
+        /* the peer wins: it creates hero's element track first */
+        real(
+          args[0],
+          args[1],
+          [
+            {
+              op: 'add_track',
+              track: {
+                id: 'peer-t',
+                kind: 'element',
+                frameId: args[1] === pageId ? frameId : frameId,
+                elementId: 'hero',
+              },
+            },
+          ] as never,
+          args[3],
+        )
+        return { ok: false, error: 'track already exists' } as ReturnType<typeof real>
+      }
+      return real(...args)
+    }) as typeof real
+    try {
+      const out = await pro.applyElementPreset(
+        canvas,
+        pageId,
+        { frame_id: frameId, element_ids: ['hero', 'sub'], preset: 'rise' },
+        actor(),
+      )
+      expect(out.ok).toBe(true)
+      const hero = comp().tracks.find((t) => t.elementId === 'hero')
+      expect(hero?.id).toBe('peer-t')
+      expect(hero?.keyframes?.length ?? 0).toBeGreaterThan(0)
+      expect(comp().tracks.filter((t) => t.elementId === 'hero')).toHaveLength(1)
+    } finally {
+      pro.presetDeps.patchComposition = real
+    }
+  })
+})
+
+describe('render job validation — range, rule, bill', () => {
+  const job = (over: Record<string, unknown> = {}) =>
+    createRenderJob({
+      composition: comp(),
+      format: 'mp4',
+      target: 'browser',
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      range: { start: 0, end: 4 },
+      by: { id: 'u', name: 'test' },
+      ...over,
+    } as never)
+
+  it('refuses a range outside 0 ≤ start < end ≤ duration', () => {
+    actions.setComposition(canvas.id, baseComp(), pageId, actor())
+    for (const range of [
+      { start: -1, end: 4 },
+      { start: 4, end: 4 },
+      { start: 5, end: 2 },
+      { start: 0, end: 6.5 },
+      { start: NaN, end: 4 },
+    ]) {
+      const created = job({ range })
+      expect(created.ok, JSON.stringify(range)).toBe(false)
+      if (!created.ok) expect(created.error).toMatch(/range|duration/i)
+    }
+    expect(job({ range: { start: 0, end: 6 } }).ok).toBe(true)
+  })
+
+  it('keeps the MO-15 rule id on the refusal', () => {
+    const tracks = Array.from({ length: 25 }, (_, i) => ({
+      id: `el${i}`,
+      kind: 'element' as const,
+      frameId,
+      elementId: `el${i}`,
+      effects: [{ id: 'g', fx: 'glow', params: {} }],
+    }))
+    actions.setComposition(canvas.id, baseComp(tracks), pageId, actor())
+    const created = job()
+    expect(created.ok).toBe(false)
+    if (!created.ok) {
+      expect(created.error).toMatch(/layer|budget/i)
+      expect((created as { rule?: string }).rule).toBe('MO-15')
+    }
+  })
+
+  it('a muted layer’s stack does not sink the render bill', () => {
+    /* 10 × gaussian-blur on the camera busts the cap alone (AC-17 covers
+       that); the same stack on a muted element must not add to it */
+    const stack = Array.from({ length: 10 }, (_, i) => ({ id: `g${i}`, fx: 'gaussian-blur', params: {} }))
+    actions.setComposition(
+      canvas.id,
+      baseComp([
+        { id: 'cam', kind: 'camera', keyframes: [] },
+        { id: 'el1', kind: 'element', frameId, elementId: 'hero', muted: true, effects: stack },
+        { id: 'el2', kind: 'element', frameId, elementId: 'sub', layer: { mode: 'off' }, effects: stack },
+      ]),
+      pageId,
+      actor(),
+    )
+    const created = job({ format: 'webm', target: 'server' })
+    expect(created.ok).toBe(true)
   })
 })

@@ -363,7 +363,7 @@ export function renderComposition(
     range: input.range,
     by,
   })
-  if (!created.ok) return fail(created.error)
+  if (!created.ok) return fail(created.rule ? `${created.rule}: ${created.error}` : created.error)
   return ok({
     job: created.job,
     note: 'The job is queued: a browser tab or the desktop app (target "desktop") claims it, renders and uploads the file. Watch render:progress in the room, or GET /api/renders/{id}.',

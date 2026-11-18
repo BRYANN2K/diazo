@@ -2366,7 +2366,7 @@ export function buildMcpServer(
     {
       title: 'Promote an element to a layer',
       description:
-        'Set the layer contract on an element: `{track_id | frame_id + element_id, layer?, blend?, matte?, masks?}` — layer carries {mode: auto|on|off, visible, transform: compositor|css, pad, scale, motionBlur}, blend is one of the 26 blend modes (null clears to normal), matte {source: trackId, channel: alpha|luma, invert?} borrows another layer’s coverage (draws in P1), masks is the full vector-mask list (id-keyed diff; draws in P1). Send `layer: null` to clear the spec.',
+        'Set the layer contract on an element: `{track_id | frame_id + element_id, layer? | mode?, visible?, transform?, pad?, scale?, motion_blur?, blend?, matte?, masks?}` — layer fields arrive flat or nested under layer (never both at once); layer carries {mode: auto|on|off, visible, transform: compositor|css, pad, scale, motionBlur}, blend is one of the 26 blend modes (null clears to normal), matte {source: trackId, channel: alpha|luma, invert?} borrows another layer’s coverage (draws in P1), masks is the full vector-mask list (replaces atomically; draws in P1). Send `layer: null` to clear the spec.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
@@ -2374,6 +2374,15 @@ export function buildMcpServer(
         track_id: z.string().optional().describe('The element track — or give frame_id + element_id'),
         frame_id: z.string().optional(),
         element_id: z.string().optional().describe('The element’s data-doop-id'),
+        mode: z
+          .enum(['auto', 'on', 'off'])
+          .optional()
+          .describe('Flat layer field — promotion: auto (dynamic only), on, off'),
+        visible: z.boolean().optional().describe('Flat layer field'),
+        transform: z.enum(['compositor', 'css']).optional().describe('Flat layer field — where its transform runs'),
+        pad: z.number().optional().describe('Flat layer field — px the raster grows past the element'),
+        scale: z.number().optional().describe('Flat layer field — texture scale'),
+        motion_blur: z.boolean().optional().describe('Flat layer field — the layer spec’s motionBlur'),
         layer: z
           .record(z.unknown())
           .nullable()

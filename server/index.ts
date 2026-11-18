@@ -3082,7 +3082,8 @@ app.post('/api/canvases/:id/pages/:pageId/composition/renders', (req, res) => {
     range: req.body?.range,
     by: { id: req.user!.id, name: req.user!.name },
   })
-  if (!created.ok) return res.status(created.status).json({ error: created.error })
+  if (!created.ok)
+    return res.status(created.status).json({ error: created.error, ...(created.rule ? { rule: created.rule } : {}) })
   /* a server-target job renders on the instance itself, in the background */
   if (created.job.target === 'server') queueServerRender(created.job)
   res.status(201).json({ job: created.job })

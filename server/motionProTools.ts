@@ -25,6 +25,7 @@ import {
   BLEND_MODES,
   fitCameraToFrame,
   MOTION_BLOCK_ATTR,
+  MOTION_LIMITS,
   newMotionId,
   parseEasing,
   parseMotionBlock,
@@ -32,19 +33,24 @@ import {
   TEXT_SPLITS,
   TRANSITION_DIRECTIONS,
   TRANSITION_KINDS,
+  type Composition,
   type CompositionOp,
   type Direction,
   type EffectInstance,
   type FrameTextAnimator,
   type MotionEasing,
+  type MotionKeyframe,
+  type MotionTrack,
   type MotionTransition,
   type TextOrder,
   type TextSplit,
 } from '../shared/motion.ts'
 import { planLayers, type FramePlan } from '../shared/motionLayers.ts'
 import {
+  ELEMENT_PRESET_MAX_DURATION,
   elementPreset,
   elementPresetList,
+  elementPresetSpec,
   isElementPreset,
   staggerOffsets,
   type StaggerOptions,
@@ -377,7 +383,12 @@ export function listMotionEffects(): Outcome {
       family: fx.family,
       cost: fx.cost,
       alpha: fx.alpha,
-      ...(fx.grow ? { grows: true } : {}),
+      /* px the effect spreads past its input's edge at default params —
+         the layer pad sums these */
+      grow: fx.grow ? Math.ceil(fx.grow(fx.defaults())) : 0,
+      /* where the stack draws: an element layer, the scene camera or an
+         adjustment covering the film */
+      scopes: ['element', 'camera', 'adjustment'],
       params: fx.params,
       ...(fx.gen ? { generates: true } : {}),
       /* luma matte and displacement map bind the layer's own picture on
@@ -421,11 +432,44 @@ const BLEND_USE: Record<string, string> = {
   'lighter-color': 'keeps the lighter composite colour per pixel',
 }
 
-/** effect ops share their plumbing: validate ids, patch, report */
+/** effect ops share their plumbing: validate ids, patch, report. When a
+ *  racing peer created the same element track between our read and the
+ *  patch, the minted `add_track` refuses ("element already has a track") —
+ *  fold the minted id onto the track that won the race and retry, so two
+ *  concurrent first writes land on one track instead of duplicating. */
 function effectPatch(canvas: Canvas, pageId: string, ops: CompositionOp[], actor: Actor): Outcome {
   const comp = compOf(canvas, pageId)
   if ('error' in comp) return comp
-  const applied = actions.patchComposition(canvas.id, pageId, ops, actor)
+  let applied = actions.patchComposition(canvas.id, pageId, ops, actor)
+  for (
+    let attempt = 0;
+    attempt < 2 && !applied.ok && /already exists|already has a track/.test(applied.error ?? '');
+    attempt++
+  ) {
+    const fresh = store.getComposition(canvas.id, pageId)
+    if (!fresh) return fail('the page has no composition — create one first')
+    const remap = new Map<string, string>()
+    const kept: CompositionOp[] = []
+    for (const op of ops) {
+      if (op.op === 'add_track' && op.track.kind === 'element' && op.track.elementId) {
+        const existing = fresh.tracks.find(
+          (t) => t.kind === 'element' && t.frameId === op.track.frameId && t.elementId === op.track.elementId,
+        )
+        if (existing) {
+          remap.set(op.track.id, existing.id)
+          continue
+        }
+      }
+      kept.push(op)
+    }
+    if (remap.size === 0) break
+    const remapped = kept.map((op) =>
+      'trackId' in op && remap.has(op.trackId as string)
+        ? ({ ...op, trackId: remap.get(op.trackId as string)! } as CompositionOp)
+        : op,
+    )
+    applied = actions.patchComposition(canvas.id, pageId, remapped, actor)
+  }
   if (!applied.ok) return fail(applied.error ?? 'rejected')
   return ok({ composition: applied.composition })
 }
@@ -734,10 +778,15 @@ export function setMotionBlur(
 
 /**
  * The layer contract on an element track: `mode`/`visible`/`transform`/
- * `pad`/`scale`/`motion_blur` land as one `set_layer`, `blend` as
- * `set_blend`, `matte` as `set_matte`, and `masks` diffs into mask ops.
- * All fields optional and merge — send `layer: null` to clear the spec.
+ * `pad`/`scale`/`motion_blur` land as one `set_layer` (flat or nested under
+ * `layer`), `blend` as `set_blend`, `matte` as `set_matte`, and `masks`
+ * replaces the whole list atomically via `set_masks`. All fields optional
+ * and merge — send `layer: null` to clear the spec.
  */
+/* the layer fields the flat call carries — `set_layer` accepts them at
+   the top level as documented, not only inside `layer` */
+const FLAT_LAYER_FIELDS = ['mode', 'visible', 'transform', 'pad', 'scale', 'motion_blur'] as const
+
 export async function setLayer(
   canvas: Canvas,
   pageId: string,
@@ -749,7 +798,7 @@ export async function setLayer(
     blend?: string | null
     matte?: Record<string, unknown> | null
     masks?: Record<string, unknown>[] | null
-  },
+  } & Partial<Record<(typeof FLAT_LAYER_FIELDS)[number], unknown>>,
   actor: Actor,
 ): Promise<Outcome> {
   const comp = compOf(canvas, pageId)
@@ -759,12 +808,42 @@ export async function setLayer(
   if (!target.elementTrack) {
     return fail(`layers only exist on element tracks — ${input.track_id} is not one`)
   }
-  const track = comp.tracks.find((t) => t.id === target.trackId)
-  const ops: CompositionOp[] = target.create ? [target.create] : []
+  /* normalize the flat controls into the partial layer spec — a field
+     given both ways with a different value is a conflict, not a merge.
+     The flat name is snake_case (the API spelling); the spec field is
+     camelCase — motion_blur lands as motionBlur */
+  const flat: Record<string, unknown> = {}
+  const flatGiven: string[] = []
+  for (const field of FLAT_LAYER_FIELDS) {
+    if (input[field] !== undefined) {
+      flat[field === 'motion_blur' ? 'motionBlur' : field] = input[field]
+      flatGiven.push(field)
+    }
+  }
+  let layer: Record<string, unknown> | null | undefined
   if (input.layer !== undefined) {
-    ops.push({ op: 'set_layer', trackId: target.trackId, layer: input.layer as never })
+    if (input.layer === null) {
+      if (flatGiven.length > 0) {
+        return fail(`layer: null clears the spec — do not also pass ${flatGiven.join(', ')}`)
+      }
+      layer = null
+    } else {
+      for (const field of Object.keys(flat)) {
+        if (input.layer[field] !== undefined && input.layer[field] !== flat[field]) {
+          return fail(`${field} is given both flat and inside layer with different values`)
+        }
+      }
+      layer = { ...input.layer, ...flat }
+    }
+  } else if (Object.keys(flat).length > 0) {
+    layer = flat
+  }
+
+  const ops: CompositionOp[] = target.create ? [target.create] : []
+  if (layer !== undefined) {
+    ops.push({ op: 'set_layer', trackId: target.trackId, layer: layer as never })
   } else if (input.blend === undefined && input.matte === undefined && input.masks === undefined) {
-    return fail('nothing to write — pass layer, blend, matte or masks')
+    return fail('nothing to write — pass layer fields, blend, matte or masks')
   }
   if (input.blend !== undefined) {
     if (input.blend !== null && !BLEND_MODES.includes(input.blend as never)) {
@@ -776,20 +855,24 @@ export async function setLayer(
     ops.push({ op: 'set_matte', trackId: target.trackId, matte: input.matte as never })
   }
   if (input.masks !== undefined) {
-    const wanted = input.masks ?? []
-    const existing = track?.masks ?? []
-    const kept = new Set(wanted.map((m) => m.id))
-    for (const m of existing) {
-      if (!kept.has(m.id)) ops.push({ op: 'remove_mask', trackId: target.trackId, maskId: m.id })
-    }
-    for (const m of wanted) {
-      const prev = existing.find((e) => e.id === m.id)
-      if (prev) ops.push({ op: 'update_mask', trackId: target.trackId, maskId: prev.id, mask: m as never })
-      else ops.push({ op: 'add_mask', trackId: target.trackId, mask: m as never })
-    }
+    /* the mask list replaces atomically in the caller's order — a diff
+       could never express a reorder of ordered subtract/intersect masks */
+    ops.push({ op: 'set_masks', trackId: target.trackId, masks: input.masks as never })
   }
   const applied = actions.patchComposition(canvas.id, pageId, ops, actor)
-  if (!applied.ok) return fail(applied.error ?? 'layer rejected')
+  if (!applied.ok) {
+    const error = applied.error ?? 'layer rejected'
+    /* fold a racing peer's freshly-created element track like effectPatch */
+    if (/already exists|already has a track/.test(error) && target.create) {
+      const retried = effectPatch(canvas, pageId, ops, actor)
+      if (retried.ok) {
+        const data = retried.data as { composition: Composition }
+        return ok({ composition: data.composition, track_id: target.trackId })
+      }
+      return fail('layer rejected — a concurrent edit kept winning the race')
+    }
+    return fail(error)
+  }
   return ok({ composition: applied.composition, track_id: target.trackId })
 }
 
@@ -823,6 +906,10 @@ export function listElementPresets(): Outcome {
   return ok({ presets: elementPresetList() })
 }
 
+/* the patch seam tests inject a racing peer through — production always
+   uses the real action */
+export const presetDeps = { patchComposition: actions.patchComposition }
+
 /**
  * Compile an element preset into ordinary keyframes on one or many element
  * tracks of one frame — the track is created when missing. `stagger`
@@ -835,7 +922,6 @@ export async function applyElementPreset(
   input: {
     frame_id?: string
     element_ids?: string[]
-    element_id?: string
     preset?: string
     at?: number
     duration?: number
@@ -854,7 +940,9 @@ export async function applyElementPreset(
   if (!isElementPreset(input.preset)) {
     return fail(`preset must be one of the list_element_presets ids`)
   }
-  const ids = input.element_ids ?? (input.element_id ? [input.element_id] : [])
+  /* one element is element_ids: ['id'] — the public contract is plural
+     only, on MCP and resident alike */
+  const ids = input.element_ids ?? []
   if (ids.length === 0) return fail('element_ids is required')
   if (ids.length > 64) return fail('element_ids must name at most 64 elements')
   if (!input.frame_id) return fail('frame_id is required')
@@ -922,47 +1010,96 @@ export async function applyElementPreset(
   } else {
     offsets = ids.map(() => 0)
   }
-  /* one ops batch: create each missing track, then drop its keyframes */
-  const ops: CompositionOp[] = []
-  const written: { element_id: string; track_id: string; offset: number; keyframes: number }[] = []
-  for (const [i, elementId] of ids.entries()) {
-    const target = await elementTrack(canvas, pageId, comp, {
-      frame_id: frame.id,
-      element_id: elementId,
-    })
-    if (!target.ok) return fail(target.error)
-    if (target.create) ops.push(target.create)
-    /* an auto-created track must be remembered for the next element —
-       elementTrack consults comp.tracks only */
-    if (target.create) {
-      comp.tracks.push({
-        id: target.trackId,
-        kind: 'element',
-        frameId: frame.id,
-        elementId,
-      } as never)
-    }
-    const keyframes = elementPreset(input.preset, {
-      t: at + offsets[i]!,
-      duration: input.duration,
-      direction,
-      distance: input.distance,
-      intensity: input.intensity,
-      easing,
-      seed: (input.seed ?? 1) + i,
-      params: input.params,
-    })
-    for (const keyframe of keyframes) ops.push({ op: 'add_keyframe', trackId: target.trackId, keyframe })
-    written.push({ element_id: elementId, track_id: target.trackId, offset: offsets[i]!, keyframes: keyframes.length })
+  if (ids.length !== new Set(ids).size) return fail('element_ids must not repeat')
+  const spec = elementPresetSpec(input.preset)!
+  const duration = input.duration ?? spec.duration
+  if (!Number.isFinite(duration) || duration <= 0 || duration > ELEMENT_PRESET_MAX_DURATION) {
+    return fail(`duration must be finite and ≤ ${ELEMENT_PRESET_MAX_DURATION}s`)
   }
-  const applied = actions.patchComposition(canvas.id, pageId, ops, actor)
-  if (!applied.ok) return fail(applied.error ?? 'preset rejected')
-  return ok({
-    composition: applied.composition,
-    preset: input.preset,
-    elements: written,
-    note: 'every value landed as an ordinary editable keyframe',
-  })
+
+  /* the whole batch is one atomic patch — every budget is checked against
+     the composition AS READ, provisional tracks live in a request-local
+     map (never in the live store), and a rejected patch leaves nothing
+     behind. A peer's concurrent write can collide on a track id, so a
+     conflict re-reads and retries instead of stranding half the batch. */
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const current = attempt === 1 ? comp : compOf(canvas, pageId)
+    if ('error' in current) return current
+    const last = at + duration + Math.max(0, ...offsets)
+    if (last > current.duration + 1e-9) {
+      return fail(`preset + stagger ends at ${last.toFixed(3)}s — past the film's ${current.duration}s`)
+    }
+    const existingByElement = new Map<string, MotionTrack>()
+    for (const track of current.tracks) {
+      if (track.kind === 'element' && track.frameId === frame.id && track.elementId) {
+        existingByElement.set(track.elementId, track)
+      }
+    }
+    const creating = ids.filter((id) => !existingByElement.has(id))
+    if (current.tracks.length + creating.length > MOTION_LIMITS.MAX_TRACKS) {
+      return fail(
+        `the preset needs ${creating.length} new tracks on ${current.tracks.length} — over the ${MOTION_LIMITS.MAX_TRACKS} track budget`,
+      )
+    }
+
+    /* bounded generation: preset loops are already clamped inside
+       elementPreset; the per-track keyframe budget is checked against the
+       written count before the ops reach the patch */
+    const ops: CompositionOp[] = []
+    const written: { element_id: string; track_id: string; offset: number; keyframes: number }[] = []
+    let generationError: string | undefined
+    for (const [i, elementId] of ids.entries()) {
+      const existing = existingByElement.get(elementId)
+      const trackId = existing?.id ?? `el-${newMotionId().slice(0, 10)}`
+      if (!existing) {
+        ops.push({
+          op: 'add_track',
+          track: { id: trackId, kind: 'element', frameId: frame.id, elementId, name: `Element ${elementId}` },
+        })
+      }
+      let keyframes: MotionKeyframe[]
+      try {
+        keyframes = elementPreset(input.preset, {
+          t: at + offsets[i]!,
+          duration: input.duration,
+          direction,
+          distance: input.distance,
+          intensity: input.intensity,
+          easing,
+          seed: (input.seed ?? 1) + i,
+          params: input.params,
+        })
+      } catch (error) {
+        generationError = error instanceof Error ? error.message : 'preset generation failed'
+        break
+      }
+      const laneSize = existing?.keyframes?.length ?? 0
+      if (laneSize + keyframes.length > MOTION_LIMITS.MAX_KEYFRAMES_PER_TRACK) {
+        generationError = `${elementId}'s track holds ${laneSize} keyframes — the preset's ${keyframes.length} would pass the ${MOTION_LIMITS.MAX_KEYFRAMES_PER_TRACK} budget`
+        break
+      }
+      for (const keyframe of keyframes) ops.push({ op: 'add_keyframe', trackId, keyframe })
+      written.push({ element_id: elementId, track_id: trackId, offset: offsets[i]!, keyframes: keyframes.length })
+    }
+    if (generationError !== undefined) return fail(generationError)
+
+    const applied = presetDeps.patchComposition(canvas.id, pageId, ops, actor)
+    if (applied.ok) {
+      return ok({
+        composition: applied.composition,
+        preset: input.preset,
+        elements: written,
+        note: 'every value landed as an ordinary editable keyframe',
+      })
+    }
+    const error = applied.error ?? 'preset rejected'
+    /* a peer can add the same element track between our read and the
+       patch — that conflict retries against a fresh read; every other
+       refusal is real */
+    if (attempt < 3 && /already exists|already has a track/.test(error)) continue
+    return fail(error)
+  }
+  return fail('preset rejected — a concurrent edit kept winning the race')
 }
 
 /* ---- one dispatch for every surface ---- */
