@@ -11,7 +11,7 @@
  * the composition time, never from a wall clock or accumulated state.
  */
 
-import type { EffectInstance, MotionTrack } from './motion.ts'
+import { MOTION_LIMITS, type EffectInstance, type MotionTrack } from './motion.ts'
 
 export type FxFamily = 'blur' | 'light' | 'lens' | 'texture' | 'distort' | 'color' | 'glitch' | 'generate' | 'matte'
 
@@ -42,6 +42,20 @@ export interface FxSpec {
   /** relative GPU cost: 1 = single cheap pass, 3 = multi-tap, 5 = pyramid */
   cost: number
   params: readonly FxParam[]
+  /** what the body samples (motion-elements P0): 'premult' effects read
+   *  neighbouring texels — blurs, gathers and warps need premultiplied
+   *  input so coverage edges don't halo; 'straight' effects touch only
+   *  their own pixel's colour and grade the unpremultiplied value, which
+   *  is both correct and saves the runner a convert pass. Family default,
+   *  overridable per spec. */
+  alpha: 'premult' | 'straight'
+  /** px the effect spreads past its input's edge — the layer's pad sums
+   *  these (clamped to MOTION_LIMITS.MAX_LAYER_PAD) so a blur's bleed or a
+   *  displacement isn't clipped at the element's border box. Absent = the
+   *  effect stays inside its input. Warps whose reach is a share of the
+   *  layer's own size return a conservative estimate against a 512 px
+   *  reference span. */
+  grow?: (params: Record<string, number | string | boolean>) => number
   /** generates pixels rather than filtering them (matte generators ignore
    *  the layer's own picture) */
   gen?: boolean
@@ -55,6 +69,27 @@ export interface FxSpec {
   defaults(): Record<string, number | string | boolean>
   /** a params object's error, null when clean */
   validate(params: Record<string, unknown>): string | null
+}
+
+/* the default input representation per family — resamplers premultiply,
+ *  per-pixel colour ops stay straight; a spec overrides when its family is
+ *  mixed (pixelate resamples inside 'texture'; leaks/flare/vignette only
+ *  shade inside 'light') */
+const FAMILY_ALPHA: Record<FxFamily, 'premult' | 'straight'> = {
+  blur: 'premult',
+  light: 'premult',
+  lens: 'premult',
+  texture: 'straight',
+  distort: 'premult',
+  color: 'straight',
+  glitch: 'premult',
+  generate: 'straight',
+  matte: 'premult',
+}
+
+const numParam = (params: Record<string, number | string | boolean>, id: string): number => {
+  const v = params[id]
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0
 }
 
 const n = (id: string, min: number, max: number, def: number, step?: number, note?: string): FxParam => ({
@@ -78,7 +113,8 @@ const pt = (id: string): FxParam => ({ id, kind: 'point', def: '0.5,0.5', note: 
 
 const COLOR_RE = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/
 
-const F = (spec: Omit<FxSpec, 'defaults' | 'validate'>): FxSpec => ({
+const F = (spec: Omit<FxSpec, 'defaults' | 'validate' | 'alpha'> & { alpha?: FxSpec['alpha'] }): FxSpec => ({
+  alpha: spec.alpha ?? FAMILY_ALPHA[spec.family],
   ...spec,
   defaults() {
     const out: Record<string, number | string | boolean> = {}
@@ -132,13 +168,21 @@ const F = (spec: Omit<FxSpec, 'defaults' | 'validate'>): FxSpec => ({
  */
 export const MOTION_EFFECTS: readonly FxSpec[] = [
   /* blur */
-  F({ id: 'gaussian-blur', label: 'Gaussian Blur', family: 'blur', cost: 4, params: [px('radius', 0, 200, 12)] }),
+  F({
+    id: 'gaussian-blur',
+    label: 'Gaussian Blur',
+    family: 'blur',
+    cost: 4,
+    params: [px('radius', 0, 200, 12)],
+    grow: (p) => numParam(p, 'radius'),
+  }),
   F({
     id: 'directional-blur',
     label: 'Directional Blur',
     family: 'blur',
     cost: 3,
     params: [px('radius', 0, 200, 20), n('angle', -180, 180, 0)],
+    grow: (p) => numParam(p, 'radius'),
   }),
   F({
     id: 'radial-blur',
@@ -153,6 +197,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'blur',
     cost: 5,
     params: [px('radius', 0, 60, 10), n('bokeh', 0, 1, 0.6, undefined, 'highlight gain')],
+    grow: (p) => numParam(p, 'radius'),
   }),
   F({
     id: 'whip-blur',
@@ -160,6 +205,9 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'blur',
     cost: 3,
     params: [n('amount', 0, 1, 0.5), n('angle', -180, 180, 0), n('curve', 0.2, 4, 1.6, undefined, 'speed curve')],
+    /* the streak reaches amount × 0.3 of the texture — estimate on the
+       512 px reference span */
+    grow: (p) => numParam(p, 'amount') * 160,
   }),
   /* light */
   F({
@@ -168,6 +216,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'light',
     cost: 4,
     params: [px('radius', 0, 120, 18), n('intensity', 0, 4, 0.8), n('threshold', 0, 1, 0.6), c('tint', '#ffffff')],
+    grow: (p) => numParam(p, 'radius'),
   }),
   F({
     id: 'bloom',
@@ -175,11 +224,13 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'light',
     cost: 5,
     params: [n('threshold', 0, 1, 0.75), n('intensity', 0, 3, 0.9), px('radius', 0, 80, 24)],
+    grow: (p) => numParam(p, 'radius'),
   }),
   F({
     id: 'light-leak',
     label: 'Light Leak',
     family: 'light',
+    alpha: 'straight',
     cost: 2,
     params: [
       c('color', '#ff9a3c'),
@@ -193,6 +244,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     id: 'lens-flare',
     label: 'Lens Flare',
     family: 'light',
+    alpha: 'straight',
     cost: 3,
     params: [pt('position'), n('intensity', 0, 3, 1), n('ghosts', 0, 8, 4, 1), c('tint', '#cfe8ff')],
   }),
@@ -200,6 +252,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     id: 'vignette',
     label: 'Vignette',
     family: 'light',
+    alpha: 'straight',
     cost: 1,
     params: [n('amount', 0, 1, 0.4), n('radius', 0.2, 1.5, 0.75), n('feather', 0, 1, 0.6), c('color', '#000000')],
   }),
@@ -217,6 +270,8 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'lens',
     cost: 1,
     params: [px('amount', 0, 40, 4), pt('center'), sel('falloff', ['linear', 'edges'], 'edges')],
+    /* the 'edges' falloff can reach ~3× the amount away from centre */
+    grow: (p) => numParam(p, 'amount') * 3,
   }),
   F({
     id: 'barrel-distortion',
@@ -224,6 +279,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'lens',
     cost: 1,
     params: [n('amount', -1, 1, 0.3), pt('center')],
+    grow: (p) => Math.abs(numParam(p, 'amount')) * 64,
   }),
   F({
     id: 'lens-distortion',
@@ -231,6 +287,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'lens',
     cost: 1,
     params: [n('k1', -1, 1, 0.15), n('k2', -1, 1, 0.05), pt('center')],
+    grow: (p) => (Math.abs(numParam(p, 'k1')) + Math.abs(numParam(p, 'k2'))) * 64,
   }),
   F({
     id: 'rolling-shutter',
@@ -238,6 +295,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'lens',
     cost: 2,
     params: [px('amount', -60, 60, 8, undefined, 'px of skew across the frame'), sel('axis', ['x', 'y'], 'x')],
+    grow: (p) => Math.abs(numParam(p, 'amount')) * 0.5,
   }),
   /* texture */
   F({
@@ -276,6 +334,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     id: 'pixelate',
     label: 'Pixelate',
     family: 'texture',
+    alpha: 'premult',
     cost: 1,
     params: [px('size', 1, 200, 12, undefined, 'block px'), sel('mode', ['square', 'diamond', 'hex'], 'square')],
   }),
@@ -288,6 +347,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     needsInput: true,
     selfMapped: true,
     params: [px('amount', 0, 200, 24), sel('channel', ['r', 'g', 'luma'], 'luma')],
+    grow: (p) => numParam(p, 'amount'),
   }),
   F({
     id: 'wave-warp',
@@ -300,6 +360,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
       n('angle', -180, 180, 0),
       n('speed', -20, 20, 0, undefined, 'seeded phase rate — deterministic per seed'),
     ],
+    grow: (p) => numParam(p, 'amplitude'),
   }),
   F({
     id: 'turbulent-displace',
@@ -311,6 +372,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
       n('scale', 0.2, 20, 3),
       n('evolution', -10, 10, 0, undefined, 'seeded noise rate'),
     ],
+    grow: (p) => numParam(p, 'amount') * 0.5,
   }),
   F({
     id: 'bulge-pinch',
@@ -318,6 +380,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'distort',
     cost: 1,
     params: [pt('center'), n('amount', -1, 1, 0.4), n('radius', 0.05, 2, 0.5)],
+    grow: (p) => Math.abs(numParam(p, 'amount')) * 64,
   }),
   F({
     id: 'mirror',
@@ -332,6 +395,8 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'distort',
     cost: 2,
     params: [n('position', 0, 1, 0.5), n('stretch', -1, 1, 0.3), sel('axis', ['x', 'y'], 'y')],
+    /* a negative stretch pushes samples beyond the box (share of span) */
+    grow: (p) => Math.max(0, -numParam(p, 'stretch')) * 160,
   }),
   /* color */
   F({
@@ -374,6 +439,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'glitch',
     cost: 1,
     params: [px('amount', 0, 60, 6), n('angle', -180, 180, 0), n('jitter', 0, 1, 0, undefined, 'seeded wobble')],
+    grow: (p) => numParam(p, 'amount') * 2,
   }),
   F({
     id: 'block-shift',
@@ -381,6 +447,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'glitch',
     cost: 2,
     params: [px('amount', 0, 200, 24), n('rows', 2, 60, 12, 1), n('rate', 0, 20, 4, undefined, 'seeded re-roll rate')],
+    grow: (p) => numParam(p, 'amount') * 0.5,
   }),
   F({
     id: 'scan-jitter',
@@ -388,6 +455,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'glitch',
     cost: 1,
     params: [px('amount', 0, 60, 6), n('frequency', 1, 200, 60), n('rate', 0, 20, 6)],
+    grow: (p) => numParam(p, 'amount') * 0.5,
   }),
   /* generators */
   F({
@@ -436,6 +504,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'matte',
     cost: 2,
     params: [px('amount', 0, 200, 12, undefined, 'edge softness px')],
+    grow: (p) => numParam(p, 'amount'),
   }),
   F({
     id: 'choke',
@@ -443,6 +512,7 @@ export const MOTION_EFFECTS: readonly FxSpec[] = [
     family: 'matte',
     cost: 2,
     params: [px('amount', -100, 100, 8, undefined, 'px — negative chokes the matte')],
+    grow: (p) => Math.abs(numParam(p, 'amount')),
   }),
 ]
 
@@ -538,11 +608,37 @@ export function enabledEffects(track: MotionTrack): EffectInstance[] {
  *  exceed; check_scene reports it as `cost_cap` */
 export const EFFECT_COST_CAP = 36
 
-/** the cost estimate of a stack — the check's per-layer GPU budget */
-export function effectCost(track: MotionTrack): number {
+/**
+ * The cost estimate of a stack — the check's per-layer GPU budget.
+ * `weight` scales it to the share of the output the stack actually
+ * processes: an element layer costs its area over the film's area
+ * (motion-elements P0), while a camera or adjustment stack spans the
+ * frame (weight 1).
+ */
+export function effectCost(track: MotionTrack, weight = 1): number {
   let total = 0
   for (const e of enabledEffects(track)) total += BY_ID.get(e.fx)?.cost ?? 2
-  return total
+  return total * weight
+}
+
+/**
+ * Pixels of padding the stack needs around a layer's box: the sum of each
+ * enabled effect's `grow` at its current params, clamped to
+ * MOTION_LIMITS.MAX_LAYER_PAD. `paramsAt` resolves an instance's params
+ * (resting values merged with `fx:` lanes at t); the default reads the
+ * resting values.
+ */
+export function layerPad(
+  effects: readonly EffectInstance[],
+  paramsAt?: (effect: EffectInstance) => Record<string, number | string | boolean>,
+): number {
+  let pad = 0
+  for (const e of effects) {
+    if (e.enabled === false) continue
+    const grow = BY_ID.get(e.fx)?.grow
+    if (grow) pad += grow(paramsAt ? paramsAt(e) : e.params)
+  }
+  return Math.min(MOTION_LIMITS.MAX_LAYER_PAD, Math.ceil(pad))
 }
 
 /** params resolved at t: `fx:<instanceId>.<param>` keyframe lanes override
