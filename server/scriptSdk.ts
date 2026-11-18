@@ -208,20 +208,22 @@ function entityOn(canvas: Canvas, kind: ScriptEntityUndo['kind'], id: string): u
  *  element stamps land after — so a whole-canvas diff would claim whatever a
  *  collaborator changed during the wait. Instead the operation reports each
  *  entity it synchronously wrote through `journal`; before-images come from
- *  the snapshot taken up front, after-images are read at the write. */
+ *  the snapshot taken up front, after-images are copied at the write —
+ *  from the object just stored when the caller passes it, so a persistence
+ *  await can never smuggle a later collaborator edit into the after-image. */
 async function mutateAsync<T>(
   ctx: ScriptRunContext,
-  fn: (journal: (kind: 'frame' | 'composition', id: string) => void) => Promise<T>,
+  fn: (journal: (kind: 'frame' | 'composition', id: string, entity?: unknown) => void) => Promise<T>,
 ): Promise<T> {
   if (ctx.active === false) throw new SdkError('limit', 'wall limit reached', 'wall')
   await store.load(ctx.canvasId)
   const snap = undoSnapshot(store.getCanvas(ctx.canvasId)!)
   ctx.undo ??= new Map()
-  const journal = (kind: 'frame' | 'composition', id: string) => {
+  const journal = (kind: 'frame' | 'composition', id: string, entity?: unknown) => {
     const canvas = store.getCanvas(ctx.canvasId)
     if (!canvas) return
     const key = undoKey(kind, id)
-    const after = undoCopy(kind, entityOn(canvas, kind, id))
+    const after = undoCopy(kind, entity === undefined ? entityOn(canvas, kind, id) : entity)
     let entry = ctx.undo!.get(key)
     if (!entry) {
       entry = { kind, id, ...(snap.has(key) ? { before: snap.get(key) } : {}) }
@@ -289,7 +291,7 @@ interface Finding {
 
 async function reviewOf(frame: Frame, actor: Actor, opts: { render?: boolean } = {}): Promise<Record<string, unknown>> {
   void actor
-  const lint = await lintFrame(frame)
+  const lint = await lintFrame(frame, { offline: true })
   const tokens = store.getTokens(frame.canvasId)
   const inventory = dom.styleInventory(frame.html, tokens)
   const components = store.getComponents(frame.canvasId)
@@ -1178,6 +1180,10 @@ const HANDLERS: Record<string, Entry> = {
           'frame_writes',
         )
       ctx.budgets.frameWrites -= stamps
+      /* the reservation the op may spend: each actual stamp decrements it,
+         so a frame that grows unstamped content mid-op can consume a slot
+         but never write past it */
+      const stampBudget = { remaining: stamps }
       if (ctx.dryRun) {
         if (!canvasPages(canvasOf(ctx)).some((p) => p.id === pageId)) throw notFound('page is not on this canvas')
         const { body, shots } = buildStoryboard({
@@ -1219,6 +1225,7 @@ const HANDLERS: Record<string, Entry> = {
           ctx.actor,
           journal,
           () => ctx.active === false,
+          stampBudget,
         ),
       )
       if (!out.ok) throw invalid(String(out.error))
@@ -1262,7 +1269,7 @@ const HANDLERS: Record<string, Entry> = {
   'checks.lint': {
     fn: async (ctx, args) => {
       const frame = frameOf(ctx, str(args[0], 'frameId'))
-      const lint = await lintFrame(frame)
+      const lint = await lintFrame(frame, { offline: true })
       return {
         score: lint.score,
         errors: lint.errors,
@@ -1290,6 +1297,16 @@ const HANDLERS: Record<string, Entry> = {
     fn: async (ctx, args) => {
       const frame = frameOf(ctx, str(args[0], 'frameId'))
       if (!rendererAvailable()) throw new SdkError('unavailable', 'snapshot needs the server renderer', 'renderer')
+      /* the pixel bill is known before the render exists: a frame whose raw
+         pixels alone bust the budget is refused without a capture — and
+         exhaustion is a run limit, not an error the guest can catch */
+      const pixels = Math.max(1, Math.round(frame.width)) * Math.max(1, Math.round(frame.height)) * 4
+      if (pixels > ctx.budgets.snapshotBytes)
+        throw new SdkError(
+          'limit',
+          `snapshot_bytes limit reached: ${pixels} pixels needed, ${ctx.budgets.snapshotBytes} left`,
+          'snapshot_bytes',
+        )
       const png = await renderFrame(frame, 1, { offline: true })
       const meta = await sharp(png).metadata()
       const width = meta.width ?? frame.width

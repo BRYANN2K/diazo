@@ -518,3 +518,189 @@ it('an interleaved collaborator edit is not claimed by a motion run or its undo'
   expect(report.unreverted).toEqual([])
   expect(store.getFrame(other.id)!.html).toContain('v2')
 })
+
+it('a collaborator edit on the very frame being stamped is not claimed as the after-image', async () => {
+  /* the stamped frame's after-image is fixed at the write, before the
+     persistence wait — a mid-wait edit must stay unreverted, not be
+     swallowed into the undo image and erased by revert */
+  store.setLinkAccess(caller.canvasId, 'edit')
+  const ilCaller: ScriptCaller = {
+    ...caller,
+    userId: 'interleave-user-2',
+    actor: { kind: 'user', name: 'Il2', color: '#000' },
+  }
+  const canvas = store.getCanvas(caller.canvasId)!
+  const pageId = canvasPages(canvas)[0]!.id
+  actions.createFrame(
+    caller.canvasId,
+    { name: 'Shot', html: '<html><body><h1>Headline</h1></body></html>', width: 400, height: 300 },
+    caller.actor,
+  )
+  let release!: () => void
+  vi.mocked(persist.saveFrameNow).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve
+      }),
+  )
+  const running = executeScript(
+    { script: `await diazo.compositions.storyboard(${JSON.stringify(pageId)})` },
+    ilCaller,
+    true,
+  )
+  await vi.waitFor(() => {
+    expect(release).toBeDefined()
+    expect(persist.saveFrameNow).toHaveBeenCalled()
+  })
+  /* the collaborator edits the exact frame whose stamp is held open */
+  const stampedId = (vi.mocked(persist.saveFrameNow).mock.calls[0]![0] as { id: string }).id
+  actions.updateFrame(
+    stampedId,
+    { html: '<html><body>collab-v2</body></html>' },
+    { kind: 'user', name: 'Collab', color: '#111' },
+  )
+  release()
+  const result = await running
+  expect(result.ok).toBe(true)
+
+  const undo = rows.get(result.run_id)!.undo ?? []
+  const entry = undo.find((e) => e.kind === 'frame' && e.id === stampedId)
+  expect(entry).toBeTruthy()
+  /* the after-image is the stamp write itself — not whatever the frame
+     became while persistence was in flight */
+  expect(JSON.stringify(entry!.after)).toContain('data-doop-id')
+  expect(JSON.stringify(entry!.after)).not.toContain('collab-v2')
+
+  const report = await revertScriptRun(result.run_id, ilCaller)
+  expect(report.unreverted).toContain(`frame:${stampedId}`)
+  expect(store.getFrame(stampedId)!.html).toBe('<html><body>collab-v2</body></html>')
+})
+
+it('a stamp that fails to persist is still journaled — undo reverts the in-memory write', async () => {
+  /* store.updateFrame ran, then the save failed: without a journal entry
+     the revert leaves the stamp behind */
+  store.setLinkAccess(caller.canvasId, 'edit')
+  const fsCaller: ScriptCaller = {
+    ...caller,
+    userId: 'failstamp-user',
+    actor: { kind: 'user', name: 'Fs', color: '#000' },
+  }
+  const canvas = store.getCanvas(caller.canvasId)!
+  const pageId = canvasPages(canvas)[0]!.id
+  const shot = actions.createFrame(
+    caller.canvasId,
+    { name: 'Shot', html: '<html><body><h1>Headline</h1></body></html>', width: 400, height: 300 },
+    caller.actor,
+  )!
+  const origHtml = store.getFrame(shot.id)!.html
+  const silent = vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.mocked(persist.saveFrameNow).mockImplementation(async () => {
+    throw new Error('disk full')
+  })
+  const result = await executeScript(
+    { script: `await diazo.compositions.storyboard(${JSON.stringify(pageId)})` },
+    fsCaller,
+    true,
+  )
+  vi.mocked(persist.saveFrameNow).mockImplementation(async () => {})
+  silent.mockRestore()
+  expect(result.ok).toBe(true)
+  expect(store.getFrame(shot.id)!.html).toContain('data-doop-id')
+  const undo = rows.get(result.run_id)!.undo ?? []
+  expect(undo.some((e) => e.kind === 'frame' && e.id === shot.id)).toBe(true)
+
+  await revertScriptRun(result.run_id, fsCaller)
+  expect(store.getFrame(shot.id)!.html).toBe(origHtml)
+})
+
+it('refuses runs without an identified requester — even on an ownerless legacy canvas', async () => {
+  /* legacy canvases stay open to claiming, but a script always runs as
+     somebody: an anonymous caller would inherit that open 'edit' for free */
+  const legacy = store.createCanvas('Legacy', undefined)
+  const anon: ScriptCaller = {
+    canvasId: legacy.id,
+    actor: { kind: 'user', name: 'Anon', color: '#000' },
+    source: 'resident',
+  }
+  await expect(executeScript({ script: 'return 1' }, anon, true)).rejects.toThrow(/signed-in/)
+  await expect(executeScript({ script: 'return 1' }, anon, false)).rejects.toThrow(/signed-in/)
+  await expect(revertScriptRun('run-x', anon)).rejects.toThrow(/signed-in/)
+  /* identified accounts keep the legacy canvas's open access */
+  const identified = await executeScript({ script: 'return 3' }, { ...anon, userId: 'editor-1' }, false)
+  expect(identified.ok).toBe(true)
+})
+
+it('an idempotency key replays only the identical result cap and timeout too', async () => {
+  store.setLinkAccess(caller.canvasId, 'edit')
+  const idemCaller: ScriptCaller = { ...caller, userId: 'idem-user' }
+  const base = { script: `return 'x'.repeat(5000)`, idempotency_key: 'k-cap', result_cap: 8192 }
+  const first = await executeScript(base, idemCaller, false)
+  expect(first.ok).toBe(true)
+  expect(await executeScript(base, idemCaller, false)).toMatchObject({
+    run_id: first.run_id,
+    deduplicated: true,
+  })
+
+  /* the stored answer was cut to 8K: replaying under a smaller cap must
+     not serve it — the cap the answer was cut to is part of the request */
+  await expect(executeScript({ ...base, result_cap: 64 }, idemCaller, false)).rejects.toThrow(/different request/)
+  await expect(executeScript({ ...base, result_cap: 32768 }, idemCaller, false)).rejects.toThrow(/different request/)
+  await expect(executeScript({ ...base, timeout_ms: 500 }, idemCaller, false)).rejects.toThrow(/different request/)
+})
+
+it('a failed undo audit save reports applied-but-unrecorded — never the parameters', async () => {
+  /* the refused row bound source, response and undo images: a raw storage
+     error can carry any of them, so the undo path sanitizes the same way
+     the execution save does */
+  store.setLinkAccess(caller.canvasId, 'edit')
+  const usCaller: ScriptCaller = { ...caller, userId: 'undo-save-user' }
+  const wrote = await executeScript({ script: edit() + ' return 1' }, usCaller, true)
+  expect(wrote.ok).toBe(true)
+  const silent = vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.mocked(scriptRunDeps.save).mockRejectedValueOnce(
+    new Error('update script_runs — parameters: ["SECRET-MARKER-42","<html>SECRET-MARKER-42</html>"]'),
+  )
+  const report = await revertScriptRun(wrote.run_id, usCaller)
+  expect(report.ok).toBe(true)
+  expect(report.audited).toBe(false)
+  expect(report.restored).toContain(`frame:${frameId}`)
+  expect(JSON.stringify(report)).not.toContain('SECRET-MARKER-42')
+  /* state was applied — only the bookkeeping failed */
+  expect(store.getFrame(frameId)!.html).toContain('Before')
+  const logged = silent.mock.calls.map((c) => c.map(String).join(' ')).join('\n')
+  expect(logged).not.toContain('SECRET-MARKER-42')
+  silent.mockRestore()
+})
+
+it('snapshot budget exhaustion ends the run — a caught error cannot write on', async () => {
+  /* the budget pays host memory the guest heap never sees: catchable or
+     not, the run dies and everything it wrote is rolled back. A 5000×3500
+     frame needs 70MB of raw pixels — over budget before a byte renders */
+  store.setLinkAccess(caller.canvasId, 'edit')
+  vi.spyOn(screenshot, 'rendererAvailable').mockReturnValue(true)
+  vi.spyOn(screenshot, 'renderFrame').mockResolvedValue(Buffer.alloc(100, 1))
+  const big = actions.createFrame(
+    caller.canvasId,
+    { name: 'Big', html: '<html><body>big</body></html>', width: 5000, height: 3500 },
+    caller.actor,
+  )!
+  const result = await executeScript(
+    {
+      script:
+        `${edit()}` +
+        `try { await diazo.checks.snapshot(${JSON.stringify(big.id)}) } catch (e) {}\n` +
+        `await diazo.frames.edit(${JSON.stringify(frameId)}, [{op:'text',element:'title',text:'second'}])\n` +
+        `return 'done'`,
+    },
+    { ...caller, userId: 'snap-limit-user' },
+    true,
+  )
+  expect(result.ok).toBe(false)
+  expect(result.code).toBe('limit')
+  expect(result.error).toMatch(/snapshot_bytes/)
+  /* the run died at the snapshot — the second edit never ran and the
+     first one was rolled back */
+  expect(store.getFrame(frameId)!.html).toContain('Before')
+  expect(screenshot.renderFrame).not.toHaveBeenCalled()
+  await expect(revertScriptRun(result.run_id, caller)).rejects.toThrow(/successful writes/)
+})

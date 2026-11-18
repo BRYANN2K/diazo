@@ -3417,10 +3417,11 @@ async function execToolInner(
         const raw = parsed.data as Record<string, unknown>
         if (raw.canvas_id !== undefined && raw.canvas_id !== canvasId) return fail('scripts are bound to this canvas')
         /* scripts run as the verified requester — the payer's account pays
-           for the run but does not widen what the script may read or change */
-        if (runState.mixedRequesters) {
-          return fail('this run serves asks from several people — script tools act for one requester, so they stay off')
-        }
+           for the run but does not widen what the script may read or change.
+           No requester at all means no script: an anonymous run would get
+           an ownerless canvas's open legacy access for free */
+        const requesterRefusal = requesterGate(runState, 'script')
+        if (requesterRefusal) return fail(requesterRefusal)
         const caller = {
           canvasId,
           userId: runState.askerId,

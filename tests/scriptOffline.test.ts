@@ -28,8 +28,12 @@ vi.mock('../server/frameChecks.ts', async (importOriginal) => ({
 }))
 
 const loadFramePage = vi.hoisted(() =>
-  vi.fn(async () => ({
-    page: { evaluate: vi.fn(async () => ({})) },
+  vi.fn(async (_frame: unknown, _opts?: { offline?: boolean }) => ({
+    page: {
+      /* a bare-bones slop snapshot: the real collector's stand-in, enough
+         for lintSnapshot to score without a browser */
+      evaluate: vi.fn(async () => ({ width: 0, height: 0, elements: [], allText: '', styleText: '' })),
+    },
     close: vi.fn(async () => {}),
   })),
 )
@@ -45,10 +49,15 @@ vi.mock('../server/screenshot.ts', async (importOriginal) => ({
   rendererAvailable: () => true,
 }))
 
-vi.mock('../server/lint.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../server/lint.ts')>()),
-  lintFrame: vi.fn(async () => ({ score: 100, errors: 0, warnings: 0, issues: [], doc: 'x' })),
-}))
+/* the lint itself is on the network path — its rendered pass must ask the
+   loader for the same offline policy as every other script check, so the
+   real lintFrame runs here against the mocked page loader */
+const lintFrame = vi.hoisted(() => vi.fn())
+vi.mock('../server/lint.ts', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('../server/lint.ts')>()
+  lintFrame.mockImplementation(orig.lintFrame)
+  return { ...orig, lintFrame }
+})
 
 import { dispatchScriptCall, finishScriptReviews, type ScriptRunContext } from '../server/scriptSdk.ts'
 import { allowFrameAsset } from '../server/screenshot.ts'
@@ -78,6 +87,7 @@ beforeEach(() => {
   checkFrame.mockClear()
   loadFramePage.mockClear()
   renderFrame.mockClear()
+  lintFrame.mockClear()
   canvasId = store.createCanvas('Offline', OWNER).id
   frameId = actions.createFrame(
     canvasId,
@@ -116,6 +126,22 @@ describe('script checks load pages offline', () => {
 
     expect(checkFrame).toHaveBeenCalledOnce()
     expect(checkFrame.mock.calls[0]![2]).toEqual({ offline: true })
+  })
+
+  it('the lint pass itself loads the page offline — explicit and shared review alike', async () => {
+    /* a frame whose html names a remote image: an online lint would reach
+       its origin while scoring, so the real lintFrame must ask the loader
+       for the offline policy on every script path that renders it */
+    const ctx = runCtx()
+    await dispatchScriptCall(ctx, 'checks.lint', [frameId])
+    await dispatchScriptCall(ctx, 'checks.review', [frameId])
+    await dispatchScriptCall(ctx, 'frames.edit', [frameId, [{ op: 'text', element: 't', text: 'Changed' }]])
+
+    expect(lintFrame).toHaveBeenCalled()
+    expect(loadFramePage).toHaveBeenCalled()
+    for (const call of loadFramePage.mock.calls) {
+      expect(call[1]).toEqual(expect.objectContaining({ offline: true }))
+    }
   })
 })
 

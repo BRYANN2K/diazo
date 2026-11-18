@@ -62,6 +62,11 @@ export interface ScriptRunRecord {
   agentRunId: string | null
   /** sha256 of the script source */
   hash: string
+  /** the effective limits the request ran under — part of the idempotency
+   *  fingerprint: the same key with a different result cap or timeout is a
+   *  different request, not a replay */
+  resultCap?: number
+  timeoutMs?: number
   /** the script as received (bounded by the runner's script-size limit) */
   sourceScript: string
   /** every SDK call the run made, in order */

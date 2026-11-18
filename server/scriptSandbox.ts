@@ -40,12 +40,23 @@ export const SCRIPT_LIMITS = {
   queueRuns: 16,
 } as const
 
-export type LimitName = 'wall' | 'memory' | 'sdk_calls' | 'frame_writes' | 'script_size' | 'result_size' | 'args_bytes'
+export type LimitName =
+  'wall' | 'memory' | 'sdk_calls' | 'frame_writes' | 'script_size' | 'result_size' | 'args_bytes' | 'snapshot_bytes'
 
 /** The limits that kill a run when an SDK call reports them. Anything else
  *  an SdkError carries — renderer, search, args_bytes, ops — is an ordinary
- *  call failure the script can catch, not a run-level kill. */
-const RUN_LIMITS = new Set<LimitName>(['wall', 'memory', 'sdk_calls', 'frame_writes', 'script_size', 'result_size'])
+ *  call failure the script can catch, not a run-level kill. snapshot_bytes
+ *  is host memory the guest heap never sees: exhausting it ends the run the
+ *  same way `memory` does — the guest must not catch it and write on. */
+const RUN_LIMITS = new Set<LimitName>([
+  'wall',
+  'memory',
+  'sdk_calls',
+  'frame_writes',
+  'script_size',
+  'result_size',
+  'snapshot_bytes',
+])
 
 /** Global worker pool: per-canvas serialization does not stop N canvases
  *  from spawning N QuickJS workers at once, so the host caps them here. */

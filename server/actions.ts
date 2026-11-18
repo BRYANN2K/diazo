@@ -679,16 +679,21 @@ async function stampSaved(frameId: string, id: string): Promise<boolean> {
  *  in (sign-off stands, no design-history version), every fresh id is tracked
  *  until the write that carries it is on disk, and the room sees the frame
  *  once. Callers hand the ids out only after this returns, so a link is never
- *  ahead of its stamp. Undefined when the frame is gone or the write fails. */
+ *  ahead of its stamp. Undefined when the frame is gone or the write fails.
+ *  `onWrite` fires at the in-memory mutation, before the persistence wait —
+ *  a listener that journals state reads exactly what this call wrote, never
+ *  whatever a collaborator lands while the disk write is out. */
 export async function commitElementStamps(
   frame: Frame,
   html: string,
   ids: readonly string[],
   by: string,
   kind: ActorKind = 'user',
+  onWrite?: (written: Frame) => void,
 ): Promise<Frame | undefined> {
   const next = store.updateFrame(frame.id, { html }, by, { annotation: true })
   if (!next) return undefined
+  onWrite?.(next)
   const pending = unsavedStamps.get(frame.id) ?? { ids: new Set<string>() }
   for (const id of ids) pending.ids.add(id)
   unsavedStamps.set(frame.id, pending)

@@ -4,9 +4,28 @@ import { sdkPaths } from '../server/scriptSdk.ts'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { afterEach, expect, it, vi } from 'vitest'
-vi.mock('../server/db/persist.ts', () => ({ saveCanvas: () => {}, saveFrame: () => {}, saveActivity: () => {} }))
+vi.mock('../server/db/persist.ts', () => ({
+  saveCanvas: () => {},
+  saveFrame: () => {},
+  saveActivity: () => {},
+  saveTask: () => {},
+  saveFrameVersion: () => {},
+  deleteFrame: () => {},
+  saveToken: () => {},
+  deleteToken: () => {},
+  saveComponent: () => {},
+  deleteComponent: () => {},
+  saveComposition: () => {},
+  deleteComposition: () => {},
+  saveCompositionVersion: () => {},
+  saveFrameNow: async () => {},
+  loadFrameHtml: async () => [],
+}))
 import { buildMcpServer } from '../server/mcp.ts'
 import { reloadEnv } from '../server/env.ts'
+import { store } from '../server/store.ts'
+import * as actions from '../server/actions.ts'
+import { scriptRunDeps, type StoredScriptRun } from '../server/scriptRuns.ts'
 import { getSdkDocs } from '../server/scriptTools.ts'
 import { DOOP_GUIDE, guideTopic } from '../server/guide.ts'
 async function connect(profile?: 'code') {
@@ -72,6 +91,54 @@ it('serves namespace docs and a bounded core guide with a final screenshot rule'
   /* tool-mode agents get the whole guide back — no script-era excerpt */
   expect(guideTopic('diazo-instructions')).toBe(DOOP_GUIDE)
   expect(guideTopic('scripts')).toContain('full-resolution screenshot')
+})
+
+it('a failed undo audit save reaches the MCP caller without the stored payloads', async () => {
+  /* the refused row bound source, response and undo images — a raw storage
+     error can carry any of them, so the transport must get the sanitized
+     applied-but-unrecorded outcome only */
+  const canvas = store.createCanvas('McpUndo', 'owner')
+  const frame = actions.createFrame(
+    canvas.id,
+    { name: 'F', html: '<html><body><h1 data-doop-id="t">A</h1></body></html>', width: 100, height: 100 },
+    { kind: 'user', name: 'Owner', color: '#000' },
+  )!
+  const rows = new Map<string, StoredScriptRun>()
+  vi.spyOn(scriptRunDeps, 'save').mockImplementation(async (r) => {
+    rows.set(r.record.id, structuredClone(r))
+  })
+  vi.spyOn(scriptRunDeps, 'get').mockImplementation(async (id) => structuredClone(rows.get(id)))
+  vi.spyOn(scriptRunDeps, 'byKey').mockImplementation(async (c, k) =>
+    structuredClone([...rows.values()].find((r) => r.record.canvasId === c && r.record.idempotencyKey === k)),
+  )
+  const { client, close } = await connect('code')
+  try {
+    const ran = await client.callTool({
+      name: 'run_script',
+      arguments: {
+        canvas_id: canvas.id,
+        script: `await diazo.frames.edit(${JSON.stringify(frame.id)}, [{op:'text',element:'t',text:'B'}]); return 1`,
+      },
+    })
+    expect(ran.isError).toBeFalsy()
+    const runId = (JSON.parse((ran.content as { text: string }[])[0]!.text) as { run_id: string }).run_id
+    vi.spyOn(scriptRunDeps, 'save').mockRejectedValueOnce(
+      new Error('update script_runs — parameters: ["SECRET-MARKER-42","<html>SECRET-MARKER-42</html>"]'),
+    )
+    const out = await client.callTool({
+      name: 'revert_script_run',
+      arguments: { canvas_id: canvas.id, run_id: runId },
+    })
+    expect(out.isError).toBeFalsy()
+    const text = (out.content as { text: string }[])[0]!.text
+    expect(text).not.toContain('SECRET-MARKER-42')
+    const res = JSON.parse(text) as { audited?: boolean; restored?: string[] }
+    expect(res.audited).toBe(false)
+    expect(res.restored).toContain(`frame:${frame.id}`)
+  } finally {
+    await close()
+    vi.restoreAllMocks()
+  }
 })
 
 it('accounts for every MCP tool and every named SDK mirror', async () => {

@@ -34,6 +34,7 @@ vi.mock('sharp', () => ({ default: () => ({ metadata: async () => ({ width: 10, 
 import { dispatchScriptCall, type ScriptRunContext } from '../server/scriptSdk.ts'
 import { createFrame } from '../server/actions.ts'
 import { store } from '../server/store.ts'
+import { renderFrame } from '../server/screenshot.ts'
 
 const OWNER = 'owner-1'
 
@@ -96,5 +97,19 @@ describe('snapshot memory budget', () => {
     /* the second render never gets kept — the buffer is refused, not parked */
     await expect(dispatchScriptCall(ctx, 'checks.snapshot', [frame.id])).rejects.toThrow(/snapshot_bytes/)
     expect(ctx.snapshots.size).toBe(1)
+  })
+
+  it('refuses a predictably too-large frame before the renderer is asked', async () => {
+    /* 5000×3500 needs 70MB of raw pixels — over budget before a byte
+       renders, so the expensive capture never runs */
+    const frame = createFrame(
+      canvasId,
+      { name: 'Big', html: '<html><body>x</body></html>', width: 5000, height: 3500 },
+      { kind: 'user', name: 'O', color: '#000' },
+    )!
+    const render = vi.mocked(renderFrame)
+    render.mockClear()
+    await expect(dispatchScriptCall(runCtx(), 'checks.snapshot', [frame.id])).rejects.toThrow(/snapshot_bytes/)
+    expect(render).not.toHaveBeenCalled()
   })
 })

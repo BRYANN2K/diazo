@@ -37,6 +37,10 @@ export async function executeScript(
   write: boolean,
 ): Promise<ScriptRunResult> {
   if (!env.DOOP_AGENT_SCRIPTS) throw new SdkError('refused', 'agent scripts are disabled')
+  /* scripts run as a verified account: an anonymous caller would get the
+     ownerless-canvas legacy 'edit' role for free — and skip the per-account
+     rate below, which has no name to count against */
+  if (!caller.userId) throw new SdkError('permission', 'script runs need a signed-in caller')
   /* the rate counts at arrival: a run that waited in the canvas queue still
      consumed its slot of the caller's minute, and an over-rate caller must
      not pile waiters onto the queue at all */
@@ -116,6 +120,7 @@ export async function serializeScript<T>(canvasId: string, fn: () => Promise<T>)
 
 function gate(caller: ScriptCaller, write: boolean): void {
   if (!env.DOOP_AGENT_SCRIPTS) throw new SdkError('refused', 'agent scripts are disabled')
+  if (!caller.userId) throw new SdkError('permission', 'script runs need a signed-in caller')
   const canvas = store.getCanvas(caller.canvasId)
   if (!canvas) throw new SdkError('not_found', 'the canvas is gone')
   if (!roleAllows(canvasRole(caller.userId, canvas), write ? 'edit' : 'view'))
@@ -124,18 +129,24 @@ function gate(caller: ScriptCaller, write: boolean): void {
 
 async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean): Promise<ScriptRunResult> {
   const hash = createHash('sha256').update(input.script).digest('hex')
+  /* the effective limits the request runs under — a replay must be the
+     identical request, and the cap the answer was cut to is part of it */
+  const resultCap = input.result_cap ?? SCRIPT_LIMITS.resultBytes
+  const timeoutMs = Math.max(250, Math.min(input.timeout_ms ?? SCRIPT_LIMITS.wallMs, SCRIPT_LIMITS.wallMsMax))
   if (input.idempotency_key) {
     const prior = await scriptRunDeps.byKey(caller.canvasId, input.idempotency_key)
     if (prior) {
       /* a key replays only the identical request — same principal, same
-         mode (query/write and dry/live), same script. A mismatch is a
-         different request holding the key; its stored result is never
-         served across the boundary */
+         mode (query/write and dry/live), same script, same effective
+         limits. A mismatch is a different request holding the key; its
+         stored result is never served across the boundary */
       const identical =
         prior.record.ownerId === (caller.userId ?? null) &&
         prior.record.mode === (write ? 'write' : 'query') &&
         prior.record.dryRun === !!input.dry_run &&
-        prior.record.hash === hash
+        prior.record.hash === hash &&
+        prior.record.resultCap === resultCap &&
+        prior.record.timeoutMs === timeoutMs
       if (!identical) throw new SdkError('conflict', 'the idempotency key was used for a different request')
       if (prior.response) return { ...prior.response, deduplicated: true }
       throw new SdkError('conflict', 'the previous run was interrupted; inspect its audit record before retrying')
@@ -157,6 +168,8 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
     agentRunId: caller.actor.runId ?? null,
     mode: write ? 'write' : 'query',
     hash,
+    resultCap,
+    timeoutMs,
     sourceScript: input.script.slice(0, SCRIPT_LIMITS.scriptBytes),
     calls: [],
     writes: [],
@@ -341,7 +354,7 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
 export async function revertScriptRun(
   runId: string,
   caller: ScriptCaller,
-): Promise<{ ok: true; run_id: string; restored: string[]; unreverted: string[] }> {
+): Promise<{ ok: true; run_id: string; restored: string[]; unreverted: string[]; audited?: boolean }> {
   gate(caller, true)
   return serializeScript(caller.canvasId, async () => {
     if (!roleAllows(canvasRole(caller.userId, store.getCanvas(caller.canvasId)!), 'edit'))
@@ -355,7 +368,19 @@ export async function revertScriptRun(
       throw new SdkError('invalid', 'only successful writes can be reverted')
     const report = restoreScriptState(saved.undo, caller.canvasId, caller.actor)
     saved.record.outcome = report.unreverted.length ? 'reverted_partial' : 'reverted'
-    await scriptRunDeps.save(saved)
+    let audited = true
+    try {
+      await scriptRunDeps.save(saved)
+    } catch (error) {
+      /* the refused row bound the record and its undo images — the answer
+         reports the applied revert and the run id, never the parameters.
+         State is already restored: applied-but-not-recorded, not failed */
+      console.error(
+        `[script-runs] audit save failed for undo of run ${runId}`,
+        error instanceof Error ? error.name : error,
+      )
+      audited = false
+    }
     logActivity(
       caller.canvasId,
       caller.actor,
@@ -365,6 +390,12 @@ export async function revertScriptRun(
           }`
         : `reverted script ${runId}`,
     )
-    return { ok: true, run_id: runId, restored: report.restored, unreverted: report.unreverted }
+    return {
+      ok: true,
+      run_id: runId,
+      restored: report.restored,
+      unreverted: report.unreverted,
+      ...(audited ? {} : { audited: false }),
+    }
   })
 }

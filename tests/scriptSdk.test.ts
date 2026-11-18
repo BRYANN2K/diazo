@@ -16,7 +16,7 @@ vi.mock('../server/db/persist.ts', () => ({
 
 import { dispatchScriptCall, nameMatcher, sdkPaths, SdkError, type ScriptRunContext } from '../server/scriptSdk.ts'
 import { store } from '../server/store.ts'
-import { createFrame } from '../server/actions.ts'
+import { createFrame, updateFrame } from '../server/actions.ts'
 import { reloadEnv } from '../server/env.ts'
 import { canvasPages } from '../shared/pages.ts'
 import * as motionJobs from '../server/motionJobs.ts'
@@ -349,5 +349,72 @@ describe('storyboard stamping budget', () => {
     ctx.active = false
     release()
     await expect(pending).rejects.toThrow(/cut/)
+  })
+
+  it('spends the reservation per actual stamp — a frame that grows unstamped content mid-op is skipped', async () => {
+    /* one frame needs a stamp at preflight, one does not: while the first
+       stamp's write is held open, a collaborator makes the second frame
+       unstamped — the reservation was one, so that late content is never
+       written past it */
+    const first = createFrame(
+      canvasId,
+      { name: 'S1', html: '<html><body><h1>One</h1></body></html>', width: 100, height: 100, x: 0, y: 0 },
+      { kind: 'user', name: 'Owner', color: '#000' },
+    )!
+    const second = createFrame(
+      canvasId,
+      {
+        name: 'S2',
+        /* a real element id (six alnum) — already stamped at preflight, so
+           the reservation counts only the first frame */
+        html: '<html><body><h1 data-doop-id="abc123">Two</h1></body></html>',
+        width: 100,
+        height: 100,
+        x: 400,
+        y: 0,
+      },
+      { kind: 'user', name: 'Owner', color: '#000' },
+    )!
+    const ctx = runCtx({ budgets: { frameWrites: 10 } })
+    let release!: () => void
+    vi.mocked(persist.saveFrameNow).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        }),
+    )
+    const pending = dispatchScriptCall(ctx, 'compositions.storyboard', [pageId()])
+    await vi.waitFor(() => {
+      expect(release).toBeDefined()
+      expect(persist.saveFrameNow).toHaveBeenCalled()
+    })
+    updateFrame(
+      second.id,
+      { html: '<html><body><h1>New</h1></body></html>' },
+      { kind: 'user', name: 'Collab', color: '#111' },
+    )
+    release()
+    const out = (await pending) as { ok: boolean }
+    expect(out.ok).toBe(true)
+    expect(store.getFrame(first.id)!.html).toContain('data-doop-id')
+    expect(store.getFrame(second.id)!.html).toBe('<html><body><h1>New</h1></body></html>')
+  })
+
+  it('a run cut during the canvas load writes no composition at all', async () => {
+    /* the op's own load is the third: preflight, mutateAsync, then the one
+       inside the storyboard — the cut landing there must stop the
+       composition mutation, not just a later stamp */
+    stampable('S1', 'One')
+    const ctx = runCtx({ budgets: { frameWrites: 10 } })
+    vi.mocked(persist.saveFrameNow).mockClear()
+    let loads = 0
+    const loadSpy = vi.spyOn(store, 'load').mockImplementation(async (id) => {
+      if (++loads >= 3) ctx.active = false
+      return store.getCanvas(id)
+    })
+    await expect(dispatchScriptCall(ctx, 'compositions.storyboard', [pageId()])).rejects.toThrow(/cut/)
+    loadSpy.mockRestore()
+    expect(store.getComposition(canvasId, pageId())).toBeUndefined()
+    expect(persist.saveFrameNow).not.toHaveBeenCalled()
   })
 })

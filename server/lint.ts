@@ -16,8 +16,8 @@ import { store } from './store.ts'
 /* the collector is evaluated as an expression: function declaration + call */
 const COLLECT_EXPR = `${SLOP_COLLECTOR_SOURCE}\n;collectSlopSnapshot()`
 
-async function lintFrameDom(frame: Frame): Promise<FrameLint> {
-  const loaded = await loadFramePage(frame)
+async function lintFrameDom(frame: Frame, opts: { offline?: boolean } = {}): Promise<FrameLint> {
+  const loaded = await loadFramePage(frame, { offline: opts.offline })
   try {
     /* tsx's __name helper shim, as inspectOn needs it too */
     await loaded.page.evaluate('globalThis.__name = (target) => target')
@@ -30,12 +30,13 @@ async function lintFrameDom(frame: Frame): Promise<FrameLint> {
 
 /** Score one frame. Browser lint when a renderer exists, static rules as the
  *  fallback — never throws for a bad document. The verdict names the
- *  document it scored (`doc`). */
-export async function lintFrame(frame: Frame): Promise<FrameLint> {
+ *  document it scored (`doc`). `offline` loads the page without network —
+ *  script-run checks get the server's own /a/ assets and nothing else. */
+export async function lintFrame(frame: Frame, opts: { offline?: boolean } = {}): Promise<FrameLint> {
   const doc = lintDocKey(frame)
   if (rendererAvailable()) {
     try {
-      return { ...(await lintFrameDom(frame)), doc }
+      return { ...(await lintFrameDom(frame, opts)), doc }
     } catch (error) {
       console.warn(`[lint] rendered lint failed for frame ${frame.id}, falling back to static rules`, error)
     }

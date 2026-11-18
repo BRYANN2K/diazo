@@ -134,16 +134,67 @@ describe('resident script caller', () => {
   })
 
   it('an anonymous asker runs as nobody — never as the canvas owner', async () => {
-    /* no asker and no payer identity: the script gets anonymous access —
-       canvasRole grants signed-out users nothing, so the run is refused
-       instead of borrowing the owner's account */
+    /* no asker and no payer identity: scripts need a signed-in requester,
+       so the run is refused instead of borrowing the owner's account */
     for (const link of ['none', 'edit'] as const) {
       store.setLinkAccess(canvasId, link)
       const out = await execTool(call('query_script', { script: 'return 1' }), canvasId, actor(), run({}))
       expect(out.is_error).toBe(true)
-      expect(text(out)).toMatch(/access refused|permission/i)
+      expect(text(out)).toMatch(/sign in|access refused|permission/i)
     }
     expect(rows.size).toBe(0)
+  })
+
+  it('refuses an anonymous asker even on an ownerless legacy canvas', async () => {
+    /* legacy canvases are open to claiming — anonymous access there is
+       'edit' for free, which is exactly what a script must not inherit */
+    const legacy = store.createCanvas('Legacy', undefined)
+    for (const name of ['query_script', 'run_script', 'revert_script_run']) {
+      const out = await execTool(
+        call(name, name === 'revert_script_run' ? { run_id: 'r1' } : { script: 'return 1' }),
+        legacy.id,
+        actor(),
+        run({}),
+      )
+      expect(out.is_error).toBe(true)
+      expect(text(out)).toMatch(/sign in/i)
+    }
+    /* an identified asker still gets the legacy canvas's open access */
+    const state = run({ askerId: 'claimer' })
+    const out = await execTool(call('query_script', { script: 'return 3' }), legacy.id, actor(), state)
+    expect(out.is_error).toBeFalsy()
+    expect(result(out).result).toBe(3)
+  })
+
+  it('a failed undo audit save reaches the asker without the stored payloads', async () => {
+    /* the save error can carry another editor's source or undo images —
+       the resident transport must get the sanitized outcome only */
+    store.setLinkAccess(canvasId, 'edit')
+    const frame = actions.createFrame(
+      canvasId,
+      { name: 'F', html: '<html><body><h1 data-doop-id="t">A</h1></body></html>', width: 100, height: 100 },
+      actor(),
+    )!
+    const state = run({ payerId: 'payer', askerId: 'asker' })
+    const wrote = await execTool(
+      call('run_script', {
+        script: `await diazo.frames.edit(${JSON.stringify(frame.id)}, [{op:'text',element:'t',text:'B'}]); return 1`,
+      }),
+      canvasId,
+      actor(),
+      state,
+    )
+    expect(wrote.is_error).toBeFalsy()
+    const runId = result(wrote).run_id!
+    vi.spyOn(scriptRunDeps, 'save').mockRejectedValueOnce(
+      new Error('update script_runs — parameters: ["SECRET-MARKER-42","<html>SECRET-MARKER-42</html>"]'),
+    )
+    const out = await execTool(call('revert_script_run', { run_id: runId }), canvasId, actor(), state)
+    expect(out.is_error).toBeFalsy()
+    expect(text(out)).not.toContain('SECRET-MARKER-42')
+    const res = JSON.parse(text(out)) as { audited?: boolean; restored?: string[] }
+    expect(res.audited).toBe(false)
+    expect(res.restored).toContain(`frame:${frame.id}`)
   })
 
   it('revert checks the asker’s edit access, not the payer’s', async () => {
