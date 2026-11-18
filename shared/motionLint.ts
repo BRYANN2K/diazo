@@ -21,6 +21,7 @@ import {
   parseMotionBlock,
   type Composition,
   type MotionLintIssue,
+  type MotionTrack,
 } from './motion.ts'
 import { GL_EFFECT_IDS, enabledEffects } from './motionFx.ts'
 import { isLayer } from './motionLayers.ts'
@@ -97,6 +98,27 @@ export function elementHtml(html: string, elementId: string): string | null {
     if (depth === 0) return html.slice(open.index, m.index + m[0].length)
   }
   return html.slice(open.index)
+}
+
+/* attribute-aware element lookups, shared with the layer planner: the
+   id can be written `data-doop-id = 'x'` as well as the double-quoted
+   form — a literal substring search misses half the valid syntax */
+
+/** does the string contain a `data-doop-id` for this element — any quoting */
+export const elementHasId = (text: string, elementId: string): boolean =>
+  new RegExp(`data-doop-id\\s*=\\s*["']${esc(elementId)}["']`).test(text)
+
+/** the element's open-tag position in `html`, or -1 — document order key */
+export function elementIndex(html: string, elementId: string): number {
+  const m = new RegExp(`<([a-zA-Z][a-zA-Z0-9]*)[^>]*data-doop-id\\s*=\\s*["']${esc(elementId)}["']`).exec(html)
+  return m?.index ?? -1
+}
+
+/** is `maybeChild` inside `parentId`'s subtree in this frame's HTML? */
+export function subtreeContains(html: string | undefined, parentId: string, maybeChild: string): boolean {
+  if (html === undefined) return false
+  const parent = elementHtml(html, parentId)
+  return parent !== null && elementHasId(parent, maybeChild)
 }
 
 function snippet(text: string, index: number, span = 60): string {
@@ -409,17 +431,18 @@ export function lintComposition(
         message: `blend/layer/matte/masks on a ${track.kind} track never render — they belong on element tracks`,
       })
     }
-    /* MO-21: an element track whose only animated property is opacity
-       reads as a fade-only film — nudge toward a real move */
-    if (track.kind === 'element' && (track.keyframes ?? []).length > 0) {
-      const props = new Set(track.keyframes!.map((k) => k.property))
-      if ([...props].every((p) => p === 'opacity')) {
-        issues.push({
-          rule: MO_RULES.MOTION_VARIETY,
-          severity: 'warning',
-          message: `element ${track.elementId} animates only opacity — apply_element_preset names 56 real moves (entrances, exits, emphasis)`,
-        })
-      }
+  }
+
+  /* MO-21: a shot whose element motion is only opacity reads as a fade —
+     judged per shot so a fading title under a moving hero is fine */
+  for (const shot of shotWindows(comp)) {
+    const props = changingPropsIn(comp, shot.t, shot.duration)
+    if (props.size > 0 && [...props].every((p) => p === 'opacity')) {
+      issues.push({
+        rule: MO_RULES.MOTION_VARIETY,
+        severity: 'warning',
+        message: `the shot at ${shot.t}s animates only opacity — apply_element_preset names 56 real moves (entrances, exits, emphasis)`,
+      })
     }
   }
 
@@ -466,7 +489,7 @@ export function lintComposition(
         for (const parent of tracks) {
           if (parent === child || enabledEffects(parent).length === 0) continue
           const parentHtml = elementHtml(html, parent.elementId!)
-          if (parentHtml && parentHtml.includes(`data-doop-id="${child.elementId}"`)) {
+          if (parentHtml && elementHasId(parentHtml, child.elementId!)) {
             issues.push({
               rule: MO_RULES.LAYER_NESTED_FX,
               severity: 'error',
@@ -480,6 +503,68 @@ export function lintComposition(
     }
   }
   return issues
+}
+
+/* ---- shots: the windows lint and check_scene share ---- */
+
+export interface ShotWindow {
+  t: number
+  duration: number
+}
+
+/** the shots the camera's keyframe boundaries cut the film into — no
+ *  camera keys means the whole film is one shot */
+export function shotWindows(comp: Composition): ShotWindow[] {
+  const camera = comp.tracks.find((t) => t.kind === 'camera')
+  const bounds = [...new Set((camera?.keyframes ?? []).map((k) => k.t))]
+    .filter((t) => t >= 0 && t < comp.duration)
+    .sort((a, b) => a - b)
+  const edges = [0, ...bounds.filter((t) => t > 0), comp.duration]
+  const out: ShotWindow[] = []
+  for (let i = 0; i + 1 < edges.length; i++) out.push({ t: edges[i]!, duration: edges[i + 1]! - edges[i]! })
+  return out
+}
+
+/**
+ * One track's properties whose value changes inside [t, t+d): a lane
+ * counts when two neighbouring keyframes straddle or sit inside the
+ * window with differing values — a value interpolating across the whole
+ * shot is motion, even when neither endpoint lands inside it.
+ */
+export function trackPropsChangingIn(track: Pick<MotionTrack, 'keyframes'>, t: number, duration: number): Set<string> {
+  const end = t + duration
+  const lanes = new Map<string, { t: number; value: number | string }[]>()
+  for (const kf of track.keyframes ?? []) {
+    const list = lanes.get(kf.property) ?? []
+    list.push(kf)
+    lanes.set(kf.property, list)
+  }
+  const props = new Set<string>()
+  for (const [prop, kfs] of lanes) {
+    kfs.sort((a, b) => a.t - b.t)
+    for (let i = 0; i + 1 < kfs.length; i++) {
+      const a = kfs[i]!
+      const b = kfs[i + 1]!
+      if (a.t < end && b.t > t && a.value !== b.value) {
+        props.add(prop)
+        break
+      }
+    }
+  }
+  return props
+}
+
+/**
+ * Element properties changing inside [t, t+d) across the composition —
+ * the union of every unmuted element track's changing lanes.
+ */
+export function changingPropsIn(comp: Composition, t: number, duration: number): Set<string> {
+  const props = new Set<string>()
+  for (const track of comp.tracks) {
+    if (track.muted || track.kind !== 'element') continue
+    for (const p of trackPropsChangingIn(track, t, duration)) props.add(p)
+  }
+  return props
 }
 
 /** one number agents can quote: errors first */

@@ -314,3 +314,89 @@ describe('lint_motion', () => {
     expect(issues.some((i) => i.message.includes('past the composition duration'))).toBe(true)
   })
 })
+
+describe('MO-19 attribute forms and MO-21 per-shot judgement', () => {
+  const kf = (id: string, property: string, t0: number, v0: number, t1: number, v1: number) => [
+    { id: `${id}a`, property, t: t0, value: v0, easing: { type: 'linear' } as const },
+    { id: `${id}b`, property, t: t1, value: v1, easing: { type: 'linear' } as const },
+  ]
+
+  it('MO-19 finds the nested layer whatever the quote or whitespace form', () => {
+    const tracks = [
+      {
+        id: 't1',
+        kind: 'element' as const,
+        frameId: 'f1',
+        elementId: 'wrap',
+        effects: [{ id: 'e', fx: 'glow', params: {} }],
+      },
+      {
+        id: 't2',
+        kind: 'element' as const,
+        frameId: 'f1',
+        elementId: 'kid',
+        effects: [{ id: 'e', fx: 'glow', params: {} }],
+      },
+    ]
+    const htmlVariants = [
+      `<div data-doop-id="wrap"><b data-doop-id="kid">x</b></div>`,
+      `<div data-doop-id='wrap'><b data-doop-id='kid'>x</b></div>`,
+      `<div   data-doop-id = "wrap"  ><b data-doop-id ="kid">x</b></div>`,
+      `<div id="a" data-doop-id="wrap" class="c"><b data-doop-id="kid">x</b></div>`,
+    ]
+    for (const html of htmlVariants) {
+      const issues = lintComposition(comp({ tracks }), { frameHtml: new Map([['f1', html]]) })
+      expect(
+        issues.some((i) => i.rule === 'MO-19'),
+        html,
+      ).toBe(true)
+    }
+    /* and a non-nested pair with lookalike ids stays quiet */
+    const flat = `<div data-doop-id="wrap"></div><b data-doop-id="kiddo">x</b>`
+    const quiet = lintComposition(comp({ tracks }), { frameHtml: new Map([['f1', flat]]) })
+    expect(quiet.some((i) => i.rule === 'MO-19')).toBe(false)
+  })
+
+  it('MO-21 judges each shot on its own — a fade under moving content is fine', () => {
+    /* two shots: a hold on f1 (opacity-only motion), a move on f2.
+       Only the fading shot is flagged */
+    const camera = {
+      id: 'cam',
+      kind: 'camera' as const,
+      keyframes: [
+        { id: 'c0', property: 'x', t: 0, value: 0, easing: { type: 'hold' } as const },
+        { id: 'c1', property: 'x', t: 5, value: 1000, easing: { type: 'hold' } as const },
+      ],
+    }
+    const fade = {
+      id: 'el1',
+      kind: 'element' as const,
+      frameId: 'f1',
+      elementId: 'hero',
+      keyframes: kf('f', 'opacity', 1, 0, 3, 1),
+    }
+    const mover = {
+      id: 'el2',
+      kind: 'element' as const,
+      frameId: 'f2',
+      elementId: 'box',
+      keyframes: kf('m', 'x', 6, 0, 8, 200),
+    }
+    const issues = lintComposition(comp({ duration: 10, tracks: [camera, fade, mover] }))
+    const mo21 = issues.filter((i) => i.rule === 'MO-21')
+    expect(mo21).toHaveLength(1)
+    expect(mo21[0]!.message).toContain('at 0s')
+    /* and a shot whose only change arrives through interpolation still
+       counts — keyframes sit on the shot boundaries, strictly inside
+       neither, yet the lane moves the whole window */
+    const drifting = {
+      id: 'el3',
+      kind: 'element' as const,
+      frameId: 'f1',
+      elementId: 'hero',
+      keyframes: kf('d', 'opacity', 0, 0, 5, 1),
+    }
+    const still = lintComposition(comp({ duration: 10, tracks: [camera, drifting] }))
+    expect(still.some((i) => i.rule === 'MO-21')).toBe(true)
+  })
+})

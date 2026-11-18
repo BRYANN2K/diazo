@@ -30,7 +30,9 @@ export const blendModeAt = (index: number): BlendMode => BLEND_MODES[index] ?? '
 /* ---- separable per-channel kernels ---- */
 
 const colorDodge = (cb: number, cs: number): number => (cs >= 1 ? (cb > 0 ? 1 : 0) : Math.min(1, cb / (1 - cs)))
-const colorBurn = (cb: number, cs: number): number => (cs <= 0 ? 0 : Math.max(0, 1 - (1 - cb) / cs))
+/* the white-backdrop endpoint precedes the black-source one: burn of white
+   over anything is white, even with a zero source */
+const colorBurn = (cb: number, cs: number): number => (cb >= 1 ? 1 : cs <= 0 ? 0 : Math.max(0, 1 - (1 - cb) / cs))
 const vividLight = (cb: number, cs: number): number => (cs <= 0.5 ? colorBurn(cb, 2 * cs) : colorDodge(cb, 2 * cs - 1))
 
 /** soft-light's rational correction curve on the backdrop */
@@ -78,7 +80,9 @@ function separable(mode: BlendMode, cb: number, cs: number): number {
     case 'pin-light':
       return cs <= 0.5 ? Math.min(cb, 2 * cs) : Math.max(cb, 2 * cs - 1)
     case 'hard-mix':
-      return vividLight(cb, cs) < 0.5 ? 0 : 1
+      /* the specified threshold is inclusive: Cb + Cs ≥ 1, not the
+         vivid-light half */
+      return cb + cs >= 1 ? 1 : 0
     default:
       return cs
   }
@@ -187,7 +191,7 @@ vec3 doopClip(vec3 c) {
 }
 vec3 doopSetLum(vec3 c, float l) { return doopClip(c + (l - doopLum(c))); }
 float doopDodge(float cb, float cs) { return cs >= 1. ? (cb > 0. ? 1. : 0.) : min(1., cb / (1. - cs)); }
-float doopBurn(float cb, float cs) { return cs <= 0. ? 0. : max(0., 1. - (1. - cb) / cs); }
+float doopBurn(float cb, float cs) { return cb >= 1. ? 1. : cs <= 0. ? 0. : max(0., 1. - (1. - cb) / cs); }
 float doopVivid(float cb, float cs) { return cs <= .5 ? doopBurn(cb, 2. * cs) : doopDodge(cb, 2. * cs - 1.); }
 float doopSoftD(float x) { return x <= .25 ? ((16. * x - 12.) * x + 4.) * x : sqrt(x); }
 float doopSep(int m, float cb, float cs) {
@@ -211,7 +215,7 @@ float doopSep(int m, float cb, float cs) {
   if (m == 16) return doopVivid(cb, cs);                    // vivid-light
   if (m == 17) return clamp(cb + 2. * cs - 1., 0., 1.);     // linear-light
   if (m == 18) return cs <= .5 ? min(cb, 2. * cs) : max(cb, 2. * cs - 1.);        // pin-light
-  if (m == 19) return doopVivid(cb, cs) < .5 ? 0. : 1.;     // hard-mix
+  if (m == 19) return cb + cs >= 1. ? 1. : 0.;              // hard-mix
   return cs;
 }
 vec3 doopBlend(int m, vec3 cb, vec3 cs) {

@@ -193,7 +193,29 @@ const clipHidden = (direction: ElementPresetOptions['direction']): string => {
   return 'inset(100% 0% 0% 0%)'
 }
 
-const pnum = (o: Resolved, id: string, def: number): number => o.p[id] ?? def
+/* ---- user-input bounds ----
+ * A preset's numbers come from the tool call: bound them BEFORE any loop
+ * runs so generation can never allocate unbounded work. Value knobs
+ * clamp to a wide-but-finite range; loop counts — the params and rates
+ * that size a for-loop — cap at ELEMENT_PRESET_MAX_LOOPS iterations, and
+ * duration itself is capped so rate·duration loops stay bounded too. */
+export const ELEMENT_PRESET_MAX_LOOPS = 64
+export const ELEMENT_PRESET_MAX_DURATION = 3600
+const MAX_PARAM = 1e6
+const MAX_DISTANCE = 100_000
+
+const bounded = (v: number | undefined, def: number, min = -MAX_PARAM, max = MAX_PARAM): number =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : def
+
+/** a preset knob: a non-finite user value falls back to the default, a
+ *  finite one clamps into ±MAX_PARAM — angles and amplitudes stay sane,
+ *  nothing turns into NaN keyframes */
+const pnum = (o: Resolved, id: string, def: number): number => bounded(o.p[id], def)
+
+/** a user-supplied loop count — swings, steps, bounces, octaves — clamped
+ *  to a whole number in [min, ELEMENT_PRESET_MAX_LOOPS] */
+const loopCount = (o: Resolved, id: string, def: number, min = 1): number =>
+  Math.min(ELEMENT_PRESET_MAX_LOOPS, Math.max(min, Math.round(pnum(o, id, def))))
 
 /* ---- the specs ---- */
 
@@ -328,7 +350,7 @@ const specs: ElementPresetSpec[] = [
     easing: EASE_OUT,
     keyframes: (o) => {
       const angle = pnum(o, 'angle', -25)
-      const swings = Math.max(1, Math.round(pnum(o, 'swings', 3)))
+      const swings = loopCount(o, 'swings', 3)
       const kfs: MotionKeyframe[] = [kf('rotate', o.t, angle, o.ease)]
       /* damped oscillation: each half-swing carries 60% of the previous */
       for (let i = 1; i <= swings; i++) {
@@ -376,7 +398,7 @@ const specs: ElementPresetSpec[] = [
     keyframes: (o) => {
       const ox = pnum(o, 'ox', 50)
       const oy = pnum(o, 'oy', 50)
-      const steps = Math.max(2, Math.round(pnum(o, 'steps', 6)))
+      const steps = loopCount(o, 'steps', 6, 2)
       const kfs: MotionKeyframe[] = [kf('clipPath', o.t, `circle(0% at ${ox}% ${oy}%)`, HOLD)]
       for (let i = 1; i < steps; i++) {
         kfs.push(kf('clipPath', o.t + (o.d * i) / steps, `circle(${(75 * i) / steps}% at ${ox}% ${oy}%)`, HOLD))
@@ -411,7 +433,7 @@ const specs: ElementPresetSpec[] = [
     easing: EASE_IN,
     keyframes: (o) => {
       const r = pnum(o, 'restitution', 0.6)
-      const n = Math.max(1, Math.round(pnum(o, 'bounces', 3)))
+      const n = loopCount(o, 'bounces', 3)
       const kfs: MotionKeyframe[] = [kf('y', o.t, -o.dist, EASE_IN)]
       /* the fall is ~35% of the span; bounces tile the rest, decaying r²ⁿ */
       const t = o.t + o.d * 0.35
@@ -486,7 +508,7 @@ const specs: ElementPresetSpec[] = [
     easing: HOLD,
     keyframes: (o) => {
       const rng = seededRandom(o.seed)
-      const steps = Math.max(2, Math.round(pnum(o, 'steps', 5)))
+      const steps = loopCount(o, 'steps', 5, 2)
       const amp = o.int * 60 + 10
       const kfs: MotionKeyframe[] = [kf('opacity', o.t, 0, HOLD)]
       for (let i = 0; i < steps; i++) {
@@ -642,7 +664,7 @@ const specs: ElementPresetSpec[] = [
     easing: EASE_IN,
     keyframes: (o) => {
       const angle = pnum(o, 'angle', 25)
-      const swings = Math.max(1, Math.round(pnum(o, 'swings', 3)))
+      const swings = loopCount(o, 'swings', 3)
       const kfs: MotionKeyframe[] = [kf('rotate', o.t, 0, EASE_IN)]
       for (let i = 1; i <= swings; i++) {
         const amp = angle * (0.4 + 0.6 * (i / swings)) * (i % 2 === 0 ? -1 : 1)
@@ -689,7 +711,7 @@ const specs: ElementPresetSpec[] = [
     keyframes: (o) => {
       const ox = pnum(o, 'ox', 50)
       const oy = pnum(o, 'oy', 50)
-      const steps = Math.max(2, Math.round(pnum(o, 'steps', 6)))
+      const steps = loopCount(o, 'steps', 6, 2)
       const kfs: MotionKeyframe[] = [kf('clipPath', o.t, REST_CLIP, HOLD)]
       for (let i = 1; i < steps; i++) {
         kfs.push(kf('clipPath', o.t + (o.d * i) / steps, `circle(${75 - (75 * i) / steps}% at ${ox}% ${oy}%)`, HOLD))
@@ -774,7 +796,7 @@ const specs: ElementPresetSpec[] = [
     easing: HOLD,
     keyframes: (o) => {
       const rng = seededRandom(o.seed)
-      const steps = Math.max(2, Math.round(pnum(o, 'steps', 5)))
+      const steps = loopCount(o, 'steps', 5, 2)
       const amp = o.int * 60 + 10
       const kfs: MotionKeyframe[] = [
         kf('x', o.t, 0, HOLD),
@@ -821,7 +843,7 @@ const specs: ElementPresetSpec[] = [
     easing: EASE_IN_OUT,
     keyframes: (o) => {
       const peak = pnum(o, 'scale', 1.06)
-      const count = Math.max(1, Math.round(pnum(o, 'count', 1)))
+      const count = loopCount(o, 'count', 1)
       const kfs: MotionKeyframe[] = [kf('scale', o.t, 1, o.ease)]
       for (let i = 0; i < count; i++) {
         kfs.push(kf('scale', o.t + (o.d * (i + 0.5)) / count, peak, EASE_IN_OUT))
@@ -861,7 +883,7 @@ const specs: ElementPresetSpec[] = [
     keyframes: (o) => {
       const rng = seededRandom(o.seed)
       const amp = pnum(o, 'amplitude', 8) * (0.5 + o.int)
-      const n = Math.max(2, Math.round(pnum(o, 'frequency', 10) * o.d))
+      const n = Math.min(ELEMENT_PRESET_MAX_LOOPS, Math.max(2, Math.round(pnum(o, 'frequency', 10) * o.d)))
       const kfs: MotionKeyframe[] = [kf('x', o.t, 0, HOLD)]
       for (let i = 1; i <= n; i++) {
         const decay = 1 - i / (n + 1)
@@ -883,7 +905,7 @@ const specs: ElementPresetSpec[] = [
     easing: EASE_IN_OUT,
     keyframes: (o) => {
       const angle = pnum(o, 'angle', 5)
-      const swings = Math.max(1, Math.round(pnum(o, 'swings', 2)))
+      const swings = loopCount(o, 'swings', 2)
       const kfs: MotionKeyframe[] = [kf('rotate', o.t, 0, o.ease)]
       for (let i = 1; i <= swings * 2; i++) {
         const amp = angle * (1 - i / (swings * 2 + 1)) * (i % 2 === 0 ? 1 : -1)
@@ -988,7 +1010,7 @@ const specs: ElementPresetSpec[] = [
     keyframes: (o) => {
       const a = pnum(o, 'amplitude', 8)
       const period = Math.max(0.1, pnum(o, 'period', 2))
-      const loops = Math.max(1, Math.round(o.d / period))
+      const loops = Math.min(ELEMENT_PRESET_MAX_LOOPS, Math.max(1, Math.round(o.d / period)))
       const kfs: MotionKeyframe[] = [kf('y', o.t, 0, EASE_IN_OUT)]
       const slice = o.d / (loops * 4)
       for (let i = 1; i < loops * 4; i++) {
@@ -1011,7 +1033,7 @@ const specs: ElementPresetSpec[] = [
     keyframes: (o) => {
       const a = pnum(o, 'amplitude', 1.04)
       const period = Math.max(0.1, pnum(o, 'period', 3))
-      const loops = Math.max(1, Math.round(o.d / period))
+      const loops = Math.min(ELEMENT_PRESET_MAX_LOOPS, Math.max(1, Math.round(o.d / period)))
       const kfs: MotionKeyframe[] = [kf('scale', o.t, 1, EASE_IN_OUT)]
       const slice = o.d / (loops * 2)
       for (let i = 1; i < loops * 2; i++) {
@@ -1034,7 +1056,7 @@ const specs: ElementPresetSpec[] = [
     keyframes: (o) => {
       const a = pnum(o, 'angle', 4)
       const period = Math.max(0.1, pnum(o, 'period', 2.4))
-      const loops = Math.max(1, Math.round(o.d / period))
+      const loops = Math.min(ELEMENT_PRESET_MAX_LOOPS, Math.max(1, Math.round(o.d / period)))
       const kfs: MotionKeyframe[] = [kf('rotate', o.t, 0, EASE_IN_OUT)]
       const slice = o.d / (loops * 4)
       for (let i = 1; i < loops * 4; i++) {
@@ -1059,8 +1081,8 @@ const specs: ElementPresetSpec[] = [
     keyframes: (o) => {
       const rng = seededRandom(o.seed)
       const amp = pnum(o, 'amplitude', 3) * (0.5 + o.int)
-      const oct = Math.max(1, Math.round(pnum(o, 'octaves', 2)))
-      const n = Math.max(2, Math.round(pnum(o, 'frequency', 8) * o.d))
+      const oct = loopCount(o, 'octaves', 2)
+      const n = Math.min(ELEMENT_PRESET_MAX_LOOPS, Math.max(2, Math.round(pnum(o, 'frequency', 8) * o.d)))
       const jitter = () => {
         /* two summed samples read richer than one flat uniform step */
         let v = 0
@@ -1089,7 +1111,7 @@ const specs: ElementPresetSpec[] = [
     duration: 0.6,
     easing: HOLD,
     keyframes: (o) => {
-      const count = Math.max(1, Math.round(pnum(o, 'count', 3)))
+      const count = loopCount(o, 'count', 3)
       const floor = pnum(o, 'floor', 0.2)
       const kfs: MotionKeyframe[] = [kf('opacity', o.t, 1, HOLD)]
       const slice = o.d / (count * 2)
@@ -1147,7 +1169,7 @@ const specs: ElementPresetSpec[] = [
     easing: LINEAR,
     keyframes: (o) => {
       const r = pnum(o, 'radius', 12)
-      const turns = Math.max(1, Math.round(pnum(o, 'turns', 1)))
+      const turns = loopCount(o, 'turns', 1)
       const steps = turns * 8
       /* sin/cos leave -1e-16 dust on the rest keyframes — snap it so the
          authored lane ends on a clean 0 */
@@ -1190,15 +1212,24 @@ export function elementPreset(id: ElementPreset, opts: ElementPresetOptions): Mo
   const spec = SPEC_BY_ID.get(id)
   if (!spec) throw new Error(`unknown element preset ${id}`)
   const duration = opts.duration ?? spec.duration
+  /* every number the caller controls is validated before a spec's loop
+     ever sees it — a NaN or Infinity must not reach a keyframe */
+  if (!Number.isFinite(opts.t) || opts.t < 0) throw new Error(`preset t must be a finite time ≥ 0`)
+  if (!Number.isFinite(duration) || duration <= 0 || duration > ELEMENT_PRESET_MAX_DURATION) {
+    throw new Error(`preset duration must be finite and ≤ ${ELEMENT_PRESET_MAX_DURATION}s`)
+  }
+  if (typeof opts.direction === 'number' && !Number.isFinite(opts.direction)) {
+    throw new Error('preset direction must be a finite number of degrees')
+  }
   const resolved: Resolved = {
     t: opts.t,
     d: duration,
     ease: opts.easing ?? spec.easing,
     direction: opts.direction,
     dir: dirVector(opts.direction),
-    dist: opts.distance ?? 80,
-    int: Math.min(1, Math.max(0, opts.intensity ?? 0.5)),
-    seed: opts.seed ?? 1,
+    dist: bounded(opts.distance, 80, -MAX_DISTANCE, MAX_DISTANCE),
+    int: bounded(opts.intensity, 0.5, 0, 1),
+    seed: bounded(opts.seed, 1, -MAX_PARAM, MAX_PARAM),
     p: opts.params ?? {},
   }
   /* exits read direction as where the element travels TO, entrances as
@@ -1236,7 +1267,16 @@ export function staggerOffsets(
   if (n <= 0) return []
   if (n === 1) return [0]
   const from = opts.from ?? 'start'
-  const span = opts.amount ?? (opts.each ?? 0) * (n - 1)
+  /* a caller's each/amount is a user number — bound it before it becomes
+     a keyframe time, and bound the each·(n−1) spread itself: the product
+     of a clamped value can still overflow */
+  const each = bounded(opts.each, 0, 0, ELEMENT_PRESET_MAX_DURATION)
+  const span = bounded(
+    opts.amount,
+    Math.min(ELEMENT_PRESET_MAX_DURATION, each * (n - 1)),
+    0,
+    ELEMENT_PRESET_MAX_DURATION,
+  )
 
   let order: number[]
   switch (from) {

@@ -14,7 +14,9 @@ const GRID = [0, 0.25, 0.5, 0.75, 1]
    these numbers, not against the implementation's own algebra */
 
 const dodge = (cb: number, cs: number): number => (cs >= 1 ? (cb > 0 ? 1 : 0) : Math.min(1, cb / (1 - cs)))
-const burn = (cb: number, cs: number): number => (cs <= 0 ? 0 : Math.max(0, 1 - (1 - cb) / cs))
+/* W3C burn: the white backdrop wins first — burning over white is white even
+   when the source channel is zero */
+const burn = (cb: number, cs: number): number => (cb >= 1 ? 1 : cs <= 0 ? 0 : Math.max(0, 1 - (1 - cb) / cs))
 const vivid = (cb: number, cs: number): number => (cs <= 0.5 ? burn(cb, 2 * cs) : dodge(cb, 2 * cs - 1))
 const softD = (x: number): number => (x <= 0.25 ? ((16 * x - 12) * x + 4) * x : Math.sqrt(x))
 const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
@@ -39,7 +41,8 @@ const SEPARABLE: Record<string, (cb: number, cs: number) => number> = {
   'vivid-light': vivid,
   'linear-light': (cb, cs) => clamp01(cb + 2 * cs - 1),
   'pin-light': (cb, cs) => (cs <= 0.5 ? Math.min(cb, 2 * cs) : Math.max(cb, 2 * cs - 1)),
-  'hard-mix': (cb, cs) => (vivid(cb, cs) < 0.5 ? 0 : 1),
+  /* hard-mix's own contract: the inclusive sum threshold, not vivid-light */
+  'hard-mix': (cb, cs) => (cb + cs >= 1 ? 1 : 0),
 }
 
 const lum = (c: Rgb): number => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]
@@ -154,6 +157,21 @@ describe('blendPixel — every mode on a 5×5 grid', () => {
     expect(blendPixel('color-dodge', rgb(0, 0, 0), rgb(1, 1, 1))[0]).toBe(0)
     expect(blendPixel('color-burn', rgb(0.5, 0.5, 0.5), rgb(0, 0, 0))[0]).toBe(0)
     expect(blendPixel('divide', rgb(0.5, 0.5, 0.5), rgb(0, 0, 0))[0]).toBe(1)
+  })
+
+  it('the endpoint checks that regressed (literal W3C expectations)', () => {
+    /* color-burn: an opaque white backdrop burned by a black source stays
+       white — the white-backdrop branch precedes the black-source one */
+    expect(blendPixel('color-burn', rgb(1, 1, 1), rgb(0, 0, 0))).toEqual([1, 1, 1])
+    /* vivid-light at cs=0 halves through color-burn: white backdrop stays
+       white, a mid backdrop over black burns to black */
+    expect(blendPixel('vivid-light', rgb(1, 1, 1), rgb(0, 0, 0))).toEqual([1, 1, 1])
+    expect(blendPixel('vivid-light', rgb(0.5, 0.5, 0.5), rgb(0, 0, 0))).toEqual([0, 0, 0])
+    /* hard-mix: black backdrop plus white source sums to exactly 1, and the
+       threshold is inclusive — the result is white, not black */
+    expect(blendPixel('hard-mix', rgb(0, 0, 0), rgb(1, 1, 1))).toEqual([1, 1, 1])
+    expect(blendPixel('hard-mix', rgb(0.4, 0.4, 0.4), rgb(0.6, 0.6, 0.6))).toEqual([1, 1, 1])
+    expect(blendPixel('hard-mix', rgb(0.4, 0.4, 0.4), rgb(0.5, 0.5, 0.5))).toEqual([0, 0, 0])
   })
 })
 

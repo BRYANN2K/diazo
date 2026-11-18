@@ -7,11 +7,13 @@ import { describe, expect, it } from 'vitest'
 import type { MotionKeyframe } from '../shared/motion.ts'
 import {
   ELEMENT_PRESET_IDS,
+  ELEMENT_PRESET_MAX_LOOPS,
   elementPreset,
   elementPresetList,
   elementPresetSpec,
   isElementPreset,
   staggerOffsets,
+  type ElementPreset,
 } from '../shared/motionElementPresets.ts'
 
 const strip = (kfs: MotionKeyframe[]) => kfs.map(({ property, t, value, easing }) => ({ property, t, value, easing }))
@@ -180,5 +182,58 @@ describe('staggerOffsets', () => {
     expectOffsets(linear, [0, 0.25, 0.5, 0.75, 1])
     expect(eased[4]).toBeCloseTo(1)
     expect(eased[2]).not.toBeCloseTo(0.5)
+  })
+
+  it('a caller-sized each/amount clamps at the duration bound', () => {
+    const offsets = staggerOffsets(10, { each: 1e9 })
+    expect(Math.max(...offsets)).toBeLessThanOrEqual(3600)
+    expect(staggerOffsets(10, { amount: -5 })).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+  })
+})
+
+describe('work bounds — a caller’s numbers never explode the expansion', () => {
+  it('rejects non-finite t, duration and direction before any loop runs', () => {
+    for (const t of [NaN, Infinity, -Infinity, -0.5]) {
+      expect(() => elementPreset('pulse', { t }), `t=${t}`).toThrow(/t must be/)
+    }
+    for (const duration of [NaN, Infinity, 0, -1, 3601]) {
+      expect(() => elementPreset('pulse', { t: 0, duration }), `d=${duration}`).toThrow(/duration/)
+    }
+    expect(() => elementPreset('slide-in', { t: 0, direction: NaN })).toThrow(/direction/)
+  })
+
+  it('clamps loop-driving params at the loop budget, not after it', () => {
+    /* every loop the review counted: swings, steps, bounces, counts,
+       frequencies, octaves and turns — a 1e9 asks for the sun and gets 64 */
+    const cases: [ElementPreset, Record<string, number>][] = [
+      ['pulse', { count: 1e9 }],
+      ['flash', { count: 1e9 }],
+      ['glitch-in', { steps: 1e9 }],
+      ['bounce-in', { bounces: 1e9 }],
+      ['swing-in', { swings: 1e9 }],
+      ['shake', { frequency: 1e9 }],
+      ['wiggle', { octaves: 1e9, frequency: 1e9 }],
+      ['orbit', { turns: 1e9 }],
+    ]
+    for (const [id, params] of cases) {
+      const kfs = elementPreset(id, { t: 0, duration: 1, params })
+      /* bounded loops × bounded lanes — far under the unbounded count */
+      expect(kfs.length, id).toBeLessThanOrEqual(ELEMENT_PRESET_MAX_LOOPS * 16 + 8)
+      expect(
+        kfs.every((k) => Number.isFinite(k.t) && (typeof k.value !== 'number' || Number.isFinite(k.value))),
+        id,
+      ).toBe(true)
+    }
+  })
+
+  it('a NaN or Infinity param lands nowhere — every keyframe is finite', () => {
+    const kfs = elementPreset('pop', { t: 0, duration: 1, params: { overshoot: NaN } })
+    for (const kf of kfs) {
+      expect(Number.isFinite(kf.t)).toBe(true)
+      if (typeof kf.value === 'number') expect(Number.isFinite(kf.value)).toBe(true)
+    }
+    /* and a distance of Infinity clamps to the travel bound */
+    const slid = elementPreset('slide-in', { t: 0, duration: 1, distance: Infinity })
+    expect(Math.abs(lanes(slid).get('x')![0]!.value as number)).toBeLessThanOrEqual(100_000)
   })
 })

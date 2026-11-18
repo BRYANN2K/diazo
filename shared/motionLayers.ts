@@ -20,15 +20,19 @@
 
 import {
   LAYER_TRANSFORM_PROPS,
+  MOTION_BLOCK_ATTR,
   MOTION_LIMITS,
   SCENE_ATTR,
   elementKey,
+  motionNumber,
+  parseMotionBlock,
   type Composition,
+  type FrameMotionBlock,
   type MotionLintIssue,
   type MotionTrack,
 } from './motion.ts'
-import { effectCost, enabledEffects, layerPad as stackPad } from './motionFx.ts'
-import { elementHtml } from './motionLint.ts'
+import { effectCost, enabledEffects, layerPadReach } from './motionFx.ts'
+import { elementHasId, elementHtml, elementIndex, subtreeContains } from './motionLint.ts'
 import { keyframeLanes, laneValueAt, type CompositionStateAt } from './motionRuntime.ts'
 
 /* ---- the plan types ---- */
@@ -54,8 +58,12 @@ export interface LayerGeometry {
   ink?: { top: number; right: number; bottom: number; left: number }
   /** DOM paint order among the frame's layers, back→front (z-index aware) */
   paintOrder?: number
-  /** an ancestor that clips the layer: frame-space rect + corner radius */
-  clip?: { rect: Rect; radius: number }
+  /** an ancestor that clips the layer: frame-space rect + corner radius.
+   *  `shape` names the clip's complexity — 'rect' (default) is a square or
+   *  rounded rectangle the compositor can apply; 'complex' (a path, an
+   *  SVG clip, multiple radii) keeps the transform in CSS so the clip
+   *  stays exact */
+  clip?: { rect: Rect; radius: number; shape?: 'rect' | 'complex' }
   /** an ancestor carries a rest rotation/skew — the transform must stay in CSS */
   ancestorRotated?: boolean
   /** non-layer content paints over this layer's rest box (MO-18) */
@@ -155,11 +163,18 @@ function frameIsScene(html: string | undefined): boolean {
   return html !== undefined && (html.includes(SCENE_ATTR) || html.includes('var(--t'))
 }
 
-/** is `maybeChild` inside `parent`'s subtree in this frame's HTML? */
-function elementContains(html: string | undefined, parentId: string, maybeChild: string): boolean {
-  if (html === undefined) return false
-  const parent = elementHtml(html, parentId)
-  return parent !== null && parent.includes(`data-doop-id="${maybeChild}"`)
+const MOTION_SCRIPT_RE = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi
+
+/** the frame's parsed data-doop-motion block (frame-authored keyframes and
+ *  text animators), or null when the frame carries none */
+function motionBlockOf(html: string | undefined): FrameMotionBlock | null {
+  if (html === undefined) return null
+  for (const m of html.matchAll(MOTION_SCRIPT_RE)) {
+    if (!(m[1] ?? '').includes(MOTION_BLOCK_ATTR)) continue
+    const block = parseMotionBlock(m[2] ?? '')
+    if (block) return block
+  }
+  return null
 }
 
 /* ---- scale planning ---- */
@@ -205,10 +220,43 @@ export function planLayers(
   let filmBytes = 0
   const filmArea = comp.width * comp.height
 
-  /* every layer track by frame, for nesting checks */
+  /* matte references resolve in composition context: an element track a
+     matte names as its source must promote too — its texture has to exist
+     for the borrow — while a dangling, muted or cross-frame source is
+     MO-16, and a matte chain that cycles is refused the same way */
+  const matteSource = new Map<string, MotionTrack | 'dangle' | 'cycle'>()
+  for (const track of comp.tracks) {
+    if (!track.matte) continue
+    const seen = new Set([track.id])
+    let cur: string | undefined = track.matte.source
+    let cyclic = false
+    while (cur !== undefined) {
+      if (seen.has(cur)) {
+        cyclic = true
+        break
+      }
+      seen.add(cur)
+      cur = comp.tracks.find((t) => t.id === cur)?.matte?.source
+    }
+    matteSource.set(track.id, cyclic ? 'cycle' : (comp.tracks.find((t) => t.id === track.matte!.source) ?? 'dangle'))
+  }
+
+  /* candidates: promoted tracks plus the element tracks a matte borrows
+     from. A matte source that draws no texture of its own (muted, or
+     layer.mode:'off') cannot feed a matte — the consumer gets MO-16. */
+  const promoted = comp.tracks.filter(isLayer)
+  const candidateIds = new Set(promoted.map((t) => t.id))
+  for (const track of promoted) {
+    const source = track.matte ? matteSource.get(track.id) : undefined
+    if (source && source !== 'dangle' && source !== 'cycle' && !candidateIds.has(source.id)) {
+      if (!source.muted && source.layer?.mode !== 'off' && source.frameId === track.frameId) {
+        candidateIds.add(source.id)
+      }
+    }
+  }
   const layersByFrame = new Map<string, MotionTrack[]>()
   for (const track of comp.tracks) {
-    if (!isLayer(track) || !track.frameId) continue
+    if (!candidateIds.has(track.id) || !track.frameId) continue
     const list = layersByFrame.get(track.frameId) ?? []
     list.push(track)
     layersByFrame.set(track.frameId, list)
@@ -219,7 +267,48 @@ export function planLayers(
     const push = (rule: string, severity: MotionLintIssue['severity'], message: string) =>
       issues.push({ rule, severity, message, frameId: frame.id })
     const html = htmlOf(frame.id)
-    const layerTracks = layersByFrame.get(frame.id) ?? []
+    const candidates = layersByFrame.get(frame.id) ?? []
+
+    for (const track of candidates) {
+      if (!track.matte) continue
+      const source = matteSource.get(track.id)
+      const elementId = track.elementId!
+      if (source === 'cycle') {
+        push('MO-16', 'error', `layer ${elementId}'s matte chain cycles — a matte cannot borrow itself`)
+      } else if (source === 'dangle' || source === undefined) {
+        push('MO-16', 'error', `layer ${elementId}'s matte → ${track.matte.source} points at no track`)
+      } else if (source.kind !== 'element' || source.frameId !== frame.id) {
+        push('MO-16', 'error', `layer ${elementId}'s matte → ${track.matte.source} is not an element of this frame`)
+      } else if (source.muted || source.layer?.mode === 'off') {
+        push(
+          'MO-16',
+          'warning',
+          `matte source ${source.elementId} draws no texture — layer ${elementId}'s matte has nothing to borrow`,
+        )
+      }
+    }
+
+    /* a candidate nested inside an effect-carrying one would get the
+       parent's stack baked into its raster and applied again. P0 keeps
+       the child inside the parent's layer — it is absorbed rather than
+       promoted — and its own lanes count toward the parent's dynamic
+       content (MO-19 reports it) */
+    const absorbed = new Set<MotionTrack>()
+    for (const child of candidates) {
+      for (const parent of candidates) {
+        if (parent === child || enabledEffects(parent).length === 0) continue
+        if (subtreeContains(html, parent.elementId!, child.elementId!)) {
+          absorbed.add(child)
+          push(
+            'MO-19',
+            'error',
+            `layer ${child.elementId} nests inside effect-carrying layer ${parent.elementId} — it draws inside the parent's raster and its own stack does not composite; move the effects to the child or unnest`,
+          )
+          break
+        }
+      }
+    }
+    const layerTracks = candidates.filter((t) => !absorbed.has(t))
     const layerElementIds = new Set(layerTracks.map((t) => t.elementId!))
 
     if (layerTracks.length > MOTION_LIMITS.MAX_LAYERS_PER_FRAME) {
@@ -230,62 +319,78 @@ export function planLayers(
       )
     }
 
-    /* a layer nested inside an effect-carrying layer would get the
-       parent's stack applied to its pixels twice — flag it (MO-19) */
-    for (const child of layerTracks) {
-      for (const parent of layerTracks) {
-        if (parent === child || enabledEffects(parent).length === 0) continue
-        if (elementContains(html, parent.elementId!, child.elementId!)) {
-          push(
-            'MO-19',
-            'error',
-            `layer ${child.elementId} nests inside effect-carrying layer ${parent.elementId} — move the effects to the child or unnest`,
-          )
-          break
-        }
-      }
-    }
-
+    const block = motionBlockOf(html)
     const layers: LayerPlan[] = []
     for (const track of layerTracks) {
       const elementId = track.elementId!
-      const geo = opts?.geometry?.get(elementKey(frame.id, elementId))
 
-      /* content: static unless a lane, a scene frame, frame-block motion
-         or a non-layer tracked descendant re-paints the pixels */
-      const reasons: string[] = []
-      const lanes = keyframeLanes(track.keyframes ?? [])
-      for (const prop of lanes.keys()) {
-        if (!laneIsStatic(prop)) reasons.push(`lane ${prop} repaints`)
-      }
-      if (frameIsScene(html)) reasons.push('the frame is a scene')
-      for (const other of comp.tracks) {
-        if (other === track || other.kind !== 'element' || other.frameId !== frame.id || !other.elementId) continue
-        if (layerElementIds.has(other.elementId)) continue
-        if ((other.keyframes ?? []).length === 0) continue
-        if (elementContains(html, elementId, other.elementId)) {
-          reasons.push(`tracked descendant ${other.elementId} is not a layer`)
-        }
-      }
-      const content = reasons.length > 0 ? 'dynamic' : 'static'
-
-      /* where the transform runs */
+      /* where the transform runs — decided first: with transform 'css'
+         the transform/opacity lanes live inside the raster and re-paint
+         it, so content is classified after placement */
       let transform = track.layer?.transform ?? 'compositor'
       let transformReason: string | undefined
       if (track.layer?.transform === undefined) {
+        const geo = opts?.geometry?.get(elementKey(frame.id, elementId))
         if (geo?.ancestorRotated) {
           transform = 'css'
           transformReason = 'an ancestor carries a rest rotation or skew'
         } else if (geo?.clip && !clipIsPlainRect(geo.clip)) {
           transform = 'css'
-          transformReason = 'a clipping ancestor is not a plain rounded rect'
+          transformReason = 'a clipping ancestor is not a plain rect'
         }
         if (transform === 'css' && transformReason) {
           push('MO-17', 'warning', `layer ${elementId}: transform falls back to CSS — ${transformReason}`)
         }
       }
+      const geo = opts?.geometry?.get(elementKey(frame.id, elementId))
 
-      const pad = Math.min(MOTION_LIMITS.MAX_LAYER_PAD, (track.layer?.pad ?? 0) + stackPad(enabledEffects(track)))
+      /* content: static unless a lane, a scene frame, frame-block motion,
+         a text animator or a non-layer tracked descendant re-paints the
+         pixels — a cached texture must never freeze any of them */
+      const reasons: string[] = []
+      const lanes = keyframeLanes(track.keyframes ?? [])
+      for (const prop of lanes.keys()) {
+        if (TRANSFORM_SET.has(prop)) {
+          if (transform === 'css') reasons.push(`lane ${prop} stays inside the raster (transform: css)`)
+          continue
+        }
+        if (!laneIsStatic(prop)) reasons.push(`lane ${prop} repaints`)
+      }
+      if (frameIsScene(html)) reasons.push('the frame is a scene')
+      if (block) {
+        const subtree = html ? elementHtml(html, elementId) : null
+        if (block.keyframes.some((k) => k.el === elementId || (subtree !== null && elementHasId(subtree, k.el)))) {
+          reasons.push('frame-block motion touches the element')
+        }
+        for (const animator of block.animators ?? []) {
+          if (animator.el === elementId || (subtree !== null && elementHasId(subtree, animator.el))) {
+            reasons.push(`a text animator drives ${animator.el}`)
+            break
+          }
+        }
+      }
+      for (const other of comp.tracks) {
+        if (other === track || other.kind !== 'element' || other.frameId !== frame.id || !other.elementId) continue
+        if (layerElementIds.has(other.elementId)) continue
+        if ((other.keyframes ?? []).length === 0) continue
+        if (subtreeContains(html, elementId, other.elementId)) {
+          reasons.push(`tracked descendant ${other.elementId} is not a layer`)
+        }
+      }
+      const content = reasons.length > 0 ? 'dynamic' : 'static'
+
+      /* the pad the stack honestly asks for, unclamped — authoring pad on
+         top of the registry-default-aware, lane-aware grow. Over the cap
+         is an MO-15 the render refuses on, not a silent crop */
+      const reach = (track.layer?.pad ?? 0) + layerPadReach(track)
+      if (reach > MOTION_LIMITS.MAX_LAYER_PAD) {
+        push(
+          'MO-15',
+          'error',
+          `layer ${elementId} needs ${Math.ceil(reach)}px of padding — over the ${MOTION_LIMITS.MAX_LAYER_PAD}px pad budget`,
+        )
+      }
+      const pad = Math.min(MOTION_LIMITS.MAX_LAYER_PAD, reach)
       const scale = planScale(comp, track, opts?.outputScale ?? 1)
 
       let texture: LayerPlan['texture']
@@ -327,23 +432,24 @@ export function planLayers(
     }
 
     /* composite order: measured paint order wins, else document order in
-       the frame's markup (ordinary-flow approximation) */
+       the frame's markup (ordinary-flow approximation) — the array is
+       returned sorted and `order` is assigned after the sort */
     const docIndex = (elementId: string): number => {
       if (html === undefined) return 0
-      const i = html.indexOf(`data-doop-id="${elementId}"`)
+      const i = elementIndex(html, elementId)
       return i < 0 ? Number.MAX_SAFE_INTEGER : i
     }
-    layers
-      .map((l) => ({
-        layer: l,
-        key: opts?.geometry?.get(elementKey(l.frameId, l.elementId))?.paintOrder ?? docIndex(l.elementId),
+    const ordered = layers
+      .map((layer) => ({
+        layer,
+        key: opts?.geometry?.get(elementKey(layer.frameId, layer.elementId))?.paintOrder ?? docIndex(layer.elementId),
       }))
       .sort((a, b) => a.key - b.key)
-      .forEach((entry, i) => {
-        entry.layer.order = i
-      })
+    ordered.forEach((entry, i) => {
+      entry.layer.order = i
+    })
 
-    plans.push({ frameId: frame.id, layers, issues })
+    plans.push({ frameId: frame.id, layers: ordered.map((e) => e.layer), issues })
   }
 
   if (filmLayers > MOTION_LIMITS.MAX_LAYERS) {
@@ -364,10 +470,33 @@ export function planLayers(
   return plans
 }
 
-/** a clip counts as "a plain rounded rect" when it covers the layer's box
- *  — anything tighter keeps the transform in CSS so the clip stays right */
+/**
+ * The film's effect bill the way the renderer pays it: the scene stacks
+ * (camera and adjustment) plus the element stacks whose track promotes to
+ * a drawable layer. Muted tracks, `layer.mode:'off'` escapes and
+ * invisible layers raster nothing and cost nothing — a suppressed element
+ * stack must not sink a render under the cap. `plans` reuses a caller's
+ * layer plan; the caller passes every frame's plan.
+ */
+export function sceneEffectBill(comp: Composition, plans: readonly FramePlan[]): number {
+  const drawable = new Set<string>()
+  for (const plan of plans) {
+    for (const layer of plan.layers) if (layer.visible) drawable.add(layer.trackId)
+  }
+  let bill = 0
+  for (const track of comp.tracks) {
+    if (track.muted) continue
+    if (track.kind === 'element' && !drawable.has(track.id)) continue
+    bill += effectCost(track)
+  }
+  return bill
+}
+
+/** a clip counts as plain when the compositor can apply it — a square or
+ *  rounded rect. A path, an SVG clip or per-corner radii is 'complex' and
+ *  keeps the transform in CSS so the clip stays exact */
 function clipIsPlainRect(clip: NonNullable<LayerGeometry['clip']>): boolean {
-  return clip.radius <= 0
+  return (clip.shape ?? 'rect') === 'rect'
 }
 
 /* ---- the transform matrix ---- */
@@ -406,10 +535,8 @@ export function mulAffine(m1: Affine2D, m2: Affine2D): Affine2D {
   ]
 }
 
-const numProp = (props: Record<string, number | string> | undefined, name: string): number | undefined => {
-  const v = props?.[name]
-  return typeof v === 'number' && Number.isFinite(v) ? v : undefined
-}
+const numProp = (props: Record<string, number | string> | undefined, name: string): number | undefined =>
+  motionNumber(props?.[name])
 
 /**
  * One element's local matrix about its origin: the track transform the way
@@ -448,7 +575,10 @@ export function layerMatrix(plan: LayerPlan, state: CompositionStateAt, geometry
     geo?.origin ??
     (geo?.rect ? { x: geo.rect.x + geo.rect.width / 2, y: geo.rect.y + geo.rect.height / 2 } : { x: 0, y: 0 })
   let m = localMatrix(state.elements[elementKey(plan.frameId, plan.elementId)], elementOrigin)
-  for (const parent of geo?.parents ?? []) {
+  /* parents arrive outermost-first; the innermost matrix premultiplies
+     first so the composed order is outer · … · inner · local — an outer
+     scale multiplies an inner translation, not the other way round */
+  for (const parent of [...(geo?.parents ?? [])].reverse()) {
     const parentM = localMatrix(state.elements[elementKey(plan.frameId, parent.elementId)], parent.origin)
     m = mulAffine(parentM, m)
   }
@@ -483,10 +613,12 @@ export function layerIsolateCss(elementId: string, hiddenIds: readonly string[] 
   )
 }
 
-/** stylesheet for the base raster: the promoted elements vanish — their
- *  pixels come back through the compositor */
+/** stylesheet for the base raster: the promoted elements and their whole
+ *  subtrees vanish — their pixels come back through the compositor */
 export function baseHideCss(elementIds: readonly string[]): string {
-  return elementIds.map((id) => `[data-doop-id="${safeId(id)}"] { visibility: hidden !important; }`).join('\n')
+  return elementIds
+    .map((id) => `[data-doop-id="${safeId(id)}"], [data-doop-id="${safeId(id)}"] * { visibility: hidden !important; }`)
+    .join('\n')
 }
 
 /**

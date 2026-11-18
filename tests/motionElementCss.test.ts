@@ -50,3 +50,51 @@ describe('element tracks as frame CSS', () => {
     expect(isScene('<main>')).toBe(false)
   })
 })
+
+describe('wipe presets and numeric-string coercion', () => {
+  const withClip = {
+    ...comp,
+    tracks: [
+      {
+        id: 'e1',
+        kind: 'element' as const,
+        frameId: 'f1',
+        elementId: 'hero',
+        keyframes: [
+          { id: 'w1', property: 'clipPath', t: 0, value: 'inset(0% 100% 0% 0%)', easing: { type: 'linear' } as const },
+          { id: 'w2', property: 'clipPath', t: 2, value: 'inset(0% 0% 0% 0%)', easing: { type: 'linear' } as const },
+        ],
+      },
+    ],
+  }
+
+  it('a clipPath lane serialises as clip-path — the wipe presets draw', () => {
+    const css = frameMotionCss(frameStateAt(withClip, 0), 'f1')
+    expect(css).toContain('clip-path: inset(0% 100% 0% 0%) !important')
+  })
+
+  it('numeric strings coerce like numbers — "0.5" writes 0.5', () => {
+    const c = {
+      ...comp,
+      tracks: [
+        {
+          id: 'e1',
+          kind: 'element' as const,
+          frameId: 'f1',
+          elementId: 'hero',
+          keyframes: [
+            {
+              id: 'a',
+              property: 'opacity',
+              t: 0,
+              value: '0.5' as unknown as number,
+              easing: { type: 'hold' } as const,
+            },
+          ],
+        },
+      ],
+    }
+    const css = frameMotionCss(frameStateAt(c, 0), 'f1')
+    expect(css).toContain('opacity: 0.5 !important')
+  })
+})

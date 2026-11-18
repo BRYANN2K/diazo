@@ -686,6 +686,8 @@ export type CompositionOp =
      element track; matte/masks store now and draw in P1 */
   | { op: 'set_layer'; trackId: string; layer: LayerSpec | null }
   | { op: 'set_matte'; trackId: string; matte: LayerMatte | null }
+  /** the whole mask list, replaced atomically; null clears it */
+  | { op: 'set_masks'; trackId: string; masks: LayerMask[] | null }
   | { op: 'add_mask'; trackId: string; mask: LayerMask }
   | { op: 'update_mask'; trackId: string; maskId: string; mask: LayerMask }
   | { op: 'remove_mask'; trackId: string; maskId: string }
@@ -1869,6 +1871,26 @@ function parseOp(input: unknown, duration: number): ParseResult<CompositionOp> {
       const maskId = parseId(input.maskId, 'maskId')
       return maskId.ok ? ok({ op: 'remove_mask', trackId: trackId.value, maskId: maskId.value }) : maskId
     }
+    case 'set_masks': {
+      const trackId = parseId(input.trackId, 'trackId')
+      if (!trackId.ok) return trackId
+      if (input.masks === null || input.masks === undefined) {
+        return ok({ op: 'set_masks', trackId: trackId.value, masks: null })
+      }
+      if (!Array.isArray(input.masks) || input.masks.length > 32) {
+        return bad('masks must be an array of at most 32')
+      }
+      const masks: LayerMask[] = []
+      const seen = new Set<string>()
+      for (const raw of input.masks) {
+        const mask = parseLayerMask(raw)
+        if (!mask.ok) return mask
+        if (seen.has(mask.value.id)) return bad(`duplicate mask id ${mask.value.id}`)
+        seen.add(mask.value.id)
+        masks.push(mask.value)
+      }
+      return ok({ op: 'set_masks', trackId: trackId.value, masks })
+    }
     default:
       return bad(`unknown op "${input.op}"`)
   }
@@ -1919,6 +1941,17 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
       if (findTrack(comp, op.track.id)) return `track ${op.track.id} already exists`
       if (op.track.kind === 'camera' && comp.tracks.some((t) => t.kind === 'camera'))
         return 'a camera track already exists'
+      /* one element track per element: a second lane for the same target
+         would split its keyframes across two layers — the batch fails so a
+         racing preset application retries instead of duplicating */
+      if (
+        op.track.kind === 'element' &&
+        op.track.elementId !== undefined &&
+        comp.tracks.some(
+          (t) => t.kind === 'element' && t.elementId === op.track.elementId && t.frameId === op.track.frameId,
+        )
+      )
+        return `element ${op.track.elementId} already has a track`
       /* only camera, adjustment and element stacks reach the renderer — an
          effect stack, blend or layer spec on another kind would sit in the
          model undrawn, so the write is refused rather than stored silently */
@@ -2138,7 +2171,10 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
       if (track.kind !== 'element' && op.layer !== null)
         return `layers only exist on element tracks, not ${track.kind} tracks`
       if (op.layer === null) delete track.layer
-      else track.layer = op.layer
+      /* the op carries a partial spec — the given fields merge into what is
+         stored, so `set_layer { pad: 30 }` does not erase an existing
+         `mode: 'on'`; `null` clears the whole spec */
+      else track.layer = { ...track.layer, ...op.layer }
       return null
     }
     case 'set_matte': {
@@ -2175,6 +2211,15 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
       track.masks!.splice(i, 1)
       return null
     }
+    case 'set_masks': {
+      const track = findTrack(comp, op.trackId)
+      if (!track) return `no track ${op.trackId}`
+      if (track.kind !== 'element' && op.masks !== null)
+        return `masks only exist on element tracks, not ${track.kind} tracks`
+      if (op.masks === null) delete track.masks
+      else track.masks = op.masks
+      return null
+    }
   }
 }
 
@@ -2197,6 +2242,21 @@ function clipAllowed(track: MotionTrack, clip: MotionClip): string | null {
 }
 
 /* ---- helpers ---- */
+
+/**
+ * Finite numeric coercion shared by the CSS writer and the layer matrix:
+ * a resolved lane value may arrive as a numeric string ("10"), which both
+ * readers must honour identically — a matrix that only accepts `number`
+ * would silently drop a transform the raster does apply.
+ */
+export const motionNumber = (v: number | string | undefined): number | undefined => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : undefined
+  }
+  return undefined
+}
 
 /** the key element state is indexed under: `frameId/elementId` */
 export const elementKey = (frameId: string, elementId: string): string => `${frameId}/${elementId}`

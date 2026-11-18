@@ -623,22 +623,62 @@ export function effectCost(track: MotionTrack, weight = 1): number {
 
 /**
  * Pixels of padding the stack needs around a layer's box: the sum of each
- * enabled effect's `grow` at its current params, clamped to
- * MOTION_LIMITS.MAX_LAYER_PAD. `paramsAt` resolves an instance's params
- * (resting values merged with `fx:` lanes at t); the default reads the
- * resting values.
+ * enabled effect's `grow`, clamped to MOTION_LIMITS.MAX_LAYER_PAD.
+ * `paramsAt` resolves an instance's params (resting values merged with
+ * `fx:` lanes at t); the default reads the resting values. Registry
+ * defaults always merge in first — a param the instance leaves unset
+ * still costs what the renderer's default draws (a gaussian blur with no
+ * radius stored still bleeds its 12 px).
  */
 export function layerPad(
+  effects: readonly EffectInstance[],
+  paramsAt?: (effect: EffectInstance) => Record<string, number | string | boolean>,
+): number {
+  return Math.min(MOTION_LIMITS.MAX_LAYER_PAD, Math.ceil(stackPadReach(effects, paramsAt)))
+}
+
+/** the grow a param set asks for — defaults merged under the given values */
+function growAt(spec: FxSpec, params: Record<string, number | string | boolean> | undefined): number {
+  if (!spec.grow) return 0
+  return spec.grow({ ...spec.defaults(), ...(params ?? {}) })
+}
+
+function stackPadReach(
   effects: readonly EffectInstance[],
   paramsAt?: (effect: EffectInstance) => Record<string, number | string | boolean>,
 ): number {
   let pad = 0
   for (const e of effects) {
     if (e.enabled === false) continue
-    const grow = BY_ID.get(e.fx)?.grow
-    if (grow) pad += grow(paramsAt ? paramsAt(e) : e.params)
+    const spec = BY_ID.get(e.fx)
+    if (spec) pad += growAt(spec, paramsAt ? paramsAt(e) : e.params)
   }
-  return Math.min(MOTION_LIMITS.MAX_LAYER_PAD, Math.ceil(pad))
+  return pad
+}
+
+/**
+ * The pad a track's stack asks for, BEFORE the MAX_LAYER_PAD clamp — the
+ * honest number MO-15 refuses renders on. The reach counts the largest
+ * value every `fx:` lane drives each param to, since the raster must hold
+ * the effect at its furthest bleed, not only its resting value.
+ */
+export function layerPadReach(track: MotionTrack): number {
+  let pad = 0
+  for (const e of enabledEffects(track)) {
+    const spec = BY_ID.get(e.fx)
+    if (!spec?.grow) continue
+    const base = { ...spec.defaults(), ...e.params }
+    let reach = spec.grow(base)
+    const prefix = `fx:${e.id}.`
+    for (const kf of track.keyframes ?? []) {
+      if (!kf.property.startsWith(prefix)) continue
+      const param = kf.property.slice(prefix.length)
+      if (typeof kf.value !== 'number' || !Number.isFinite(kf.value)) continue
+      reach = Math.max(reach, spec.grow({ ...base, [param]: kf.value }))
+    }
+    pad += reach
+  }
+  return pad
 }
 
 /** params resolved at t: `fx:<instanceId>.<param>` keyframe lanes override

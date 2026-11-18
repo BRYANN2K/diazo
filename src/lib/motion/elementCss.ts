@@ -1,16 +1,13 @@
 import type { CompositionStateAt } from './contract'
+import { motionNumber as num } from '../../../shared/motion'
 
 /* An element track's resolved values (shared/motionRuntime.ts
    `frameStateAt(...).elements`) as CSS for its element, keyed by
    `data-doop-id`. Transform parts use the individual `translate`, `scale`
    and `rotate` properties so the element's own `transform` still applies;
-   the rules are `!important` because a frame styles its elements inline. */
-
-const num = (v: number | string | undefined): number | undefined => {
-  if (typeof v === 'number') return v
-  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) return Number(v)
-  return undefined
-}
+   the rules are `!important` because a frame styles its elements inline.
+   Numeric strings coerce through the shared `motionNumber` the layer
+   matrix uses, so a "10" lane lands identically on both paths. */
 
 function declarations(props: Record<string, number | string>): string[] {
   const out: string[] = []
@@ -39,6 +36,9 @@ function declarations(props: Record<string, number | string>): string[] {
   const hue = num(props['hue-rotate'])
   if (hue !== undefined) filters.push(`hue-rotate(${hue}deg)`)
   if (filters.length) out.push(`filter: ${filters.join(' ')}`)
+  /* clip-path lanes (wipe/iris/draw-on presets): the runtime hands a
+     ready `inset(...)`/`circle(...)` string */
+  if (typeof props.clipPath === 'string' && props.clipPath !== '') out.push(`clip-path: ${props.clipPath}`)
   const radius = num(props.borderRadius)
   if (radius !== undefined) out.push(`border-radius: ${radius}px`)
   if (typeof props.color === 'string') out.push(`color: ${props.color}`)
