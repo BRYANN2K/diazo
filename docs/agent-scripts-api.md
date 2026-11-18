@@ -75,11 +75,11 @@ namespace). One global `diazo`, every function awaited.
 | `diazo.components`   | `list`, `get`                                                 | `create`, `update`, `insert`                          |
 | `diazo.libraries`    | `search`, `item`, `check`                                     | `insert`                                              |
 | `diazo.compositions` | `get`, `stateAt(times)`, `lint`                               | `storyboard`, `patch`, `render`                       |
-| `diazo.search`       | `images`, `icons`, `logos` (text facts, no pixels)            | —                                                     |
 
 Not in the SDK (kept on their own tools, spec AC-11): deleting frames,
 pages or components; sharing; approvals; `import_webpage` / `view_website`;
-`generate_image`; repo tools; `set_guidelines`.
+`generate_image`; `search_images` / `search_icons` / `search_logos`; repo
+tools; `set_guidelines`.
 
 Every function calls the same code the corresponding MCP tool calls
 (`server/actions.ts`, `pageTools.ts`, `componentTools.ts`,

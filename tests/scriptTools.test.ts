@@ -63,7 +63,7 @@ it('removes disabled execution tools and refuses direct execution calls', async 
   }
 })
 it('serves namespace docs and a bounded core guide with a final screenshot rule', () => {
-  for (const ns of ['canvas', 'frames', 'tokens', 'components', 'libraries', 'checks', 'compositions', 'search']) {
+  for (const ns of ['canvas', 'frames', 'tokens', 'components', 'libraries', 'checks', 'compositions']) {
     const docs = getSdkDocs(ns)
     expect(docs.typings).toContain('diazo.' + ns)
     expect(docs.methods.length).toBeGreaterThan(0)

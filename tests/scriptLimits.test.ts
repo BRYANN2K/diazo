@@ -12,17 +12,6 @@ vi.mock('../server/db/persist.ts', () => ({
   deleteComponent: () => {},
 }))
 
-const searchIcons = vi.hoisted(() =>
-  vi.fn(async (_q: string, _opts?: { limit?: number }) => [{ id: 'mdi:a', svg_url: 'u' }]),
-)
-const searchPhotos = vi.hoisted(() =>
-  vi.fn(async (_q: string, _opts?: { count?: number }) => [
-    { image_url: 'u', width: 1, height: 1, alt: '', avg_color: '#fff', photographer: 'p' },
-  ]),
-)
-const searchLogos = vi.hoisted(() => vi.fn(async (_q: string) => [{ name: 'n', domain: 'd', logo_url: 'u' }]))
-vi.mock('../server/imageSearch.ts', () => ({ searchIcons, searchPhotos, searchLogos }))
-
 const searchLibraries = vi.hoisted(() =>
   vi.fn(async (_c: unknown[], _opts?: { query?: string; limit?: number }) => ({ hits: [] as unknown[] })),
 )
@@ -57,26 +46,18 @@ function runCtx(): ScriptRunContext {
 
 beforeEach(() => {
   canvasId = store.createCanvas('Limits', OWNER).id
-  searchIcons.mockClear()
-  searchPhotos.mockClear()
   searchLibraries.mockClear()
 })
 
+describe('off-server search has no SDK path', () => {
+  it('search.* is refused at the host bridge', async () => {
+    for (const path of ['search.icons', 'search.images', 'search.logos']) {
+      await expect(dispatchScriptCall(runCtx(), path, ['arrow'])).rejects.toThrow(/unknown diazo function/)
+    }
+  })
+})
+
 describe('search call limits are clamped', () => {
-  it('search.icons clamps the guest limit', async () => {
-    await dispatchScriptCall(runCtx(), 'search.icons', ['arrow', { limit: 100_000 }])
-    expect(searchIcons.mock.calls[0]![1]?.limit).toBeLessThanOrEqual(48)
-    await dispatchScriptCall(runCtx(), 'search.icons', ['arrow', { limit: -5 }])
-    expect(searchIcons.mock.calls[1]![1]?.limit).toBeGreaterThanOrEqual(1)
-  })
-
-  it('search.images clamps the guest limit', async () => {
-    await dispatchScriptCall(runCtx(), 'search.images', ['sky', { limit: 100_000 }])
-    expect(searchPhotos.mock.calls[0]![1]?.count).toBeLessThanOrEqual(8)
-    await dispatchScriptCall(runCtx(), 'search.images', ['sky', { limit: 0 }])
-    expect(searchPhotos.mock.calls[1]![1]?.count).toBeGreaterThanOrEqual(1)
-  })
-
   it('libraries.search clamps the guest limit', async () => {
     await dispatchScriptCall(runCtx(), 'libraries.search', ['button', { limit: 100_000 }])
     expect(searchLibraries.mock.calls[0]![1]?.limit).toBeLessThanOrEqual(60)

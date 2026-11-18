@@ -271,16 +271,16 @@ export const SCRIPT_TOOL_COVERAGE: Record<string, { sdk: string } | { excluded: 
     excluded: 'External resource, generation, upload or export; requires its dedicated tool.',
   },
   search_images: {
-    sdk: 'search.images',
+    excluded: 'External resource, generation, upload or export; requires its dedicated tool.',
   },
   list_backgrounds: {
     excluded: 'Separate workflow; not exposed by the bounded canvas SDK.',
   },
   search_icons: {
-    sdk: 'search.icons',
+    excluded: 'External resource, generation, upload or export; requires its dedicated tool.',
   },
   search_logos: {
-    sdk: 'search.logos',
+    excluded: 'External resource, generation, upload or export; requires its dedicated tool.',
   },
   view_website: {
     excluded: 'External resource, generation, upload or export; requires its dedicated tool.',

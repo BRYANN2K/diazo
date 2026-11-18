@@ -17,7 +17,7 @@ export const scriptToolShapes = {
   query_script: scriptInputShape,
   run_script: scriptInputShape,
   get_sdk_docs: {
-    namespace: z.enum(['canvas', 'frames', 'tokens', 'components', 'libraries', 'checks', 'compositions', 'search']),
+    namespace: z.enum(['canvas', 'frames', 'tokens', 'components', 'libraries', 'checks', 'compositions']),
   },
   revert_script_run: { canvas_id: z.string(), run_id: z.string(), agent_name: z.string().optional() },
 }

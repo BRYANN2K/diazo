@@ -29,7 +29,6 @@ import { textContrast } from '../shared/frameChecks.ts'
 import { cssColorToRgba } from '../shared/slopRules.ts'
 import { loadFramePage, renderFrame, rendererAvailable } from './screenshot.ts'
 import { pixelScore } from './driftDiff.ts'
-import * as imageSearch from './imageSearch.ts'
 import { itemDetail, libraryFor, readableLibraries, searchLibraries } from './libraryQueries.ts'
 import { libraryItems } from './libraryIndex.ts'
 import { runComponentTool } from './componentTools.ts'
@@ -1351,47 +1350,6 @@ const HANDLERS: Record<string, Entry> = {
       if (ctx.active === false) throw new SdkError('limit', 'wall limit reached', 'wall')
       const written = mutate(ctx, () => actions.updateFrame(frame.id, { html }, ctx.actor))!
       return { ok: true, changes, review: await reviewOf(written, ctx.actor, {}) }
-    },
-  },
-
-  /* ---- diazo.search ---- */
-  'search.images': {
-    fn: async (_ctx, args) => {
-      const opts = args[1] === undefined ? {} : obj(args[1], 'opts')
-      try {
-        const photos = await imageSearch.searchPhotos(str(args[0], 'query'), {
-          count: clampLimit(opts.limit, 5, 8),
-        })
-        return photos.map((p) => ({
-          url: p.image_url,
-          width: p.width,
-          height: p.height,
-          alt: p.alt,
-          color: p.avg_color,
-          credit: p.photographer,
-        }))
-      } catch (error) {
-        throw new SdkError('unavailable', error instanceof Error ? error.message : 'image search failed', 'search')
-      }
-    },
-  },
-  'search.icons': {
-    fn: async (_ctx, args) => {
-      const opts = args[1] === undefined ? {} : obj(args[1], 'opts')
-      const icons = await imageSearch.searchIcons(str(args[0], 'query'), {
-        limit: clampLimit(opts.limit, 24, 48),
-      })
-      return icons.map((i) => ({ name: i.id, url: i.svg_url, tags: i.id.split(':') }))
-    },
-  },
-  'search.logos': {
-    fn: async (_ctx, args) => {
-      try {
-        const logos = await imageSearch.searchLogos(str(args[0], 'brand'), 4)
-        return logos.map((l) => ({ name: l.name, domain: l.domain, url: l.logo_url }))
-      } catch (error) {
-        throw new SdkError('unavailable', error instanceof Error ? error.message : 'logo search failed', 'search')
-      }
     },
   },
 }

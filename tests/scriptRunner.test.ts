@@ -294,3 +294,22 @@ it('caps the runs pending on one canvas', async () => {
     scriptCanvasQueue.maxPending = maxPending
   }
 })
+
+it('reaches no network from the SDK in either script mode', async () => {
+  const fetchSpy = vi.spyOn(globalThis, 'fetch')
+  try {
+    /* the escape attempt: no diazo.search namespace exists to bridge out,
+       and the guest itself still has no fetch */
+    const query = await executeScript(
+      { script: 'return {search: typeof diazo.search, fetch: typeof fetch}' },
+      caller,
+      false,
+    )
+    expect(query.result).toEqual({ search: 'undefined', fetch: 'undefined' })
+    const write = await executeScript({ script: edit() + 'return typeof diazo.search' }, caller, true)
+    expect(write.result).toBe('undefined')
+    expect(fetchSpy).not.toHaveBeenCalled()
+  } finally {
+    fetchSpy.mockRestore()
+  }
+})

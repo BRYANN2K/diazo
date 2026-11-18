@@ -533,44 +533,6 @@ declare namespace diazo {
   }
 
   /* ---------------------------------------------------------------- */
-  /* diazo.search — facts, not pixels                                  */
-  /* ---------------------------------------------------------------- */
-
-  interface ImageHit {
-    url: string
-    width: number
-    height: number
-    alt: string
-    /** dominant colour, when the provider reports one */
-    color?: string
-    credit?: string
-  }
-
-  interface IconHit {
-    name: string
-    /** hotlinkable SVG URL */
-    url: string
-    tags: string[]
-  }
-
-  interface LogoHit {
-    name: string
-    domain: string
-    /** logo asset URL (SVG preferred) */
-    url: string
-  }
-
-  interface Search {
-    /** Stock photos as text facts: URL, size, alt, main colour. (read) */
-    images(query: string, opts?: { limit?: number }): Promise<ImageHit[]>
-    /** UI icons as hotlinkable SVGs. (read) */
-    icons(query: string, opts?: { limit?: number }): Promise<IconHit[]>
-    /** A real company's logo by brand name or domain — one call per brand.
-     *  (read) */
-    logos(brand: string): Promise<LogoHit[]>
-  }
-
-  /* ---------------------------------------------------------------- */
   /* the global                                                        */
   /* ---------------------------------------------------------------- */
 
@@ -582,7 +544,6 @@ declare namespace diazo {
   const components: Components
   const libraries: Libraries
   const compositions: Compositions
-  const search: Search
 
   interface DiazoError extends Error {
     name: 'DiazoError'
