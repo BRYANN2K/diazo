@@ -6,6 +6,7 @@ import { getBlenderOp, submitBlenderOp, BlenderError } from './blenderOps.ts'
 import { canAccessCanvas, canEditCanvas } from './access.ts'
 import type { Canvas } from '../shared/types.ts'
 import { BLENDER_OP_ARGS, type BlenderOpTool } from '../shared/blender.ts'
+import { directorKey } from '../shared/director.ts'
 
 export const BLENDER_TOOLS = [
   {
@@ -68,6 +69,19 @@ export const BLENDER_TOOLS = [
     shape: { op_id: z.string().min(1).max(100) },
   },
 ] as const
+
+/**
+ * blender_render_frame's dedupe key inside a director run: the op's args
+ * after the tool's own schema applied defaults, plus the page. A filing that
+ * cannot parse returns undefined — the tool will fail it anyway.
+ */
+export function blenderEffectiveKey(name: string, raw: unknown, pageId: string): string | undefined {
+  const tool = BLENDER_TOOLS.find((item) => item.name === name)
+  if (!tool || name !== 'blender_render_frame') return undefined
+  const parsed = z.object(tool.shape).strict().safeParse(raw)
+  if (!parsed.success) return undefined
+  return directorKey({ tool: tool.tool, pageId, ...parsed.data })
+}
 
 export async function runBlenderTool(name: string, canvas: Canvas, userId: string, raw: unknown): Promise<unknown> {
   if (!canAccessCanvas(userId, canvas)) throw new BlenderError('canvas view access required')

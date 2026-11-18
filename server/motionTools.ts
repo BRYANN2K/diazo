@@ -43,6 +43,7 @@ import type { Actor, Canvas, Frame } from '../shared/types.ts'
 import type { LibraryItem, LibraryItemMeta } from '../shared/library.ts'
 import { captionsFromTranscript, duckingKeyframes, findFillers, parseMediaBody } from '../shared/motionMedia.ts'
 import { generateVideo, VideoGenError, videoCost } from './videoGen.ts'
+import { directorKey } from '../shared/director.ts'
 import { storeAsset } from './assets.ts'
 import { videoModel, VIDEO_MODELS, VIDEO_PRICE_DATE, type VideoAspect } from '../shared/videoModels.ts'
 
@@ -334,6 +335,34 @@ export async function lintMotion(canvas: Canvas, input: { page_id?: string; fram
       ...(i.frameId ? { frame_id: i.frameId } : {}),
       ...(i.snippet ? { snippet: i.snippet } : {}),
     })),
+  })
+}
+
+/** render_composition's dedupe key inside a director run: the queued job's
+ *  parameters after the tool's defaults, plus the film's revision — a
+ *  re-render of a changed film is a new filing, an identical one is not. */
+export function renderEffectiveKey(
+  input: {
+    format?: string
+    target?: string
+    width?: number
+    height?: number
+    fps?: number
+    range?: { start?: number; end?: number }
+  },
+  pageId: string,
+  revision: number,
+): string {
+  return directorKey({
+    tool: 'render_composition',
+    pageId,
+    format: input.format ?? 'mp4',
+    target: input.target ?? 'browser',
+    width: input.width,
+    height: input.height,
+    fps: input.fps,
+    range: input.range ?? {},
+    revision,
   })
 }
 
@@ -740,6 +769,42 @@ export function videoModels(input: { model?: string; seconds?: number }) {
     priceDate: VIDEO_PRICE_DATE,
     estimate: m ? { model: m.id, cost: videoCost(m, input.seconds) } : undefined,
   }
+}
+
+/**
+ * generate_video's dedupe key inside a director run: the request the
+ * provider sees — trimmed prompt, model/seconds/aspect/seed, frame and
+ * reference images hashed (they are megabytes inline), and the placement,
+ * with `at` absent filing as 0.
+ */
+export function videoEffectiveKey(
+  input: {
+    prompt?: string
+    model?: string
+    seconds?: number
+    aspect?: string
+    seed?: number
+    first_frame?: string
+    last_frame?: string
+    refs?: string[]
+    at?: number
+  },
+  pageId: string,
+): string {
+  const img = (s: string | undefined) => (s ? directorKey(s) : undefined)
+  return directorKey({
+    tool: 'generate_video',
+    pageId,
+    prompt: (input.prompt ?? '').trim(),
+    model: input.model,
+    seconds: input.seconds,
+    aspect: input.aspect,
+    seed: input.seed,
+    first_frame: img(input.first_frame),
+    last_frame: img(input.last_frame),
+    refs: (input.refs ?? []).map(img),
+    at: input.at ?? 0,
+  })
 }
 
 /**

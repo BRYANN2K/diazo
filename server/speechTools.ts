@@ -1,6 +1,7 @@
 /** Speech tool definitions are reused by both canvas tool transports. */
 import { z } from 'zod'
 import { speechRequestSchema } from '../shared/speech.ts'
+import { directorKey } from '../shared/director.ts'
 import { catalog, getJob, listVoices, SpeechError, speechEnabled } from './speech.ts'
 import { estimateSpeech, submitSpeech } from './speechJobs.ts'
 import { canAccessCanvas, canEditCanvas } from './access.ts'
@@ -55,6 +56,23 @@ export const SPEECH_TOOLS = [
     shape: {},
   },
 ] as const
+
+/**
+ * The paid filings' dedupe key (director runs): the input AFTER the tool's
+ * own schema applied its defaults and trims — `at` omitted and `at: 0` file
+ * one job, trailing whitespace in `text` files one job. Two placements or
+ * two voices file two. Returns undefined when the input cannot parse — the
+ * tool will fail it anyway, so there is nothing to dedupe.
+ */
+export function speechEffectiveKey(name: string, raw: unknown, pageId: string): string | undefined {
+  const tool = SPEECH_TOOLS.find((item) => item.name === name)
+  if (!tool || (name !== 'generate_voiceover' && name !== 'transcribe_clip')) return undefined
+  const parsed = z.object(tool.shape).strict().safeParse(raw)
+  if (!parsed.success) return undefined
+  const kind = name === 'generate_voiceover' ? 'speak' : 'transcribe'
+  const data = parsed.data as Record<string, unknown>
+  return directorKey({ tool: kind, pageId: data.page_id ?? pageId, ...data })
+}
 
 export async function runSpeechTool(name: string, canvas: Canvas, userId: string, raw: unknown): Promise<unknown> {
   if (!speechEnabled()) throw new SpeechError('speech is disabled')
