@@ -111,6 +111,8 @@ esac`,
     'podman',
     `echo "podman $*" >> "$STUB_DIR/calls.log"
 case "$1" in
+  version) echo "\${STUB_PODMAN_VERSION-4.9.5}" ;;
+  --version) echo "podman version \${STUB_PODMAN_VERSION-4.9.5}" ;;
   pull) exit 0 ;;
   inspect) [ -f "$STUB_DIR/exists" ] ;;
   run) touch "$STUB_DIR/exists" ;;
@@ -267,6 +269,10 @@ describe('install-local.sh on Linux', () => {
     calls()
       .split('\n')
       .find((line) => line.startsWith('docker run ')) ?? ''
+  const podmanRunLine = () =>
+    calls()
+      .split('\n')
+      .find((line) => line.startsWith('podman run ')) ?? ''
 
   it('runs the same container through Docker, with a restart policy', async () => {
     const { code, out } = await run([], { STUB_OS: 'Linux', STUB_ARCH: 'x86_64' })
@@ -313,16 +319,32 @@ describe('install-local.sh on Linux', () => {
     expect(dockerRunLine()).not.toContain('/app/data:Z')
   })
 
-  it('maps the caller into the container under Podman (keep-id), not --user', async () => {
+  it('pins the caller at the image uid under Podman 4.3+ (keep-id), not --user', async () => {
     rmSync(path.join(bin, 'docker'))
-    expect((await run([], { STUB_OS: 'Linux', STUB_ARCH: 'x86_64' })).code).toBe(0)
-    const line =
-      calls()
-        .split('\n')
-        .find((l) => l.startsWith('podman run ')) ?? ''
-    expect(line).toContain('--userns=keep-id')
-    expect(line).toContain('--env HOME=/app/data')
-    expect(line).not.toMatch(/--user \d/)
+    for (const version of ['4.9.5', '5.1.2']) {
+      writeFileSync(path.join(root, 'calls.log'), '')
+      expect((await run([], { STUB_OS: 'Linux', STUB_ARCH: 'x86_64', STUB_PODMAN_VERSION: version })).code).toBe(0)
+      const line = podmanRunLine()
+      expect(line).toContain('--userns=keep-id:uid=10001,gid=10001')
+      expect(line).toContain('--env HOME=/app/data')
+      expect(line).not.toMatch(/--user \d/)
+    }
+  })
+
+  it('maps the caller on Podman older than 4.3: plain keep-id plus --user', async () => {
+    rmSync(path.join(bin, 'docker'))
+    const uid = spawnSync('id', ['-u']).stdout.toString().trim()
+    const gid = spawnSync('id', ['-g']).stdout.toString().trim()
+    /* the uid=/gid= options do not exist before 4.3; an unreadable version
+       gets the same compatible form */
+    for (const version of ['4.2.5', '3.4.4', '']) {
+      writeFileSync(path.join(root, 'calls.log'), '')
+      expect((await run([], { STUB_OS: 'Linux', STUB_ARCH: 'x86_64', STUB_PODMAN_VERSION: version })).code).toBe(0)
+      const line = podmanRunLine()
+      expect(line).toContain('--userns=keep-id ')
+      expect(line).toContain(`--user ${uid}:${gid}`)
+      expect(line).not.toContain('keep-id:uid=')
+    }
   })
 
   it('pulls the arm64 image on arm64 Linux', async () => {

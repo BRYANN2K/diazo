@@ -396,6 +396,25 @@ selinux_enforcing() {
   fi
 }
 
+# The client version Podman reports, empty when neither query answers.
+podman_version() {
+  v=$(podman version --format '{{.Client.Version}}' 2>/dev/null) ||
+    v=$(podman --version 2>/dev/null | sed -n 's/.*version[^0-9]*\([0-9][0-9.]*\).*/\1/p')
+  printf '%s' "$v"
+}
+
+# keep-id's uid=/gid= options exist only since Podman 4.3. On an older
+# Podman (or an unreadable version) plain keep-id still maps the caller
+# into the container, and --user then runs the process as that mapped uid:
+# the bind mount stays writable and host files stay the caller's.
+podman_userns() {
+  case $(podman_version) in
+    '' | [0-3].* | 4.[0-2].*)
+      printf '%s\n' --userns=keep-id --user "$(id -u):$(id -g)" ;;
+    *) printf '%s\n' --userns=keep-id:uid=10001,gid=10001 ;;
+  esac
+}
+
 # The `run` invocation, one argument per line (the tests read it). Docker and
 # Podman share their flags; the container also gets a restart policy there,
 # since the systemd unit only runs at login and a crash should not idle it.
@@ -403,10 +422,16 @@ selinux_enforcing() {
 # The image runs as uid 10001, which cannot write a host-mounted data folder
 # on Linux: Docker does not remap a bind mount's ownership (Apple's
 # `container` does), and rootless Podman maps it through subuids. So the
-# container runs as the person instead — `--user` for Docker, keep-id for
-# Podman, which maps the caller's uid into the container and gives it a
-# passwd entry — with HOME at the data folder (Chromium and PGlite need a
-# writable one; a uid with no passwd entry has none).
+# caller's uid is mapped into the container instead — `--user` for Docker,
+# keep-id for Podman, which also gives it a passwd entry — with HOME at the
+# data folder (Chromium and PGlite need a writable one; a uid with no passwd
+# entry has none).
+#
+# keep-id:uid=10001 pins the caller to the image's own user: Podman 4.x
+# (Ubuntu, Debian) still runs the process as the image's USER even with
+# keep-id, and only the mapped uid can write the bind mount. Podman 5.x runs
+# the process as the keep-id user, so the pin lands on the same 10001 either
+# way. podman_userns picks this form only where 4.3+ supports it.
 run_args() {
   case $RT in
     apple)
@@ -439,7 +464,7 @@ run_args() {
         --env HOME=/app/data
       case $RT in
         docker) printf '%s\n' --user "$(id -u):$(id -g)" ;;
-        podman) printf '%s\n' --userns=keep-id ;;
+        podman) podman_userns ;;
       esac
       ;;
   esac

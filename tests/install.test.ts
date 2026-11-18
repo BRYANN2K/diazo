@@ -184,6 +184,8 @@ esac`,
     'podman',
     `echo "podman $*" >> "$STUB_DIR/calls.log"
 case "$1" in
+  version) echo "\${STUB_PODMAN_VERSION-4.9.5}" ;;
+  --version) echo "podman version \${STUB_PODMAN_VERSION-4.9.5}" ;;
   pull) exit 0 ;;
   inspect) [ -f "$STUB_DIR/exists" ] ;;
   run) touch "$STUB_DIR/exists" ;;
