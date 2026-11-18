@@ -1,12 +1,12 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { gunzipSync } from 'node:zlib'
 import { PGlite } from '@electric-sql/pglite'
 import { afterEach, describe, expect, it } from 'vitest'
-import { backupNow, backupPgDir, startDailyBackups } from '../server/backup.ts'
+import { backupNow, backupPgDir, fileBody, startDailyBackups } from '../server/backup.ts'
 import { stubEnv, unstubAllEnvs } from './envStub.ts'
 
 /**
@@ -46,6 +46,33 @@ function fakeClient() {
   return client
 }
 
+/** A fake client whose backup_label names a REAL WAL range — the shape
+ *  Postgres actually returns — so the coverage check engages. `stopLsn`
+ *  is where pg_backup_stop says backup mode ended. */
+function fakeClientWithWal(opts: { segment: string; stopLsn: string; segSize?: string }) {
+  const calls: string[] = []
+  const label = [
+    'START WAL LOCATION: 0/5000028 (file ' + opts.segment + ')',
+    'CHECKPOINT LOCATION: 0/5000060',
+    'BACKUP METHOD: streamed',
+    'BACKUP FROM: primary',
+    `START TIME: ${new Date().toISOString()}`,
+    'LABEL: diazo-test',
+  ].join('\n')
+  const client = {
+    calls,
+    query: async (sql: string) => {
+      calls.push(sql)
+      if (sql.includes('pg_backup_start')) return { rows: [{ pg_backup_start: '0/5000028' }] }
+      if (sql.includes('pg_backup_stop')) return { rows: [{ lsn: opts.stopLsn, labelfile: label, spcmapfile: '' }] }
+      if (sql.includes('wal_segment_size')) return { rows: [{ wal_segment_size: opts.segSize ?? '16MB' }] }
+      return { rows: [] }
+    },
+    syncToFs: async () => {},
+  } as unknown as PGlite & { calls: string[] }
+  return client
+}
+
 /** A small on-disk pg dir — backupNow and backupPgDir both read real files. */
 async function seedPgDir(data: string): Promise<string> {
   const pg = path.join(data, 'pg')
@@ -53,6 +80,13 @@ async function seedPgDir(data: string): Promise<string> {
   await fs.writeFile(path.join(pg, 'PG_VERSION'), '16\n')
   await fs.writeFile(path.join(pg, 'base', '16384', '12345'), Buffer.alloc(1500, 0x61))
   return pg
+}
+
+/** Drain a byte generator into one buffer — fileBody yields piece by piece. */
+async function collect(gen: AsyncGenerator<Buffer>): Promise<Buffer> {
+  const parts: Buffer[] = []
+  for await (const part of gen) parts.push(part)
+  return Buffer.concat(parts)
 }
 
 /** Poll until `probe` yields — startDailyBackups' boot check is
@@ -205,12 +239,14 @@ describe('server/backup.ts', () => {
     await fs.writeFile(path.join(backups, 'pg-2020-01-01T00-00-00-000Z.tar.gz.tmp'), 'torn')
     await fs.mkdir(path.join(backups, 'pg-2020-01-02T00-00-00-000Z.work'))
     await fs.writeFile(path.join(backups, 'pg-2020-01-02T00-00-00-000Z.work', 'file'), 'x')
+    await fs.mkdir(path.join(backups, 'pg-2020-01-02T00-00-00-000Z.walhold'))
+    await fs.writeFile(path.join(backups, 'pg-2020-01-02T00-00-00-000Z.walhold', '000000010000000000000001'), 'x')
     await fs.writeFile(path.join(backups, 'pg-2020-01-03T00-00-00-000Z.assets.json'), '{}')
 
     await backupPgDir(pg, 'pre-migration')
 
     const names = await fs.readdir(backups)
-    expect(names.filter((n) => /\.(?:tmp|work)$/.test(n))).toEqual([])
+    expect(names.filter((n) => /\.(?:tmp|work|walhold)$/.test(n))).toEqual([])
     expect(names).not.toContain('pg-2020-01-03T00-00-00-000Z.assets.json')
   })
 
@@ -276,5 +312,117 @@ describe('server/backup.ts', () => {
     await new Promise((r) => setTimeout(r, 300))
 
     expect((await fs.readdir(backups)).filter((n) => n.endsWith('.tar.gz'))).toEqual([`pg-${stamp}.tar.gz`])
+  })
+
+  /* -- finding: the WAL the label needs could be recycled between
+        pg_backup_stop and the copy, publishing an unrestorable archive -- */
+
+  it('fails loudly when WAL the label requires was already recycled — nothing is published', async () => {
+    const data = tmpDataDir()
+    const pg = await seedPgDir(data)
+    /* the postmaster's side: pg_wal exists but the start segment is gone —
+       exactly what a checkpoint between stop and copy produces */
+    await fs.mkdir(path.join(pg, 'pg_wal'), { recursive: true })
+    await fs.writeFile(path.join(pg, 'pg_wal', '000000010000000000000006'), 'current-wal')
+
+    /* label requires segment …05 through the stop lsn's segment …06 */
+    await expect(
+      backupNow(fakeClientWithWal({ segment: '000000010000000000000005', stopLsn: '0/6000100' }), 'daily'),
+    ).rejects.toThrow(/required WAL was recycled/)
+
+    /* no archive, no manifest, no leftovers — an unrestorable pair must
+       never exist under a backup's name */
+    const names = (await fs.readdir(path.join(data, 'backups'))).filter((n) => n.startsWith('pg-'))
+    expect(names).toEqual([])
+  })
+
+  it('retains every WAL segment the label names — the range lands in the archive', async () => {
+    const data = tmpDataDir()
+    const pg = await seedPgDir(data)
+    const wal = path.join(pg, 'pg_wal')
+    await fs.mkdir(wal, { recursive: true })
+    /* the two segments the range 0x05..0x06 spans — written mid-backup or
+       not, the hoarder must hold both before the label is proved */
+    await fs.writeFile(path.join(wal, '000000010000000000000005'), 'start-segment')
+    await fs.writeFile(path.join(wal, '000000010000000000000006'), 'stop-segment')
+    /* archive_status lives in pg_wal but is runtime state, not WAL */
+    await fs.mkdir(path.join(wal, 'archive_status'))
+
+    const { archive } = await backupNow(
+      fakeClientWithWal({ segment: '000000010000000000000005', stopLsn: '0/6000100' }),
+      'daily',
+    )
+
+    const raw = gunzipSync(await fs.readFile(archive))
+    expect(raw.includes(Buffer.from('pg_wal/000000010000000000000005'))).toBe(true)
+    expect(raw.includes(Buffer.from('pg_wal/000000010000000000000006'))).toBe(true)
+    expect(raw.includes(Buffer.from('start-segment'))).toBe(true)
+    /* and the hold dir is swept once the backup is done */
+    expect((await fs.readdir(path.join(data, 'backups'))).filter((n) => n.endsWith('.walhold'))).toEqual([])
+  })
+
+  /* -- finding: backups were written world-readable under a permissive
+        umask; dir, archive and manifest must be owner-only -- */
+
+  it('keeps the backup tree private under a permissive umask — 0700 dir, 0600 files', async () => {
+    const data = tmpDataDir()
+    const pg = await seedPgDir(data)
+    const wal = path.join(pg, 'pg_wal')
+    await fs.mkdir(wal, { recursive: true })
+    await fs.writeFile(path.join(wal, '000000010000000000000005'), 'wal')
+
+    const saved = process.umask(0o022)
+    try {
+      const { archive, manifest } = await backupNow(
+        fakeClientWithWal({ segment: '000000010000000000000005', stopLsn: '0/5000100' }),
+        'daily',
+      )
+      expect(statSync(path.join(data, 'backups')).mode & 0o777).toBe(0o700)
+      expect(statSync(archive).mode & 0o777).toBe(0o600)
+      expect(statSync(manifest).mode & 0o777).toBe(0o600)
+    } finally {
+      process.umask(saved)
+    }
+  })
+
+  /* -- finding: a file changing while archived must yield exactly the
+        statted bytes — grown tail ignored, shrunk body zero-padded -- */
+
+  it('reads exactly the statted length of a file that grew after open', async () => {
+    const data = tmpDataDir()
+    const file = path.join(data, 'growing')
+    await fs.writeFile(file, Buffer.alloc(70000, 0x62)) /* spans two stream chunks */
+    const handle = await fs.open(file)
+    try {
+      const size = (await handle.stat()).size
+      await fs.appendFile(file, Buffer.alloc(30000, 0x63)) /* grows under the open handle */
+      const body = await collect(fileBody(handle, size))
+      /* exactly `size` payload bytes, then tar padding to the 512 block —
+         the grown tail never enters the archive */
+      expect(body.length).toBe(70144)
+      expect(body.subarray(0, 70000).every((b) => b === 0x62)).toBe(true)
+      expect(body.subarray(70000).every((b) => b === 0)).toBe(true)
+    } finally {
+      await handle.close()
+    }
+  })
+
+  it('zero-pads a file that shrank after open — pg_basebackup semantics', async () => {
+    const data = tmpDataDir()
+    const file = path.join(data, 'shrinking')
+    await fs.writeFile(file, Buffer.alloc(600, 0x64))
+    const handle = await fs.open(file)
+    try {
+      const size = (await handle.stat()).size
+      await fs.truncate(file, 10)
+      const body = await collect(fileBody(handle, size))
+      /* still `size` payload + padding: a short file zero-fills rather
+         than corrupting the tar's block alignment */
+      expect(body.length).toBe(1024)
+      expect(body.subarray(0, 10).every((b) => b === 0x64)).toBe(true)
+      expect(body.subarray(10).every((b) => b === 0)).toBe(true)
+    } finally {
+      await handle.close()
+    }
   })
 })
