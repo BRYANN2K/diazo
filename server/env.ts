@@ -312,6 +312,10 @@ const schema = {
   /* refuse `target: 'server'` motion renders outright: an instance without
      headless Chromium to spare keeps renders on browser and desktop */
   SERVER_RENDER_DISABLED: bool({ default: false }),
+  /* the GL the shared Chromium composites motion layers and effects with:
+     swiftshader is software — deterministic and always available headless;
+     gpu uses the host's real GPU; off disables WebGL entirely */
+  RENDER_GL: str({ choices: ['swiftshader', 'gpu', 'off'], default: 'swiftshader' }),
 
   /* ------------------------------------------------------ analytics */
   POSTHOG_KEY: str({ default: undefined }),

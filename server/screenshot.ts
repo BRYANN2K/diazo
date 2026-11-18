@@ -77,6 +77,14 @@ export function launchBrowser(timeout?: number, protocolTimeout?: number): Promi
       '--disable-webrtc-multiple-routes',
       '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
       '--hide-scrollbars',
+      /* motion layers and effects composite in WebGL: software by default
+         (deterministic, no GPU needed), the host GPU when RENDER_GL=gpu,
+         or disabled — the compositor then reports passthrough */
+      ...(env.RENDER_GL === 'swiftshader'
+        ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']
+        : env.RENDER_GL === 'off'
+          ? ['--disable-3d-apis']
+          : []),
       /* containers: no user namespaces for the sandbox, tiny /dev/shm */
       ...(env.CHROME_NO_SANDBOX ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
     ],
