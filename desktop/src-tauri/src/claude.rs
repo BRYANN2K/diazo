@@ -724,6 +724,15 @@ fn valid_effort(effort: &str) -> bool {
     ["low", "medium", "high", "xhigh", "max"].contains(&effort)
 }
 
+/// The largest turn budget a job may carry — the server's animate safety
+/// net. The CLI enforces the number itself, so the value passes through
+/// up to that ceiling instead of collapsing every run to the smallest one
+const MAX_JOB_TURNS: u64 = 200;
+
+fn job_turns(job: &Value) -> u64 {
+    job["maxTurns"].as_u64().unwrap_or(24).clamp(1, MAX_JOB_TURNS)
+}
+
 #[tauri::command]
 pub async fn claude_run(
     app: AppHandle,
@@ -771,7 +780,7 @@ fn run_cli(app: &AppHandle, job: &Value, cancel: Arc<AtomicBool>) -> Result<Valu
     if prompt.len() + system.len() > 1_000_000 {
         return Err("Task is too large".into());
     }
-    let turns = job["maxTurns"].as_u64().unwrap_or(24).clamp(1, 40);
+    let turns = job_turns(job);
     let dir = directory(app)?.join(id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let config = dir.join("mcp.json");
@@ -877,6 +886,19 @@ fn run_cli(app: &AppHandle, job: &Value, cancel: Arc<AtomicBool>) -> Result<Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn turn_budget_passes_through_to_the_motion_cap() {
+        // The server sends 200 for an animate run — clamping it to 40 is
+        // what made the safety budget a lie at the shell boundary
+        assert_eq!(job_turns(&json!({})), 24);
+        assert_eq!(job_turns(&json!({"maxTurns": 40})), 40);
+        assert_eq!(job_turns(&json!({"maxTurns": 200})), 200);
+        assert_eq!(job_turns(&json!({"maxTurns": 10_000})), MAX_JOB_TURNS);
+        assert_eq!(job_turns(&json!({"maxTurns": 0})), 1);
+        assert_eq!(job_turns(&json!({"maxTurns": "many"})), 24);
+    }
+
     #[cfg(unix)]
     #[test]
     fn installer_does_not_execute_a_failed_download() {

@@ -558,6 +558,14 @@ pub(crate) fn parse_job(job: &Value) -> Result<Job, String> {
     if prompt.len() + system.len() > 1_000_000 {
         return Err("Task is too large".into());
     }
+    // A session is one prompt under a wall clock — it cannot count turns,
+    // so a budget beyond the ordinary ceiling is refused rather than
+    // silently dropped. The mode that needs the bigger backstop is not
+    // offered to this runner; anything larger reaching this point is a job
+    // for the CLI runner that can pass it through.
+    if job["maxTurns"].as_u64().unwrap_or(24) > 40 {
+        return Err("Turn budget beyond what this runner can enforce".into());
+    }
     let tools: Vec<String> = job["tools"]
         .as_array()
         .map(|tools| tools.iter().filter_map(Value::as_str).filter(|t| valid_tool(t)).map(str::to_string).take(300).collect())
@@ -1023,6 +1031,19 @@ mod tests {
         assert_eq!(parse_job(&job(json!({"token": "short"}))).unwrap_err(), "Invalid run token");
         assert_eq!(parse_job(&job(json!({"id": "x"}))).unwrap_err(), "Invalid run id");
         assert_eq!(parse_job(&job(json!({"agent": "devin", "effort": "high"}))).unwrap_err(), "Invalid effort");
+    }
+
+    #[test]
+    fn a_turn_budget_beyond_the_runner_is_refused() {
+        // A session cannot count turns — the server never sends an animate
+        // budget here, and a job that asks for one is told so rather than
+        // run unbounded
+        assert!(parse_job(&job(json!({"maxTurns": 24}))).is_ok());
+        assert!(parse_job(&job(json!({"maxTurns": 40}))).is_ok());
+        assert_eq!(
+            parse_job(&job(json!({"maxTurns": 200}))).unwrap_err(),
+            "Turn budget beyond what this runner can enforce"
+        );
     }
 
     #[test]

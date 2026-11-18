@@ -124,6 +124,8 @@ import {
 } from '../shared/localRepo.ts'
 import { recordAgentFeedback } from './agentFeedback.ts'
 import { AGENT_IDEA_CATEGORIES, AGENT_ISSUE_CATEGORIES, type AgentFeedbackCategory } from '../shared/agentFeedback.ts'
+import { ACP_AGENT_NAMES, acpAgentOf, isAcpRunnerProvider } from '../shared/acpAgent.ts'
+import { getJob } from './speech.ts'
 import { lintAndStore } from './lint.ts'
 import { checkAndStore, checkOutcomeForAgent } from './frameChecks.ts'
 import type { FrameLint } from '../shared/slopRules.ts'
@@ -347,6 +349,18 @@ interface RunState {
    *  run wrote — the signature signs their current arrangement, so an
    *  A/B move or rename alternates instead of rising forever */
   arrangedFrames?: Set<string>
+  /** pages whose film this run wrote through its own tools — the delivery
+   *  evidence an animate card is judged on, so another editor's timeline
+   *  work can never deliver the agent's card */
+  filmPages?: Set<string>
+  /** voice-over jobs this run filed, jobId → pageId: the explicit link
+   *  that lets a job finishing off-turn count its clip insert as the
+   *  run's own film work */
+  filmJobs?: Map<string, string>
+  /** paid filings this run already submitted, recipe hash → job id: an
+   *  identical refile is refused before it can bill the requester for
+   *  the same thing twice */
+  paidFilings?: Map<string, string>
   /* ---- chat runs only ---- */
   /** the asks this chat run claimed, oldest first */
   chatAsks?: ChatMessage[]
@@ -610,6 +624,12 @@ function watchJob(runState: RunState, kind: 'speech' | 'blender', out: unknown):
     `${kind}:${job.id}`,
     `${job.state}:${job.progress ?? ''}:${job.updatedAt ?? ''}${waited}`,
   )
+  /* a voice-over this run filed finishing IS its own film write — its
+     clip lands on the page even between polls */
+  if (kind === 'speech' && job.state === 'done') {
+    const page = runState.filmJobs?.get(job.id)
+    if (page) (runState.filmPages ??= new Set()).add(page)
+  }
 }
 
 /* Calls that move the no-progress watch without changing the canvas: the
@@ -631,6 +651,96 @@ const MOTION_FILM_READS = new Set([
   'critique_scene',
 ])
 
+/* Writes the signature itself judges: their result is canvas state the
+   signature covers, so a repeat landing a seen state is still however
+   fresh its input looks. Only REPLACE-style writes belong — a call that
+   mints a fresh entity on success (insert_clip, animate_storyboard,
+   create_frame) always reads as new to the signature, so the call key
+   stays the thing that stops its repeats. Every tool not listed here
+   keeps input novelty: reads of new ground, and work the canvas cannot
+   show — a filed job, a Blender op, an uploaded image. */
+const MOTION_OBSERVED_WRITES = new Set([
+  'set_composition',
+  'set_direction',
+  'set_motion_blur',
+  'apply_look',
+  'set_effects',
+  'update_effect',
+  'remove_effect',
+  'update_frame',
+  'set_canvas_pages',
+  'create_tokens',
+  'set_tokens',
+  'set_token_themes',
+  'edit_frame_html',
+  'set_frame_html',
+  'begin_frame_rewrite',
+  'commit_frame_rewrite',
+])
+/* narration is not work: set_status only tells people what the run is
+   doing, so changing its words are no more movement than a repeat */
+const MOTION_NARRATION = new Set(['set_status'])
+/* input fields a call's recipe never means: the write's concurrency
+   guard and the spend cap — keyed on, they mint a fresh "new call" on
+   every repeat */
+const MOTION_META_INPUT = new Set(['expected_revision', 'max_cost'])
+
+/** A call's input as a recipe: bookkeeping fields out, top-level keys
+ *  sorted — key order is not meaning either. */
+function keyInput(input: Record<string, unknown>): string {
+  return JSON.stringify(
+    Object.fromEntries(
+      Object.entries(input)
+        .filter(([key]) => !MOTION_META_INPUT.has(key))
+        .sort(([a], [b]) => a.localeCompare(b)),
+    ),
+  )
+}
+
+/* Paid filings whose job lands a fresh id every time — a voice-over, a
+   transcription, a generated clip: an identical refile would bill the
+   requester again for the same recipe and read as forever-new work to
+   the watch, so one recipe files once per run. A genuinely different
+   placement or recipe is a different key */
+const PAID_FILING_TOOLS = new Set(['generate_voiceover', 'transcribe_clip', 'generate_video'])
+const filingKey = (block: Anthropic.ToolUseBlockParam) =>
+  contentHash(`filing ${block.name} ${keyInput(block.input as Record<string, unknown>)}`)
+
+/* tools whose ok result lands on a page's film — the composition itself
+   or the media its clips play: their page is the run's own delivery
+   evidence, recorded so another editor's timeline work can never
+   deliver the agent's card */
+const FILM_WRITE_TOOLS = new Set([
+  'set_composition',
+  'animate_storyboard',
+  'set_direction',
+  'apply_camera_preset',
+  'apply_transition',
+  'apply_text_animation',
+  'add_effect',
+  'update_effect',
+  'remove_effect',
+  'set_effects',
+  'apply_look',
+  'set_motion_blur',
+  'insert_clip',
+  'set_media',
+  'build_captions',
+  'duck_audio',
+  'generate_video',
+])
+
+/** Note the page a landed film write belongs to — evidence the run's own
+ *  tools changed the film, read from the call's target alone. */
+function markFilmWrite(block: Anthropic.ToolUseBlockParam, canvasId: string, runState: RunState): void {
+  if (!FILM_WRITE_TOOLS.has(block.name)) return
+  const input = block.input as Record<string, unknown>
+  const pageId =
+    (typeof input.page_id === 'string' && input.page_id) ||
+    (typeof input.frame_id === 'string' ? store.getFrame(input.frame_id)?.pageId : undefined)
+  if (pageId) (runState.filmPages ??= new Set()).add(pageId)
+}
+
 /** The content a film read sees: the page's composition body plus the
  *  content hash of every frame on it (lint covers frame HTML too). */
 function filmVersion(canvasId: string, input: Record<string, unknown>): string {
@@ -649,9 +759,10 @@ function filmVersion(canvasId: string, input: Record<string, unknown>): string {
 /** A call's novelty key. Frame and film reads carry the version of what
  *  they look at, so re-checking changed content is new ground while a poll
  *  of the same state is a repeat. Every other call keys on its name and
- *  input alone: a first try at each distinct call is movement — a write
- *  the signature cannot see, a job being filed or polled for the first
- *  time — and the same call repeated is still time. */
+ *  recipe alone — bookkeeping like a revision guard or a spend cap does
+ *  not make a repeat new: a first try at each distinct call is movement —
+ *  a write the signature cannot see, a job being filed or polled for the
+ *  first time — and the same call repeated is still time. */
 function motionCallKey(block: Anthropic.ToolUseBlockParam, canvasId: string): string {
   const input = block.input as Record<string, unknown>
   let version = ''
@@ -661,7 +772,7 @@ function motionCallKey(block: Anthropic.ToolUseBlockParam, canvasId: string): st
   } else if (MOTION_FILM_READS.has(block.name)) {
     version = filmVersion(canvasId, input)
   }
-  return `${block.name} ${JSON.stringify(block.input)} ${version}`
+  return `${block.name} ${keyInput(input)} ${version}`
 }
 
 const LINT_NOTE_ISSUES = 8
@@ -818,7 +929,22 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
      like prompt cards — drift's delivery is findings, an animate card's is
      the film it directs */
   const repoCards = allCards.filter((c) => c.kind === 'sketch' || c.kind === 'design-system')
-  const cards = allCards.filter((c) => !c.kind || c.kind === 'drift' || c.kind === 'animate')
+  let cards = allCards.filter((c) => !c.kind || c.kind === 'drift' || c.kind === 'animate')
+  /* an animate run's room is only as real as its turn backstop: an ACP
+     session is one prompt under a wall clock — nothing counts turns there,
+     so the mode is not offered to it. The card is refused, not silently
+     run unbounded */
+  if (isAcpRunnerProvider(model.provider) && cards.some((c) => c.kind === 'animate')) {
+    const agentName = ACP_AGENT_NAMES[acpAgentOf(model.provider)]
+    for (const c of cards)
+      if (c.kind === 'animate')
+        actions.failCard(
+          canvasId,
+          c.id,
+          `${agentName} cannot take an animate card — it has no turn budget to enforce. Retry on a runner that sets one, like the Claude Plan or a cloud model.`,
+        )
+    cards = cards.filter((c) => c.kind !== 'animate')
+  }
   /* latched: Retry clears a stopped card's failure on this same object, and
      the old run, still letting go, must not take the retried card for its own */
   let stopped = false
@@ -848,6 +974,14 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       void meter.finish(repoCards.every((c) => c.endedAt) ? 'done' : 'failed')
       return 'ran'
     }
+  }
+  /* refusing animate cards on a runner without a turn backstop can empty
+     the batch before a turn ever runs — nothing left means settle and out */
+  if (claimed.length === 0 && comments.length === 0 && cards.length === 0) {
+    clearInterval(heartbeat)
+    actions.setAgentStatus(canvasId, actor, '')
+    void meter.finish('failed')
+    return 'ran'
   }
 
   const checks = stopChecks.get(canvasId) ?? new Set()
@@ -1054,12 +1188,29 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
        card the Animate button queued carries the flag — a card or comment
        that merely names the tool gets the ordinary budget */
     const motionRun = cards.some((c) => c.kind === 'animate')
-    /* an animate card can ask for a film alone — no frame write required:
-       remember the compositions at the start so a changed one counts as
-       delivered work the way a mutated frame does */
-    const filmBaseline = motionRun ? filmSigs(canvasId).join('|') : undefined
-    const filmMoved = () => filmBaseline !== undefined && filmSigs(canvasId).join('|') !== filmBaseline
+    /* an animate card can ask for a film alone — no frame write required.
+       Delivery is the film the RUN itself wrote: its own tools' pages and
+       the page of a voice-over job it filed that finished — never a
+       canvas-wide diff another editor's work could trip */
+    const filmDone = () => (runState.filmPages?.size ?? 0) > 0
+    const filmDelivered = async (): Promise<boolean> => {
+      if (filmDone()) return true
+      /* a filed job can finish after its last poll: the clip insert is
+         still the run's own work — look before the card is judged */
+      for (const [jobId, pageId] of runState.filmJobs ?? []) {
+        const job = await getJob(jobId).catch(() => undefined)
+        if (job?.state === 'done') {
+          ;(runState.filmPages ??= new Set()).add(pageId)
+          return true
+        }
+      }
+      return false
+    }
     let stalledRun = false
+    /* a stalled harness ends, not waits: this signal fires the moment the
+       call window fills, cancelling the runner underneath rather than
+       asking it to wrap up whenever it chooses */
+    const stallAbort = new AbortController()
     /* why the run was ended, for the closing summary and the card */
     let stallReason: string | undefined
     let stillTurns = 0
@@ -1085,9 +1236,14 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
       const sig = contentHash(motionSignature(canvasId, runState))
       const fresh = !seenMotionSigs.has(sig)
       seenMotionSigs.add(sig)
-      /* a call that coincides with a state move is still a first try —
-         note its target even then, so repeating it counts as a repeat */
-      const key = failed ? undefined : contentHash(motionCallKey(block, canvasId))
+      /* input novelty is for calls the signature cannot judge — reads of
+         new ground, work the canvas cannot show. A write the signature
+         covers is judged by what it landed: a return to a seen state is
+         still however fresh its input looks, and narration does no work
+         at all. A call that coincides with a state move is still a first
+         try — note its target even then, so repeating it is a repeat */
+      const novel = !failed && !MOTION_OBSERVED_WRITES.has(block.name) && !MOTION_NARRATION.has(block.name)
+      const key = novel ? contentHash(motionCallKey(block, canvasId)) : undefined
       const newCall = key !== undefined && !seenMotionCalls.has(key)
       if (key) seenMotionCalls.add(key)
       return fresh || newCall
@@ -1200,8 +1356,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
           // connection must never imply that the user's subscription covers it.
           tools: runTools.filter((tool) => tool.name !== 'generate_image'),
           maxTurns,
-          isCanceled: canceled,
-          signal: abort.signal,
+          isCanceled: () => canceled() || stalledRun,
+          signal: AbortSignal.any([abort.signal, stallAbort.signal]),
           execute: async (block) => {
             if (runState.blockedWebsiteAccess)
               return {
@@ -1232,10 +1388,15 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                feeds on each call against the wider call window */
             if (motionRun && !stalledRun) {
               if (result.is_error === true) refusedCalls += 1
-              else refusedCalls = 0
+              else {
+                refusedCalls = 0
+                markFilmWrite(block, canvasId, runState)
+              }
               if (motionMoved(block, result.is_error === true)) stillCalls = 0
-              else if (++stillCalls >= MOTION_STALL_CALLS)
+              else if (++stillCalls >= MOTION_STALL_CALLS) {
                 motionStall(MOTION_STALL_CALLS, 'tool calls', refusedCalls >= MOTION_STALL_CALLS)
+                stallAbort.abort()
+              }
             }
             return result
           },
@@ -1350,7 +1511,10 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
                     `[resident] tool canvas=${canvasId} name=${block.name}${typeof target === 'string' ? ` frame=${target}` : ''}`,
                   )
                   const result = await execTool(block, canvasId, actor, runState)
-                  if (motionRun && motionMoved(block, result.is_error === true)) movedThisTurn = true
+                  if (motionRun) {
+                    if (result.is_error !== true) markFilmWrite(block, canvasId, runState)
+                    if (motionMoved(block, result.is_error === true)) movedThisTurn = true
+                  }
                   if (block.name === 'import_webpage' && result.is_error && !runState.blockedWebsiteAccess) {
                     importFailureInBatch =
                       'The website import failed. Correct the tool error and retry the import before making design changes.'
@@ -1381,7 +1545,7 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
             continue
           }
 
-          if (requireMutation && !deliveredWork(runState) && !filmMoved() && !mutationNudgeSent) {
+          if (requireMutation && !deliveredWork(runState) && !filmDone() && !mutationNudgeSent) {
             mutationNudgeSent = true
             messages.push({
               role: 'user',
@@ -1448,7 +1612,8 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
     const blockedWebsiteAccess = runState.blockedWebsiteAccess
     /* a film an animate run built or rewrote is delivered work too — the
        no-mutation gate holds cards that produced nothing at all */
-    const noMutation = finished && requireMutation && !deliveredWork(runState) && !filmMoved() && !blockedWebsiteAccess
+    const noMutation =
+      finished && requireMutation && !deliveredWork(runState) && !(await filmDelivered()) && !blockedWebsiteAccess
     const unverifiedMutation =
       finished &&
       runState.vision &&
@@ -4578,11 +4743,29 @@ export async function execTool(
           if (gate) return fail(gate)
         }
         try {
+          /* a paid filing's job lands a fresh clip id on the film — an
+             identical refile would bill the requester again for the same
+             recipe and read as new work forever, so it is refused before
+             submission. A different placement or recipe is a different key */
+          const filing = PAID_FILING_TOOLS.has(block.name) ? filingKey(block) : undefined
+          const prior = filing !== undefined ? runState.paidFilings?.get(filing) : undefined
+          if (prior !== undefined)
+            return fail(
+              `this run already filed that job — poll get_transcript on ${prior || 'it'} instead of submitting a copy`,
+            )
           const out = await runSpeechTool(block.name, canvas, runState.askerId!, block.input)
           /* only the poll is watched: a filing call returns a new job id
              every time, which the signature would read as forever-new —
              the filing call is already counted once by its key */
           if (block.name === 'get_transcript') watchJob(runState, 'speech', out)
+          if (filing !== undefined) {
+            const jobId = (out as { job?: { id?: unknown } }).job?.id
+            ;(runState.paidFilings ??= new Map()).set(filing, typeof jobId === 'string' ? jobId : '')
+            /* a filed voice-over finishing later is the run's own film
+               work — its clip lands on the page even off-turn */
+            if (block.name === 'generate_voiceover' && typeof jobId === 'string' && typeof input.page_id === 'string')
+              (runState.filmJobs ??= new Map()).set(jobId, input.page_id)
+          }
           return ok(JSON.stringify(out))
         } catch (error) {
           return fail(error instanceof Error ? error.message : 'speech tool failed')
@@ -4623,6 +4806,12 @@ export async function execTool(
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
         const raw = block.input as Record<string, unknown>
+        /* same rule as the speech filings: a generated clip costs the
+           payer and lands a fresh asset id every time — one recipe, one
+           generation */
+        const filing = filingKey(block)
+        if (runState.paidFilings?.has(filing))
+          return fail('this run already generated that clip — it is on the film, use it')
         const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined)
         const out = await generateVideoClip(
           canvas,
@@ -4642,6 +4831,7 @@ export async function execTool(
           runState.payerId,
         )
         if (!out.ok) return fail(out.error)
+        ;(runState.paidFilings ??= new Map()).set(filing, 'clip')
         return ok(JSON.stringify(out.data))
       }
       case 'render_composition': {

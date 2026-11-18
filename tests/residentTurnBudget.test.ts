@@ -426,22 +426,213 @@ describe('an animate run’s room to work', () => {
     expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
   })
 
-  it('ends a loop that refiles the same voice-over — a new job id is not new work', async () => {
-    /* every filing lands a fresh job id; the filing CALL is what counts,
-       and it repeats */
+  it('ends a loop that refiles the same voice-over — a finished job is not a fresh filing', async () => {
+    /* production: each completed job inserts its clip with a FRESH id, so
+       the film signature moved on every delivery and the refiling loop
+       looked productive. The recipe is refused before it bills twice */
+    actions.setComposition(canvasId, { duration: 12, fps: 30, width: 1280, height: 720, tracks: [] }, pageId, {
+      name: 'ann',
+      kind: 'user',
+      color: '#000',
+    })
     let filings = 0
-    mocks.runSpeechTool.mockImplementation(async () => ({
-      job: { id: `j${++filings}`, state: 'queued', progress: 0, updatedAt: Date.now() },
-    }))
-    const { model, run } = scriptedModel(
-      Array.from({ length: 30 }, () => toolUse('generate_voiceover', { text: 'the same line', voice: 'emma' })),
+    mocks.runSpeechTool.mockImplementation(async () => {
+      filings += 1
+      /* the job completes inside the filing call: its clip lands on the
+         film with a fresh id each time, the way completeSpeechJob does */
+      actions.patchComposition(
+        canvasId,
+        pageId,
+        [
+          {
+            op: 'add_track',
+            track: {
+              id: `voice-${filings}`,
+              kind: 'audio',
+              name: 'Voice-over',
+              clips: [
+                {
+                  id: `vo-${filings}`,
+                  start: 1,
+                  duration: 2,
+                  source: { type: 'asset', assetId: `a-${filings}` },
+                },
+              ],
+            },
+          },
+        ],
+        { name: 'Speech', kind: 'agent', color: '#000' },
+      )
+      return { job: { id: `j${filings}`, state: 'done', progress: 1, updatedAt: Date.now() } }
+    })
+    const { model } = scriptedModel(
+      Array.from({ length: 30 }, () =>
+        toolUse('generate_voiceover', { text: 'the same line', voice: 'emma', page_id: pageId, at: 1 }),
+      ),
     )
     mocks.pickModel.mockResolvedValue(model)
     await runSweep(canvasId)
     await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
-    /* one first filing, then eight repeats of the same call */
+    /* one filing ran — every copy since was refused before submission,
+       and refused calls name the stall for what it was */
+    expect(filings).toBe(1)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/all refused/i)
+  })
+
+  it('still files a genuinely different placement — the recipe, not the filing, is deduped', async () => {
+    let filings = 0
+    mocks.runSpeechTool.mockImplementation(async () => ({
+      job: { id: `j${++filings}`, state: 'queued', progress: 0, updatedAt: 1 },
+    }))
+    const { model } = scriptedModel([
+      toolUse('generate_voiceover', { text: 'the same line', voice: 'emma', page_id: pageId, at: 1 }),
+      toolUse('generate_voiceover', { text: 'the same line', voice: 'emma', page_id: pageId, at: 5 }),
+      doneTurn,
+    ])
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => {
+      const c = cardById(canvasId, 'c1')
+      expect(c.failedAt ?? c.endedAt).toBeTypeOf('number')
+    })
+    /* a different `at` is a different placement — its own job */
+    expect(filings).toBe(2)
+  })
+
+  it('ends a write loop that only bumps its revision — the guard is not content', async () => {
+    /* expected_revision is a concurrency guard: each write returns the
+       film to a state the run already saw, however fresh its input looks */
+    actions.setComposition(canvasId, { duration: 6, fps: 30, width: 1280, height: 720, tracks: [] }, pageId, {
+      name: 'ann',
+      kind: 'user',
+      color: '#000',
+    })
+    let i = 0
+    const { model, run } = scriptedModel(
+      Array.from({ length: 30 }, () => {
+        i += 1
+        return toolUse('set_composition', {
+          page_id: pageId,
+          expected_revision: i,
+          composition: { duration: 6 + (i % 2), fps: 30, width: 1280, height: 720, tracks: [] },
+        })
+      }),
+    )
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* the two films each landed once; the loop stops on turn 10 instead of
+       writing all 30 — under the old key the rising revision made every
+       call look new */
+    expect(run).toHaveBeenCalledTimes(10)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('does not count narration as work — set_status only tells, it does not do', async () => {
+    const { model, run } = scriptedModel(
+      Array.from({ length: 30 }, (_, i) => toolUse('set_status', { status: `directing shot ${i}` })),
+    )
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* fresh words every turn still stall at 9: the words changed, the
+       canvas did not */
     expect(run).toHaveBeenCalledTimes(9)
     expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('does not let another editor’s film write deliver the run’s card', async () => {
+    /* the other editor writes the page's film mid-run: real canvas change,
+       but never evidence this run delivered */
+    let calls = 0
+    const run = vi.fn(async (_req: AgentTurnRequest): Promise<AgentTurnResult> => {
+      calls += 1
+      if (calls === 1) {
+        actions.setComposition(canvasId, { duration: 12, fps: 30, width: 1280, height: 720, tracks: [] }, pageId, {
+          name: 'Beth',
+          kind: 'user',
+          color: '#00f',
+        })
+        return flatTurn()
+      }
+      return doneTurn
+    })
+    mocks.pickModel.mockResolvedValue({ provider: 'anthropic', label: 'Test', userId: 'ann', run })
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* a canvas-wide diff would have delivered the card on Beth's work —
+       only the run's own film writes count now */
+    expect(cardById(canvasId, 'c1').endedAt).toBeUndefined()
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/without changing a frame or a token/i)
+  })
+
+  it('counts a voice-over the run filed and saw finish as its own film work', async () => {
+    /* the run's job link is explicit: the filing recorded the page, the
+       done poll landed the film write even though no tool touched it */
+    actions.setComposition(canvasId, { duration: 12, fps: 30, width: 1280, height: 720, tracks: [] }, pageId, {
+      name: 'ann',
+      kind: 'user',
+      color: '#000',
+    })
+    mocks.runSpeechTool.mockImplementation(async (name: string) => {
+      if (name === 'generate_voiceover') return { job: { id: 'j1', state: 'queued', progress: 0, updatedAt: 1 } }
+      if (name === 'get_transcript') return { job: { id: 'j1', state: 'done', progress: 1, updatedAt: 30 } }
+      return {}
+    })
+    const { model } = scriptedModel([
+      toolUse('generate_voiceover', { text: 'the line', voice: 'emma', page_id: pageId, at: 1 }),
+      toolUse('get_transcript', { job_id: 'j1' }),
+      doneTurn,
+    ])
+    mocks.pickModel.mockResolvedValue(model)
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').endedAt).toBeTypeOf('number'), { timeout: 15_000 })
+    expect(cardById(canvasId, 'c1').failureReason).toBeUndefined()
+  })
+
+  it('ends a stalled local harness itself — the runner only exits on cancel', async () => {
+    /* a runner that takes no hint: it loops until the run is cancelled
+       underneath it */
+    let calls = 0
+    const runHarness = vi.fn(async (req: LocalHarnessRequest) => {
+      while (!req.isCanceled?.() && !req.signal?.aborted) {
+        calls += 1
+        await req.execute({ type: 'tool_use', id: `t${calls}`, name: flatCall[0], input: flatCall[1] })
+      }
+      return { success: false, text: 'cancelled mid-run' }
+    })
+    mocks.pickModel.mockResolvedValue({
+      provider: 'claude-local',
+      label: 'Test',
+      userId: 'ann',
+      runHarness,
+      run: vi.fn(),
+    })
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    /* the stall fired the cancel at call 25 — not a wrap-up request the
+       runner could ignore for the rest of its window */
+    expect(calls).toBe(25)
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/changed nothing on the canvas/i)
+  })
+
+  it('does not offer the animate mode to a runner that cannot count turns', async () => {
+    /* an ACP session is one prompt under a wall clock: the card is
+       refused, not silently run unbounded — the session never started */
+    const runHarness = vi.fn(async () => ({ success: true, text: 'done' }))
+    const run = vi.fn()
+    mocks.pickModel.mockResolvedValue({
+      provider: 'grok-local',
+      label: 'Grok',
+      userId: 'ann',
+      runHarness,
+      run,
+    })
+    await runSweep(canvasId)
+    await vi.waitFor(() => expect(cardById(canvasId, 'c1').failedAt).toBeTypeOf('number'))
+    expect(cardById(canvasId, 'c1').failureReason).toMatch(/turn budget/i)
+    expect(runHarness).not.toHaveBeenCalled()
+    expect(run).not.toHaveBeenCalled()
   })
 
   it('ends a move loop that slides the same frame back and forth', async () => {
