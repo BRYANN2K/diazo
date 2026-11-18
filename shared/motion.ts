@@ -97,6 +97,18 @@ export const MOTION_LIMITS = {
   RENDER_MAX_BYTES: 250 * 1024 * 1024,
   /** at most this many non-finished jobs per canvas */
   MAX_ACTIVE_JOBS: 3,
+  /* element-layer budgets (motion-elements P0): promoted element tracks
+     isolate their pixels into textures — these caps keep the layer pool
+     bounded so the compositor's memory and pass counts stay predictable.
+     Breaching them is lint MO-15 and a refused render. */
+  MAX_LAYERS_PER_FRAME: 24,
+  MAX_LAYERS: 64,
+  /** one layer texture side, px (premultiplied RGBA8) */
+  MAX_LAYER_SIDE: 4096,
+  /** the whole film's layer textures, bytes */
+  MAX_LAYER_TEXTURE_BYTES: 256 * 1024 * 1024,
+  /** pixels an effect stack may grow a layer past its border box */
+  MAX_LAYER_PAD: 512,
 } as const
 
 /** nanoid-shaped ids — client, server and agent ops all mint these */
@@ -359,15 +371,37 @@ export interface MotionClip {
  * an intensity can ease like any other number. Every effect ships seeded —
  * pixels stay a pure function of (composition, t). */
 
+/* the 26 colour blend modes of the compositor (motion-elements P0): the 20
+ * separable modes first, then the 6 non-separable ones. Order is the mode
+ * index BLEND_GLSL and the CPU reference in shared/motionBlend.ts share —
+ * append-only, never reorder. Existing spellings are kept. */
 export const BLEND_MODES = [
   'normal',
   'multiply',
   'screen',
   'overlay',
-  'soft-light',
+  'darken',
+  'lighten',
+  'color-dodge',
+  'color-burn',
   'hard-light',
-  'add',
+  'soft-light',
   'difference',
+  'exclusion',
+  'add',
+  'subtract',
+  'divide',
+  'linear-burn',
+  'vivid-light',
+  'linear-light',
+  'pin-light',
+  'hard-mix',
+  'hue',
+  'saturation',
+  'color',
+  'luminosity',
+  'darker-color',
+  'lighter-color',
 ] as const
 export type BlendMode = (typeof BLEND_MODES)[number]
 
@@ -385,6 +419,81 @@ export interface EffectInstance {
   /** wet/dry, default 1 */
   mix?: number
   blend?: BlendMode
+}
+
+/* ---- element layers (motion-elements P0) ----
+ * An element track whose pixels need compositor isolation — an effect stack,
+ * a non-normal blend, a matte or masks, or an explicit `layer.mode:'on'` —
+ * becomes a layer: the renderer rasterises the element alone into a texture,
+ * runs its stack and blends it onto the frame buffer. `LayerSpec` is the
+ * authoring contract; shared/motionLayers.ts turns it into a plan. */
+
+/** element-track properties the compositor's own matrix handles — everything
+ *  else a lane touches makes the layer's raster dynamic (shared/motionLayers
+ *  decides per element, per frame) */
+export const LAYER_TRANSFORM_PROPS = [
+  'x',
+  'y',
+  'scale',
+  'scaleX',
+  'scaleY',
+  'rotate',
+  'skewX',
+  'skewY',
+  'opacity',
+] as const
+export type LayerTransformProp = (typeof LAYER_TRANSFORM_PROPS)[number]
+
+/**
+ * Promotion and rendering hints for one element track. `mode`:
+ * `'auto'` (default) promotes when the track carries an effect, a blend, a
+ * matte or masks; `'on'` forces a layer; `'off'` keeps the element in the
+ * base raster even with a stack (the stack then simply does not draw — the
+ * agent's escape hatch). `visible: false` keeps the layer out of the picture
+ * but lets it serve as a matte/effect-input source. `transform` picks where
+ * the track transform runs; absent = measured (compositor when safe, CSS
+ * fallback). `pad`/`scale` are overrides — the plan computes both when unset.
+ */
+export interface LayerSpec {
+  mode?: 'auto' | 'on' | 'off'
+  /** false = matte/effect-input source only, never drawn */
+  visible?: boolean
+  /** where the track transform runs; unset = measured */
+  transform?: 'compositor' | 'css'
+  /** px added around the element's box on every side, ≤ MAX_LAYER_PAD;
+   *  the plan adds effect growth on top, clamped */
+  pad?: number
+  /** texture px per frame px; unset = planned from zoom */
+  scale?: number
+  /** P1: per-layer motion blur samples; stored now, drawn later */
+  motionBlur?: boolean
+}
+
+/** a matte borrows another element layer's alpha or luma as this layer's
+ *  coverage (P1 renders it; the field stores and plans already) */
+export interface LayerMatte {
+  /** track id of the source element layer, same frame */
+  source: string
+  channel?: 'alpha' | 'luma'
+  invert?: boolean
+}
+
+/** a vector hole/window inside a layer's coverage (P1 renders it; the field
+ *  stores and plans already) */
+export interface LayerMask {
+  id: string
+  shape:
+    | { type: 'rect'; x: number; y: number; width: number; height: number; radius?: number }
+    | { type: 'ellipse'; cx: number; cy: number; rx: number; ry: number }
+    | { type: 'path'; d: string }
+  mode?: 'add' | 'subtract' | 'intersect' | 'difference'
+  invert?: boolean
+  /** px of edge blur */
+  feather?: number
+  /** px the shape grows (positive) or shrinks (negative) */
+  expansion?: number
+  /** 0..1 — the mask's coverage scale */
+  opacity?: number
 }
 
 /* ---- the director's intent (motion-pro P0) ----
@@ -455,8 +564,15 @@ export interface MotionTrack {
   clips?: MotionClip[]
   /** the track's effect stack, applied in order (motion-pro P1) */
   effects?: EffectInstance[]
-  /** how the layer composites onto what's below it */
+  /** how the layer composites onto what's below it — element tracks blend
+   *  through the compositor (motion-elements P0) */
   blend?: BlendMode
+  /** element tracks only: promotion and render hints for the element layer */
+  layer?: LayerSpec
+  /** element tracks only: borrow another layer's coverage (draws in P1) */
+  matte?: LayerMatte
+  /** element tracks only: vector windows inside the layer (draws in P1) */
+  masks?: LayerMask[]
 }
 
 /* ---- the composition ---- */
@@ -566,6 +682,13 @@ export type CompositionOp =
   | { op: 'reorder_effects'; trackId: string; effectIds: string[] }
   /** how the layer composites onto what's below; null back to normal */
   | { op: 'set_blend'; trackId: string; blend: BlendMode | null }
+  /* element-layer ops (motion-elements P0): the layer contract on an
+     element track; matte/masks store now and draw in P1 */
+  | { op: 'set_layer'; trackId: string; layer: LayerSpec | null }
+  | { op: 'set_matte'; trackId: string; matte: LayerMatte | null }
+  | { op: 'add_mask'; trackId: string; mask: LayerMask }
+  | { op: 'update_mask'; trackId: string; maskId: string; mask: LayerMask }
+  | { op: 'remove_mask'; trackId: string; maskId: string }
 
 /* ---- per-frame motion data (the data-doop-motion block) ----
  * Frame-authored keyframes ride the frame's HTML — versions, copy and MCP
@@ -1090,6 +1213,122 @@ function parseDirection(input: unknown): Direction | null {
   return out
 }
 
+export function parseLayerSpec(input: unknown): ParseResult<LayerSpec> {
+  if (!isRecord(input)) return bad('layer must be an object')
+  const out: LayerSpec = {}
+  if (input.mode !== undefined) {
+    if (input.mode !== 'auto' && input.mode !== 'on' && input.mode !== 'off') {
+      return bad('layer.mode must be auto, on or off')
+    }
+    out.mode = input.mode
+  }
+  if (input.visible !== undefined) {
+    if (typeof input.visible !== 'boolean') return bad('layer.visible must be a boolean')
+    out.visible = input.visible
+  }
+  if (input.transform !== undefined) {
+    if (input.transform !== 'compositor' && input.transform !== 'css') {
+      return bad('layer.transform must be compositor or css')
+    }
+    out.transform = input.transform
+  }
+  if (input.pad !== undefined) {
+    const pad = parseSeconds(input.pad, 'layer.pad', 0, MOTION_LIMITS.MAX_LAYER_PAD)
+    if (!pad.ok) return pad
+    out.pad = pad.value
+  }
+  if (input.scale !== undefined) {
+    if (typeof input.scale !== 'number' || !Number.isFinite(input.scale) || input.scale <= 0 || input.scale > 16) {
+      return bad('layer.scale must be in (0, 16]')
+    }
+    out.scale = input.scale
+  }
+  if (input.motionBlur !== undefined) {
+    if (typeof input.motionBlur !== 'boolean') return bad('layer.motionBlur must be a boolean')
+    out.motionBlur = input.motionBlur
+  }
+  return ok(out)
+}
+
+export function parseLayerMatte(input: unknown): ParseResult<LayerMatte> {
+  if (!isRecord(input)) return bad('matte must be an object')
+  const source = parseId(input.source, 'matte.source')
+  if (!source.ok) return source
+  const out: LayerMatte = { source: source.value }
+  if (input.channel !== undefined) {
+    if (input.channel !== 'alpha' && input.channel !== 'luma') return bad('matte.channel must be alpha or luma')
+    out.channel = input.channel
+  }
+  if (input.invert !== undefined) {
+    if (typeof input.invert !== 'boolean') return bad('matte.invert must be a boolean')
+    out.invert = input.invert
+  }
+  return ok(out)
+}
+
+const MASK_MODES = ['add', 'subtract', 'intersect', 'difference'] as const
+
+export function parseLayerMask(input: unknown): ParseResult<LayerMask> {
+  if (!isRecord(input)) return bad('mask must be an object')
+  const id = parseId(input.id, 'mask.id')
+  if (!id.ok) return id
+  if (!isRecord(input.shape) || typeof input.shape.type !== 'string')
+    return bad('mask.shape must be an object with a type')
+  let shape: LayerMask['shape']
+  if (input.shape.type === 'rect') {
+    const { x, y, width, height, radius } = input.shape
+    if (![x, y, width, height].every((v) => typeof v === 'number' && Number.isFinite(v))) {
+      return bad('mask.shape rect needs numeric x, y, width, height')
+    }
+    shape = { type: 'rect', x: x as number, y: y as number, width: width as number, height: height as number }
+    if (radius !== undefined) {
+      if (typeof radius !== 'number' || !Number.isFinite(radius) || radius < 0)
+        return bad('mask.shape.radius must be ≥ 0')
+      shape.radius = radius
+    }
+  } else if (input.shape.type === 'ellipse') {
+    const { cx, cy, rx, ry } = input.shape
+    if (![cx, cy, rx, ry].every((v) => typeof v === 'number' && Number.isFinite(v))) {
+      return bad('mask.shape ellipse needs numeric cx, cy, rx, ry')
+    }
+    shape = { type: 'ellipse', cx: cx as number, cy: cy as number, rx: rx as number, ry: ry as number }
+  } else if (input.shape.type === 'path') {
+    if (typeof input.shape.d !== 'string' || input.shape.d.length < 1 || input.shape.d.length > 20000) {
+      return bad('mask.shape path needs a d string')
+    }
+    shape = { type: 'path', d: input.shape.d }
+  } else {
+    return bad('mask.shape.type must be rect, ellipse or path')
+  }
+  const out: LayerMask = { id: id.value, shape }
+  if (input.mode !== undefined) {
+    if (!MASK_MODES.includes(input.mode as (typeof MASK_MODES)[number])) {
+      return bad(`mask.mode must be one of ${MASK_MODES.join(', ')}`)
+    }
+    out.mode = input.mode as LayerMask['mode']
+  }
+  if (input.invert !== undefined) {
+    if (typeof input.invert !== 'boolean') return bad('mask.invert must be a boolean')
+    out.invert = input.invert
+  }
+  if (input.feather !== undefined) {
+    const n = parseSeconds(input.feather, 'mask.feather', 0, MOTION_LIMITS.MAX_LAYER_PAD)
+    if (!n.ok) return n
+    out.feather = n.value
+  }
+  if (input.expansion !== undefined) {
+    const n = parseSeconds(input.expansion, 'mask.expansion', -MOTION_LIMITS.MAX_LAYER_PAD, MOTION_LIMITS.MAX_LAYER_PAD)
+    if (!n.ok) return n
+    out.expansion = n.value
+  }
+  if (input.opacity !== undefined) {
+    const n = parseSeconds(input.opacity, 'mask.opacity', 0, 1)
+    if (!n.ok) return n
+    out.opacity = n.value
+  }
+  return ok(out)
+}
+
 function parseMotionBlur(input: unknown): { shutter: number; samples?: number } | null {
   if (!isRecord(input)) return null
   const { shutter, samples } = input
@@ -1147,13 +1386,45 @@ export function parseTrack(input: unknown, duration: number): ParseResult<Motion
     }
     if (input.blend !== null) track.blend = input.blend as BlendMode
   }
-  /* same renderer limits the add_track/add_effect ops enforce — a whole-body
-     set_composition reparses through here, so refusing at parse time keeps an
-     undrawn effect stack or blend out of the model */
-  if (input.kind !== 'camera' && input.kind !== 'adjustment' && track.effects?.length) {
-    return bad(`effects only draw on camera and adjustment tracks, not ${input.kind} tracks`)
+  if (input.layer !== undefined && input.layer !== null) {
+    const layer = parseLayerSpec(input.layer)
+    if (!layer.ok) return layer
+    track.layer = layer.value
   }
-  if (track.blend != null) return bad('track blend is not drawn yet')
+  if (input.matte !== undefined && input.matte !== null) {
+    const matte = parseLayerMatte(input.matte)
+    if (!matte.ok) return matte
+    track.matte = matte.value
+  }
+  if (input.masks !== undefined) {
+    if (!Array.isArray(input.masks) || input.masks.length > 32) {
+      return bad('track.masks must be an array of at most 32')
+    }
+    const masks: LayerMask[] = []
+    const seen = new Set<string>()
+    for (const raw of input.masks) {
+      const mask = parseLayerMask(raw)
+      if (!mask.ok) return mask
+      if (seen.has(mask.value.id)) return bad(`duplicate mask id ${mask.value.id}`)
+      seen.add(mask.value.id)
+      masks.push(mask.value)
+    }
+    track.masks = masks
+  }
+  /* same renderer limits the ops enforce — a whole-body set_composition
+     reparses through here, so refusing at parse time keeps an undrawn effect
+     stack, blend or layer spec out of the model. Camera, adjustment and
+     element tracks draw effects; only element tracks draw a blend or carry
+     a layer contract (motion-elements P0). */
+  if (input.kind !== 'camera' && input.kind !== 'adjustment' && input.kind !== 'element' && track.effects?.length) {
+    return bad(`effects only draw on camera, adjustment and element tracks, not ${input.kind} tracks`)
+  }
+  if (track.blend != null && input.kind !== 'element') {
+    return bad(`track blend only draws on element tracks, not ${input.kind} tracks`)
+  }
+  if ((track.layer != null || track.matte != null || track.masks != null) && input.kind !== 'element') {
+    return bad(`layer, matte and masks only belong on element tracks, not ${input.kind} tracks`)
+  }
   if (input.keyframes !== undefined) {
     if (!Array.isArray(input.keyframes)) return bad('track.keyframes must be an array')
     if (input.keyframes.length > MOTION_LIMITS.MAX_KEYFRAMES_PER_TRACK) {
@@ -1556,6 +1827,48 @@ function parseOp(input: unknown, duration: number): ParseResult<CompositionOp> {
       }
       return ok({ op: 'set_blend', trackId: trackId.value, blend: (input.blend ?? null) as BlendMode | null })
     }
+    case 'set_layer': {
+      const trackId = parseId(input.trackId, 'trackId')
+      if (!trackId.ok) return trackId
+      if (input.layer === null || input.layer === undefined) {
+        return ok({ op: 'set_layer', trackId: trackId.value, layer: null })
+      }
+      const layer = parseLayerSpec(input.layer)
+      if (!layer.ok) return layer
+      return ok({ op: 'set_layer', trackId: trackId.value, layer: layer.value })
+    }
+    case 'set_matte': {
+      const trackId = parseId(input.trackId, 'trackId')
+      if (!trackId.ok) return trackId
+      if (input.matte === null || input.matte === undefined) {
+        return ok({ op: 'set_matte', trackId: trackId.value, matte: null })
+      }
+      const matte = parseLayerMatte(input.matte)
+      if (!matte.ok) return matte
+      return ok({ op: 'set_matte', trackId: trackId.value, matte: matte.value })
+    }
+    case 'add_mask': {
+      const trackId = parseId(input.trackId, 'trackId')
+      if (!trackId.ok) return trackId
+      const mask = parseLayerMask(input.mask)
+      if (!mask.ok) return mask
+      return ok({ op: 'add_mask', trackId: trackId.value, mask: mask.value })
+    }
+    case 'update_mask': {
+      const trackId = parseId(input.trackId, 'trackId')
+      if (!trackId.ok) return trackId
+      const maskId = parseId(input.maskId, 'maskId')
+      if (!maskId.ok) return maskId
+      const mask = parseLayerMask(input.mask)
+      if (!mask.ok) return mask
+      return ok({ op: 'update_mask', trackId: trackId.value, maskId: maskId.value, mask: mask.value })
+    }
+    case 'remove_mask': {
+      const trackId = parseId(input.trackId, 'trackId')
+      if (!trackId.ok) return trackId
+      const maskId = parseId(input.maskId, 'maskId')
+      return maskId.ok ? ok({ op: 'remove_mask', trackId: trackId.value, maskId: maskId.value }) : maskId
+    }
     default:
       return bad(`unknown op "${input.op}"`)
   }
@@ -1606,12 +1919,20 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
       if (findTrack(comp, op.track.id)) return `track ${op.track.id} already exists`
       if (op.track.kind === 'camera' && comp.tracks.some((t) => t.kind === 'camera'))
         return 'a camera track already exists'
-      /* only the camera and adjustment stacks reach the renderer — an
-         effect stack or a blend on any other track would sit in the model
-         undrawn, so the write is refused rather than stored silently */
-      if (op.track.kind !== 'camera' && op.track.kind !== 'adjustment' && op.track.effects?.length)
-        return `effects only draw on camera and adjustment tracks, not ${op.track.kind} tracks`
-      if (op.track.blend != null) return 'track blend is not drawn yet'
+      /* only camera, adjustment and element stacks reach the renderer — an
+         effect stack, blend or layer spec on another kind would sit in the
+         model undrawn, so the write is refused rather than stored silently */
+      if (
+        op.track.kind !== 'camera' &&
+        op.track.kind !== 'adjustment' &&
+        op.track.kind !== 'element' &&
+        op.track.effects?.length
+      )
+        return `effects only draw on camera, adjustment and element tracks, not ${op.track.kind} tracks`
+      if (op.track.blend != null && op.track.kind !== 'element')
+        return `track blend only draws on element tracks, not ${op.track.kind} tracks`
+      if ((op.track.layer != null || op.track.matte != null || op.track.masks != null) && op.track.kind !== 'element')
+        return `layer, matte and masks only belong on element tracks, not ${op.track.kind} tracks`
       comp.tracks.push(op.track)
       return null
     }
@@ -1746,8 +2067,8 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
     case 'add_effect': {
       const track = findTrack(comp, op.trackId)
       if (!track) return `no track ${op.trackId}`
-      if (track.kind !== 'camera' && track.kind !== 'adjustment')
-        return `effects only draw on camera and adjustment tracks, not ${track.kind} tracks`
+      if (track.kind !== 'camera' && track.kind !== 'adjustment' && track.kind !== 'element')
+        return `effects only draw on camera, adjustment and element tracks, not ${track.kind} tracks`
       const effects = (track.effects ??= [])
       if (effects.length >= 20) return 'too many effects on the track'
       if (effects.some((e) => e.id === op.effect.id)) return `effect ${op.effect.id} already exists`
@@ -1803,10 +2124,55 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
     case 'set_blend': {
       const track = findTrack(comp, op.trackId)
       if (!track) return `no track ${op.trackId}`
-      /* no renderer composites a track's blend mode — storing one would be
-         a silent no-op, so only clearing is allowed */
+      /* only element tracks composite a blend — writing one anywhere else
+         would be a silent no-op; a null clear still scrubs a legacy value */
+      if (track.kind !== 'element' && op.blend !== null)
+        return `track blend only draws on element tracks, not ${track.kind} tracks`
       if (op.blend === null) delete track.blend
-      else return 'track blend is not drawn yet'
+      else track.blend = op.blend
+      return null
+    }
+    case 'set_layer': {
+      const track = findTrack(comp, op.trackId)
+      if (!track) return `no track ${op.trackId}`
+      if (track.kind !== 'element' && op.layer !== null)
+        return `layers only exist on element tracks, not ${track.kind} tracks`
+      if (op.layer === null) delete track.layer
+      else track.layer = op.layer
+      return null
+    }
+    case 'set_matte': {
+      const track = findTrack(comp, op.trackId)
+      if (!track) return `no track ${op.trackId}`
+      if (track.kind !== 'element' && op.matte !== null)
+        return `mattes only exist on element tracks, not ${track.kind} tracks`
+      if (op.matte === null) delete track.matte
+      else track.matte = op.matte
+      return null
+    }
+    case 'add_mask': {
+      const track = findTrack(comp, op.trackId)
+      if (!track) return `no track ${op.trackId}`
+      if (track.kind !== 'element') return `masks only exist on element tracks, not ${track.kind} tracks`
+      const masks = (track.masks ??= [])
+      if (masks.length >= 32) return 'too many masks on the track'
+      if (masks.some((m) => m.id === op.mask.id)) return `mask ${op.mask.id} already exists`
+      masks.push(op.mask)
+      return null
+    }
+    case 'update_mask': {
+      const track = findTrack(comp, op.trackId)
+      const i = track?.masks?.findIndex((m) => m.id === op.maskId) ?? -1
+      if (!track || i < 0) return `no mask ${op.maskId}`
+      /* the mask's id is its address — a rename is remove+add */
+      track.masks![i] = { ...op.mask, id: op.maskId }
+      return null
+    }
+    case 'remove_mask': {
+      const track = findTrack(comp, op.trackId)
+      const i = track?.masks?.findIndex((m) => m.id === op.maskId) ?? -1
+      if (!track || i < 0) return `no mask ${op.maskId}`
+      track.masks!.splice(i, 1)
       return null
     }
   }
