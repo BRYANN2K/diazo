@@ -3416,9 +3416,14 @@ async function execToolInner(
         if (!parsed.success) return fail(`invalid ${block.name} input: ${parsed.error.issues[0]?.message}`)
         const raw = parsed.data as Record<string, unknown>
         if (raw.canvas_id !== undefined && raw.canvas_id !== canvasId) return fail('scripts are bound to this canvas')
+        /* scripts run as the verified requester — the payer's account pays
+           for the run but does not widen what the script may read or change */
+        if (runState.mixedRequesters) {
+          return fail('this run serves asks from several people — script tools act for one requester, so they stay off')
+        }
         const caller = {
           canvasId,
-          userId: runState.payerId ?? store.getCanvas(canvasId)?.ownerId,
+          userId: runState.askerId,
           actor,
           source: 'resident' as const,
         }
