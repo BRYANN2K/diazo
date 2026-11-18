@@ -68,6 +68,7 @@ import type { BillingInterval, Plan } from '../../shared/billing'
 import type { LinkAccess } from '../../shared/canvasRole'
 import type { CommentAnchorInput } from '../../shared/comments'
 import type { ComponentCode, ComponentDef, ComponentProp, PartOverride } from '../../shared/components'
+import type { AnimateRequest } from '../../shared/director'
 
 /** What the server says about a component beyond the definition itself. */
 export interface ComponentInfo {
@@ -992,10 +993,11 @@ export const api = {
     scope?: CardScope,
     runner?: RunnerPick,
     kind?: CardKind,
+    animate?: AnimateRequest,
   ) =>
     req(`/api/canvases/${canvasId}/cards`, {
       method: 'POST',
-      body: JSON.stringify({ title, agents, attachments, scope, runner, kind }),
+      body: JSON.stringify({ title, agents, attachments, scope, runner, kind, animate }),
     }),
   completeCard: (canvasId: string, cardId: string) =>
     req(`/api/canvases/${canvasId}/cards/${cardId}/done`, { method: 'POST' }),

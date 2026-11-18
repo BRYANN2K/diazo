@@ -197,6 +197,7 @@ export function MotionTimeline({
         undefined,
         currentRunnerPick(),
         'animate',
+        { pageId, seconds: comp?.duration ?? NEW_COMPOSITION.duration },
       )
       onToast(t('motion.animateQueued'))
     } catch (err) {

@@ -6,6 +6,7 @@ import type { CanvasRole, LinkAccess } from './canvasRole.ts'
 import type { ComponentDef } from './components.ts'
 import type { DesignToken } from './designTokens.ts'
 import type { RunnerPick } from './agentRunner.ts'
+import type { AnimateRequest, DirectorRunView } from './director.ts'
 import type { FrameLint } from './slopRules.ts'
 import type { FrameChecks } from './frameChecks.ts'
 import type { DevTask } from './devTasks.ts'
@@ -450,6 +451,9 @@ export interface AgentTask {
    *  handing the title to the chat agent. Absent on prompt cards. */
   kind?: CardKind
   payload?: RepoCardPayload | DriftCardPayload
+  /** 'animate' cards carry the film the sender asked for — the director run
+   *  reads it; validated by parseAnimateRequest (shared/director.ts) */
+  animate?: AnimateRequest
   /** board cards a chat plan queued: the library references the launcher
    *  approved for this screen — the design agent opens them as its base */
   references?: ChatPlanReference[]
@@ -468,8 +472,8 @@ export type RepoCardKind = 'sketch' | 'design-system'
 
 /** Structured card kinds beyond the repo import: 'drift' asks the resident
  *  to review the gaps between a designed frame and its shipped capture;
- *  'animate' marks the card Motion Studio's "Animate storyboard" queues —
- *  it rides the ordinary loop but buys the film-direction turn budget. */
+ *  'animate' queues a director run — a staged film build with its own
+ *  stages, budgets and delivery verdict (shared/director.ts) */
 export type CardKind = RepoCardKind | 'drift' | 'animate'
 
 /** A screen of a connected GitHub repository, as the import manifest lists it. */
@@ -803,6 +807,8 @@ export type ServerMessage =
   /** a page's timeline was written or removed (composition null) —
    *  multiplayer timeline editing lands over the room */
   | { type: 'composition'; pageId: string; composition: Composition | null; actor: Actor }
+  /** a director run changed stage, filed a pass, or settled (motion-director) */
+  | { type: 'director'; run: DirectorRunView }
   /** a collaborator's playhead on a page's composition */
   | { type: 'composition:playhead'; clientId: string; pageId: string; t: number; playing: boolean }
   /** a render job's status/progress changed */
