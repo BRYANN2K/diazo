@@ -24,6 +24,9 @@
     "build-storybook": "storybook build",
     "prepare": "husky || true"
   },
+  "trustedDependencies": [
+    "fs-ext"
+  ],
   "lint-staged": {
     "*.{ts,tsx,js}": [
       "oxlint --type-aware --deny-warnings",
@@ -60,6 +63,7 @@
     "drizzle-orm": "^0.45.2",
     "envalid": "8.2.0",
     "express": "^4.19.2",
+    "fs-ext": "2.1.1",
     "jose": "6.2.10",
     "jszip": "^3.10.2",
     "lucide-react": "^1.59.0",
@@ -92,6 +96,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@types/compression": "^1.8.1",
     "@types/express": "^4.17.21",
+    "@types/fs-ext": "2.0.3",
     "@types/node": "^20.14.10",
     "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.20.4",

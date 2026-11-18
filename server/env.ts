@@ -139,6 +139,10 @@ const schema = {
      unset and not embedded = the browser profile stays on the OS temp
      dir (the container behaviour) */
   DOOP_BROWSER_DIR: str({ default: undefined }),
+  /* pins the machine identity written into the data-dir lock claim —
+     containers whose OS id changes on recreation set this so a dead
+     container's claim reads as ours, never as a foreign machine's */
+  DOOP_MACHINE_ID: str({ default: undefined }),
   /* the desktop shell spawns the server as a sidecar over piped stdio
      (DOOP_INSTALL=desktop): it exits when stdin closes — the app died —
      prints `ready <port>` once listening, and binds loopback. For the

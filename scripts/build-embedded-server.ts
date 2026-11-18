@@ -11,9 +11,10 @@
  *   out/embedded-server/
  *     server.mjs       the whole server (express, ws, drizzle, auth, mcp), minified
  *     node_modules/    only the externals the bundle does not carry — sharp
- *                      with the target's @img/* packages and libvips, and
+ *                      with the target's @img/* packages and libvips,
  *                      @electric-sql/pglite (finds its .wasm and data files by
- *                      URL, so it cannot be inlined)
+ *                      URL, so it cannot be inlined), and fs-ext — the native
+ *                      module behind the data-dir lock (build/Release/*.node).
  *     migrations/      the drizzle SQL + journal applied at boot (the meta
  *                      snapshots are drizzle-kit's, not the migrator's — dropped)
  *     backgrounds.json the catalog server/backgrounds.ts seeds from
@@ -86,8 +87,9 @@ const EXTERNALS = [
   '@aws-sdk/client-s3',
   'drizzle-orm/node-postgres',
   'drizzle-orm/node-postgres/migrator',
+  'fs-ext',
 ]
-const SHIPPED = ['sharp', '@electric-sql/pglite']
+const SHIPPED = ['sharp', '@electric-sql/pglite', 'fs-ext']
 
 /* ------------------------------------------------------------------ */
 /* steps                                                               */
@@ -150,6 +152,13 @@ await build({
 /* 2. node_modules for the externals */
 const nodeModulesOut = path.join(outDir, 'node_modules')
 if (targetOs && targetCpu) {
+  /* fs-ext ships no prebuild — it compiles at install, which --ignore-scripts
+     skips and a host build would produce for the wrong target anyway. A
+     cross-staged bundle needs `npm rebuild fs-ext` (or node-gyp) run on the
+     target itself; native per-OS builds are unaffected. */
+  console.warn(
+    `warn: fs-ext is built at install — the staged node_modules lack its .node for ${targetOs}/${targetCpu}; rebuild it on the target`,
+  )
   /* another platform: `bun install --os --cpu` resolves the matching optional
      deps (@img/*) where npm's same flags skip them entirely */
   const staged = mkdtempSync(path.join(tmpdir(), 'diazo-bundle-nm-'))
@@ -241,6 +250,10 @@ function pruneNodeModules(dir: string): void {
         '@electric-sql/pglite/dist/contrib',
         '@electric-sql/pglite/dist/live',
         '@electric-sql/pglite/dist/worker',
+        /* node-gyp's object files — only Release/fs_ext.node is loaded */
+        'fs-ext/build/Release/obj.target',
+        'fs-ext/build/Release/.deps',
+        'fs-ext/tests',
       ]
       if (deadDirs.includes(inside)) {
         rmSync(full, { recursive: true, force: true })

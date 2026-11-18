@@ -23,6 +23,9 @@ jobs:
           node-version: 22
       - run: bun install --frozen-lockfile
       - run: bun run build:embedded-server
+      # the data-dir lock is the native seam this job exists for: fs-ext must
+      # build on every OS, and a second process must really be refused
+      - run: bunx vitest run tests/dataLock.test.ts
       - name: Boot the bundle and check it answers
         shell: bash
         run: |

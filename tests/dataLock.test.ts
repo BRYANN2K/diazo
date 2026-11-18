@@ -7,13 +7,15 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { acquireDataLock, DataDirInUseError, type AcquireOptions } from '../server/dataLock.ts'
 
 /**
- * server/dataLock.ts: one live server per data directory, backed by the OS.
- * `<dir>/server.lock` is the claim file; `<dir>/server.lock.sock` a unix
- * socket the holder binds for its lifetime — a refused connection is the
- * kernel's proof the holder is gone, so no pid or hostname comparison
- * decides liveness (a same-pid neighbour in another container cannot fake
- * it). A live holder is refused before any protected state is touched; a
- * provably dead claim is moved aside and re-created under one O_EXCL gate.
+ * server/dataLock.ts: one live server per data directory, proven by the
+ * kernel's file locking — `<dir>/server.lock` is a stable file, created
+ * once and never unlinked, that the holder keeps an exclusive OS lock on
+ * for its whole life (flock on POSIX, LockFileEx on Windows). Death of
+ * ANY kind frees the lock; a suspended or quiet holder stays locked —
+ * claim timestamps are never read for liveness. A claim written under
+ * another machine identity is refused unconditionally: on a shared
+ * filesystem its lock may be real but invisible, and age cannot prove a
+ * remote holder dead.
  */
 
 interface Lock {
@@ -24,7 +26,7 @@ const ROOT = process.cwd()
 const HELPER = path.join(ROOT, 'tests', 'fixtures', 'dataLockHelper.ts')
 
 /* spawn the holder as ONE node process — `--import tsx` loads the .ts
-   helper in-process, so the child's pid is the socket's owner and a
+   helper in-process, so the child's pid is the lock's owner and a
    SIGKILL really kills the holder (a `tsx` wrapper would fork and leave
    a grandchild holding the lock) */
 function spawnHelper(dir: string, heartbeatMs: number | string): ChildProcess {
@@ -61,7 +63,8 @@ function writeClaim(dir: string, body: object, mtimeMsAgo = 0): void {
   fs.utimesSync(file, mtime, mtime)
 }
 
-/** A socket file nothing listens on — the shape a dead holder leaves. */
+/** A socket file nothing listens on — the shape the old design's dead
+ *  holder leaves behind. */
 async function deadSocket(file: string): Promise<void> {
   const server = net.createServer()
   await new Promise<void>((resolve) => server.listen(file, resolve))
@@ -93,42 +96,35 @@ afterEach(() => {
 })
 
 describe('server/dataLock.ts', () => {
-  it('claims the dir, binds the socket, and release removes both', async () => {
+  it('claims the dir, writes the claim, and release frees the lock', async () => {
     const dir = tmpdir()
     const l = await lock(dir)
     const holder = JSON.parse(fs.readFileSync(claimFile(dir), 'utf8')) as { pid: number; host: string }
     expect(holder.pid).toBe(process.pid)
     expect(holder.host).toBe(os.hostname())
-    expect(fs.statSync(sockFile(dir)).isSocket()).toBe(true)
     l.release()
-    expect(fs.existsSync(claimFile(dir))).toBe(false)
-    expect(fs.existsSync(sockFile(dir))).toBe(false)
+    /* the claim file itself stays — stable, never unlinked — but the
+       kernel lock is free, so the next boot relocks and overwrites */
+    expect(fs.existsSync(claimFile(dir))).toBe(true)
+    await expect(lock(dir)).resolves.toBeDefined()
   })
 
-  it('refuses a second acquire while this process holds the socket', async () => {
+  it('refuses a second acquire while this process holds the lock', async () => {
     const dir = tmpdir()
     await lock(dir)
     await expect(acquireDataLock(dir)).rejects.toThrow(DataDirInUseError)
   })
 
-  it('frees the directory for the next boot after release', async () => {
-    const dir = tmpdir()
-    ;(await lock(dir)).release()
-    await expect(lock(dir)).resolves.toBeDefined()
-  })
-
-  it('refuses a live holder in another process before touching the lock', async () => {
+  it('refuses a live holder in another process without disturbing its claim', async () => {
     const dir = tmpdir()
     const { pid } = await holdInChild(dir)
     /* what a refused contender must not disturb */
     const claim = fs.readFileSync(claimFile(dir), 'utf8')
-    const sockIno = fs.statSync(sockFile(dir)).ino
 
     await expect(acquireDataLock(dir)).rejects.toThrow(DataDirInUseError)
     await expect(acquireDataLock(dir)).rejects.toThrow(`process ${pid}`)
 
     expect(fs.readFileSync(claimFile(dir), 'utf8')).toBe(claim)
-    expect(fs.statSync(sockFile(dir)).ino).toBe(sockIno)
   }, 45_000)
 
   it('reclaims the dir once the holder is dead — kill -9 included', async () => {
@@ -141,38 +137,47 @@ describe('server/dataLock.ts', () => {
     const l = await lock(dir)
     const holder = JSON.parse(fs.readFileSync(claimFile(dir), 'utf8')) as { pid: number }
     expect(holder.pid).toBe(process.pid)
-    /* the dead holder's socket file was replaced by a live one */
-    expect(fs.statSync(sockFile(dir)).isSocket()).toBe(true)
     l.release()
   }, 45_000)
 
   it('still refuses a live holder whose claim went quiet — the heartbeat is not liveness', async () => {
     const dir = tmpdir()
     /* a child holding the lock with a heartbeat that never fires while the
-       test runs; aging its claim must change nothing — the socket is the
-       proof it is alive, not the file's date */
+       test runs; aging its claim must change nothing — the kernel lock is
+       the proof it is alive, not the file's date */
     await holdInChild(dir, 60_000)
     const stale = new Date(Date.now() - 120_000)
     fs.utimesSync(claimFile(dir), stale, stale)
     await expect(acquireDataLock(dir)).rejects.toThrow(DataDirInUseError)
-    expect(fs.statSync(sockFile(dir)).isSocket()).toBe(true)
   }, 45_000)
 
-  it('refuses a claim that names our own pid and host — the twin container', async () => {
-    const dir = tmpdir()
-    /* two containers sharing hostname, pid space and the volume: the claim
-       reads exactly as if we wrote it, but the socket still belongs to the
-       other process. The probe does not consult the pid at all */
-    await holdInChild(dir, 60_000)
-    writeClaim(dir, { pid: process.pid, host: os.hostname(), at: new Date().toISOString() })
-    await expect(acquireDataLock(dir)).rejects.toThrow(DataDirInUseError)
-  }, 45_000)
+  /* SIGSTOP/SIGCONT are POSIX; Windows keeps a suspended holder's lock the
+     same way, but there is no cross-platform way to suspend the child */
+  it.skipIf(process.platform === 'win32')(
+    'refuses a suspended holder — a stopped process still holds its lock',
+    async () => {
+      const dir = tmpdir()
+      /* the suspended live holder: SIGSTOP keeps the fd open, so the kernel
+       lock survives and the contender is refused — the case heartbeat-age
+       liveness always got wrong */
+      const { child } = await holdInChild(dir, 60_000)
+      child.kill('SIGSTOP')
+      try {
+        await expect(acquireDataLock(dir)).rejects.toThrow(DataDirInUseError)
+      } finally {
+        child.kill('SIGCONT')
+      }
+    },
+    45_000,
+  )
 
   it('exactly one of two simultaneous boots wins the dir', async () => {
     const dir = tmpdir()
-    /* a dead holder's leftovers both contenders race to reclaim */
+    /* a dead holder's claim file is all the leftovers a lock design needs:
+       the kernel frees its lock with the process, both contenders race to
+       relock, and flock decides — the delayed-contender window the socket
+       design lost does not exist */
     writeClaim(dir, { pid: 999_999, host: os.hostname() }, 120_000)
-    await deadSocket(sockFile(dir))
 
     const outcomes = await Promise.all(
       [0, 1].map(
@@ -201,7 +206,24 @@ describe('server/dataLock.ts', () => {
     expect(outcomes.filter((o) => !o.includes('WON'))[0]).toMatch(/already in use|refused/)
   }, 60_000)
 
-  it('a holder whose claim is stolen exits loudly instead of writing under a rival', async () => {
+  it('holds a data path longer than a unix socket name allows', async () => {
+    /* server.lock.sock had to fit in sockaddr_un (~104 chars): a 70-char
+       data dir under a scratch root already broke the first heartbeat.
+       The file lock names nothing but the file itself */
+    const dir = path.join(
+      tmpdir(),
+      'a-very-long-data-directory-name-that-keeps-going-and-going-past-what-sun-path-allows',
+    )
+    expect(path.join(dir, 'server.lock.sock').length).toBeGreaterThan(104)
+    const { child } = await holdInChild(dir, 120)
+    /* alive past the first beats — a stolen heartbeat exited the old holder */
+    await new Promise((r) => setTimeout(r, 400))
+    expect(child.exitCode).toBeNull()
+    const holder = JSON.parse(fs.readFileSync(claimFile(dir), 'utf8')) as { pid: number }
+    expect(holder.pid).toBe(child.pid)
+  }, 45_000)
+
+  it('a holder whose claim is rewritten exits loudly instead of writing under a rival', async () => {
     const dir = tmpdir()
     /* a long heartbeat would leave the theft unnoticed past the timeout */
     const { child } = await holdInChild(dir, 150)
@@ -215,61 +237,96 @@ describe('server/dataLock.ts', () => {
     expect(stderr).toMatch(/lost the data-dir lock/)
   }, 45_000)
 
-  it('a holder whose socket file is removed exits loudly — the dir reads socketless', async () => {
+  it('a holder whose lock file is deleted exits loudly — the path no longer names it', async () => {
     const dir = tmpdir()
-    /* our socket survives its file being unlinked — but every contender
-       would then see a socketless claim and reclaim under us */
+    /* the lock survives on the unlinked inode — but the path is free for a
+       new file a contender could lock, so the dir must look lost to us */
     const { child } = await holdInChild(dir, 150)
     let stderr = ''
     child.stderr!.on('data', (d: Buffer) => {
       stderr += d.toString()
     })
     const exited = new Promise<number | null>((resolve) => child.once('exit', (code) => resolve(code)))
-    fs.rmSync(sockFile(dir))
+    fs.rmSync(claimFile(dir))
     expect(await exited).toBe(1)
     expect(stderr).toMatch(/lost the data-dir lock/)
   }, 45_000)
 
-  it('refuses a foreign-host claim while fresh, reclaims it once stale', async () => {
+  it('never retakes a claim written under a different machine identity — however old', async () => {
     const dir = tmpdir()
-    await deadSocket(sockFile(dir))
-    writeClaim(dir, { pid: 42, host: 'some-container-elsewhere' })
-    await expect(acquireDataLock(dir)).rejects.toThrow(/some-container-elsewhere/)
+    /* the shared-filesystem case: the claim's holder may be alive on a
+       machine whose lock we cannot see — age is not proof of death, so a
+       foreign claim refuses unconditionally */
+    writeClaim(dir, { pid: 42, host: 'some-container-elsewhere', mid: 'other-machine' })
+    await expect(acquireDataLock(dir)).rejects.toThrow(/some-container-elsewhere|another machine/)
 
-    writeClaim(dir, { pid: 42, host: 'some-container-elsewhere' }, 120_000)
+    writeClaim(dir, { pid: 42, host: 'some-container-elsewhere', mid: 'other-machine' }, 120_000)
+    await expect(acquireDataLock(dir)).rejects.toThrow(DataDirInUseError)
+
+    writeClaim(dir, { pid: 42, host: 'some-container-elsewhere', mid: 'other-machine' }, 7 * 86_400_000)
+    await expect(acquireDataLock(dir)).rejects.toThrow(DataDirInUseError)
+  })
+
+  it('refuses a foreign claim dated in the future — a stepped-back clock is not death either', async () => {
+    const dir = tmpdir()
+    writeClaim(dir, { pid: 42, host: 'some-container-elsewhere', mid: 'other-machine' }, -300_000)
+    await expect(acquireDataLock(dir)).rejects.toThrow(DataDirInUseError)
+  })
+
+  it('relocks a dead same-host claim — leftover files need no proof of death beyond the free lock', async () => {
+    const dir = tmpdir()
+    writeClaim(dir, { pid: 999_999, host: os.hostname(), at: new Date().toISOString() })
     await expect(lock(dir)).resolves.toBeDefined()
   })
 
-  it('reclaims a foreign claim dated in the future — a stepped-back clock is still stale', async () => {
+  it('relocks an unreadable claim — a power cut mid-write', async () => {
     const dir = tmpdir()
-    await deadSocket(sockFile(dir))
-    writeClaim(dir, { pid: 42, host: 'some-container-elsewhere' }, -300_000)
-    await expect(lock(dir)).resolves.toBeDefined()
-  })
-
-  it('reclaims a dead claim with no socket — a claimant that crashed mid-claim', async () => {
-    const dir = tmpdir()
-    /* same-host claim, never bound: fresh means "mid-claim" for one window,
-       then it is a dead claimant either way */
-    writeClaim(dir, { pid: 999_999, host: os.hostname() })
-    await expect(lock(dir, { midClaimMs: 150 })).resolves.toBeDefined()
-  })
-
-  it('reclaims an unreadable claim once the socket is proven dead', async () => {
-    const dir = tmpdir()
-    await deadSocket(sockFile(dir))
     fs.writeFileSync(claimFile(dir), 'not json')
     await expect(lock(dir)).resolves.toBeDefined()
+    /* and the claim now names us */
+    const holder = JSON.parse(fs.readFileSync(claimFile(dir), 'utf8')) as { pid: number }
+    expect(holder.pid).toBe(process.pid)
   })
 
-  it('release leaves a lock another holder wrote', async () => {
-    const dir = tmpdir()
-    const l = await lock(dir, { heartbeatMs: 60_000 })
-    writeClaim(dir, { pid: 999_999, host: os.hostname(), at: new Date().toISOString() })
-    l.release()
-    /* a release that unlinks unconditionally would free the dir under the
-       live server that just took it */
-    const holder = JSON.parse(fs.readFileSync(claimFile(dir), 'utf8')) as { pid: number }
-    expect(holder.pid).toBe(999_999)
-  })
+  /* the socket design was POSIX-only — a Windows install can never leave
+     a .sock behind, and a named pipe is not a file existsSync sees */
+  it.skipIf(process.platform === 'win32')(
+    'sweeps a dead unix socket left by the old design, then holds the dir',
+    async () => {
+      const dir = tmpdir()
+      await deadSocket(sockFile(dir))
+      await expect(lock(dir)).resolves.toBeDefined()
+      expect(fs.existsSync(sockFile(dir))).toBe(false)
+    },
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses when an old-design socket holder is still alive',
+    async () => {
+      const dir = tmpdir()
+      /* an old-version holder has no file lock — only its socket proves it;
+       the lock design sweeps dead sockets but a live one still owns the dir */
+      const child = spawn(
+        process.execPath,
+        [
+          '-e',
+          `const s=require('net').createServer(c=>c.end(JSON.stringify({pid:process.pid,host:'${os.hostname()}'})+'\\n'));
+         s.listen(${JSON.stringify(sockFile(dir))},()=>console.log('listening'));setInterval(()=>{},60000)`,
+        ],
+        { stdio: ['ignore', 'pipe', 'pipe'] },
+      )
+      children.push(child)
+      await new Promise<void>((resolve, reject) => {
+        child.stdout!.on('data', (d: Buffer) => {
+          if (d.toString().includes('listening')) resolve()
+        })
+        child.once('exit', () => reject(new Error('legacy holder exited early')))
+        setTimeout(() => reject(new Error('socket never listened')), 15_000)
+      })
+      await expect(acquireDataLock(dir)).rejects.toThrow(DataDirInUseError)
+      /* the live socket file must survive — it is the holder's proof */
+      expect(fs.existsSync(sockFile(dir))).toBe(true)
+    },
+    30_000,
+  )
 })
