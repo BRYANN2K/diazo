@@ -506,6 +506,36 @@ describe('a server with Anthropic credentials of its own', () => {
     expect(headers.accept).toBe('application/json')
   })
 
+  it('a person’s accept still wins when the env spells the name differently', async () => {
+    reply = anthropicToolCall
+    /* the env's "accept" and our fixed "Accept" are two keys for one HTTP
+       header; whichever spelling the merge reads last wins, so the person's
+       value must go out under every spelling — not sit early under its own */
+    await stubServerAnthropicEnv('accept: operator')
+    const run = customTurn(
+      {
+        config: { name: 'Gateway', apiType: 'anthropic', baseUrl: `${base}/anthropic`, models: [] },
+        headers: { accept: 'application/vnd.person+json' },
+      },
+      { id: 'glm-5', vision: true },
+    )
+    await run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 1000 })
+    expect(seen[0]!.headers.accept).toBe('application/vnd.person+json')
+  })
+
+  it('the fixed anthropic-version survives a second env spelling of the name', async () => {
+    reply = anthropicToolCall
+    /* two env lines for one header leave both spellings in the merge; a null
+       under the later one would delete the version a strict gateway needs */
+    await stubServerAnthropicEnv('anthropic-version: operator\nAnthropic-Version: other')
+    const run = customTurn(
+      { config: { name: 'Gateway', apiType: 'anthropic', baseUrl: `${base}/anthropic`, models: [] } },
+      { id: 'glm-5', vision: true },
+    )
+    await run({ system: [{ text: 'sys' }], tools: [TOOL], messages: [screenshot], maxTokens: 1000 })
+    expect(seen[0]!.headers['anthropic-version']).toBe('2023-06-01')
+  })
+
   it('the /test call is guarded the same way', async () => {
     reply = anthropicToolCallWith('{"ready":true}')
     await stubServerAnthropicEnv()

@@ -115,3 +115,35 @@ it('runs a turn on the connected key alone, the server’s own credentials aside
   expect(seen[0]!.headers['x-api-key']).toBe('sk-ant-alice')
   expect(seen[0]!.headers.authorization).toBeUndefined()
 })
+
+it('a re-spelled env auth name cannot smuggle the server’s value back in', async () => {
+  /* the env carries each auth name under two spellings: one the guard's own
+     spelling (overwritten in place, early in the merge) and one it does not
+     know (read last, so it would win) — the person's value must restate
+     every spelling, or the server's env credential ends up on their bill */
+  stubEnv('ANTHROPIC_BASE_URL', base)
+  stubEnv(
+    'ANTHROPIC_CUSTOM_HEADERS',
+    'Authorization: Bearer server-a\nauthorization: Bearer server-b\nX-Api-Key: sk-server-a\nx-api-key: sk-server-b',
+  )
+  mocks.accounts.mockResolvedValue([
+    {
+      kind: 'anthropic-key',
+      userId: 'alice',
+      apiKey: 'sk-ant-alice',
+      model: 'claude-opus-5',
+      enabled: true,
+      connectedAt: 1,
+    },
+  ])
+  const model = await pickModel('alice')
+  await model!.run({
+    system: [{ text: 'Design' }],
+    tools: [],
+    messages: [{ role: 'user', content: 'hi' }],
+    maxTokens: 1024,
+  })
+  expect(seen).toHaveLength(1)
+  expect(seen[0]!.headers['x-api-key']).toBe('sk-ant-alice')
+  expect(seen[0]!.headers.authorization).toBeUndefined()
+})
