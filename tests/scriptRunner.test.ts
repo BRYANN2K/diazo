@@ -340,3 +340,40 @@ it('rejects an excluded render job on both script transports and queues none', a
     created.mockRestore()
   }
 })
+
+it('an idempotency key replays only the identical request', async () => {
+  /* a shared-edit canvas: every editor can read the key list, so replay is
+     scoped by principal + mode + script — never by key alone */
+  store.setLinkAccess(caller.canvasId, 'edit')
+  const key = 'seen-in-usage'
+  const script = edit() + 'return 1'
+  const first = await executeScript({ script, idempotency_key: key }, caller, true)
+  expect(first.ok).toBe(true)
+
+  /* the identical request still deduplicates */
+  expect(await executeScript({ script, idempotency_key: key }, caller, true)).toMatchObject({
+    run_id: first.run_id,
+    deduplicated: true,
+  })
+
+  /* a different principal reusing the key gets a conflict, not the cached
+     result — the key was visible in the usage list either way */
+  const other: ScriptCaller = {
+    ...caller,
+    userId: 'editor-2',
+    actor: { kind: 'user', name: 'Ed', color: '#000' },
+  }
+  await expect(executeScript({ script, idempotency_key: key }, other, true)).rejects.toThrow(/different request/)
+
+  /* mode changes are different requests too: a write key cannot satisfy a
+     query or a dry run, nor the reverse */
+  await expect(executeScript({ script, idempotency_key: key }, caller, false)).rejects.toThrow(/different request/)
+  await expect(executeScript({ script, idempotency_key: key, dry_run: true }, caller, true)).rejects.toThrow(
+    /different request/,
+  )
+
+  /* and a different script under the same key is a different request */
+  await expect(executeScript({ script: 'return 2', idempotency_key: key }, caller, true)).rejects.toThrow(
+    /different request/,
+  )
+})

@@ -116,11 +116,23 @@ function gate(caller: ScriptCaller, write: boolean): void {
 }
 
 async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean): Promise<ScriptRunResult> {
+  const hash = createHash('sha256').update(input.script).digest('hex')
   if (input.idempotency_key) {
     const prior = await scriptRunDeps.byKey(caller.canvasId, input.idempotency_key)
-    if (prior?.response) return { ...prior.response, deduplicated: true }
-    if (prior)
+    if (prior) {
+      /* a key replays only the identical request — same principal, same
+         mode (query/write and dry/live), same script. A mismatch is a
+         different request holding the key; its stored result is never
+         served across the boundary */
+      const identical =
+        prior.record.ownerId === (caller.userId ?? null) &&
+        prior.record.mode === (write ? 'write' : 'query') &&
+        prior.record.dryRun === !!input.dry_run &&
+        prior.record.hash === hash
+      if (!identical) throw new SdkError('conflict', 'the idempotency key was used for a different request')
+      if (prior.response) return { ...prior.response, deduplicated: true }
       throw new SdkError('conflict', 'the previous run was interrupted; inspect its audit record before retrying')
+    }
   }
   const started = Date.now()
   const id = randomUUID()
@@ -136,7 +148,8 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
     ownerId: caller.userId ?? null,
     source: caller.source,
     agentRunId: caller.actor.runId ?? null,
-    hash: createHash('sha256').update(input.script).digest('hex'),
+    mode: write ? 'write' : 'query',
+    hash,
     sourceScript: input.script.slice(0, SCRIPT_LIMITS.scriptBytes),
     calls: [],
     writes: [],

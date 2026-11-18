@@ -55,6 +55,9 @@ export interface ScriptRunRecord {
   ownerId: string | null
   /** 'mcp' | 'resident' — who drove the call */
   source: 'mcp' | 'resident'
+  /** the transport the run arrived on: an idempotency key replays only
+   *  inside the mode it was used in */
+  mode?: 'query' | 'write'
   /** the resident run that contained it, when it was one */
   agentRunId: string | null
   /** sha256 of the script source */
