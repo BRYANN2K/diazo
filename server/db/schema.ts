@@ -48,6 +48,16 @@ import type {
   RenderTarget,
 } from '../../shared/motion.ts'
 import type { DevTaskBrief, DevTaskDrift, DevTaskState } from '../../shared/devTasks.ts'
+import type {
+  DirectorBudgets,
+  DirectorMode,
+  DirectorSpent,
+  DirectorStage,
+  DirectorStatus,
+  OpenIssue,
+  PassRecord,
+} from '../../shared/director.ts'
+import type { RunnerPick } from '../../shared/agentRunner.ts'
 import type { GenerationRecipe, Transcript } from '../../shared/motionMedia.ts'
 import type { CustomModel, SpeechInstall, SpeechJob, SpeechPreferences, Voice } from '../../shared/speech.ts'
 
@@ -1638,4 +1648,42 @@ export const voices = pgTable(
     createdAt: bigint('created_at', { mode: 'number' }).notNull(),
   },
   (t) => [index('voices_owner_idx').on(t.ownerId)],
+)
+
+/** Director runs (shared/director.ts): one row per staged Animate run —
+ *  server-owned stages, budgets, pass records, open issues and the delivery
+ *  verdict. The in-memory store (server/directorRuns.ts) writes through on
+ *  every stage change and pass, throttled between; a row left `running`
+ *  across a restart reads back `interrupted`. */
+export const directorRuns = pgTable(
+  'director_runs',
+  {
+    id: text('id').primaryKey(),
+    canvasId: text('canvas_id').notNull(),
+    pageId: text('page_id').notNull(),
+    /** the animate card the run serves */
+    taskId: text('task_id').notNull(),
+    /** the account the run bills to */
+    ownerId: text('owner_id').notNull(),
+    askerId: text('asker_id'),
+    agent: text('agent').notNull(),
+    runner: jsonb('runner').$type<RunnerPick>(),
+    mode: text('mode').$type<DirectorMode>().notNull(),
+    status: text('status').$type<DirectorStatus>().notNull(),
+    stage: text('stage').$type<DirectorStage>().notNull(),
+    /** current refine pass, 1-based; 0 outside refine */
+    pass: integer('pass').notNull(),
+    maxPasses: integer('max_passes').notNull(),
+    budgets: jsonb('budgets').$type<DirectorBudgets>().notNull(),
+    spent: jsonb('spent').$type<DirectorSpent>().notNull(),
+    passes: jsonb('passes').$type<PassRecord[]>().notNull(),
+    openIssues: jsonb('open_issues').$type<OpenIssue[]>().notNull(),
+    reason: text('reason'),
+    startSig: text('start_sig').notNull(),
+    endSig: text('end_sig'),
+    effectiveWrites: integer('effective_writes').notNull(),
+    startedAt: bigint('started_at', { mode: 'number' }).notNull(),
+    endedAt: bigint('ended_at', { mode: 'number' }),
+  },
+  (t) => [index('director_runs_page_idx').on(t.canvasId, t.pageId, t.startedAt)],
 )

@@ -21,6 +21,7 @@ import type {
   LibraryVisibility,
 } from '../../shared/library.ts'
 import { parseRunnerPick } from '../../shared/agentRunner.ts'
+import type { AnimateRequest, DirectorRun } from '../../shared/director.ts'
 import type { CurationJob } from '../../shared/libraryCuration.ts'
 import { cleanPlanReferences } from '../../shared/chat.ts'
 import { byStack } from '../../shared/frameStack.ts'
@@ -547,6 +548,75 @@ export function saveRenderJob(j: RenderJob) {
 
 export function deleteRenderJob(id: string) {
   swallow(db.delete(t.renderJobs).where(eq(t.renderJobs.id, id)))
+}
+
+/** the director-run row: in-memory-only fields (ledger, lastWrittenRevision,
+ *  skippedShots) never leave the process */
+function directorRunRow(run: DirectorRun) {
+  return {
+    id: run.id,
+    canvasId: run.canvasId,
+    pageId: run.pageId,
+    taskId: run.taskId,
+    ownerId: run.ownerId,
+    askerId: run.askerId ?? null,
+    agent: run.agent,
+    runner: run.runner ?? null,
+    mode: run.mode,
+    status: run.status,
+    stage: run.stage,
+    pass: run.pass,
+    maxPasses: run.maxPasses,
+    budgets: run.budgets,
+    spent: run.spent,
+    passes: run.passes,
+    openIssues: run.openIssues,
+    reason: run.reason ?? null,
+    startSig: run.startSig,
+    endSig: run.endSig ?? null,
+    effectiveWrites: run.effectiveWrites,
+    startedAt: run.startedAt,
+    endedAt: run.endedAt ?? null,
+  }
+}
+
+export function saveDirectorRun(run: DirectorRun) {
+  const row = directorRunRow(run)
+  swallow(db.insert(t.directorRuns).values(row).onConflictDoUpdate({ target: t.directorRuns.id, set: row }))
+}
+
+function directorRunFromRow(row: typeof t.directorRuns.$inferSelect): DirectorRun {
+  return {
+    id: row.id,
+    canvasId: row.canvasId,
+    pageId: row.pageId,
+    taskId: row.taskId,
+    ownerId: row.ownerId,
+    ...(row.askerId != null ? { askerId: row.askerId } : {}),
+    agent: row.agent,
+    ...(row.runner != null ? { runner: row.runner } : {}),
+    mode: row.mode,
+    status: row.status,
+    stage: row.stage,
+    pass: row.pass,
+    maxPasses: row.maxPasses,
+    budgets: row.budgets,
+    spent: row.spent,
+    passes: row.passes,
+    openIssues: row.openIssues,
+    ...(row.reason != null ? { reason: row.reason } : {}),
+    startSig: row.startSig,
+    ...(row.endSig != null ? { endSig: row.endSig } : {}),
+    effectiveWrites: row.effectiveWrites,
+    startedAt: row.startedAt,
+    ...(row.endedAt != null ? { endedAt: row.endedAt } : {}),
+    ledger: [],
+  }
+}
+
+export async function loadDirectorRuns(): Promise<DirectorRun[]> {
+  const rows = await db.select().from(t.directorRuns).orderBy(desc(t.directorRuns.startedAt))
+  return rows.map(directorRunFromRow)
 }
 
 export function deleteGuideline(canvasId: string, name: string) {
@@ -1189,11 +1259,19 @@ function referencesField(references: string | null): Pick<AgentTask, 'references
 
 /** A structured card's kind + payload, or nothing when the row is a prompt
  *  card or its payload no longer parses (the card then reads as a plain one).
- *  An animate card carries no payload — the kind itself is the flag, so it
- *  alone comes back. */
-function repoCardFields(kind: string | null, payload: string | null): Pick<AgentTask, 'kind' | 'payload'> {
+ *  An animate card stores its AnimateRequest in the same payload column —
+ *  the kind alone also stands, for cards written before the request existed. */
+function repoCardFields(kind: string | null, payload: string | null): Pick<AgentTask, 'kind' | 'payload' | 'animate'> {
   if (!kind) return {}
-  if (!payload) return kind === 'animate' ? { kind } : {}
+  if (kind === 'animate') {
+    if (!payload) return { kind }
+    try {
+      return { kind, animate: JSON.parse(payload) as AnimateRequest }
+    } catch {
+      return { kind }
+    }
+  }
+  if (!payload) return {}
   try {
     return { kind: kind as CardKind, payload: JSON.parse(payload) as RepoCardPayload | DriftCardPayload }
   } catch {
@@ -1226,7 +1304,7 @@ export function saveTask(canvasId: string, task: AgentTask) {
     stage: task.stage ?? null,
     attachments: task.attachments?.join(',') ?? null,
     kind: task.kind ?? null,
-    payload: task.payload ? JSON.stringify(task.payload) : null,
+    payload: task.payload ? JSON.stringify(task.payload) : task.animate ? JSON.stringify(task.animate) : null,
     scope: task.scope ? JSON.stringify(task.scope) : null,
     references: task.references?.length ? JSON.stringify(task.references) : null,
     frameIds: task.frameIds?.join(',') ?? null,
@@ -1437,6 +1515,9 @@ export interface Hydrated {
   /** canvasId -> render jobs, newest first; a job left 'rendering' across a
    *  restart is failed on the way in */
   renderJobs: Map<string, RenderJob[]>
+  /** director runs, newest first; a row left 'running' across a restart
+   *  becomes 'interrupted' in directorRuns.init */
+  directorRuns: DirectorRun[]
   tasks: Map<string, AgentTask[]> // canvasId -> newest first
   feedback: Map<string, TaskFeedback[]>
   comments: Map<string, ElementComment[]>
@@ -1470,6 +1551,7 @@ export async function hydrate(): Promise<Hydrated> {
     memberRows,
     compositionRows,
     renderJobRows,
+    directorRunRows,
   ] = await Promise.all([
     db.select().from(t.canvases),
     /* every column but html: frame HTML is most of the database and loads
@@ -1490,6 +1572,7 @@ export async function hydrate(): Promise<Hydrated> {
     db.select().from(t.canvasMembers).orderBy(t.canvasMembers.addedAt),
     db.select().from(t.compositions),
     db.select().from(t.renderJobs).orderBy(desc(t.renderJobs.createdAt)),
+    db.select().from(t.directorRuns).orderBy(desc(t.directorRuns.startedAt)),
   ])
 
   const canvases: Canvas[] = canvasRows.map((c) => ({
@@ -1866,6 +1949,7 @@ export async function hydrate(): Promise<Hydrated> {
     decisions,
     proposals,
     renderJobs,
+    directorRuns: directorRunRows.map(directorRunFromRow),
   }
 }
 
