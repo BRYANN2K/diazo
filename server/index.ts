@@ -158,6 +158,8 @@ import {
   patchRenderJob,
   wireRenderJobs,
 } from './motionJobs.ts'
+import { getDirectorRun, initDirectorRuns, listDirectorRuns, wireDirectorRuns } from './directorRuns.ts'
+import { directorRunView, parseAnimateRequest } from '../shared/director.ts'
 import { nanoid } from 'nanoid'
 import { MOTION_LIMITS, parseCompositionBody, parseOps } from '../shared/motion.ts'
 import {
@@ -271,6 +273,10 @@ actions.hydrateLogs(data)
 /* render jobs the restart orphaned are already marked failed by hydrate;
    the in-memory pool mirrors the table for the REST routes */
 initRenderJobs(data.renderJobs)
+/* director rows left `running` across the restart come back `interrupted`
+   and their cards fail with the retry-from-film reason (needs taskLog
+   hydrated, so after actions.hydrateLogs) */
+initDirectorRuns(data.directorRuns)
 seed()
 
 /* Never-attempted queued cards get their first pickup after boot. Hydration
@@ -491,6 +497,7 @@ setInterval(() => {
 }, 5000)
 
 actions.wire(broadcast, agentTouch)
+wireDirectorRuns(broadcast)
 wireDevTasks(broadcast)
 /* a `queued` dev task's launch job lives in this process's memory — after a
    restart nothing can claim it, so it is failed like an expired one */
@@ -4322,6 +4329,16 @@ app.post('/api/canvases/:id/cards', async (req, res) => {
   if (!requireCanvas(req, res, req.params.id, 'edit')) return
   const title = String(req.body?.title ?? '').trim()
   if (!title) return res.status(400).json({ error: 'empty title' })
+  /* an animate card carries a validated film request — the kind is never
+     derived from the card's text */
+  let animate
+  if (req.body?.kind === 'animate') {
+    const parsed = parseAnimateRequest(req.body?.animate)
+    if (!parsed.ok) return res.status(400).json({ error: parsed.error })
+    animate = parsed.value
+  } else if (req.body?.animate !== undefined) {
+    return res.status(400).json({ error: 'animate belongs on an animate card' })
+  }
   const gate = await allowance.consumeResidentTask(req.user!.id)
   if (!gate.ok) {
     return res.status(403).json({ error: 'resident_limit', used: gate.used, limit: gate.limit })
@@ -4337,6 +4354,7 @@ app.post('/api/canvases/:id/cards', async (req, res) => {
     req.body?.runner,
     undefined,
     req.body?.kind,
+    animate,
   )
   if (!card) return res.status(404).json({ error: 'canvas not found or empty title' })
   res.json(card)
@@ -4365,6 +4383,38 @@ app.post('/api/canvases/:canvasId/cards/:id/stop', (req, res) => {
   const card = actions.stopCard(req.params.canvasId, req.params.id, req.user!.name)
   if (!card) return res.status(404).json({ error: 'card not found' })
   res.json(card)
+})
+
+/* ---- director runs (motion-director M0): the staged Animate run's own
+   read surface — the room's `director` messages carry the live view ---- */
+
+app.get('/api/canvases/:id/director-runs', (req, res) => {
+  const canvas = requireCanvas(req, res, req.params.id, 'view')
+  if (!canvas) return
+  const pageId = typeof req.query.pageId === 'string' ? req.query.pageId : undefined
+  const limit = Number(req.query.limit) || 20
+  res.json({ runs: listDirectorRuns(canvas.id, pageId, limit) })
+})
+
+app.get('/api/director-runs/:id', (req, res) => {
+  const run = getDirectorRun(req.params.id)
+  if (!run) return res.status(404).json({ error: 'director run not found' })
+  const canvas = requireCanvas(req, res, run.canvasId, 'view')
+  if (!canvas) return
+  res.json({ run: directorRunView(run) })
+})
+
+app.post('/api/director-runs/:id/stop', (req, res) => {
+  const run = getDirectorRun(req.params.id)
+  if (!run) return res.status(404).json({ error: 'director run not found' })
+  const canvas = requireCanvas(req, res, run.canvasId, 'edit')
+  if (!canvas) return
+  /* the card stop path is the run's stop: a stopped run returns at once,
+     posts nothing */
+  const card = actions.stopCard(run.canvasId, run.taskId, req.user!.name)
+  if (!card) return res.status(404).json({ error: 'the run’s card is gone' })
+  const after = getDirectorRun(run.id)
+  res.json({ run: after ? directorRunView(after) : null, card })
 })
 
 app.post('/api/tasks/:id/feedback', async (req, res) => {

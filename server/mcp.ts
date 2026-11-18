@@ -2209,16 +2209,58 @@ export function buildMcpServer(
         canvas_id: z.string(),
         page_id: z.string(),
         pixels: z.boolean().optional(),
+        scores: z
+          .record(z.string(), z.number().int().min(1).max(5))
+          .optional()
+          .describe('Your grades per rubric category, 1–5; a category with a machine blocker caps at 2'),
+        issues: z
+          .array(
+            z.object({
+              t: z.number().optional(),
+              track_id: z.string().optional(),
+              severity: z.enum(['blocker', 'major', 'minor']),
+              fix: z.string(),
+            }),
+          )
+          .max(40)
+          .optional()
+          .describe('Your own findings this pass, at most 40'),
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, page_id, pixels, agent_name }) => {
+    async ({ canvas_id, page_id, pixels, scores, issues, agent_name }) => {
       const c = canvasFor(canvas_id, 'view')
       if (!c) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
-      const out = await critiqueScene(c, page_id, { pixels })
+      const out = await critiqueScene(c, page_id, { pixels, scores, issues })
       if (!out.ok) return err(out.error)
       return text({ ok: true, ...(out.data as object) })
+    },
+  )
+
+  server.registerTool(
+    'wait_for_job',
+    {
+      title: 'Wait on a queued job',
+      description:
+        'Poll a speech, blender or render job until its state changes or the call times out (90 s max per call). Past ten minutes total on one job the answer says to go on without it. generate_video is synchronous — it has no job to wait on.',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        kind: z.enum(['speech', 'video', 'blender', 'render']),
+        job_id: z.string(),
+        timeout_s: z.number().optional().describe('Seconds to wait, 5–90, default 90'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, kind, job_id, timeout_s, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const { waitForJob } = await import('./directorLoop.ts')
+      const timeoutMs = Math.min(90_000, Math.max(5_000, (Number(timeout_s) || 90) * 1_000))
+      const out = await waitForJob(kind, job_id, c.id, timeoutMs)
+      return text({ ok: true, state: out.text })
     },
   )
 
