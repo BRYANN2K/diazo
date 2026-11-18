@@ -139,7 +139,7 @@ export const SCRIPT_TOOL_COVERAGE: Record<string, { sdk: string } | { excluded: 
     sdk: 'compositions.lint',
   },
   render_composition: {
-    sdk: 'compositions.render',
+    excluded: 'A queued render job outlives the run and script undo cannot reach it — the dedicated tool owns it.',
   },
   add_effect: {
     excluded: 'Motion or scene editing stays in the dedicated MCP tools.',

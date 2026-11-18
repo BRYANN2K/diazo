@@ -32,6 +32,8 @@ import {
 } from '../server/scriptRunner.ts'
 import { scriptRunDeps, type StoredScriptRun } from '../server/scriptRuns.ts'
 import { reloadEnv } from '../server/env.ts'
+import { canvasPages } from '../shared/pages.ts'
+import * as motionJobs from '../server/motionJobs.ts'
 
 let caller: ScriptCaller
 let frameId: string
@@ -311,5 +313,30 @@ it('reaches no network from the SDK in either script mode', async () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   } finally {
     fetchSpy.mockRestore()
+  }
+})
+
+it('rejects an excluded render job on both script transports and queues none', async () => {
+  /* give the page a real composition: a surviving handler would reach the
+     job queue, so "no job" can only mean the path is gone */
+  const canvas = store.getCanvas(caller.canvasId)!
+  const pageId = canvasPages(canvas)[0]!.id
+  canvas.compositions = [{ id: 'c1', canvasId: canvas.id, pageId, revision: 1 } as never]
+  const created = vi
+    .spyOn(motionJobs, 'createRenderJob')
+    .mockImplementation(() => ({ ok: true, job: { id: 'j1' } }) as never)
+  try {
+    const query = await executeScript({ script: 'return typeof diazo.compositions.render' }, caller, false)
+    expect(query.result).toBe('undefined')
+    const write = await executeScript(
+      { script: `await diazo.compositions.render(${JSON.stringify(pageId)})` },
+      caller,
+      true,
+    )
+    expect(write.ok).toBe(false)
+    expect(write.error).toMatch(/render|not a function|undefined/i)
+    expect(created).not.toHaveBeenCalled()
+  } finally {
+    created.mockRestore()
   }
 })

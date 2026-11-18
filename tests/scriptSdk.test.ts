@@ -16,6 +16,8 @@ import { dispatchScriptCall, nameMatcher, sdkPaths, SdkError, type ScriptRunCont
 import { store } from '../server/store.ts'
 import { createFrame } from '../server/actions.ts'
 import { reloadEnv } from '../server/env.ts'
+import { canvasPages } from '../shared/pages.ts'
+import * as motionJobs from '../server/motionJobs.ts'
 
 const OWNER = 'owner-1'
 const ACTOR = { kind: 'agent' as const, name: 'Script', color: '#000', runId: 'run-1' }
@@ -270,5 +272,24 @@ describe('nameMatcher', () => {
     expect(nameMatcher('--*-color')('--text-size')).toBe(false)
     expect(nameMatcher('*')('anything')).toBe(true)
     expect(nameMatcher('**')('anything')).toBe(true)
+  })
+})
+
+describe('excluded tools', () => {
+  it('compositions.render has no dispatch path and queues no job', async () => {
+    /* a page that DOES have a composition — so the pre-fix handler would
+       have reached the job queue: the refusal must be the missing path */
+    const canvas = store.getCanvas(canvasId)!
+    const pageId = canvasPages(canvas)[0]!.id
+    canvas.compositions = [{ id: 'c1', canvasId, pageId, revision: 1 } as never]
+    const created = vi
+      .spyOn(motionJobs, 'createRenderJob')
+      .mockImplementation(() => ({ ok: true, job: { id: 'j1' } }) as never)
+
+    await expect(dispatchScriptCall(runCtx(), 'compositions.render', [pageId])).rejects.toThrow(
+      /unknown diazo function/,
+    )
+    expect(created).not.toHaveBeenCalled()
+    created.mockRestore()
   })
 })

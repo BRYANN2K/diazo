@@ -1197,21 +1197,6 @@ const HANDLERS: Record<string, Entry> = {
       return { ok: true, revision: (out.data as { revision: number }).revision }
     },
   },
-  'compositions.render': {
-    write: true,
-    fn: async (ctx, args) => {
-      const pageId = str(args[0], 'pageId')
-      const opts = args[1] === undefined ? {} : obj(args[1], 'opts')
-      if (ctx.dryRun) return { ok: true, jobId: 'dry-run' }
-      const out = motion.renderComposition(canvasOf(ctx), pageId, opts as never, {
-        id: ctx.runId,
-        name: ctx.actor.name,
-      })
-      if (!out.ok) throw invalid(String(out.error))
-      return { ok: true, jobId: (out.data as { job?: { id?: string } }).job?.id ?? '' }
-    },
-  },
-
   /* ---- diazo.checks ---- */
   'checks.lint': {
     fn: async (ctx, args) => {

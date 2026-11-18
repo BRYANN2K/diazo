@@ -524,12 +524,6 @@ declare namespace diazo {
       ops: Record<string, unknown>[],
       opts?: { expectedRevision?: number },
     ): Promise<{ ok: true; revision: number }>
-    /** Queue a render job (the existing render gate, background priority).
-     *  (write) */
-    render(
-      pageId: string,
-      opts?: { format?: 'mp4' | 'webm'; target?: 'browser' | 'desktop'; range?: { start?: number; end?: number } },
-    ): Promise<{ ok: true; jobId: string }>
   }
 
   /* ---------------------------------------------------------------- */

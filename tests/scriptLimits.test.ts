@@ -49,9 +49,9 @@ beforeEach(() => {
   searchLibraries.mockClear()
 })
 
-describe('off-server search has no SDK path', () => {
-  it('search.* is refused at the host bridge', async () => {
-    for (const path of ['search.icons', 'search.images', 'search.logos']) {
+describe('excluded tools have no SDK path', () => {
+  it('search.* and compositions.render are refused at the host bridge', async () => {
+    for (const path of ['search.icons', 'search.images', 'search.logos', 'compositions.render']) {
       await expect(dispatchScriptCall(runCtx(), path, ['arrow'])).rejects.toThrow(/unknown diazo function/)
     }
   })
