@@ -121,6 +121,34 @@ function setSat(c: Rgb, s: number): Rgb {
 
 /* ---- the public API ---- */
 
+/* darker/lighter-color pick a whole colour by luma — the one branch whose
+   verdict can flip on float noise. The comparison runs at the precision
+   the RGBA8 buffers actually carry: byte channels weighted 30/59/11 into
+   integer ticks that float64 (here) and float32 (BLEND_GLSL) evaluate
+   identically, so an equal-luma tie keeps the backdrop on both sides.
+   blendPixel compares straight-colour ticks; compositePixel compares the
+   premultiplied bytes cross-multiplied by the other side's alpha — the
+   same verdict on opaque input, and no float-division edge at partial
+   coverage. */
+const lumaTicks = (r: number, g: number, b: number): number =>
+  Math.round(r * 255) * 30 + Math.round(g * 255) * 59 + Math.round(b * 255) * 11
+
+const colorPick = (mode: BlendMode, cb: Rgb, cs: Rgb): Rgb => {
+  const tb = lumaTicks(cb[0], cb[1], cb[2])
+  const ts = lumaTicks(cs[0], cs[1], cs[2])
+  const source = mode === 'darker-color' ? ts < tb : ts > tb
+  return source ? [cs[0], cs[1], cs[2]] : [cb[0], cb[1], cb[2]]
+}
+
+/* the pick on premultiplied bytes: ticks(b)·α(s) vs ticks(s)·α(b) —
+   integer products, so the tie line is exact at every alpha */
+const premultPick = (mode: BlendMode, b: Rgba, s: Rgba, cb: Rgb, cs: Rgb): Rgb => {
+  const tb = lumaTicks(b[0], b[1], b[2]) * Math.round(s[3] * 255)
+  const ts = lumaTicks(s[0], s[1], s[2]) * Math.round(b[3] * 255)
+  const source = mode === 'darker-color' ? ts < tb : ts > tb
+  return source ? cs : cb
+}
+
 /**
  * The blend function B(Cb, Cs): two straight colours in, one out. The
  * separable modes run per channel; the non-separable ones are whole-colour.
@@ -136,9 +164,8 @@ export function blendPixel(mode: BlendMode, cb: Rgb, cs: Rgb): Rgb {
     case 'luminosity':
       return setLum(cb, lum(cs))
     case 'darker-color':
-      return lum(cb) <= lum(cs) ? [cb[0], cb[1], cb[2]] : [cs[0], cs[1], cs[2]]
     case 'lighter-color':
-      return lum(cb) >= lum(cs) ? [cb[0], cb[1], cb[2]] : [cs[0], cs[1], cs[2]]
+      return colorPick(mode, cb, cs)
     default:
       return [separable(mode, cb[0], cs[0]), separable(mode, cb[1], cs[1]), separable(mode, cb[2], cs[2])]
   }
@@ -159,7 +186,8 @@ export function compositePixel(mode: BlendMode, s: Rgba, b: Rgba): Rgba {
   if (ba <= 0) return [s[0], s[1], s[2], sa]
   const cs: Rgb = [s[0] / sa, s[1] / sa, s[2] / sa]
   const cb: Rgb = [b[0] / ba, b[1] / ba, b[2] / ba]
-  const mixed = blendPixel(mode, cb, cs)
+  const mixed =
+    mode === 'darker-color' || mode === 'lighter-color' ? premultPick(mode, b, s, cb, cs) : blendPixel(mode, cb, cs)
   const ao = sa + ba * (1 - sa)
   const rgb: number[] = []
   for (let i = 0; i < 3; i++) {
@@ -190,6 +218,7 @@ vec3 doopClip(vec3 c) {
   return c;
 }
 vec3 doopSetLum(vec3 c, float l) { return doopClip(c + (l - doopLum(c))); }
+float doopLumaTicks(vec3 c) { return dot(floor(c * 255. + .5), vec3(30., 59., 11.)); }
 float doopDodge(float cb, float cs) { return cs >= 1. ? (cb > 0. ? 1. : 0.) : min(1., cb / (1. - cs)); }
 float doopBurn(float cb, float cs) { return cb >= 1. ? 1. : cs <= 0. ? 0. : max(0., 1. - (1. - cb) / cs); }
 float doopVivid(float cb, float cs) { return cs <= .5 ? doopBurn(cb, 2. * cs) : doopDodge(cb, 2. * cs - 1.); }
@@ -223,8 +252,8 @@ vec3 doopBlend(int m, vec3 cb, vec3 cs) {
   if (m == 21) return doopSetLum(doopSetSat(cb, doopSat(cs)), doopLum(cb));       // saturation
   if (m == 22) return doopSetLum(cs, doopLum(cb));                               // color
   if (m == 23) return doopSetLum(cb, doopLum(cs));                               // luminosity
-  if (m == 24) return doopLum(cb) <= doopLum(cs) ? cb : cs;                      // darker-color
-  if (m == 25) return doopLum(cb) >= doopLum(cs) ? cb : cs;                      // lighter-color
+  if (m == 24) return doopLumaTicks(cs) < doopLumaTicks(cb) ? cs : cb;           // darker-color
+  if (m == 25) return doopLumaTicks(cs) > doopLumaTicks(cb) ? cs : cb;           // lighter-color
   return vec3(doopSep(m, cb.r, cs.r), doopSep(m, cb.g, cs.g), doopSep(m, cb.b, cs.b));
 }
 vec4 doopComposite(int m, vec4 s, vec4 b) {
@@ -232,7 +261,16 @@ vec4 doopComposite(int m, vec4 s, vec4 b) {
   if (b.a <= 0.) return s;
   vec3 cs = s.rgb / s.a;
   vec3 cb = b.rgb / b.a;
-  vec3 bm = doopBlend(m, cb, cs);
+  /* the colour-pick modes compare premult bytes cross-multiplied by the
+     other side's alpha — integer products, so the tie line is exact */
+  vec3 bm;
+  if (m == 24 || m == 25) {
+    float tb = doopLumaTicks(b.rgb) * floor(s.a * 255. + .5);
+    float ts = doopLumaTicks(s.rgb) * floor(b.a * 255. + .5);
+    bm = m == 24 ? (ts < tb ? cs : cb) : (ts > tb ? cs : cb);
+  } else {
+    bm = doopBlend(m, cb, cs);
+  }
   float ao = s.a + b.a * (1. - s.a);
   vec3 co = s.a * ((1. - b.a) * cs + b.a * bm) + (1. - s.a) * b.rgb;
   return vec4(co, ao);

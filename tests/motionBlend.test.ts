@@ -173,6 +173,61 @@ describe('blendPixel — every mode on a 5×5 grid', () => {
     expect(blendPixel('hard-mix', rgb(0.4, 0.4, 0.4), rgb(0.6, 0.6, 0.6))).toEqual([1, 1, 1])
     expect(blendPixel('hard-mix', rgb(0.4, 0.4, 0.4), rgb(0.5, 0.5, 0.5))).toEqual([0, 0, 0])
   })
+
+  it('darker/lighter-color keep the backdrop on equal luma — the byte fixtures', () => {
+    /* the reviewer's probe: [6,6,65] and [6,17,6] share one mathematical
+       luma — float32 and float64 must reach the same verdict, so the
+       comparison runs on byte-exact 30/59/11 ticks and a tie picks cb */
+    const cb = rgb(6 / 255, 6 / 255, 65 / 255)
+    const cs = rgb(6 / 255, 17 / 255, 6 / 255)
+    expect(blendPixel('darker-color', cb, cs)).toEqual(cb)
+    expect(blendPixel('lighter-color', cb, cs)).toEqual(cb)
+    /* the same pair through the opaque composite stays the backdrop */
+    expect(compositePixel('darker-color', [cs[0], cs[1], cs[2], 1], [cb[0], cb[1], cb[2], 1])).toEqual([
+      cb[0],
+      cb[1],
+      cb[2],
+      1,
+    ])
+    expect(compositePixel('lighter-color', [cs[0], cs[1], cs[2], 1], [cb[0], cb[1], cb[2], 1])).toEqual([
+      cb[0],
+      cb[1],
+      cb[2],
+      1,
+    ])
+  })
+
+  it('the colour pick agrees with float32 GLSL arithmetic on every byte pair', () => {
+    /* the reviewer's sweep: 30/59/11 byte ticks are integers under float32
+       too, so a Math.fround evaluation of the shader's expression must
+       give the identical pick on every RGBA8 pair — no ±1/255 wiggle room */
+    const f = Math.fround
+    const glslTicks = (c: Rgb): number =>
+      f(
+        f(f(Math.floor(f(c[0] * 255) + 0.5) * 30) + f(Math.floor(f(c[1] * 255) + 0.5) * 59)) +
+          f(Math.floor(f(c[2] * 255) + 0.5) * 11),
+      )
+    const glslPick = (mode: 'darker-color' | 'lighter-color', cb: Rgb, cs: Rgb): Rgb => {
+      const tb = glslTicks(cb)
+      const ts = glslTicks(cs)
+      return (mode === 'darker-color' ? ts < tb : ts > tb) ? cs : cb
+    }
+    for (const mode of ['darker-color', 'lighter-color'] as const) {
+      for (let i = 0; i < 256; i += 17) {
+        for (let j = 0; j < 256; j += 17) {
+          const cb = rgb(i / 255, j / 255, ((i + j) % 256) / 255)
+          const cs = rgb(j / 255, ((i * 3 + j) % 256) / 255, i / 255)
+          expect(blendPixel(mode, cb, cs), `${mode} ${cb} ${cs}`).toEqual(glslPick(mode, cb, cs))
+          /* and through the premultiplied composite on opaque input */
+          const s: readonly [number, number, number, number] = [cs[0], cs[1], cs[2], 1]
+          const b: readonly [number, number, number, number] = [cb[0], cb[1], cb[2], 1]
+          const want = glslPick(mode, cb, cs)
+          const got = compositePixel(mode, s, b)
+          for (let ch = 0; ch < 3; ch++) expect(got[ch]!, `${mode} composite ${cb} ${cs}`).toBe(want[ch]!)
+        }
+      }
+    }
+  })
 })
 
 describe('compositePixel — premultiplied source-over', () => {
