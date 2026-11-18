@@ -37,6 +37,8 @@ import {
   type CanvasSkill,
 } from '../shared/skills.ts'
 import { parseRunnerPick, runnerKey, type RunnerPick } from '../shared/agentRunner.ts'
+import type { AnimateRequest } from '../shared/director.ts'
+import { directorRunForTask, runningDirectorForPage } from './directorRuns.ts'
 import { hasElementId, stampElementId } from './elementIds.ts'
 import { decodeEscapedHtml, looksEscapedHtml, repairEscapedHtml } from './escapedHtml.ts'
 import { fontsForCanvas } from './fonts.ts'
@@ -145,6 +147,9 @@ export function hydrateLogs(data: {
  *  visible, retryable failure instead of sitting "in progress" forever. */
 function failInterruptedWork() {
   const reason = 'Interrupted by a server restart. Retry when you are ready.'
+  /* an interrupted director run leaves the film as it is — its retry
+     refines instead of rebuilding */
+  const animateReason = 'The server restarted. Retry continues from the film as it is.'
   const now = Date.now()
   for (const [canvasId, list] of taskLog) {
     for (const t of list) {
@@ -152,7 +157,7 @@ function failInterruptedWork() {
       if (t.queuedBy) {
         /* a claimed card whose run died — retryable */
         t.failedAt = now
-        t.failureReason = reason
+        t.failureReason = t.kind === 'animate' ? animateReason : reason
       } else {
         /* a live status row from the dead process — just close it out */
         t.endedAt = now
@@ -288,6 +293,9 @@ export interface NextWork {
   /** the oldest item is a chat ask: the run takes the plan-only tool loop and
    *  claims only chat messages, never cards/comments/feedback */
   chat?: boolean
+  /** the oldest item is an animate card: the run hands it to the director —
+   *  one card, no comments, no feedback, no ordinary batch */
+  animate?: { cardId: string }
 }
 
 export function workKey(payer: string, runner: RunnerPick | undefined): string {
@@ -323,16 +331,33 @@ export function nextWork(canvasId: string, agentName: string, skip?: ReadonlySet
 /** The oldest claimable work the predicate does not pass over. */
 function oldestWork(canvasId: string, agentName: string, passOver: (work: NextWork) => boolean): NextWork | undefined {
   let oldest: { at: number; work: NextWork } | undefined
-  const consider = (at: number, userId: string | undefined, runner: RunnerPick | undefined, chat = false) => {
+  const consider = (
+    at: number,
+    userId: string | undefined,
+    runner: RunnerPick | undefined,
+    chat = false,
+    animateCardId?: string,
+  ) => {
     const payer = userId ?? ''
-    const key = workKey(payer, runner)
+    /* an animate card keys on its id: one run takes one animate card, and a
+       stalled one never masks the same payer's ordinary work */
+    const key = workKey(payer, runner) + (animateCardId ? `\nanimate:${animateCardId}` : '')
     if (passOver({ payer, key })) return
     if (!oldest || at < oldest.at)
-      oldest = { at, work: { payer, ...(runner ? { runner } : {}), key, ...(chat ? { chat } : {}) } }
+      oldest = {
+        at,
+        work: {
+          payer,
+          ...(runner ? { runner } : {}),
+          key,
+          ...(chat ? { chat } : {}),
+          ...(animateCardId ? { animate: { cardId: animateCardId } } : {}),
+        },
+      }
   }
   for (const card of taskLog.get(canvasId) ?? []) {
     if (card.queuedBy && !card.agentName && !card.failedAt && !card.endedAt && stageAgent(card) === agentName) {
-      consider(card.startedAt, card.queuedByUserId, card.runner)
+      consider(card.startedAt, card.queuedByUserId, card.runner, false, card.kind === 'animate' ? card.id : undefined)
     }
   }
   for (const c of commentLog.get(canvasId) ?? []) {
@@ -460,6 +485,50 @@ export function addTaskFeedback(
     /* a reply goes back to the agent whose work it is about — unless that was
        an outside agent, in which case it stays open to whoever shows up */
     const target = roleByAgentName(task.agentName)?.name
+    /* feedback on an animate card does not enter the ordinary queue — it
+       queues a new animate card in 'refine' mode with the text as its note */
+    if (task.kind === 'animate' && task.animate?.pageId) {
+      const fb: TaskFeedback = {
+        id: nanoid(8),
+        taskId,
+        canvasId,
+        agentName: task.agentName,
+        ...(target ? { targetAgent: target } : {}),
+        from,
+        ...(fromUserId ? { fromUserId } : {}),
+        ...(task.runner ? { runner: task.runner } : {}),
+        text: clean,
+        at: Date.now(),
+        completedAt: Date.now(),
+      }
+      const list = feedbackLog.get(canvasId) ?? []
+      list.unshift(fb)
+      if (list.length > 100) list.length = 100
+      feedbackLog.set(canvasId, list)
+      persist.saveFeedback(fb)
+      broadcast(canvasId, { type: 'feedback', feedback: fb })
+      addQueuedCard(
+        canvasId,
+        `Animate: ${task.status}`,
+        task.queuedBy ?? task.agentName,
+        [DEFAULT_ROLE_ID],
+        undefined,
+        task.queuedByUserId ?? fromUserId,
+        undefined,
+        task.runner,
+        undefined,
+        'animate',
+        {
+          pageId: task.animate.pageId,
+          mode: 'refine',
+          note: clean.slice(0, 1_000),
+          ...(directorRunIdForTask(taskId) ? { parentRunId: directorRunIdForTask(taskId) } : {}),
+        },
+      )
+      import('./resident.ts').then((r) => r.onFeedback(canvasId)).catch(() => {})
+      logActivity(canvasId, resolveActor({ name: from, kind: 'user' }), `asked for another pass on “${task.status}”`)
+      return fb
+    }
     const fb: TaskFeedback = {
       id: nanoid(8),
       taskId,
@@ -1581,6 +1650,7 @@ export function addQueuedCard(
   runner?: unknown,
   references?: unknown,
   kind?: unknown,
+  animate?: AnimateRequest,
 ): AgentTask | undefined {
   const clean = title.trim().slice(0, MAX_CARD_CHARS)
   if (!clean || !store.getCanvas(canvasId)) return undefined
@@ -1609,7 +1679,8 @@ export function addQueuedCard(
       JSON.stringify(t.scope ?? null) === JSON.stringify(target ?? null) &&
       JSON.stringify(t.references ?? null) === JSON.stringify(libRefs.length ? libRefs : null) &&
       runnerKey(t.runner) === runnerKey(pick) &&
-      (t.kind ?? null) === (cardKind ?? null),
+      (t.kind ?? null) === (cardKind ?? null) &&
+      JSON.stringify(t.animate ?? null) === JSON.stringify(animate ?? null),
   )
   if (duplicate) return duplicate
   const card: AgentTask = {
@@ -1623,6 +1694,7 @@ export function addQueuedCard(
     pipeline,
     stage: 0,
     ...(cardKind ? { kind: cardKind } : {}),
+    ...(cardKind === 'animate' && animate ? { animate } : {}),
     ...(refs.length > 0 ? { attachments: refs } : {}),
     ...(libRefs.length ? { references: libRefs } : {}),
     ...(target ? { scope: target } : {}),
@@ -1829,6 +1901,9 @@ export function takeQueuedCardsFor(canvasId: string, agentName: string, payer?: 
       !t.agentName &&
       !t.failedAt &&
       !t.endedAt &&
+      /* animate cards never batch into an ordinary run — takeAnimateCard
+         claims them one at a time for a director run */
+      t.kind !== 'animate' &&
       stageAgent(t) === agentName &&
       (payer === undefined || (t.queuedByUserId ?? '') === payer) &&
       (runner === undefined || runnerKey(t.runner) === runner),
@@ -1841,6 +1916,37 @@ export function takeQueuedCardsFor(canvasId: string, agentName: string, payer?: 
     broadcast(canvasId, { type: 'task', task: c })
   }
   return pending
+}
+
+/** One animate card, claimed for a director run: exactly the card nextWork
+ *  named, only when its page has no director already running — a second
+ *  animate card on a busy page waits. The card comes back claimed or the
+ *  call returns undefined (already claimed, finished, or page busy). */
+export function takeAnimateCard(canvasId: string, cardId: string, agentName: string): AgentTask | undefined {
+  const card = (taskLog.get(canvasId) ?? []).find(
+    (t) =>
+      t.id === cardId &&
+      t.kind === 'animate' &&
+      t.queuedBy &&
+      !t.agentName &&
+      !t.failedAt &&
+      !t.endedAt &&
+      stageAgent(t) === agentName,
+  )
+  if (!card) return undefined
+  if (card.animate?.pageId && runningDirectorForPage(canvasId, card.animate.pageId)) return undefined
+  card.agentName = agentName
+  card.color = colorFor(agentName)
+  card.claimedAt = Date.now()
+  persist.saveTask(canvasId, card)
+  broadcast(canvasId, { type: 'task', task: card })
+  return card
+}
+
+/** The director run a task belonged to — feedback refine cards point their
+ *  parentRunId at it so the run history stays one thread. */
+function directorRunIdForTask(taskId: string): string | undefined {
+  return directorRunForTask(taskId)?.id
 }
 
 /** An agent finished its stage: hand the card to the next agent in the
