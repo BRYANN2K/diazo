@@ -163,7 +163,13 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
     createdAt: started,
   }
   const saved: StoredScriptRun = { record }
-  await scriptRunDeps.save(saved)
+  try {
+    await scriptRunDeps.save(saved)
+  } catch {
+    /* the row binds the script and its result — a driver error can echo
+       them back; refuse the run rather than carry that message outward */
+    throw new SdkError('failed', `the run could not be audited (id ${id})`)
+  }
   const ctx: ScriptRunContext = {
     canvasId: caller.canvasId,
     userId: caller.userId,
@@ -298,8 +304,11 @@ async function execute(input: ScriptInput, caller: ScriptCaller, write: boolean)
       record.idempotencyKey = null
       await scriptRunDeps.release(id).catch(() => {})
     }
+    /* the failed insert bound the record, response and undo images — its
+       message can echo them; the answer gets an opaque reference only */
+    console.error(`[script-runs] audit save failed for run ${id}`, error instanceof Error ? error.name : error)
     record.outcome = 'error'
-    record.error = `the audit row could not be stored: ${error instanceof Error ? error.message : String(error)}`
+    record.error = `the run could not be audited (id ${id})`
     result = {
       run_id: id,
       ok: false,

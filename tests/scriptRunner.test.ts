@@ -214,11 +214,20 @@ it('serialises only the entities a write touched for undo', async () => {
 
 it('reverts writes and frees the idempotency key when the audit row is refused', async () => {
   const before = store.getFrame(frameId)!.html
-  /* the bare record lands, then the full row (response + undo) is refused */
+  /* an own account — the suite's shared caller would hit the per-minute rate */
+  store.setLinkAccess(caller.canvasId, 'edit')
+  const auditCaller: ScriptCaller = {
+    ...caller,
+    userId: 'audit-user',
+    actor: { kind: 'user', name: 'Aud', color: '#000' },
+  }
+  /* the bare record lands, then the full row (response + undo) is refused.
+     The refusal carries bound values — the response and the logs must show
+     an opaque run reference, never the driver's parameters */
   let saves = 0
   vi.spyOn(scriptRunDeps, 'save').mockImplementation(async (run) => {
     saves++
-    if (saves > 1) throw new Error('value too long')
+    if (saves > 1) throw new Error('insert script_runs — params: ["SECRET-MARKER-42","<html>…"]')
     rows.set(run.record.id, structuredClone(run))
   })
   const released: string[] = []
@@ -227,16 +236,39 @@ it('reverts writes and frees the idempotency key when the audit row is refused',
     const row = rows.get(id)
     if (row) row.record.idempotencyKey = null
   })
-  const result = await executeScript({ script: edit(), idempotency_key: 'k1' }, caller, true)
+  const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const result = await executeScript({ script: edit(), idempotency_key: 'k1' }, auditCaller, true)
   expect(result.ok).toBe(false)
-  expect(result.error).toMatch(/too long/)
+  expect(result.error).toMatch(/could not be audited/)
+  expect(result.error).toContain(result.run_id)
+  expect(result.error).not.toContain('SECRET-MARKER-42')
+  for (const args of errorSpy.mock.calls) for (const arg of args) expect(String(arg)).not.toContain('SECRET-MARKER-42')
   expect(store.getFrame(frameId)!.html).toBe(before)
   expect(released).toEqual([result.run_id])
   /* the key is free — a retry is not locked out by the dead row */
   saves = 0
-  const retry = await executeScript({ script: `return 7`, idempotency_key: 'k1' }, caller, true)
+  const retry = await executeScript({ script: `return 7`, idempotency_key: 'k1' }, auditCaller, true)
   expect(retry.ok).toBe(false)
   expect(retry.error).not.toMatch(/interrupted|conflict/i)
+  errorSpy.mockRestore()
+})
+
+it('refuses the run unaudited when the first audit save fails, without the parameters', async () => {
+  vi.spyOn(scriptRunDeps, 'save').mockRejectedValue(
+    new Error('insert script_runs — params: ["SECRET-MARKER-42","<html>…"]'),
+  )
+  store.setLinkAccess(caller.canvasId, 'edit')
+  const firstSaveCaller: ScriptCaller = {
+    ...caller,
+    userId: 'first-save-user',
+    actor: { kind: 'user', name: 'Fs', color: '#000' },
+  }
+  const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const error = await executeScript({ script: 'return 1' }, firstSaveCaller, true).catch((e: Error) => e)
+  expect(error.message).toMatch(/could not be audited/)
+  expect(error.message).not.toContain('SECRET-MARKER-42')
+  for (const args of errorSpy.mock.calls) for (const arg of args) expect(String(arg)).not.toContain('SECRET-MARKER-42')
+  errorSpy.mockRestore()
 })
 
 it('refuses runs past the per-account rate', async () => {
@@ -381,6 +413,13 @@ it('an idempotency key replays only the identical request', async () => {
 })
 
 it('an interleaved collaborator edit is not claimed by a motion run or its undo', async () => {
+  /* an own account — the suite's shared caller would hit the per-minute rate */
+  store.setLinkAccess(caller.canvasId, 'edit')
+  const ilCaller: ScriptCaller = {
+    ...caller,
+    userId: 'interleave-user',
+    actor: { kind: 'user', name: 'Il', color: '#000' },
+  }
   const canvas = store.getCanvas(caller.canvasId)!
   const pageId = canvasPages(canvas)[0]!.id
   /* an unstamped target — the storyboard stamps it, which awaits a frame write */
@@ -405,7 +444,7 @@ it('an interleaved collaborator edit is not claimed by a motion run or its undo'
   )
   const running = executeScript(
     { script: `await diazo.compositions.storyboard(${JSON.stringify(pageId)})` },
-    caller,
+    ilCaller,
     true,
   )
   await vi.waitFor(() => expect(release).toBeDefined())
@@ -430,7 +469,7 @@ it('an interleaved collaborator edit is not claimed by a motion run or its undo'
     [`composition:${pageId}`, `frame:${shot.id}`, `frame:${frameId}`].sort(),
   )
 
-  const report = await revertScriptRun(result.run_id, caller)
+  const report = await revertScriptRun(result.run_id, ilCaller)
   expect(report.unreverted).toEqual([])
   expect(store.getFrame(other.id)!.html).toContain('v2')
 })
