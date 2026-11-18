@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import type { Frame } from '../shared/types.ts'
+import { isLayer } from '../shared/motionLayers.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
 import { renderedHeight } from './renderLimits.ts'
 import {
@@ -60,11 +61,38 @@ function findBrowser(): string {
   return path
 }
 
+/** the GL backend a launch selects — 'legacy' is no flags at all: the
+ *  browser picks its default exactly as before the motion-elements work,
+ *  so films without layers render byte-identically to earlier revisions */
+export type RenderGl = 'legacy' | (typeof env)['RENDER_GL']
+
+/** a film that promotes element layers composites in WebGL: it launches
+ *  with the configured RENDER_GL backend. Anything else takes 'legacy' —
+ *  Chromium's own default, which the pre-P0 output was rendered with */
+export function glForComposition(comp: {
+  tracks: readonly { kind: string; elementId?: string; layer?: unknown }[]
+}): 'legacy' | (typeof env)['RENDER_GL'] {
+  return comp.tracks.some((t) => isLayer(t as never)) ? env.RENDER_GL : 'legacy'
+}
+
+/** the launch flags a GL backend adds — 'legacy' adds none: the browser
+ *  picks its default exactly as before the motion-elements work, so
+ *  films without layers render byte-identically to earlier revisions */
+export function glArgs(gl: RenderGl): string[] {
+  /* the layer compositor's GL backend: software by default
+     (deterministic, no GPU needed), the host GPU when RENDER_GL=gpu,
+     or disabled — the compositor then reports passthrough */
+  if (gl === 'swiftshader') return ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']
+  if (gl === 'off') return ['--disable-3d-apis']
+  return []
+}
+
 /** A fresh headless Chrome with the server's flags. `timeout` bounds the wait
  *  for its DevTools endpoint (puppeteer's default, 30s, unless given);
  *  `protocolTimeout` bounds every DevTools command (puppeteer's 180s unless
- *  given). */
-export function launchBrowser(timeout?: number, protocolTimeout?: number): Promise<Browser> {
+ *  given). `gl` picks the rasterisation backend; 'legacy' adds no GL flags
+ *  at all — the default every pre-P0 render used. */
+export function launchBrowser(timeout?: number, protocolTimeout?: number, gl: RenderGl = 'legacy'): Promise<Browser> {
   return puppeteer.launch({
     executablePath: findBrowser(),
     headless: true,
@@ -77,14 +105,7 @@ export function launchBrowser(timeout?: number, protocolTimeout?: number): Promi
       '--disable-webrtc-multiple-routes',
       '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
       '--hide-scrollbars',
-      /* motion layers and effects composite in WebGL: software by default
-         (deterministic, no GPU needed), the host GPU when RENDER_GL=gpu,
-         or disabled — the compositor then reports passthrough */
-      ...(env.RENDER_GL === 'swiftshader'
-        ? ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']
-        : env.RENDER_GL === 'off'
-          ? ['--disable-3d-apis']
-          : []),
+      ...glArgs(gl),
       /* containers: no user namespaces for the sandbox, tiny /dev/shm */
       ...(env.CHROME_NO_SANDBOX ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
     ],
@@ -136,7 +157,23 @@ const renderer = createRenderer({
   launch: () =>
     remoteBrowserUrl
       ? connectRemoteBrowser(remoteBrowserUrl, env.REMOTE_BROWSER_TOKEN)
-      : launchBrowser(undefined, PROTOCOL_TIMEOUT_MS),
+      : launchBrowser(undefined, PROTOCOL_TIMEOUT_MS, 'legacy'),
+  tuning: {
+    maxConcurrent,
+    maxBackground: backgroundConcurrency,
+    ...(remoteBrowserUrl ? { idleCloseMs: REMOTE_IDLE_CLOSE_MS, closeTimeoutMs: REMOTE_CLOSE_TIMEOUT_MS } : {}),
+  },
+})
+
+/* films with promoted element layers render through a second pool whose
+   browser launches with the configured RENDER_GL backend — everything
+   else stays on the legacy pool, so a film without layers composites on
+   the same Chromium configuration it always did (AC-8) */
+const layerRenderer = createRenderer({
+  launch: () =>
+    remoteBrowserUrl
+      ? connectRemoteBrowser(remoteBrowserUrl, env.REMOTE_BROWSER_TOKEN)
+      : launchBrowser(undefined, PROTOCOL_TIMEOUT_MS, env.RENDER_GL),
   tuning: {
     maxConcurrent,
     maxBackground: backgroundConcurrency,
@@ -162,6 +199,12 @@ export type IsolatedPage = Pick<RenderPage, 'page' | 'close'>
  *  its caller when its lease runs out (see renderBrowser.ts). */
 export function openIsolatedPage(options?: PageOptions): Promise<IsolatedPage> {
   return renderer.openPage(options)
+}
+
+/** A page on the RENDER_GL-configured pool — for films whose promoted
+ *  element layers composite in WebGL. No-layer work never reaches it. */
+export function openLayerPage(options?: PageOptions): Promise<IsolatedPage> {
+  return layerRenderer.openPage(options)
 }
 
 /** Run `work` on a page holding the frame, under the renderer's gate and

@@ -14,8 +14,8 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
   layer planning with budgets and lint; 56 seeded element motion presets
   with staggering; `set_layer`, `get_layer_plan`, `list_element_presets`
   and `apply_element_preset` on MCP and the resident agent; render jobs
-  refuse over-budget films at creation and `RENDER_GL` picks the headless
-  GL path.
+  refuse over-budget films at creation and `RENDER_GL` picks the layer
+  compositor's GL backend (films without layers render unchanged).
 - Add the partial speech job backend: estimates, persisted transcripts, voice-over
   audio clips, secure desktop relay, and matching canvas tools. Local engine
   installers and the speech sidecar remain pending.

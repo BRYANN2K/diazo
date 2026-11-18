@@ -272,8 +272,9 @@ compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per bu
   `add_effect`/`set_effects` accept `frame_id`+`element_id` and create the track; `set_layer`,
   `get_layer_plan`, `list_element_presets` and `apply_element_preset` ship on MCP and the resident
   agent; `check_scene` reports `layers` and `motion_variety`; render jobs refuse an over-budget
-  film at creation and the headless renderer picks its GL path through `RENDER_GL`. The browser
-  layer engine and the editor land separately (P0-FE).
+  film at creation. Films with promoted layers composite on a second browser pool whose GL path
+  `RENDER_GL` picks; a film without layers renders on the legacy configuration, byte-identical to
+  before. The browser layer engine and the editor land separately (P0-FE).
 - **Motion Studio ("Rostrum") — a page can be a film (backend, MVP)** — an ordinary page gains a
   seekable, deterministic timeline: duration/fps/size, camera tracks over the page's world,
   per-element property tracks, clips, audio and captions (contract in `shared/motion.ts`, API in

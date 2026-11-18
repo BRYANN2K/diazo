@@ -14,11 +14,17 @@
  */
 
 import { env } from './env.ts'
-import { openIsolatedPage, rendererAvailable } from './screenshot.ts'
+import { glForComposition, openIsolatedPage, openLayerPage, rendererAvailable } from './screenshot.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
 import { mintRenderToken, renderCookieName, revokeRenderToken } from './motionRender.ts'
-import { lintComposition, lintMotionHtml, motionLintSummary } from '../shared/motionLint.ts'
-import { planLayers } from '../shared/motionLayers.ts'
+import {
+  lintComposition,
+  lintMotionHtml,
+  motionLintSummary,
+  shotWindows,
+  trackPropsChangingIn,
+} from '../shared/motionLint.ts'
+import { planLayers, sceneEffectBill } from '../shared/motionLayers.ts'
 import { frameStateAt } from '../shared/motionRuntime.ts'
 import { EFFECT_COST_CAP, effectCost, effectSpec, GL_EFFECT_IDS } from '../shared/motionFx.ts'
 import { CRITIQUE_PASS_DEFAULT, CRITIQUE_PASS_MAX, type Composition, type MotionLintIssue } from '../shared/motion.ts'
@@ -75,7 +81,12 @@ async function driveHarness(
   if (!rendererAvailable()) return { error: 'no renderer on this instance' }
   const budget = SHEET_BUDGET_MS
   const token = mintRenderToken({ canvasId: comp.canvasId, pageId: comp.pageId }, budget)
-  const iso = await openIsolatedPage({ priority: 'background', leaseMs: budget })
+  /* films with promoted layers composite through the configured GL pool;
+     a film without layers renders on the legacy backend it always did */
+  const iso = await (glForComposition(comp) !== 'legacy' ? openLayerPage : openIsolatedPage)({
+    priority: 'background',
+    leaseMs: budget,
+  })
   try {
     const page = iso.page
     const origin = env.BETTER_AUTH_URL
@@ -174,17 +185,9 @@ export async function sceneSnapshot(
 /* ---- check_scene ---- */
 
 /** the film's shot structure from the camera track: boundary times →
- *  segments, for pacing stats and dead-beat spotting */
-function shotsOf(comp: Composition): { t: number; duration: number }[] {
-  const camera = comp.tracks.find((t) => t.kind === 'camera')
-  const bounds = [...new Set((camera?.keyframes ?? []).map((k) => k.t))]
-    .filter((t) => t >= 0 && t < comp.duration)
-    .sort((a, b) => a - b)
-  const edges = [0, ...bounds.filter((t) => t > 0), comp.duration]
-  const out: { t: number; duration: number }[] = []
-  for (let i = 0; i + 1 < edges.length; i++) out.push({ t: edges[i]!, duration: edges[i + 1]! - edges[i]! })
-  return out
-}
+ *  segments, for pacing stats and dead-beat spotting — the same windows
+ *  the lint's per-shot rules judge */
+const shotsOf = (comp: Composition): { t: number; duration: number }[] => shotWindows(comp)
 
 /** element/clip motion inside [t, t+d) — the "is anything alive" signal a
  *  dead beat checks */
@@ -403,7 +406,6 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
       cost: effectCost(track),
     }))
     .filter((t) => t.effects.length > 0 || t.kind === 'adjustment')
-  const totalCost = perTrack.reduce((a, t) => a + t.cost, 0)
   const unsupported = new Set<string>()
   const notDrawn: { track_id: string; what: string; reason: string }[] = []
   for (const track of comp.tracks) {
@@ -436,6 +438,15 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
       notDrawn.push({ track_id: track.id, what: `${track.masks!.length} mask(s)`, reason: 'masks draw in P1' })
     }
   }
+  /* 3b — the layer plan (static part) and motion variety: what promotes,
+     what it costs, and which shots read as fade-only */
+  const plans = planLayers(
+    comp,
+    frames.map((f) => ({ id: f.id, html: f.html })),
+  )
+  /* the bill the renderer actually pays — scene stacks plus promoted
+     element layers; suppressed element stacks cost nothing */
+  const totalCost = sceneEffectBill(comp, plans)
   const effects = {
     per_track: perTrack,
     total_cost: totalCost,
@@ -444,13 +455,6 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
     unsupported: [...unsupported],
     not_drawn: notDrawn,
   }
-
-  /* 3b — the layer plan (static part) and motion variety: what promotes,
-     what it costs, and which shots read as fade-only */
-  const plans = planLayers(
-    comp,
-    frames.map((f) => ({ id: f.id, html: f.html })),
-  )
   const layers = {
     count: plans.reduce((a, p) => a + p.layers.length, 0),
     frames: plans
@@ -460,6 +464,7 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
         layers: p.layers.map((l) => ({
           element_id: l.elementId,
           track_id: l.trackId,
+          order: l.order,
           content: l.content,
           transform: l.transform,
           visible: l.visible,
@@ -471,16 +476,17 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
       })),
     issues: plans.flatMap((p) => p.issues),
   }
+  /* a lane interpolating across a shot is motion even when no keyframe
+     lands inside it — keyframe timestamps alone undercount */
   const motionVariety = shots.map((shot) => {
-    const end = shot.t + shot.duration
     const props = new Set<string>()
     let animated = 0
     for (const track of comp.tracks) {
-      if (track.kind !== 'element') continue
-      const inShot = (track.keyframes ?? []).filter((k) => k.t >= shot.t && k.t < end)
-      if (inShot.length === 0) continue
+      if (track.kind !== 'element' || track.muted) continue
+      const changing = trackPropsChangingIn(track, shot.t, shot.duration)
+      if (changing.size === 0) continue
       animated += 1
-      for (const k of inShot) props.add(k.property)
+      for (const p of changing) props.add(p)
     }
     return {
       t: shot.t,

@@ -156,3 +156,55 @@ Blend formulas are the W3C Compositing and Blending Level 1 equations plus
 the common published Photoshop-era separable-mode definitions — mathematics,
 clean-room written and recorded in THIRD-PARTY-LICENSES under "Specifications
 followed" (W3C Document License).
+
+## Review fixes — motion-elements-p0-astra
+
+Every blocking finding in `/tmp/reviews/motion-elements-p0-astra.md` applied:
+
+- **Atomic preset batches**: `applyElementPreset` builds provisional tracks
+  in a request-local pass and lands `add_track` + keyframes in ONE
+  `patchComposition` — a rejected batch (missing element, stagger past the
+  film, bad duration) leaves zero tracks; a peer's racing `add_track`
+  remaps onto the peer's track and retries (3 attempts). 6-element probe
+  covered in tests.
+- **Bounded preset generation**: `ELEMENT_PRESET_MAX_LOOPS` (64) and
+  `ELEMENT_PRESET_MAX_DURATION` (3600); t/duration/direction validated
+  before any loop; every loop site (swings, steps, bounces, counts,
+  frequencies, octaves, turns, nested wiggle) clamps before expansion;
+  stagger `each`·(n−1) and `amount` bounded as spans, not per-element.
+- **Renderer compatibility (AC-8)**: `RENDER_GL` selects the backend ONLY
+  for films with promoted element layers (`glForComposition`,
+  `openLayerPage`, a second `createRenderer` pool); everything else —
+  including every golden fixture — launches `legacy`, i.e. zero GL flags,
+  the exact pre-P0 Chromium configuration. Byte-identity holds by
+  construction; `glArgs`/`glForComposition` unit-tested.
+- **Blend endpoints**: `color-burn`, `vivid-light` and `hard-mix`
+  corrected to the W3C equations in the TS CPU reference AND the GLSL;
+  literal endpoint tests + an independent formula oracle.
+- **Planner**: ancestor matrices premultiply outer→inner (2-level probe);
+  dynamic classification covers frame `data-doop-motion` blocks, text
+  animators, CSS transform lanes and tracked non-layer descendants;
+  `layerPadReach` reports honest reach — over the pad cap is MO-15, not a
+  silent clamp; layers sort by measured paint order / markup order with
+  `order` assigned after sorting; complex clips keep `transform: 'css'`,
+  plain rect/rounded-rect pass; `baseHideCss` hides the whole subtree;
+  matte sources promote with the consumer and report MO-16 on
+  dangling/cross-frame/muted/cyclic sources.
+- **Tool parity**: `element_ids` is the only public identifier on MCP and
+  resident (singular shorthand removed); `set_layer` accepts the
+  documented flat fields plus nested `layer`, conflicting duplicates
+  refused, `motion_blur`↔`motionBlur` mapped; `masks` replaces atomically
+  via `set_masks`; `list_motion_effects` reports `alpha`, `grow`, `scopes`.
+- **Render jobs**: range refuses `NaN`/non-finite instead of silently
+  defaulting; `0 ≤ start < end ≤ duration` enforced; MO-15 refusals carry
+  `rule: 'MO-15'` to the API response; `sceneEffectBill` shared between
+  `check_scene` and job creation — muted/`mode:'off'`/`visible:false`
+  stacks bill nothing.
+- **Lint**: MO-19 matches any quote/whitespace `data-doop-id` form and
+  doesn't false-positive on lookalike ids; MO-21 is per-shot through
+  `shotWindows`/`changingPropsIn`, counting interpolation that crosses a
+  shot even when no keyframe lands strictly inside.
+
+Tests: probes live in tests/motionLayers, motionElementPresets,
+motionProTools, motion, motionElementCss, motionRenderGl and
+motionBlend — each reproduces the failing behaviour without its fix.

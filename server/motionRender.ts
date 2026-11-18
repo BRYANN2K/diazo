@@ -16,8 +16,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { nanoid } from 'nanoid'
 import { env } from './env.ts'
-import { openIsolatedPage } from './screenshot.ts'
+import { glForComposition, openIsolatedPage, openLayerPage } from './screenshot.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
+import { store } from './store.ts'
 import { finishRenderJob, patchRenderJob } from './motionJobs.ts'
 import { storeAsset, storeAssetFile } from './assets.ts'
 import { muxWebm, type WebmChunk } from './webmMux.ts'
@@ -298,7 +299,7 @@ const WEBM_FLUSH = `async () => {
 }`
 
 /* seams so tests can drive renderInPage without a browser */
-export const renderDeps = { openIsolatedPage }
+export const renderDeps = { openIsolatedPage, openLayerPage }
 
 const base64Bytes = (dataUrl: string) => Buffer.from(dataUrl.split(',')[1] ?? '', 'base64')
 
@@ -392,9 +393,15 @@ async function renderInPage(
   renderToken: string,
   budget: number,
 ): Promise<RenderOutput> {
+  /* a film that promotes element layers composites in WebGL: it renders
+     on the RENDER_GL-configured pool. Anything else goes to the legacy
+     pool — the same Chromium configuration the pre-layer output came
+     from, byte for byte (AC-8) */
+  const comp = store.getComposition(job.canvasId, job.pageId)
+  const openPage = comp && glForComposition(comp) !== 'legacy' ? renderDeps.openLayerPage : renderDeps.openIsolatedPage
   /* the page keeps its render slot for the whole budget — the renderer's
      default 120 s lease would close a long render mid-capture */
-  const iso = await renderDeps.openIsolatedPage({ priority: 'background', leaseMs: budget })
+  const iso = await openPage({ priority: 'background', leaseMs: budget })
   try {
     const page = iso.page
     const origin = new URL(url).origin
