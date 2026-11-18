@@ -121,7 +121,6 @@ export interface ScriptRunSummary {
   dryRun: boolean
   truncated: boolean
   resultBytes: number
-  idempotencyKey: string | null
   createdAt: number
 }
 
@@ -140,7 +139,6 @@ export function summarizeRun(record: ScriptRunRecord): ScriptRunSummary {
     dryRun: record.dryRun,
     truncated: record.truncated,
     resultBytes: record.resultBytes,
-    idempotencyKey: record.idempotencyKey,
     createdAt: record.createdAt,
   }
 }

@@ -33,6 +33,7 @@ import {
   type ScriptCaller,
 } from '../server/scriptRunner.ts'
 import { scriptRunDeps, type StoredScriptRun } from '../server/scriptRuns.ts'
+import { summarizeRun } from '../shared/scriptRuns.ts'
 import { reloadEnv } from '../server/env.ts'
 import { canvasPages } from '../shared/pages.ts'
 import * as motionJobs from '../server/motionJobs.ts'
@@ -272,6 +273,20 @@ it('refuses the run unaudited when the first audit save fails, without the param
   expect(error.message).not.toContain('SECRET-MARKER-42')
   for (const args of errorSpy.mock.calls) for (const arg of args) expect(String(arg)).not.toContain('SECRET-MARKER-42')
   errorSpy.mockRestore()
+})
+
+it('never surfaces a raw idempotency key in run summaries', async () => {
+  /* an own account — the suite's shared caller would hit the per-minute rate */
+  store.setLinkAccess(caller.canvasId, 'edit')
+  const keyCaller: ScriptCaller = {
+    ...caller,
+    userId: 'key-user',
+    actor: { kind: 'user', name: 'Key', color: '#000' },
+  }
+  const result = await executeScript({ script: 'return 1', idempotency_key: 'SENSITIVE-KEY-77' }, keyCaller, true)
+  const summary = summarizeRun(rows.get(result.run_id)!.record)
+  expect(summary).not.toHaveProperty('idempotencyKey')
+  expect(JSON.stringify(summary)).not.toContain('SENSITIVE-KEY-77')
 })
 
 it('drops the PNG buffers a run retained, whatever way it ends', async () => {
