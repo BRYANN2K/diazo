@@ -40,6 +40,7 @@ import * as motionJobs from '../server/motionJobs.ts'
 import * as persist from '../server/db/persist.ts'
 import * as screenshot from '../server/screenshot.ts'
 import * as scriptSdk from '../server/scriptSdk.ts'
+import * as lint from '../server/lint.ts'
 
 let caller: ScriptCaller
 let frameId: string
@@ -703,4 +704,120 @@ it('snapshot budget exhaustion ends the run — a caught error cannot write on',
   expect(store.getFrame(frameId)!.html).toContain('Before')
   expect(screenshot.renderFrame).not.toHaveBeenCalled()
   await expect(revertScriptRun(result.run_id, caller)).rejects.toThrow(/successful writes/)
+})
+
+it('a collaborator rename on a later storyboard shot survives the run undo', async () => {
+  /* the second frame is renamed while the FIRST frame's stamp write is
+     still saving: the later stamp must take its before-image at its own
+     mutation, with the rename already inside — coalescing it with the
+     run's first image would erase the rename on undo */
+  store.setLinkAccess(caller.canvasId, 'edit')
+  const ilCaller: ScriptCaller = {
+    ...caller,
+    userId: 'interleave-user-3',
+    actor: { kind: 'user', name: 'Il3', color: '#000' },
+  }
+  const canvas = store.getCanvas(caller.canvasId)!
+  const pageId = canvasPages(canvas)[0]!.id
+  actions.createFrame(
+    caller.canvasId,
+    { name: 'Shot1', html: '<html><body><h1>One</h1></body></html>', width: 400, height: 300, x: 0, y: 400 },
+    caller.actor,
+  )
+  const shot2 = actions.createFrame(
+    caller.canvasId,
+    { name: 'Shot2', html: '<html><body><h1>Two</h1></body></html>', width: 400, height: 300, x: 0, y: 800 },
+    caller.actor,
+  )!
+  let release!: () => void
+  vi.mocked(persist.saveFrameNow).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve
+      }),
+  )
+  const running = executeScript(
+    { script: `await diazo.compositions.storyboard(${JSON.stringify(pageId)})` },
+    ilCaller,
+    true,
+  )
+  await vi.waitFor(() => {
+    expect(release).toBeDefined()
+    expect(persist.saveFrameNow).toHaveBeenCalled()
+  })
+  /* the rename lands while an earlier stamp's persistence is held open —
+     shot2's stamp has not run yet, so its before-image must carry it */
+  actions.updateFrame(shot2.id, { name: 'Collaborator title' }, { kind: 'user', name: 'Collab', color: '#111' })
+  release()
+  const result = await running
+  expect(result.ok).toBe(true)
+
+  const report = await revertScriptRun(result.run_id, ilCaller)
+  expect(report.unreverted).toEqual([])
+  const restored = store.getFrame(shot2.id)!
+  expect(restored.name).toBe('Collaborator title')
+  /* the stamp itself is reverted — the rename is not */
+  expect(restored.html).not.toContain('data-doop-id')
+})
+
+it('a collaborator edit between two writes to the same frame survives the run undo', async () => {
+  /* the run edits the frame twice; the collaborator renames it while the
+     first write's review is in flight — the second write's before-image
+     is the collaborator's state, not the run's first before-image */
+  store.setLinkAccess(caller.canvasId, 'edit')
+  const coCaller: ScriptCaller = {
+    ...caller,
+    userId: 'interleave-user-4',
+    actor: { kind: 'user', name: 'Il4', color: '#000' },
+  }
+  const realLint = lint.lintFrame
+  let injected = false
+  vi.spyOn(lint, 'lintFrame').mockImplementation(async (frame, opts) => {
+    const out = await realLint(frame, opts)
+    if (!injected && frame.id === frameId) {
+      injected = true
+      actions.updateFrame(frameId, { name: 'Collaborator title' }, { kind: 'user', name: 'Collab', color: '#111' })
+    }
+    return out
+  })
+  const result = await executeScript(
+    {
+      script:
+        `await diazo.frames.edit(${JSON.stringify(frameId)}, [{op:'text',element:'title',text:'After'}]);` +
+        `await diazo.frames.edit(${JSON.stringify(frameId)}, [{op:'text',element:'title',text:'Twice'}]);`,
+    },
+    coCaller,
+    true,
+  )
+  expect(result.ok).toBe(true)
+
+  const report = await revertScriptRun(result.run_id, coCaller)
+  expect(report.unreverted).toEqual([])
+  const frame = store.getFrame(frameId)!
+  expect(frame.name).toBe('Collaborator title')
+  /* undo rewinds to the collaborator's revision — the second script edit
+     is gone, the first script edit and the rename both stay */
+  expect(frame.html).toContain('After')
+  expect(frame.html).not.toContain('Twice')
+})
+
+it('rolls back a script-created page with the rest of a failed run', async () => {
+  /* components.create opens the Components page on first use — an error
+     after it must not leave the page (or the component, or its main)
+     behind */
+  const result = await executeScript(
+    {
+      script:
+        `await diazo.components.create(${JSON.stringify({ name: 'Card', template: '<div><p>Hello</p></div>' })});` +
+        `throw new Error('boom')`,
+    },
+    caller,
+    true,
+  )
+  expect(result.ok).toBe(false)
+  expect(result.error).toBe('boom')
+  const canvas = store.getCanvas(caller.canvasId)!
+  expect(canvasPages(canvas).map((p) => p.name)).toEqual(['Page 1'])
+  expect(canvas.components ?? []).toEqual([])
+  expect(canvas.frames.filter((f) => f.name === 'Card')).toEqual([])
 })

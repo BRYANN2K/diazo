@@ -168,3 +168,30 @@ describe('the offline allowlist', () => {
     }
   })
 })
+
+describe('the page boundary itself', () => {
+  it('an offline page load installs the request guard with the local-only policy', async () => {
+    /* the interception that keeps script renders off the network lives
+       inside loadFrameInto — lose its localOnly flag and every check above
+       still says "offline" while the page fetches anyway */
+    const publicUrl = await import('../server/publicUrl.ts')
+    const { env } = await import('../server/env.ts')
+    const guard = vi.spyOn(publicUrl, 'guardPublicPageRequests').mockResolvedValue(undefined)
+    const { loadFrameInto } = await import('../server/screenshot.ts')
+    const page = { setViewport: vi.fn(async () => {}), setContent: vi.fn(async () => {}) }
+    try {
+      await loadFrameInto(page as never, store.getFrame(frameId)!, true)
+      expect(guard).toHaveBeenCalledWith(page, expect.objectContaining({ localOnly: true }))
+      /* the allowlist still admits the server's own /a/ assets, and only them */
+      const origin = new URL(env.BETTER_AUTH_URL).origin
+      const allowUrl = guard.mock.calls[0]![1]!.allowUrl!
+      expect(allowUrl(new URL(`${origin}/a/x.png`))).toBe(true)
+      expect(allowUrl(new URL('https://img.example/x.png'))).toBe(false)
+      /* an online load keeps the wider allowlist */
+      await loadFrameInto(page as never, store.getFrame(frameId)!, false)
+      expect(guard).toHaveBeenLastCalledWith(page, expect.objectContaining({ localOnly: false }))
+    } finally {
+      guard.mockRestore()
+    }
+  })
+})

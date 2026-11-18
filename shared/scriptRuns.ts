@@ -33,8 +33,8 @@ export type ScriptRunOutcome = 'ok' | 'error' | 'limit' | 'reverted' | 'reverted
  *  is not part of the payload and is never compared). Absent `before` means
  *  the run created the entity; absent `after` means it deleted it. */
 export interface ScriptEntityUndo {
-  kind: 'frame' | 'token' | 'component' | 'composition' | 'tokenThemes'
-  /** frame id / token name / component id / composition pageId; '' for tokenThemes */
+  kind: 'frame' | 'token' | 'component' | 'composition' | 'tokenThemes' | 'page'
+  /** frame id / token name / component id / page id / composition pageId; '' for tokenThemes */
   id: string
   before?: unknown
   after?: unknown

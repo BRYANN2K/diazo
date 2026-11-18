@@ -204,3 +204,36 @@ describe('resident script caller', () => {
     expect(text(out)).toMatch(/access/i)
   })
 })
+
+describe('resident script review renders', () => {
+  it('the automatic final-review tiles of a script-written frame render offline', async () => {
+    /* the run's write journal marks the revision it wrote; every automatic
+       render of THAT revision stays offline, and a later human revision —
+       a different updatedAt — renders online again */
+    const screenshot = await import('../server/screenshot.ts')
+    const thumbs = await import('../server/thumbs.ts')
+    const { frameImageBlocks } = await import('../server/resident.ts')
+    const shot = vi
+      .spyOn(screenshot, 'shotTiles')
+      .mockResolvedValue({ pngs: [Buffer.from('x')], coveredHeight: 10, truncated: false })
+    const render = vi.spyOn(screenshot, 'renderFrame').mockResolvedValue(Buffer.from('x'))
+    const frame = actions.createFrame(
+      canvasId,
+      { name: 'F', html: '<html><body><h1>A</h1></body></html>', width: 800, height: 600 },
+      actor(),
+    )!
+    thumbs.noteScriptFrameWrite(frame.id)
+    await frameImageBlocks(frame, true)
+    expect(shot).toHaveBeenCalledWith(frame, expect.objectContaining({ offline: true }))
+    await frameImageBlocks(frame)
+    expect(render).toHaveBeenCalledWith(frame, expect.anything(), expect.objectContaining({ offline: true }))
+    shot.mockClear()
+    /* a human edit bumps updatedAt — the marker no longer matches, so the
+       review render returns to the normal online path */
+    actions.updateFrame(frame.id, { html: '<html><body><h1>B</h1></body></html>' }, actor())
+    const revised = store.getFrame(frame.id)!
+    await frameImageBlocks(revised, true)
+    expect(shot).toHaveBeenCalledWith(revised, expect.not.objectContaining({ offline: true }))
+    thumbs.purge(frame.id)
+  })
+})

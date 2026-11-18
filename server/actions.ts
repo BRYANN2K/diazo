@@ -18,7 +18,7 @@ import {
   roleById,
   roleName,
 } from '../shared/agents.ts'
-import { canvasPages } from '../shared/pages.ts'
+import { canvasPages, pageFrames } from '../shared/pages.ts'
 import {
   applyCompositionOps,
   newComposition,
@@ -76,6 +76,7 @@ import type {
   Actor,
   Canvas,
   CanvasGuide,
+  CanvasPageInfo,
   ActorKind,
   ActivityItem,
   AgentTask,
@@ -682,18 +683,21 @@ async function stampSaved(frameId: string, id: string): Promise<boolean> {
  *  ahead of its stamp. Undefined when the frame is gone or the write fails.
  *  `onWrite` fires at the in-memory mutation, before the persistence wait —
  *  a listener that journals state reads exactly what this call wrote, never
- *  whatever a collaborator lands while the disk write is out. */
+ *  whatever a collaborator lands while the disk write is out. It also gets
+ *  the frame as it was the instant before the mutation: a before-image
+ *  taken at the call site would miss an edit that landed in between. */
 export async function commitElementStamps(
   frame: Frame,
   html: string,
   ids: readonly string[],
   by: string,
   kind: ActorKind = 'user',
-  onWrite?: (written: Frame) => void,
+  onWrite?: (written: Frame, before: Frame) => void,
 ): Promise<Frame | undefined> {
+  const prior = { ...frame }
   const next = store.updateFrame(frame.id, { html }, by, { annotation: true })
   if (!next) return undefined
-  onWrite?.(next)
+  onWrite?.(next, prior)
   const pending = unsavedStamps.get(frame.id) ?? { ids: new Set<string>() }
   for (const id of ids) pending.ids.add(id)
   unsavedStamps.set(frame.id, pending)
@@ -3587,6 +3591,9 @@ export function restoreScriptState(undo: ScriptEntityUndo[], canvasId: string, a
   const label = (e: ScriptEntityUndo) => (e.kind === 'tokenThemes' ? 'tokenThemes' : `${e.kind}:${e.id}`)
 
   const frames: { id: string; prev: Frame | undefined }[] = []
+  /* pages apply after the frames on them — a page the run created can only
+     be dropped once the run's own frames on it are gone */
+  const pages: { id: string; prev: CanvasPageInfo | undefined }[] = []
   const tokenNames: string[] = []
   for (const entry of undo) {
     const current = currentEntity(canvas, entry)
@@ -3639,6 +3646,9 @@ export function restoreScriptState(undo: ScriptEntityUndo[], canvasId: string, a
           actor,
         })
         break
+      case 'page':
+        pages.push({ id: entry.id, prev: prev as CanvasPageInfo | undefined })
+        break
     }
     report.restored.push(label(entry))
   }
@@ -3657,6 +3667,32 @@ export function restoreScriptState(undo: ScriptEntityUndo[], canvasId: string, a
     persist.saveFrame(frame)
     broadcast(canvas.id, { type: 'frame:updated', frame, actor })
   }
+  /* and pages last of all: whether a run-created page may be dropped is
+     only settled once the run's frames on it are reverted */
+  for (const { id, prev } of pages) {
+    const pageLabel = `page:${id}`
+    if (prev === undefined) {
+      /* created by the run — drop it only while it is still empty; a
+         frame someone else placed there is not the run's to strand */
+      if (pageFrames(canvas, id).length > 0) {
+        report.restored = report.restored.filter((l) => l !== pageLabel)
+        report.unreverted.push(pageLabel)
+        continue
+      }
+      setCanvasPages(
+        canvasId,
+        canvasPages(canvas).filter((p) => p.id !== id),
+        actor,
+      )
+      continue
+    }
+    const list = canvasPages(canvas)
+    setCanvasPages(
+      canvasId,
+      list.some((p) => p.id === id) ? list.map((p) => (p.id === id ? prev : p)) : [...list, prev],
+      actor,
+    )
+  }
   if (tokenNames.length || undo.some((e) => e.kind === 'tokenThemes' && report.restored.includes('tokenThemes')))
     broadcast(canvas.id, { type: 'tokens', tokens: canvas.tokens ?? [], themes: canvas.tokenThemes ?? [], actor })
   persist.saveCanvas(canvas)
@@ -3673,6 +3709,8 @@ function currentEntity(canvas: Canvas, entry: ScriptEntityUndo): unknown {
       return canvas.components?.find((c) => c.id === entry.id)
     case 'composition':
       return canvas.compositions?.find((c) => c.pageId === entry.id)
+    case 'page':
+      return canvasPages(canvas).find((p) => p.id === entry.id)
     case 'tokenThemes':
       return canvas.tokenThemes
   }

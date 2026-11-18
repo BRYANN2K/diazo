@@ -356,4 +356,41 @@ describe('thumbs', () => {
     expect(mocks.deleteObject).toHaveBeenCalledWith('thumb/purged-stage-w128.jpg')
     expect(mocks.deleteObject).toHaveBeenCalledWith('thumb/purged-stage-w1024.png')
   })
+
+  it('renders a script-written revision offline, and a later human revision online', async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.renderFrame.mockResolvedValue(Buffer.from('x'))
+      const f = frame('script-touched')
+      f.html = '<body><img src="https://img.example/x.png"></body>'
+      const live = vi.spyOn(store, 'getFrame').mockImplementation((id) => (id === f.id ? f : undefined))
+      thumbs.remember(f, stage(128))
+      /* the run's write marks the revision it produced — that revision's
+         automatic preview renders without the network */
+      f.updatedAt = 2
+      thumbs.noteScriptFrameWrite(f.id)
+      thumbs.noteDesignWrite(f.id)
+      await vi.advanceTimersByTimeAsync(thumbs.REFRESH_AFTER_WRITE_MS + 10)
+      expect(mocks.renderFrame).toHaveBeenCalledTimes(1)
+      expect(mocks.renderFrame).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ offline: true }),
+      )
+      /* a collaborator's revision afterwards renders online again — the
+         mark covers exactly the revision the script wrote */
+      f.updatedAt = 3
+      thumbs.noteDesignWrite(f.id)
+      await vi.advanceTimersByTimeAsync(thumbs.REFRESH_AFTER_WRITE_MS + 10)
+      expect(mocks.renderFrame).toHaveBeenCalledTimes(2)
+      expect(mocks.renderFrame).toHaveBeenLastCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.not.objectContaining({ offline: true }),
+      )
+      live.mockRestore()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

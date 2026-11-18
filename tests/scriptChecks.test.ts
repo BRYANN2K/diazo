@@ -9,8 +9,8 @@ vi.mock('../server/db/persist.ts', () => ({
   saveToken: vi.fn(),
 }))
 vi.mock('../server/lint.ts', () => ({ lintFrame: async () => ({ score: 100, errors: 0, warnings: 0, issues: [] }) }))
-vi.mock('../server/frameChecks.ts', () => ({
-  checkFrame: async () => ({
+const checkFrame = vi.hoisted(() =>
+  vi.fn(async () => ({
     score: 80,
     errors: 1,
     warnings: 1,
@@ -27,8 +27,9 @@ vi.mock('../server/frameChecks.ts', () => ({
     ],
     viewports: [{ width: 375, overflowPx: 12 }],
     focus: null,
-  }),
-}))
+  })),
+)
+vi.mock('../server/frameChecks.ts', () => ({ checkFrame }))
 const page = vi.hoisted(() => ({
   on: vi.fn(),
   evaluate: vi.fn(async () => ({
@@ -79,6 +80,7 @@ beforeEach(() => {
     snapshots: new Map(),
     writes: [],
   }
+  checkFrame.mockClear()
 })
 it('aggregates rendered errors and numeric layout data without images', async () => {
   const review = (await dispatchScriptCall(ctx, 'checks.review', [frameId])) as {
@@ -136,4 +138,26 @@ it('streams section updates in order before the result', async () => {
       () => {},
     )
   }
+})
+it('autofix refuses to commit over markup that changed while its checks ran', async () => {
+  vi.mocked(checkFrame).mockImplementationOnce(async () => {
+    /* the collaborator's write lands while the check is in flight — the
+       fix was computed against the older html and must not overwrite it */
+    actions.updateFrame(
+      frameId,
+      { html: `<!DOCTYPE html><html><body><button data-doop-id='cta'>Collab</button></body></html>` },
+      { kind: 'user', name: 'Collab', color: '#111' },
+    )
+    return {
+      score: 80,
+      errors: 0,
+      warnings: 1,
+      issues: [{ ruleId: 'FC-TAP', severity: 'warning', message: 'small target', elementId: 'cta', widths: [375] }],
+      viewports: [{ width: 375, overflowPx: 12 }],
+      focus: null,
+    }
+  })
+  await expect(dispatchScriptCall(ctx, 'checks.autofix', [frameId, ['tapTarget']])).rejects.toThrow(/changed|again/i)
+  /* the collaborator's revision is untouched */
+  expect(store.getFrame(frameId)!.html).toContain('Collab')
 })

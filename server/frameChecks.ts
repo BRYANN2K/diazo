@@ -31,6 +31,7 @@ import { FOCUS_SETUP_EXPR, FOCUS_STEP_EXPR, VIEWPORT_CHECKS_EXPR } from '../shar
 import type { RenderPriority } from './renderBrowser.ts'
 import * as actions from './actions.ts'
 import { loadFramePage, rendererAvailable } from './screenshot.ts'
+import { isScriptWrittenRevision } from './thumbs.ts'
 import { store } from './store.ts'
 
 /** The part of a puppeteer page the checks drive — small enough to fake. */
@@ -136,7 +137,9 @@ export async function checkAndStore(
   if (!rendererAvailable()) return { ok: false, reason: 'no_renderer' }
   let pass = inflight.get(frameId)
   if (!pass || pass.hash !== hash) {
-    const run = checkFrame(frame, opts.priority)
+    /* a revision a script run wrote never reaches the network from an
+       automatic pass — the same boundary the run's own checks render under */
+    const run = checkFrame(frame, opts.priority, { offline: isScriptWrittenRevision(frame) })
     pass = { hash, run }
     inflight.set(frameId, pass)
     const settle = () => {

@@ -19,6 +19,7 @@ import { canvasPages, pageFrames } from '../shared/pages.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { webFontFamilies } from '../shared/webFonts.ts'
 import type { Actor, Canvas, Frame } from '../shared/types.ts'
+import { COMPONENT_ATTR, INSTANCE_ATTR } from '../shared/components.ts'
 import type { ComponentDef, ComponentProp } from '../shared/components.ts'
 import type { DesignToken } from '../shared/designTokens.ts'
 import { applyCompositionOps, parseOps, buildStoryboard, newComposition, type Composition } from '../shared/motion.ts'
@@ -31,9 +32,11 @@ import { cssColorToRgba } from '../shared/slopRules.ts'
 import { loadFramePage, renderFrame, rendererAvailable } from './screenshot.ts'
 import { pixelScore } from './driftDiff.ts'
 import { itemDetail, libraryFor, readableLibraries, searchLibraries } from './libraryQueries.ts'
+import { libraryAllows } from './libraries.ts'
 import { libraryItems } from './libraryIndex.ts'
 import { runComponentTool } from './componentTools.ts'
 import { findComponent, componentDetail } from './componentActions.ts'
+import { noteScriptFrameWrite } from './thumbs.ts'
 import * as motion from './motionTools.ts'
 import * as dom from './scriptDom.ts'
 import { canonicalJson } from '../shared/canonicalJson.ts'
@@ -95,6 +98,9 @@ export interface ScriptRunContext {
   /** frames whose html the run changed — they get one rendered review each
    *  after the run, outside its wall budget */
   changedFrames?: Set<string>
+  /** every frame the run's journaled writes touched — component writes are
+   *  charged against frame_writes for each one they land on */
+  touchedFrames?: Set<string>
 }
 
 /** key -> projected undo copy of one entity */
@@ -105,6 +111,7 @@ const UNDO_KINDS: readonly { kind: ScriptEntityUndo['kind']; entries: (c: Canvas
   { kind: 'token', entries: (c) => (c.tokens ?? []).map((t) => [t.name, t]) },
   { kind: 'component', entries: (c) => (c.components ?? []).map((v) => [v.id, v]) },
   { kind: 'composition', entries: (c) => (c.compositions ?? []).map((v) => [v.pageId, v]) },
+  { kind: 'page', entries: (c) => canvasPages(c).map((p) => [p.id, p]) },
 ]
 
 const undoKey = (kind: ScriptEntityUndo['kind'], id: string) => `${kind}:${id}`
@@ -159,7 +166,10 @@ function undoSnapshot(canvas: Canvas): UndoSnapshot {
 /** Fold the entities this mutate changed into the run's undo map: `before`
  *  is captured the first time an entity moves, `after` always lands on the
  *  latest state, and an entity that returns to its original value stays
- *  recorded (the runner drops the no-op entries before persisting). */
+ *  recorded (the runner drops the no-op entries before persisting). When an
+ *  entity moves between two writes of the same run without matching the
+ *  earlier after-image, someone else owns the state in between — it is
+ *  folded into THIS write's before-image, or undo would erase it. */
 function undoDiff(ctx: ScriptRunContext, snap: UndoSnapshot, canvas: Canvas): void {
   const cur = undoSnapshot(canvas)
   ctx.undo ??= new Map()
@@ -174,9 +184,15 @@ function undoDiff(ctx: ScriptRunContext, snap: UndoSnapshot, canvas: Canvas): vo
     if (!entry) {
       entry = { kind, id, ...(prev === undefined ? {} : { before: prev }) }
       ctx.undo.set(key, entry)
+    } else if (prev !== undefined && !sameEntity(prev, entry.after)) {
+      entry.before = prev
     }
     if (next === undefined) delete entry.after
     else entry.after = next
+    if (kind === 'frame') {
+      ;(ctx.touchedFrames ??= new Set()).add(id)
+      noteScriptFrameWrite(id)
+    }
   }
 }
 
@@ -201,36 +217,49 @@ function entityOn(canvas: Canvas, kind: ScriptEntityUndo['kind'], id: string): u
       return (canvas.components ?? []).find((c) => c.id === id)
     case 'composition':
       return (canvas.compositions ?? []).find((c) => c.pageId === id)
+    case 'page':
+      return canvasPages(canvas).find((p) => p.id === id)
   }
 }
 
 /** The motion write tools await inside the call — frame html loads lazily and
  *  element stamps land after — so a whole-canvas diff would claim whatever a
  *  collaborator changed during the wait. Instead the operation reports each
- *  entity it synchronously wrote through `journal`; before-images come from
- *  the snapshot taken up front, after-images are copied at the write —
- *  from the object just stored when the caller passes it, so a persistence
- *  await can never smuggle a later collaborator edit into the after-image. */
+ *  entity it synchronously wrote through `journal`, as a before/after pair
+ *  read at the mutation: the after-image is the object just stored, so a
+ *  persistence await can never smuggle a later collaborator edit into it,
+ *  and the before-image is what the entity was an instant before this
+ *  write — an edit that landed between two of the run's writes stays inside
+ *  it instead of being coalesced away. */
 async function mutateAsync<T>(
   ctx: ScriptRunContext,
-  fn: (journal: (kind: 'frame' | 'composition', id: string, entity?: unknown) => void) => Promise<T>,
+  fn: (
+    journal: (kind: 'frame' | 'composition', id: string, write: { before?: unknown; after?: unknown }) => void,
+  ) => Promise<T>,
 ): Promise<T> {
   if (ctx.active === false) throw new SdkError('limit', 'wall limit reached', 'wall')
   await store.load(ctx.canvasId)
   const snap = undoSnapshot(store.getCanvas(ctx.canvasId)!)
   ctx.undo ??= new Map()
-  const journal = (kind: 'frame' | 'composition', id: string, entity?: unknown) => {
+  const journal = (kind: 'frame' | 'composition', id: string, write: { before?: unknown; after?: unknown }) => {
     const canvas = store.getCanvas(ctx.canvasId)
     if (!canvas) return
     const key = undoKey(kind, id)
-    const after = undoCopy(kind, entity === undefined ? entityOn(canvas, kind, id) : entity)
+    const after = undoCopy(kind, write.after === undefined ? entityOn(canvas, kind, id) : write.after)
+    const before = write.before === undefined ? snap.get(key) : undoCopy(kind, write.before)
     let entry = ctx.undo!.get(key)
     if (!entry) {
-      entry = { kind, id, ...(snap.has(key) ? { before: snap.get(key) } : {}) }
+      entry = { kind, id, ...(before === undefined ? {} : { before }) }
       ctx.undo!.set(key, entry)
+    } else if (before !== undefined && !sameEntity(before, entry.after)) {
+      entry.before = before
     }
     if (after === undefined) delete entry.after
     else entry.after = after
+    if (kind === 'frame' && !sameEntity(before, after)) {
+      ;(ctx.touchedFrames ??= new Set()).add(id)
+      noteScriptFrameWrite(id)
+    }
   }
   return fn(journal)
 }
@@ -451,14 +480,33 @@ async function measureOf(frame: Frame): Promise<Record<string, unknown>> {
   }
 }
 
-/** The regions two renders disagree on, at ~24px cells merged into boxes. */
-async function diffRegions(
+/** The raw pixel buffers a region scan may build — two of them at three
+ *  bytes a pixel — no matter how large the compared renders are. */
+export const DIFF_REGION_PIXELS = 4_000_000
+
+/** The regions two renders disagree on, at ~24px cells merged into boxes.
+ *  Both images are normalized into one common box, sized under
+ *  DIFF_REGION_PIXELS — the naive max-width × max-height box of two
+ *  differently-proportioned renders could hold far more than either input.
+ *  Reported boxes are mapped back to the SECOND image's (the fresh
+ *  render's) pixel space; the comparison box is only a normalization
+ *  detail. */
+export async function diffRegions(
   a: Buffer,
   b: Buffer,
-  width: number,
-  height: number,
+  aWidth: number,
+  aHeight: number,
+  bWidth: number,
+  bHeight: number,
 ): Promise<{ x: number; y: number; width: number; height: number }[]> {
   const CELL = 24
+  let width = Math.max(aWidth, bWidth, 1)
+  let height = Math.max(aHeight, bHeight, 1)
+  if (width * height > DIFF_REGION_PIXELS) {
+    const scale = Math.sqrt(DIFF_REGION_PIXELS / (width * height))
+    width = Math.max(1, Math.floor(width * scale))
+    height = Math.max(1, Math.floor(height * scale))
+  }
   const [ra, rb] = await Promise.all([
     sharp(a).flatten({ background: '#fff' }).removeAlpha().resize(width, height, { fit: 'fill' }).raw().toBuffer(),
     sharp(b).flatten({ background: '#fff' }).removeAlpha().resize(width, height, { fit: 'fill' }).raw().toBuffer(),
@@ -502,7 +550,16 @@ async function diffRegions(
     for (let dy = 0; dy < h; dy++) for (let dx = 0; dx < w; dx++) seen.add((cy + dy) * cols + cx + dx)
     boxes.push({ x: cx * CELL, y: cy * CELL, width: w * CELL, height: h * CELL })
   }
-  return boxes.slice(0, 32)
+  /* the caller wants fresh-render coordinates: each normalized axis was
+     stretched by exactly sx/sy, so boxes scale back by the same factor */
+  const sx = bWidth / width
+  const sy = bHeight / height
+  return boxes.slice(0, 32).map((box) => ({
+    x: Math.round(box.x * sx),
+    y: Math.round(box.y * sy),
+    width: Math.max(1, Math.round(box.width * sx)),
+    height: Math.max(1, Math.round(box.height * sy)),
+  }))
 }
 
 /* ------------------------------------------------------------------ */
@@ -796,18 +853,23 @@ const HANDLERS: Record<string, Entry> = {
     fn: async (ctx, args) => {
       const frame = frameOf(ctx, str(args[0], 'frameId'))
       const patch = obj(args[1], 'patch')
-      if (ctx.dryRun) {
-        for (const key of ['name', 'hidden', 'locked', 'pageId', 'x', 'y', 'width', 'height']) {
-          if (key in patch) Object.assign(frame, { [key]: patch[key] })
-        }
-        return refOf(frame)
-      }
+      /* the whole patch is validated before the first field lands — a
+         meta write that succeeds followed by a box write that fails must
+         never leave the frame half-updated */
       const meta: Record<string, unknown> = {}
       for (const key of ['name', 'hidden', 'locked', 'pageId']) if (key in patch) meta[key] = patch[key]
-      if (Object.keys(meta).length)
-        mutate(ctx, () => updateFrameMeta(canvasOf(ctx), frame.id, meta as never, ctx.actor))
       const box: Record<string, number> = {}
       for (const key of ['x', 'y', 'width', 'height']) if (key in patch) box[key] = num(patch[key], key)
+      if (meta.pageId !== undefined && !canvasPages(canvasOf(ctx)).some((p) => p.id === meta.pageId))
+        throw invalid(`no page ${String(meta.pageId)} on this canvas`)
+      if (ctx.dryRun) {
+        Object.assign(frame, meta, box)
+        return refOf(frame)
+      }
+      if (Object.keys(meta).length) {
+        const res = mutate(ctx, () => updateFrameMeta(canvasOf(ctx), frame.id, meta as never, ctx.actor))
+        if (!res.ok) throw invalid(res.error ?? 'update refused')
+      }
       if (Object.keys(box).length) mutate(ctx, () => actions.updateFrame(frame.id, box, ctx.actor))
       return refOf(store.getFrame(frame.id)!)
     },
@@ -913,6 +975,9 @@ const HANDLERS: Record<string, Entry> = {
     write: true,
     fn: async (ctx, args) => {
       const input = obj(args[0], 'input')
+      /* the create lands exactly one frame — the new component's main */
+      componentWriteCheck(ctx, 1)
+      const touched = new Set(ctx.touchedFrames ?? [])
       if (ctx.dryRun) {
         const def = {
           ...input,
@@ -925,6 +990,7 @@ const HANDLERS: Record<string, Entry> = {
           rev: 1,
         } as ComponentDef
         ;(canvasOf(ctx).components ??= []).push(def)
+        componentWriteCharge(ctx, touched, 1)
         return componentSummary(def)
       }
       const out = await componentTool(ctx, 'create_component', {
@@ -935,6 +1001,7 @@ const HANDLERS: Record<string, Entry> = {
         props: input.props,
         slots: input.slots,
       })
+      componentWriteCharge(ctx, touched, 1)
       return (out.data as { component: unknown }).component
     },
   },
@@ -943,11 +1010,17 @@ const HANDLERS: Record<string, Entry> = {
     fn: async (ctx, args) => {
       const component = str(args[0], 'componentId')
       const patch = obj(args[1], 'patch')
+      const def = canvasOf(ctx).components?.find((c) => c.id === component || c.name === component)
+      if (!def) throw notFound(`no component ${component}`)
+      /* the update writes the main and propagates to every frame holding
+         an instance — reserve the whole set before the first write */
+      const predicted = componentWriteCount(canvasOf(ctx), def)
+      componentWriteCheck(ctx, predicted)
+      const touched = new Set(ctx.touchedFrames ?? [])
       if (ctx.dryRun) {
-        const def = canvasOf(ctx).components?.find((c) => c.id === component || c.name === component)
-        if (!def) throw notFound('no component')
         for (const key of ['name', 'description', 'template', 'css', 'props', 'slots'])
           if (key in patch) Object.assign(def, { [key]: patch[key] })
+        componentWriteCharge(ctx, touched, predicted)
         return componentSummary(def)
       }
       const out = await componentTool(ctx, 'update_component', {
@@ -957,16 +1030,20 @@ const HANDLERS: Record<string, Entry> = {
         ...(typeof patch.template === 'string' ? { html: patch.template } : {}),
         component,
       })
+      componentWriteCharge(ctx, touched, predicted)
       return (out.data as { component: unknown }).component
     },
   },
   'components.insert': {
     write: true,
-    frameWrite: true,
     fn: async (ctx, args) => {
       const frame = frameOf(ctx, str(args[0], 'frameId'))
       const componentId = str(args[1], 'componentId')
       const opts = args[2] === undefined ? {} : obj(args[2], 'opts')
+      /* the insert writes the target frame — charge it against the same
+         frame-write budget as every other write */
+      componentWriteCheck(ctx, 1)
+      const touched = new Set(ctx.touchedFrames ?? [])
       if (ctx.dryRun) {
         const def = canvasOf(ctx).components?.find((c) => c.id === componentId || c.name === componentId)
         if (!def) throw notFound('no component on this canvas')
@@ -974,6 +1051,7 @@ const HANDLERS: Record<string, Entry> = {
           { op: 'insert', element: '', html: `<doop-use component="${def.id}"></doop-use>` },
         ])
         frame.html = edit.html
+        componentWriteCharge(ctx, touched, 1)
         return { ok: true, applied: edit.applied }
       }
       const out = await componentTool(ctx, 'insert_instance', {
@@ -983,6 +1061,7 @@ const HANDLERS: Record<string, Entry> = {
         ...(opts.props !== undefined ? { props: opts.props } : {}),
         dry_run: ctx.dryRun ? true : undefined,
       })
+      componentWriteCharge(ctx, touched, 1)
       return out.data
     },
   },
@@ -1042,9 +1121,14 @@ const HANDLERS: Record<string, Entry> = {
           : (await readableLibraries(ctx.userId ?? '')).map((l) => l.id)
       const out: Record<string, unknown>[] = []
       for (const libraryId of libs) {
-        if (!libraryFor(ctx.userId ?? '', libraryId, 'read')) throw denied('library read access required')
+        const access = libraryFor(ctx.userId ?? '', libraryId, 'read')
+        if (!access) throw denied('library read access required')
+        const curator = libraryAllows(access.role, 'curate')
         const items = await libraryItems(libraryId)
         for (const item of items) {
+          /* hidden and draft items are curator-only — a reader's findings
+             list must not leak what they could not open in the library */
+          if (!curator && (item.status === 'hidden' || item.status === 'draft')) continue
           for (const f of item.findings ?? []) {
             out.push({ itemId: item.itemId, rule: f.kind, severity: 'warning', message: f.message })
           }
@@ -1334,19 +1418,38 @@ const HANDLERS: Record<string, Entry> = {
       if (!kept) throw invalid('unknown snapshot — call checks.snapshot first')
       if (kept.frameId !== frame.id) throw invalid('the snapshot was taken of another frame')
       if (!rendererAvailable()) throw new SdkError('unavailable', 'diff needs the server renderer', 'renderer')
+      /* the fresh capture is host memory kept or not: a frame whose raw
+         pixels alone bust the budget is refused before the render — the
+         same preflight checks.snapshot runs */
+      const pixels = Math.max(1, Math.round(frame.width)) * Math.max(1, Math.round(frame.height)) * 4
+      if (pixels > ctx.budgets.snapshotBytes)
+        throw new SdkError(
+          'limit',
+          `snapshot_bytes limit reached: ${pixels} pixels needed, ${ctx.budgets.snapshotBytes} left`,
+          'snapshot_bytes',
+        )
       const png = await renderFrame(frame, 1, { offline: true })
-      const score = await pixelScore(kept.png, png)
       const meta = await sharp(png).metadata()
-      const resized = (meta.width ?? 0) !== kept.width || (meta.height ?? 0) !== kept.height
-      const regions = score.diffPixels
-        ? await diffRegions(
-            kept.png,
-            png,
-            Math.max(kept.width, meta.width ?? 1),
-            Math.max(kept.height, meta.height ?? 1),
-          )
-        : []
-      return { ratio: score.score / 100, regions, resized }
+      const cost = png.byteLength + (meta.width ?? frame.width) * (meta.height ?? frame.height) * 4
+      if (cost > ctx.budgets.snapshotBytes)
+        throw new SdkError(
+          'limit',
+          `snapshot_bytes limit reached: ${cost} needed, ${ctx.budgets.snapshotBytes} left`,
+          'snapshot_bytes',
+        )
+      /* the capture is transient — held against the budget while the diff
+         runs, released after */
+      ctx.budgets.snapshotBytes -= cost
+      try {
+        const score = await pixelScore(kept.png, png)
+        const resized = (meta.width ?? 0) !== kept.width || (meta.height ?? 0) !== kept.height
+        const regions = score.diffPixels
+          ? await diffRegions(kept.png, png, kept.width, kept.height, meta.width ?? 1, meta.height ?? 1)
+          : []
+        return { ratio: score.score / 100, regions, resized }
+      } finally {
+        ctx.budgets.snapshotBytes += cost
+      }
     },
   },
   'checks.review': {
@@ -1364,6 +1467,9 @@ const HANDLERS: Record<string, Entry> = {
       const wanted = new Set((kinds as string[] | undefined) ?? ['contrast', 'tapTarget', 'tokenLiteral'])
       const tokens = canvasOf(ctx).tokens ?? []
       const changes: string[] = []
+      /* the revision every check and fix below is computed against — the
+         commit refuses to write over anything newer */
+      const baseHtml = frame.html
       let html = frame.html
       /* tokenLiteral: swap literals that equal a token for var(--name) */
       if (wanted.has('tokenLiteral')) {
@@ -1421,7 +1527,15 @@ const HANDLERS: Record<string, Entry> = {
         return { ok: true, changes, review: await reviewOf({ ...frame, html }, ctx.actor, {}) }
       }
       if (ctx.active === false) throw new SdkError('limit', 'wall limit reached', 'wall')
-      const written = mutate(ctx, () => actions.updateFrame(frame.id, { html }, ctx.actor))!
+      const written = mutate(ctx, () => {
+        const current = store.getFrame(frame.id)
+        if (!current) throw notFound(`no frame ${frame.id}`)
+        /* a collaborator's edit landed while the checks awaited — the
+           computed fix belongs to the older html and must not cover it */
+        if (current.html !== baseHtml)
+          throw new SdkError('conflict', 'the frame changed while its checks ran — run checks.autofix again')
+        return actions.updateFrame(frame.id, { html }, ctx.actor)
+      })!
       return { ok: true, changes, review: await reviewOf(written, ctx.actor, {}) }
     },
   },
@@ -1442,6 +1556,66 @@ function componentSummary(def: ComponentDef): Record<string, unknown> {
   const props = (def.props ?? []) as ComponentProp[]
   const usage = `<doop-use component="${def.name}"${props.map((p) => ` ${p.name}=…`).join('')} />`
   return { id: def.id, name: def.name, description: def.description, usage }
+}
+
+/** The component ids a frame's html references — `doop-use` instances and
+ *  the `data-doop-component` marker on a main frame. */
+function componentRefsIn(html: string): string[] {
+  const out: string[] = []
+  for (const attr of [INSTANCE_ATTR, COMPONENT_ATTR])
+    for (const match of html.matchAll(new RegExp(` ${attr}="([^"]+)"`, 'g'))) out.push(match[1]!)
+  return out
+}
+
+/** How many frames a write to `def` may land on: its main (or the one it
+ *  is about to create) plus every frame holding an instance, expanded
+ *  through nested components — a rewritten main whose held instances
+ *  re-derive propagates to their frames too. */
+function componentWriteCount(canvas: Canvas, def: ComponentDef): number {
+  const componentIds = new Set([def.id])
+  const frames = new Set<string>()
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const frame of canvas.frames) {
+      if (frames.has(frame.id)) continue
+      const refs = componentRefsIn(frame.html)
+      if (!refs.some((id) => componentIds.has(id))) continue
+      frames.add(frame.id)
+      for (const id of refs)
+        if (!componentIds.has(id)) {
+          componentIds.add(id)
+          grew = true
+        }
+    }
+  }
+  const mainMissing = !def.mainFrameId || !canvas.frames.some((f) => f.id === def.mainFrameId)
+  return frames.size + (mainMissing ? 1 : 0)
+}
+
+/** Refuse before the first mutation when the frames a component write may
+ *  land on exceed what the run's frame-write budget has left. */
+function componentWriteCheck(ctx: ScriptRunContext, predicted: number): void {
+  if (predicted > ctx.budgets.frameWrites)
+    throw new SdkError(
+      'limit',
+      `component writes would touch ${predicted} frame${predicted === 1 ? '' : 's'}; frame_writes has ${ctx.budgets.frameWrites} left`,
+      'frame_writes',
+    )
+}
+
+/** Charge what the write actually landed on — the propagated writes a
+ *  prediction can only over-approximate. A write that still overspends
+ *  trips the run's limit (the run dies and its writes roll back with it). */
+function componentWriteCharge(ctx: ScriptRunContext, before: Set<string>, predicted: number): void {
+  const spent = ctx.dryRun ? predicted : [...(ctx.touchedFrames ?? [])].filter((id) => !before.has(id)).length
+  ctx.budgets.frameWrites -= spent
+  if (ctx.budgets.frameWrites < 0)
+    throw new SdkError(
+      'limit',
+      `component writes touched ${spent} frames — over the frame_writes budget`,
+      'frame_writes',
+    )
 }
 
 function componentTool(

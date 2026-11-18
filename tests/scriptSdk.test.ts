@@ -14,6 +14,15 @@ vi.mock('../server/db/persist.ts', () => ({
   saveFrameNow: vi.fn(async () => {}),
 }))
 
+vi.mock('../server/libraryQueries.ts', () => ({
+  searchLibraries: vi.fn(async () => ({ hits: [] })),
+  readableLibraries: vi.fn(async () => [{ id: 'lib-1' }]),
+  libraryFor: vi.fn(() => null),
+  itemDetail: vi.fn(async () => null),
+}))
+
+vi.mock('../server/libraryIndex.ts', () => ({ libraryItems: vi.fn(async () => []) }))
+
 import { dispatchScriptCall, nameMatcher, sdkPaths, SdkError, type ScriptRunContext } from '../server/scriptSdk.ts'
 import { store } from '../server/store.ts'
 import { createFrame, updateFrame } from '../server/actions.ts'
@@ -21,6 +30,9 @@ import { reloadEnv } from '../server/env.ts'
 import { canvasPages } from '../shared/pages.ts'
 import * as motionJobs from '../server/motionJobs.ts'
 import * as persist from '../server/db/persist.ts'
+import { createComponentFromHtml, insertInstance } from '../server/componentActions.ts'
+import { libraryFor } from '../server/libraryQueries.ts'
+import { libraryItems } from '../server/libraryIndex.ts'
 
 const OWNER = 'owner-1'
 const ACTOR = { kind: 'agent' as const, name: 'Script', color: '#000', runId: 'run-1' }
@@ -416,5 +428,94 @@ describe('storyboard stamping budget', () => {
     loadSpy.mockRestore()
     expect(store.getComposition(canvasId, pageId())).toBeUndefined()
     expect(persist.saveFrameNow).not.toHaveBeenCalled()
+  })
+})
+
+describe('component writes and the frame budget', () => {
+  it('components.create spends a frame write on the main it makes', async () => {
+    /* creating a component writes its main frame — an empty budget must
+       refuse before the main (and its Components page) exists */
+    const ctx = runCtx({ budgets: { frameWrites: 0 } })
+    await expect(call(ctx, 'components.create', { name: 'Card', template: '<div><p>x</p></div>' })).rejects.toThrow(
+      /frame_writes/,
+    )
+    const canvas = store.getCanvas(canvasId)!
+    expect(canvas.components ?? []).toHaveLength(0)
+    expect(canvasPages(canvas).map((p) => p.name)).not.toContain('Components')
+  })
+
+  it('components.update reserves every frame it may write, propagation included', async () => {
+    /* a main frame plus one instance frame: two writes the budget must
+       cover before the first one lands */
+    createComponentFromHtml(canvasId, { name: 'Card', html: '<div><p>x</p></div>' }, ACTOR)
+    insertInstance(canvasId, { frameId, component: 'Card' }, ACTOR)
+    const ctx = runCtx({ budgets: { frameWrites: 1 } })
+    await expect(call(ctx, 'components.update', 'Card', { template: '<div><p>v2</p></div>' })).rejects.toThrow(
+      /frame_writes/,
+    )
+    /* refused before any mutation — the main still has v1 */
+    const canvas = store.getCanvas(canvasId)!
+    const main = canvas.frames.find((f) => f.id === canvas.components![0]!.mainFrameId)!
+    expect(main.html).toContain('x')
+    expect(main.html).not.toContain('v2')
+  })
+
+  it('charges a component write for each frame it actually touched', async () => {
+    createComponentFromHtml(canvasId, { name: 'Card', html: '<div><p>x</p></div>' }, ACTOR)
+    insertInstance(canvasId, { frameId, component: 'Card' }, ACTOR)
+    const ctx = runCtx({ budgets: { frameWrites: 2 } })
+    await call(ctx, 'components.update', 'Card', { template: '<div><p>v2</p></div>' })
+    /* the main and the instance frame — both charged */
+    expect(ctx.budgets.frameWrites).toBe(0)
+    expect(store.getFrame(frameId)!.html).toContain('v2')
+  })
+
+  it('components.insert spends a frame write on its target', async () => {
+    createComponentFromHtml(canvasId, { name: 'Card', html: '<div><p>x</p></div>' }, ACTOR)
+    const ctx = runCtx({ budgets: { frameWrites: 0 } })
+    await expect(call(ctx, 'components.insert', frameId, 'Card')).rejects.toThrow(/frame_writes/)
+    expect(store.getFrame(frameId)!.html).not.toContain('doop-use')
+  })
+})
+
+describe('libraries.check visibility', () => {
+  const item = (itemId: string, status: string) =>
+    ({
+      canvasId: 'lib-1',
+      itemId,
+      status,
+      findings: [{ kind: 'a11y', message: `finding-${itemId}` }],
+    }) as never
+
+  it('a reader receives no findings on curator-only items', async () => {
+    const libCanvas = store.createCanvas('Lib', OWNER)
+    vi.mocked(libraryFor).mockReturnValue({ canvas: libCanvas, role: 'read' })
+    vi.mocked(libraryItems).mockResolvedValue([item('pub', 'active'), item('hid', 'hidden'), item('drf', 'draft')])
+    const out = (await call(runCtx(), 'libraries.check', { libraryId: 'lib-1' })) as { itemId: string }[]
+    expect(out.map((f) => f.itemId)).toEqual(['pub'])
+  })
+
+  it('a curator still receives every finding', async () => {
+    const libCanvas = store.createCanvas('Lib', OWNER)
+    vi.mocked(libraryFor).mockReturnValue({ canvas: libCanvas, role: 'curate' })
+    vi.mocked(libraryItems).mockResolvedValue([item('pub', 'active'), item('hid', 'hidden'), item('drf', 'draft')])
+    const out = (await call(runCtx(), 'libraries.check', { libraryId: 'lib-1' })) as { itemId: string }[]
+    expect(out.map((f) => f.itemId).sort()).toEqual(['drf', 'hid', 'pub'])
+  })
+})
+
+describe('frames.update patch validation', () => {
+  it('validates the whole patch before applying any of it', async () => {
+    const before = store.getFrame(frameId)!
+    /* the page does not exist — the resize in the same patch must not
+       partially apply */
+    await expect(call(runCtx(), 'frames.update', frameId, { pageId: 'page-nope', width: 360 })).rejects.toThrow(
+      /page page-nope/,
+    )
+    expect(store.getFrame(frameId)!.width).toBe(before.width)
+    /* a dry run validates the same patch */
+    await expect(call(runCtx({ dryRun: true }), 'frames.update', frameId, { pageId: 'page-nope' })).rejects.toThrow(
+      /page page-nope/,
+    )
   })
 })

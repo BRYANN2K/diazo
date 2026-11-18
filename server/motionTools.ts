@@ -159,10 +159,11 @@ export async function setCompositionData(
   actor: Actor,
   /* when set, each entity the call writes is reported at the write — a
      script run's undo then claims only what the op itself changed, never
-     whatever a collaborator touched during the awaited coverage pass. The
-     object just stored goes along, so the after-image is this write and
-     nothing that lands later */
-  journal?: (kind: 'frame' | 'composition', id: string, entity?: unknown) => void,
+     whatever a collaborator touched during the awaited coverage pass.
+     before and after travel as one pair: the before-image is the entity
+     the instant before this write, the after-image what was stored, so a
+     persistence wait smuggles neither kind of later edit into the record */
+  journal?: (kind: 'frame' | 'composition', id: string, write: { before?: unknown; after?: unknown }) => void,
 ): Promise<Outcome> {
   if (!pageOn(canvas, pageId)) return fail(`no page ${pageId} on this canvas`)
   const existing = store.getComposition(canvas.id, pageId)
@@ -179,7 +180,7 @@ export async function setCompositionData(
     if (!ops.ok) return fail(ops.error)
     const applied = actions.patchComposition(canvas.id, pageId, ops.value, actor)
     if (!applied.ok) return fail(applied.error ?? 'ops rejected')
-    journal?.('composition', pageId, applied.composition)
+    journal?.('composition', pageId, { before: existing, after: applied.composition })
     const { storyboard } = await withCoverage(canvas, pageId, applied.composition)
     /* only the revision matters — the caller wrote the rest (agent-cost AC-4) */
     return ok({ revision: applied.composition.revision, ...(storyboard ? { storyboard } : {}) })
@@ -191,7 +192,7 @@ export async function setCompositionData(
      shots die with the body it replaces, even though the id is kept */
   fixPasses.delete(passKey(canvas.id, pageId))
   const composition = actions.setComposition(canvas.id, body.value, pageId, actor)
-  journal?.('composition', pageId, composition)
+  journal?.('composition', pageId, { before: existing, after: composition })
   const { storyboard } = await withCoverage(canvas, pageId, composition)
   /* only the revision matters — the caller wrote the rest (agent-cost AC-4) */
   return ok({ revision: composition.revision, ...(storyboard ? { storyboard } : {}) })
@@ -228,8 +229,9 @@ export async function animateStoryboard(
      composition once it lands, each frame at the store mutation that
      stamps it (not when the disk write acknowledges). A script run's undo
      then claims only these, never whatever a collaborator touched while a
-     stamp write was out */
-  journal?: (kind: 'frame' | 'composition', id: string, entity?: unknown) => void,
+     stamp write was out — and the before-image is the entity the instant
+     before that mutation, so an edit that landed mid-op stays inside it */
+  journal?: (kind: 'frame' | 'composition', id: string, write: { before?: unknown; after?: unknown }) => void,
   /* rechecked between the awaited stamp writes: once it flips true the op
      stops — a run whose wall ended mid-storyboard stamps nothing further */
   cancelled?: () => boolean,
@@ -266,8 +268,9 @@ export async function animateStoryboard(
   /* the canvas load above awaited — a run cut while it was out writes
      nothing: recheck at the mutation, not just inside the shot loop */
   if (cancelled?.()) return fail('the run was cut before the composition landed')
+  const existing = store.getComposition(canvas.id, pageId)
   const composition = actions.setComposition(canvas.id, body, pageId, actor)
-  journal?.('composition', pageId, composition)
+  journal?.('composition', pageId, { before: existing, after: composition })
   /* a rebuilt film starts a new run: clear the old state and record the
      shots this film uses, so noted frames outside frame_ids never pend —
      and the critique pass budget restarts with it */
@@ -310,7 +313,7 @@ export async function animateStoryboard(
             analysis.stampedIds,
             actor.name,
             actor.kind,
-            (written) => journal?.('frame', frame.id, written),
+            (written, before) => journal?.('frame', frame.id, { before, after: written }),
           ))
         }
         if (!landed) {

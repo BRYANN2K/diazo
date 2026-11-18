@@ -29,6 +29,7 @@ import {
 import { RESIDENT_TASK_LIMIT } from './allowance.ts'
 import * as actions from './actions.ts'
 import { inspectFrame, renderFrame, shotTiles } from './screenshot.ts'
+import { isScriptWrittenRevision } from './thumbs.ts'
 import { imageSize } from './imageSize.ts'
 import { byteSize, recordToolCall } from './toolCalls.ts'
 import { AGENT_ROLES, DEFAULT_ROLE_ID, roleById, roleByAgentName, roleName, withoutMentions } from '../shared/agents.ts'
@@ -3246,15 +3247,18 @@ export function describeFrameList(frames: Frame[], images: Map<string, FrameImag
 
 const MAX_SHOT_HEIGHT = 4000
 
-async function frameImageBlocks(
+export async function frameImageBlocks(
   f: Frame,
   fullResolution = false,
 ): Promise<NonNullable<Exclude<Anthropic.ToolResultBlockParam['content'], string>>> {
   type Blocks = NonNullable<Exclude<Anthropic.ToolResultBlockParam['content'], string>>
+  /* a revision a script run wrote renders offline — script markup can name
+     remote assets, and an agent-driven review is an automatic render */
+  const offline = isScriptWrittenRevision(f)
   if (fullResolution) {
     /* one tall image would blow the providers' per-side limit; review the
        frame as viewport-height tiles at 1:1 instead, bounded to SHOT_TILE_MAX */
-    const { pngs, coveredHeight, truncated } = await shotTiles(f)
+    const { pngs, coveredHeight, truncated } = await shotTiles(f, offline ? { offline: true } : {})
     const blocks: Blocks = []
     for (const [i, png] of pngs.entries()) {
       blocks.push({ type: 'text', text: `${f.width}×${Math.round(f.height)} px at 1:1 — tile ${i + 1}/${pngs.length}` })
@@ -3276,6 +3280,7 @@ async function frameImageBlocks(
   const buf = await renderFrame(f, scale, {
     maxHeight: MAX_SHOT_HEIGHT,
     ...(big ? { type: 'jpeg' as const, quality: 80 } : {}),
+    ...(offline ? { offline: true } : {}),
   })
   const blocks: Blocks = [
     {
@@ -3520,7 +3525,7 @@ async function execToolInner(
       case 'inspect_frame': {
         const f = await readableFrame(input.frame_id, canvasId, runState, input.canvas_id)
         if (typeof f === 'string') return fail(f)
-        const inspection = await inspectFrame(f)
+        const inspection = await inspectFrame(f, { offline: isScriptWrittenRevision(f) })
         return ok(
           JSON.stringify({
             ...inspection,

@@ -213,7 +213,7 @@ export function allowFrameAsset(url: URL, assetOrigin: string, offline: boolean)
   return !offline && (url.origin === 'https://fonts.googleapis.com' || url.origin === 'https://fonts.gstatic.com')
 }
 
-async function loadFrameInto(page: Page, frame: Frame, offline = false): Promise<void> {
+export async function loadFrameInto(page: Page, frame: Frame, offline = false): Promise<void> {
   const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
   await guardPublicPageRequests(page, {
     allowUrl: (url) => allowFrameAsset(url, assetOrigin, offline),
@@ -269,12 +269,12 @@ export interface FrameInspection {
 
 /** A compact, rendered representation for agents. It intentionally relies on
  * visible text, semantics, geometry and computed styles rather than classes. */
-export function inspectFrame(frame: Frame): Promise<FrameInspection> {
-  return renderer.withPage('inspecting the frame', RENDER_TIMEOUT_MS, (page) => inspectOn(page, frame))
+export function inspectFrame(frame: Frame, opts?: { offline?: boolean }): Promise<FrameInspection> {
+  return renderer.withPage('inspecting the frame', RENDER_TIMEOUT_MS, (page) => inspectOn(page, frame, opts?.offline))
 }
 
-async function inspectOn(page: Page, frame: Frame): Promise<FrameInspection> {
-  await loadFrameInto(page, frame)
+async function inspectOn(page: Page, frame: Frame, offline = false): Promise<FrameInspection> {
+  await loadFrameInto(page, frame, offline)
   {
     /* tsx/esbuild annotates nested functions with __name; page.evaluate
        serializes the callback without that runtime helper. A tiny in-page

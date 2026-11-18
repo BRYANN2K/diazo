@@ -11,6 +11,7 @@ import { SLOP_COLLECTOR_SOURCE } from '../shared/slopCollect.ts'
 import { lintDocKey } from '../shared/lintDocument.ts'
 import * as actions from './actions.ts'
 import { loadFramePage, rendererAvailable } from './screenshot.ts'
+import { isScriptWrittenRevision } from './thumbs.ts'
 import { store } from './store.ts'
 
 /* the collector is evaluated as an expression: function declaration + call */
@@ -50,7 +51,9 @@ export async function lintFrame(frame: Frame, opts: { offline?: boolean } = {}):
 export async function lintAndStore(frameId: string, actor: Actor): Promise<FrameLint | undefined> {
   const frame = store.getFrame(frameId)
   if (!frame) return undefined
-  const lint = await lintFrame(frame)
+  /* a revision a script run wrote never reaches the network from an
+     automatic pass — the same boundary the run's own checks render under */
+  const lint = await lintFrame(frame, { offline: isScriptWrittenRevision(frame) })
   const now = store.getFrame(frameId)
   if (now && lintDocKey(now) === lint.doc) actions.setFrameLint(frameId, lint, actor)
   return lint

@@ -63,6 +63,25 @@ const asked = new Map<string, Map<string, { v: ThumbVariant; at: number }>>()
 const ASKED_TTL_MS = 24 * 60 * 60_000
 /** frame id → the timer of its after-write refresh */
 const refreshTimers = new Map<string, ReturnType<typeof setTimeout>>()
+/** frame id → updatedAt of a revision a script run wrote: that revision's
+ *  previews render offline — script-supplied markup must never send an
+ *  automatic render to remote origins */
+const scriptWritten = new Map<string, number>()
+
+/** Note the revision a script run just wrote to `frameId`. Called from the
+ *  run's undo journal at the write itself; the mark covers exactly that
+ *  revision — a later human write renders online again. */
+export function noteScriptFrameWrite(frameId: string): void {
+  const frame = store.getFrame(frameId)
+  if (frame) scriptWritten.set(frameId, frame.updatedAt)
+}
+
+/** Whether the frame's current revision is one a script run wrote. Any
+ *  automatic render of such a revision — preview refresh, resident final
+ *  review — stays offline; a later human write renders online again. */
+export function isScriptWrittenRevision(frame: Pick<Frame, 'id' | 'updatedAt'>): boolean {
+  return scriptWritten.get(frame.id) === frame.updatedAt
+}
 /** quiet time after a frame's last write before its stage images re-render:
  *  a streaming agent writes many times a second */
 export const REFRESH_AFTER_WRITE_MS = 15_000
@@ -223,6 +242,10 @@ function render(frame: Frame, v: ThumbVariant): Promise<CreatedThumb> {
     const source = { ...(await store.renderSource(frame)) }
     const renderedAt = source.updatedAt
     const design = designOf(source)
+    /* a revision a script run wrote renders offline — script markup can
+       name remote assets the checks were blocked from fetching, and the
+       automatic refresh is the same boundary */
+    const offline = isScriptWrittenRevision(source)
     const buf =
       v.kind === 'card'
         ? await renderFrame(source, Math.min(1, 640 / source.width), {
@@ -230,6 +253,7 @@ function render(frame: Frame, v: ThumbVariant): Promise<CreatedThumb> {
             quality: 70,
             maxHeight: PREVIEW_MAX_HEIGHT,
             priority: 'background',
+            ...(offline ? { offline: true } : {}),
           })
         : await renderFrame(source, previewScale(source.width, v.width), {
             type: v.ext === 'png' ? 'png' : 'jpeg',
@@ -237,6 +261,7 @@ function render(frame: Frame, v: ThumbVariant): Promise<CreatedThumb> {
             omitBackground: v.ext === 'png' && CANVAS_ELEMENT_RE.test(source.html),
             maxHeight: Math.ceil(STAGE_PREVIEW_PIXELS / (v.width * previewScale(source.width, v.width))),
             priority: 'background',
+            ...(offline ? { offline: true } : {}),
           })
     return { buf, renderedAt, design }
   })
@@ -423,6 +448,7 @@ export function invalidate(frameId: string): void {
 export function purge(frameId: string): void {
   dead.add(frameId)
   designAt.delete(frameId)
+  scriptWritten.delete(frameId)
   clearTimeout(refreshTimers.get(frameId))
   refreshTimers.delete(frameId)
   for (const key of forgetVariants(frameId)) queueDelete(key)
