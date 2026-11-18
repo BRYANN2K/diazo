@@ -13,7 +13,14 @@ vi.mock('../server/db/persist.ts', () => ({
 }))
 
 const checkFrame = vi.hoisted(() =>
-  vi.fn(async () => ({ score: 100, errors: 0, warnings: 0, issues: [], viewports: [], focus: {} })),
+  vi.fn(async (_frame: unknown, _priority?: string, _opts?: { offline?: boolean }) => ({
+    score: 100,
+    errors: 0,
+    warnings: 0,
+    issues: [],
+    viewports: [],
+    focus: {},
+  })),
 )
 vi.mock('../server/frameChecks.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../server/frameChecks.ts')>()),

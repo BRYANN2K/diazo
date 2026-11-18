@@ -62,7 +62,8 @@ const run = (over: Partial<RunState> = {}): RunState =>
   }) as RunState
 const call = (name: string, input: unknown = {}) => ({ type: 'tool_use' as const, id: 't1', name, input })
 const text = (r: { content?: unknown }) => String(r.content)
-const result = (r: { content?: unknown }) => JSON.parse(text(r)) as { ok: boolean; error?: string; result?: unknown }
+const result = (r: { content?: unknown }) =>
+  JSON.parse(text(r)) as { ok: boolean; error?: string; result?: unknown; run_id?: string }
 
 let rows: Map<string, StoredScriptRun>
 let canvasId: string
@@ -113,7 +114,7 @@ describe('resident script caller', () => {
     expect(out.is_error).toBeFalsy()
     const res = result(out)
     expect(res.ok).toBe(true)
-    expect(rows.get((res as { run_id: string }).run_id)!.record.ownerId).toBe('asker')
+    expect(rows.get(res.run_id!)!.record.ownerId).toBe('asker')
   })
 
   it('refuses when the run serves several people', async () => {

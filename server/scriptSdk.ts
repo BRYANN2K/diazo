@@ -189,16 +189,47 @@ function mutate<T>(ctx: ScriptRunContext, fn: () => T): T {
   return value
 }
 
+/** The entity of one undo kind currently on the canvas, or undefined. */
+function entityOn(canvas: Canvas, kind: ScriptEntityUndo['kind'], id: string): unknown {
+  switch (kind) {
+    case 'frame':
+      return canvas.frames.find((f) => f.id === id)
+    case 'token':
+      return (canvas.tokens ?? []).find((t) => t.name === id)
+    case 'component':
+      return (canvas.components ?? []).find((c) => c.id === id)
+    case 'composition':
+      return (canvas.compositions ?? []).find((c) => c.pageId === id)
+  }
+}
+
 /** The motion write tools await inside the call — frame html loads lazily and
- *  element stamps land after. The canvas is loaded first so a deferred html
- *  never reads as a script write; the undo window is then the awaited call. */
-async function mutateAsync<T>(ctx: ScriptRunContext, fn: () => Promise<T>): Promise<T> {
+ *  element stamps land after — so a whole-canvas diff would claim whatever a
+ *  collaborator changed during the wait. Instead the operation reports each
+ *  entity it synchronously wrote through `journal`; before-images come from
+ *  the snapshot taken up front, after-images are read at the write. */
+async function mutateAsync<T>(
+  ctx: ScriptRunContext,
+  fn: (journal: (kind: 'frame' | 'composition', id: string) => void) => Promise<T>,
+): Promise<T> {
   if (ctx.active === false) throw new SdkError('limit', 'wall limit reached', 'wall')
   await store.load(ctx.canvasId)
   const snap = undoSnapshot(store.getCanvas(ctx.canvasId)!)
-  const value = await fn()
-  undoDiff(ctx, snap, store.getCanvas(ctx.canvasId)!)
-  return value
+  ctx.undo ??= new Map()
+  const journal = (kind: 'frame' | 'composition', id: string) => {
+    const canvas = store.getCanvas(ctx.canvasId)
+    if (!canvas) return
+    const key = undoKey(kind, id)
+    const after = undoCopy(kind, entityOn(canvas, kind, id))
+    let entry = ctx.undo!.get(key)
+    if (!entry) {
+      entry = { kind, id, ...(snap.has(key) ? { before: snap.get(key) } : {}) }
+      ctx.undo!.set(key, entry)
+    }
+    if (after === undefined) delete entry.after
+    else entry.after = after
+  }
+  return fn(journal)
 }
 
 function roleOf(ctx: ScriptRunContext): CanvasRole | null {
@@ -1146,7 +1177,7 @@ const HANDLERS: Record<string, Entry> = {
         canvas.compositions = [...(canvas.compositions ?? []).filter((c) => c.pageId !== pageId), comp]
         return { ok: true, revision: comp.revision, shots: shots.length }
       }
-      const out = await mutateAsync(ctx, () =>
+      const out = await mutateAsync(ctx, (journal) =>
         motion.animateStoryboard(
           canvasOf(ctx),
           pageId,
@@ -1159,6 +1190,7 @@ const HANDLERS: Record<string, Entry> = {
             frame_ids: Array.isArray(opts.frameIds) ? (opts.frameIds as string[]) : undefined,
           } as never,
           ctx.actor,
+          journal,
         ),
       )
       if (!out.ok) throw invalid(String(out.error))
@@ -1185,12 +1217,13 @@ const HANDLERS: Record<string, Entry> = {
         Object.assign(comp, applied.value, { revision: comp.revision + 1 })
         return { ok: true, revision: comp.revision }
       }
-      const out = await mutateAsync(ctx, () =>
+      const out = await mutateAsync(ctx, (journal) =>
         motion.setCompositionData(
           canvasOf(ctx),
           pageId,
           { ops, ...(opts.expectedRevision !== undefined ? { expected_revision: opts.expectedRevision } : {}) },
           ctx.actor,
+          journal,
         ),
       )
       if (!out.ok) throw invalid(String(out.error))

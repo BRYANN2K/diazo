@@ -157,6 +157,10 @@ export async function setCompositionData(
   pageId: string,
   input: { composition?: unknown; ops?: unknown; expected_revision?: unknown },
   actor: Actor,
+  /* when set, each entity the call writes is reported at the write — a
+     script run's undo then claims only what the op itself changed, never
+     whatever a collaborator touched during the awaited coverage pass */
+  journal?: (kind: 'frame' | 'composition', id: string) => void,
 ): Promise<Outcome> {
   if (!pageOn(canvas, pageId)) return fail(`no page ${pageId} on this canvas`)
   const existing = store.getComposition(canvas.id, pageId)
@@ -173,6 +177,7 @@ export async function setCompositionData(
     if (!ops.ok) return fail(ops.error)
     const applied = actions.patchComposition(canvas.id, pageId, ops.value, actor)
     if (!applied.ok) return fail(applied.error ?? 'ops rejected')
+    journal?.('composition', pageId)
     const { storyboard } = await withCoverage(canvas, pageId, applied.composition)
     /* only the revision matters — the caller wrote the rest (agent-cost AC-4) */
     return ok({ revision: applied.composition.revision, ...(storyboard ? { storyboard } : {}) })
@@ -184,6 +189,7 @@ export async function setCompositionData(
      shots die with the body it replaces, even though the id is kept */
   fixPasses.delete(passKey(canvas.id, pageId))
   const composition = actions.setComposition(canvas.id, body.value, pageId, actor)
+  journal?.('composition', pageId)
   const { storyboard } = await withCoverage(canvas, pageId, composition)
   /* only the revision matters — the caller wrote the rest (agent-cost AC-4) */
   return ok({ revision: composition.revision, ...(storyboard ? { storyboard } : {}) })
@@ -216,6 +222,11 @@ export async function animateStoryboard(
     direction?: Direction
   },
   actor: Actor,
+  /* when set, each entity the call writes is reported at the write — the
+     composition once it lands, each frame once its stamps are persisted.
+     A script run's undo then claims only these, never whatever a
+     collaborator touched while a stamp write was out */
+  journal?: (kind: 'frame' | 'composition', id: string) => void,
 ): Promise<Outcome> {
   if (!pageOn(canvas, pageId)) return fail(`no page ${pageId} on this canvas`)
   /* frame html is deferred until the canvas is loaded — reading .html on
@@ -243,6 +254,7 @@ export async function animateStoryboard(
     direction: input.direction,
   })
   const composition = actions.setComposition(canvas.id, body, pageId, actor)
+  journal?.('composition', pageId)
   /* a rebuilt film starts a new run: clear the old state and record the
      shots this film uses, so noted frames outside frame_ids never pend —
      and the critique pass budget restarts with it */
@@ -276,6 +288,7 @@ export async function animateStoryboard(
         const landed =
           !actions.isFrameStreaming(frame.id) &&
           !!(await actions.commitElementStamps(frame, analysis.html, analysis.stampedIds, actor.name, actor.kind))
+        if (landed) journal?.('frame', frame.id)
         if (!landed) {
           const fresh = new Set(analysis.stampedIds)
           targets = targets.filter((t) => !fresh.has(t.id))

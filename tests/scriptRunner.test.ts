@@ -13,6 +13,7 @@ vi.mock('../server/db/persist.ts', () => ({
   saveComposition: vi.fn(),
   deleteComposition: vi.fn(),
   saveCompositionVersion: vi.fn(),
+  saveFrameNow: vi.fn(async () => {}),
   loadFrameHtml: async () => [],
 }))
 vi.mock('../shared/canonicalJson.ts', async (importOriginal) => {
@@ -34,6 +35,7 @@ import { scriptRunDeps, type StoredScriptRun } from '../server/scriptRuns.ts'
 import { reloadEnv } from '../server/env.ts'
 import { canvasPages } from '../shared/pages.ts'
 import * as motionJobs from '../server/motionJobs.ts'
+import * as persist from '../server/db/persist.ts'
 
 let caller: ScriptCaller
 let frameId: string
@@ -376,4 +378,59 @@ it('an idempotency key replays only the identical request', async () => {
   await expect(executeScript({ script: 'return 2', idempotency_key: key }, caller, true)).rejects.toThrow(
     /different request/,
   )
+})
+
+it('an interleaved collaborator edit is not claimed by a motion run or its undo', async () => {
+  const canvas = store.getCanvas(caller.canvasId)!
+  const pageId = canvasPages(canvas)[0]!.id
+  /* an unstamped target — the storyboard stamps it, which awaits a frame write */
+  const shot = actions.createFrame(
+    caller.canvasId,
+    { name: 'Shot', html: '<html><body><h1>Headline</h1></body></html>', width: 400, height: 300 },
+    caller.actor,
+  )!
+  const other = actions.createFrame(
+    caller.canvasId,
+    { name: 'Other', html: '<html><body>v1</body></html>', width: 100, height: 100 },
+    caller.actor,
+  )!
+
+  /* hold the stamp's frame write open — the collaborator edits inside that wait */
+  let release!: () => void
+  vi.mocked(persist.saveFrameNow).mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve
+      }),
+  )
+  const running = executeScript(
+    { script: `await diazo.compositions.storyboard(${JSON.stringify(pageId)})` },
+    caller,
+    true,
+  )
+  await vi.waitFor(() => expect(release).toBeDefined())
+  actions.updateFrame(
+    other.id,
+    { html: '<html><body>v2</body></html>' },
+    {
+      kind: 'user',
+      name: 'Collab',
+      color: '#111',
+    },
+  )
+  release()
+  const result = await running
+  expect(result.ok).toBe(true)
+
+  /* undo claims only what the run wrote — the page's composition and the
+     frames it stamped (the unstamped target and the fixture frame share
+     the page) — never the frame the collaborator touched */
+  const undo = rows.get(result.run_id)!.undo ?? []
+  expect(undo.map((e) => `${e.kind}:${e.id}`).sort()).toEqual(
+    [`composition:${pageId}`, `frame:${shot.id}`, `frame:${frameId}`].sort(),
+  )
+
+  const report = await revertScriptRun(result.run_id, caller)
+  expect(report.unreverted).toEqual([])
+  expect(store.getFrame(other.id)!.html).toContain('v2')
 })
