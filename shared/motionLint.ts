@@ -12,6 +12,7 @@
 import {
   DURATION_ATTR,
   MOTION_BLOCK_ATTR,
+  MOTION_LIMITS,
   SCENE_ATTR,
   SEEK_EVENT,
   START_ATTR,
@@ -21,7 +22,8 @@ import {
   type Composition,
   type MotionLintIssue,
 } from './motion.ts'
-import { GL_EFFECT_IDS } from './motionFx.ts'
+import { GL_EFFECT_IDS, enabledEffects } from './motionFx.ts'
+import { isLayer } from './motionLayers.ts'
 
 /** the MO-* rule ids, in firing order */
 export const MO_RULES = {
@@ -39,6 +41,13 @@ export const MO_RULES = {
   TEXT_SPLIT: 'MO-12',
   FX_DANGLING: 'MO-13',
   FX_UNSUPPORTED: 'MO-14',
+  LAYER_BUDGET: 'MO-15',
+  LAYER_DANGLE: 'MO-16',
+  LAYER_CSS_FALLBACK: 'MO-17',
+  LAYER_COVERED: 'MO-18',
+  LAYER_NESTED_FX: 'MO-19',
+  KIND_UNDRAWN: 'MO-20',
+  MOTION_VARIETY: 'MO-21',
 } as const
 
 const SCRIPT_RE = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi
@@ -292,7 +301,10 @@ export function lintMotionHtml(html: string, frameId?: string): MotionLintIssue[
  * that point outside the page are flagged, not hard errors, since a page's
  * frames may arrive deferred).
  */
-export function lintComposition(comp: Composition, opts?: { frameIds?: ReadonlySet<string> }): MotionLintIssue[] {
+export function lintComposition(
+  comp: Composition,
+  opts?: { frameIds?: ReadonlySet<string>; frameHtml?: ReadonlyMap<string, string> },
+): MotionLintIssue[] {
   const issues: MotionLintIssue[] = []
   const push = (severity: MotionLintIssue['severity'], message: string) =>
     issues.push({ rule: MO_RULES.COMPOSITION, severity, message })
@@ -373,6 +385,97 @@ export function lintComposition(comp: Composition, opts?: { frameIds?: ReadonlyS
           severity: 'warning',
           message: `effect ${e.fx} (${e.id}) on ${track.id} has no WebGL2 body — the compositor reports it instead of drawing it wrong`,
         })
+      }
+    }
+
+    /* MO-20: layer data on a track kind no renderer draws it on. Effects
+       draw on element, camera and adjustment tracks; blend, matte, masks
+       and the layer spec are element-track only. (The parser refuses these
+       writes; this catches data that arrived another way.) */
+    if ((track.effects ?? []).length > 0 && !['camera', 'adjustment', 'element'].includes(track.kind)) {
+      issues.push({
+        rule: MO_RULES.KIND_UNDRAWN,
+        severity: 'error',
+        message: `effects on a ${track.kind} track never render — move the stack to an element, camera or adjustment track`,
+      })
+    }
+    if (
+      track.kind !== 'element' &&
+      (track.blend != null || track.layer != null || track.matte != null || (track.masks?.length ?? 0) > 0)
+    ) {
+      issues.push({
+        rule: MO_RULES.KIND_UNDRAWN,
+        severity: 'error',
+        message: `blend/layer/matte/masks on a ${track.kind} track never render — they belong on element tracks`,
+      })
+    }
+    /* MO-21: an element track whose only animated property is opacity
+       reads as a fade-only film — nudge toward a real move */
+    if (track.kind === 'element' && (track.keyframes ?? []).length > 0) {
+      const props = new Set(track.keyframes!.map((k) => k.property))
+      if ([...props].every((p) => p === 'opacity')) {
+        issues.push({
+          rule: MO_RULES.MOTION_VARIETY,
+          severity: 'warning',
+          message: `element ${track.elementId} animates only opacity — apply_element_preset names 56 real moves (entrances, exits, emphasis)`,
+        })
+      }
+    }
+  }
+
+  /* MO-15 (count side): promoted layers per frame and across the film —
+     texture-size budgets need measured rects, which planLayers/report
+     emits instead */
+  const layerTracks = comp.tracks.filter(isLayer)
+  const perFrame = new Map<string, number>()
+  for (const track of layerTracks) {
+    perFrame.set(track.frameId!, (perFrame.get(track.frameId!) ?? 0) + 1)
+  }
+  for (const [frameId, count] of perFrame) {
+    if (count > MOTION_LIMITS.MAX_LAYERS_PER_FRAME) {
+      issues.push({
+        rule: MO_RULES.LAYER_BUDGET,
+        severity: 'error',
+        message: `frame ${frameId} promotes ${count} layers — over the ${MOTION_LIMITS.MAX_LAYERS_PER_FRAME} per-frame budget`,
+        frameId,
+      })
+    }
+  }
+  if (layerTracks.length > MOTION_LIMITS.MAX_LAYERS) {
+    issues.push({
+      rule: MO_RULES.LAYER_BUDGET,
+      severity: 'error',
+      message: `${layerTracks.length} layers across the film — over the ${MOTION_LIMITS.MAX_LAYERS} budget`,
+    })
+  }
+
+  /* MO-19: a layer nested inside an effect-carrying layer gets the
+     parent's stack baked into its own raster, then applied again —
+     needs frame markup, so it fires only when frameHtml rides along */
+  if (opts?.frameHtml) {
+    const byFrame = new Map<string, typeof layerTracks>()
+    for (const track of layerTracks) {
+      const list = byFrame.get(track.frameId!) ?? []
+      list.push(track)
+      byFrame.set(track.frameId!, list)
+    }
+    for (const [frameId, tracks] of byFrame) {
+      const html = opts.frameHtml.get(frameId)
+      if (html === undefined) continue
+      for (const child of tracks) {
+        for (const parent of tracks) {
+          if (parent === child || enabledEffects(parent).length === 0) continue
+          const parentHtml = elementHtml(html, parent.elementId!)
+          if (parentHtml && parentHtml.includes(`data-doop-id="${child.elementId}"`)) {
+            issues.push({
+              rule: MO_RULES.LAYER_NESTED_FX,
+              severity: 'error',
+              message: `layer ${child.elementId} nests inside effect-carrying layer ${parent.elementId} — move the effects to the child or unnest`,
+              frameId,
+            })
+            break
+          }
+        }
       }
     }
   }

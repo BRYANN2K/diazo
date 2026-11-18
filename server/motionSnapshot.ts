@@ -18,6 +18,7 @@ import { openIsolatedPage, rendererAvailable } from './screenshot.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
 import { mintRenderToken, renderCookieName, revokeRenderToken } from './motionRender.ts'
 import { lintComposition, lintMotionHtml, motionLintSummary } from '../shared/motionLint.ts'
+import { planLayers } from '../shared/motionLayers.ts'
 import { frameStateAt } from '../shared/motionRuntime.ts'
 import { EFFECT_COST_CAP, effectCost, effectSpec, GL_EFFECT_IDS } from '../shared/motionFx.ts'
 import { CRITIQUE_PASS_DEFAULT, CRITIQUE_PASS_MAX, type Composition, type MotionLintIssue } from '../shared/motion.ts'
@@ -368,7 +369,9 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
   const loaded = (await store.load(canvas.id)) ?? canvas
   const frames = pageFrames(loaded, pageId)
   const frameIds = new Set(frames.map((f) => f.id))
-  const issues: MotionLintIssue[] = [...lintComposition(comp, { frameIds })]
+  const issues: MotionLintIssue[] = [
+    ...lintComposition(comp, { frameIds, frameHtml: new Map(frames.map((f) => [f.id, f.html])) }),
+  ]
   for (const frame of frames) issues.push(...lintMotionHtml(frame.html, frame.id))
 
   /* 2 — pacing from the camera shots */
@@ -389,8 +392,9 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
 
   /* 3 — the effect bill, per track and in total, plus what the renderer
      cannot draw: stacks on tracks whose pixels never reach the GL pass
-     (element/clip/audio/caption), a track blend, a per-effect blend, and
-     registry effects this GL build has no body for */
+     (clip/audio/caption), a blend on a non-element track, a per-effect
+     blend (P1), and registry effects this GL build has no body for.
+     Element tracks draw in the layer compositor (motion-elements P0). */
   const perTrack = comp.tracks
     .map((track) => ({
       track_id: track.id,
@@ -405,7 +409,7 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
   for (const track of comp.tracks) {
     for (const e of track.effects ?? []) {
       if (!effectSpec(e.fx)) unsupported.add(e.fx)
-      if (track.kind !== 'camera' && track.kind !== 'adjustment') {
+      if (track.kind !== 'camera' && track.kind !== 'adjustment' && track.kind !== 'element') {
         notDrawn.push({
           track_id: track.id,
           what: e.fx,
@@ -418,12 +422,18 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
         notDrawn.push({
           track_id: track.id,
           what: `blend:${e.blend} on ${e.fx}`,
-          reason: 'per-effect blend is not drawn',
+          reason: 'per-effect blend draws in P1',
         })
       }
     }
-    if (track.blend != null) {
-      notDrawn.push({ track_id: track.id, what: `blend:${track.blend}`, reason: 'track blend is not drawn' })
+    if (track.blend != null && track.kind !== 'element') {
+      notDrawn.push({ track_id: track.id, what: `blend:${track.blend}`, reason: 'only element tracks blend' })
+    }
+    if (track.matte != null) {
+      notDrawn.push({ track_id: track.id, what: `matte → ${track.matte.source}`, reason: 'mattes draw in P1' })
+    }
+    if ((track.masks?.length ?? 0) > 0) {
+      notDrawn.push({ track_id: track.id, what: `${track.masks!.length} mask(s)`, reason: 'masks draw in P1' })
     }
   }
   const effects = {
@@ -434,6 +444,52 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
     unsupported: [...unsupported],
     not_drawn: notDrawn,
   }
+
+  /* 3b — the layer plan (static part) and motion variety: what promotes,
+     what it costs, and which shots read as fade-only */
+  const plans = planLayers(
+    comp,
+    frames.map((f) => ({ id: f.id, html: f.html })),
+  )
+  const layers = {
+    count: plans.reduce((a, p) => a + p.layers.length, 0),
+    frames: plans
+      .filter((p) => p.layers.length > 0)
+      .map((p) => ({
+        frame_id: p.frameId,
+        layers: p.layers.map((l) => ({
+          element_id: l.elementId,
+          track_id: l.trackId,
+          content: l.content,
+          transform: l.transform,
+          visible: l.visible,
+          pad: l.pad,
+          scale: l.scale,
+          cost: l.cost,
+          geometry: l.geometry,
+        })),
+      })),
+    issues: plans.flatMap((p) => p.issues),
+  }
+  const motionVariety = shots.map((shot) => {
+    const end = shot.t + shot.duration
+    const props = new Set<string>()
+    let animated = 0
+    for (const track of comp.tracks) {
+      if (track.kind !== 'element') continue
+      const inShot = (track.keyframes ?? []).filter((k) => k.t >= shot.t && k.t < end)
+      if (inShot.length === 0) continue
+      animated += 1
+      for (const k of inShot) props.add(k.property)
+    }
+    return {
+      t: shot.t,
+      duration: shot.duration,
+      element_tracks: animated,
+      properties: [...props].sort(),
+      only_opacity: animated > 0 && [...props].every((p) => p === 'opacity'),
+    }
+  })
 
   /* 4 — safe zones + legibility need measured text: the harness measure
      pass when the renderer is up, reported unavailable otherwise */
@@ -474,6 +530,8 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
     safe_zones: safeZones,
     legibility,
     effects,
+    layers,
+    motion_variety: motionVariety,
   })
 }
 

@@ -319,7 +319,7 @@ export async function lintMotion(canvas: Canvas, input: { page_id?: string; fram
   const comp = store.getComposition(canvas.id, pageId)
   const frames = pageFrames(loaded, pageId)
   const frameIds = new Set(frames.map((f) => f.id))
-  if (comp) issues.push(...lintComposition(comp, { frameIds }))
+  if (comp) issues.push(...lintComposition(comp, { frameIds, frameHtml: new Map(frames.map((f) => [f.id, f.html])) }))
   for (const frame of frames) {
     issues.push(...lintMotionHtml(frame.html, frame.id))
   }
