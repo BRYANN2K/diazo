@@ -128,7 +128,6 @@ export function createRenderJob(
     end === undefined ||
     !(start >= 0) ||
     !(end > start) ||
-    end > comp.duration ||
     end - start > MOTION_LIMITS.MAX_DURATION_S
   ) {
     return { ok: false, status: 400, error: 'range must satisfy 0 ≤ start < end ≤ duration' }

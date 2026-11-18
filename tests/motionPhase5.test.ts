@@ -101,6 +101,33 @@ describe('server render caps', () => {
     expect(fine.ok).toBe(true)
   })
 
+  it('clamps the export range to the film and refuses non-finite range values', () => {
+    /* the reviewer's probe: a 60 s request on a 10 s film is seek-clamped
+       at creation, not refused — the stored range ends at the duration */
+    const clamped = job({ range: { start: 0, end: 60 } })
+    expect(clamped.ok).toBe(true)
+    if (clamped.ok) expect(clamped.job.range).toEqual({ start: 0, end: 10 })
+    const tail = job({ range: { start: 5, end: 60 } })
+    expect(tail.ok).toBe(true)
+    if (tail.ok) expect(tail.job.range).toEqual({ start: 5, end: 10 })
+    /* present-but-broken values are refused, not silently repaired */
+    for (const range of [
+      { start: 'a', end: 5 },
+      { start: 0, end: 'b' },
+      { start: NaN, end: 5 },
+      { start: 0, end: Infinity },
+      { start: -Infinity, end: 5 },
+    ]) {
+      const bad = job({ range })
+      expect(bad.ok, JSON.stringify(range)).toBe(false)
+      if (!bad.ok) expect(bad.status).toBe(400)
+    }
+    /* and the honest inversions stay refused */
+    expect(job({ range: { start: -1, end: 5 } }).ok).toBe(false)
+    expect(job({ range: { start: 6, end: 5 } }).ok).toBe(false)
+    expect(job({ range: { start: 5, end: 5 } }).ok).toBe(false)
+  })
+
   it('allows one open server render per account, then 429s', () => {
     const n = ++seq
     const account = { id: `u-cap-${n}`, name: 'Capped' }

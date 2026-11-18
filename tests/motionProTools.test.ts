@@ -829,13 +829,13 @@ describe('render job validation — range, rule, bill', () => {
       ...over,
     } as never)
 
-  it('refuses a range outside 0 ≤ start < end ≤ duration', () => {
+  it('refuses a broken range and clamps an end past the film', () => {
     actions.setComposition(canvas.id, baseComp(), pageId, actor())
     for (const range of [
       { start: -1, end: 4 },
       { start: 4, end: 4 },
       { start: 5, end: 2 },
-      { start: 0, end: 6.5 },
+      { start: 0, end: 601 },
       { start: NaN, end: 4 },
     ]) {
       const created = job({ range })
@@ -843,6 +843,10 @@ describe('render job validation — range, rule, bill', () => {
       if (!created.ok) expect(created.error).toMatch(/range|duration/i)
     }
     expect(job({ range: { start: 0, end: 6 } }).ok).toBe(true)
+    /* an end past the film seeks to the duration — it is not refused */
+    const over = job({ range: { start: 0, end: 6.5 } })
+    expect(over.ok).toBe(true)
+    if (over.ok) expect(over.job.range.end).toBe(6)
   })
 
   it('keeps the MO-15 rule id on the refusal', () => {
