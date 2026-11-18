@@ -209,4 +209,35 @@ describe('public Chromium request guard', () => {
     expect(fetchUrl).not.toHaveBeenCalled()
     expect(request.respond).not.toHaveBeenCalled()
   })
+
+  it('under a local-only policy, serves allowlisted assets and aborts every other URL without fetching', async () => {
+    /* the offline render of a script's frame checks: /a/ assets the server
+       supplies still arrive, and no other URL is fetched or forwarded —
+       including private-looking addresses that would need no parse anyway */
+    const fetchUrl = vi.fn()
+    const harness = pageHarness()
+    await guardPublicPageRequests(harness.page, {
+      fetchUrl,
+      localOnly: true,
+      allowUrl: (url) => url.origin === 'http://localhost:4400' && url.pathname.startsWith('/a/'),
+    })
+    const asset = requestStub('http://localhost:4400/a/saved-image.png', 'image')
+    const remote = requestStub('https://img.example/x.png', 'image')
+    const internal = requestStub('http://169.254.169.254/latest/meta-data/')
+    const fonts = requestStub('https://fonts.gstatic.com/s/x.woff2', 'font')
+    const data = requestStub('data:image/png;base64,AAAA', 'image')
+
+    for (const request of [asset, remote, internal, fonts, data]) harness.dispatch(request)
+    await vi.waitFor(() => {
+      expect(asset.continue).toHaveBeenCalledOnce()
+      expect(data.continue).toHaveBeenCalledOnce()
+      expect(remote.abort).toHaveBeenCalledOnce()
+      expect(internal.abort).toHaveBeenCalledOnce()
+      expect(fonts.abort).toHaveBeenCalledOnce()
+    })
+
+    expect(fetchUrl).not.toHaveBeenCalled()
+    expect(remote.respond).not.toHaveBeenCalled()
+    expect(internal.respond).not.toHaveBeenCalled()
+  })
 })

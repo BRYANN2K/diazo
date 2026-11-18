@@ -250,6 +250,10 @@ export async function guardPublicPageRequests(
      *  is the origin pin inside the bridged fetchUrl, not the public-address
      *  rules — localhost is precisely what the desktop can reach */
     privateHosts?: boolean
+    /** an offline page load (script-run checks): allowUrl entries still
+     *  continue, every other http(s) request aborts — nothing is parsed,
+     *  proxied or fetched */
+    localOnly?: boolean
   } = {},
 ): Promise<void> {
   const fetchUrl = options.fetchUrl ?? fetchPinnedPublicUrl
@@ -272,6 +276,10 @@ export async function guardPublicPageRequests(
         const requested = new URL(raw)
         if (options.allowUrl?.(requested)) {
           await request.continue()
+          return
+        }
+        if (options.localOnly) {
+          await request.abort('blockedbyclient')
           return
         }
         if (!options.privateHosts) parsePublicHttpUrl(raw)

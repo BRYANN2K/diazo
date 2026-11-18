@@ -164,13 +164,13 @@ export function withFramePage<T>(
   step: string,
   timeoutMs: number,
   work: (page: Page) => Promise<T>,
-  options?: PageOptions,
+  options?: PageOptions & { offline?: boolean },
 ): Promise<T> {
   return renderer.withPage(
     step,
     timeoutMs,
     async (page) => {
-      await loadFrameInto(page, frame)
+      await loadFrameInto(page, frame, options?.offline)
       return work(page)
     },
     options,
@@ -179,14 +179,14 @@ export function withFramePage<T>(
 
 export async function loadFramePage(
   frame: Frame,
-  options?: PageOptions & { onConsole?: (type: string, text: string) => void },
+  options?: PageOptions & { onConsole?: (type: string, text: string) => void; offline?: boolean },
 ): Promise<IsolatedPage> {
   const loaded = await openIsolatedPage(options)
   try {
     /* console listeners must exist before setContent — errors thrown while
        the frame's own scripts first run are the ones that matter */
     if (options?.onConsole) watchPageConsole(loaded.page, options.onConsole)
-    await loadFrameInto(loaded.page, frame)
+    await loadFrameInto(loaded.page, frame, options?.offline)
     return loaded
   } catch (error) {
     await loaded.close()
@@ -202,15 +202,22 @@ export function watchPageConsole(page: Pick<Page, 'on'>, onConsole: (type: strin
   page.on('pageerror', (error) => onConsole('error', error instanceof Error ? error.message : String(error)))
 }
 
-async function loadFrameInto(page: Page, frame: Frame): Promise<void> {
+/** What a frame page may still request: assets the server itself supplies
+ *  (`/a/…`), and — only when the load may reach the network — the webfont
+ *  hosts imported frames name. An offline load (a script's checks) gets the
+ *  assets but no fonts, and nothing else. */
+export function allowFrameAsset(url: URL, assetOrigin: string, offline: boolean): boolean {
+  if (url.origin === assetOrigin) return url.pathname.startsWith('/a/')
+  /* webfonts referenced by imported frames (imports request the source
+     design's families from Google Fonts) */
+  return !offline && (url.origin === 'https://fonts.googleapis.com' || url.origin === 'https://fonts.gstatic.com')
+}
+
+async function loadFrameInto(page: Page, frame: Frame, offline = false): Promise<void> {
   const assetOrigin = new URL(env.BETTER_AUTH_URL).origin
   await guardPublicPageRequests(page, {
-    allowUrl: (url) =>
-      (url.origin === assetOrigin && url.pathname.startsWith('/a/')) ||
-      /* webfonts referenced by imported frames (imports request the
-         source design's families from Google Fonts) */
-      url.origin === 'https://fonts.googleapis.com' ||
-      url.origin === 'https://fonts.gstatic.com',
+    allowUrl: (url) => allowFrameAsset(url, assetOrigin, offline),
+    localOnly: offline,
   })
   await page.setViewport({
     width: Math.max(1, Math.round(frame.width)),
@@ -468,6 +475,9 @@ export interface RenderOptions extends PageOptions {
   type?: 'png' | 'jpeg'
   quality?: number
   maxHeight?: number
+  /** Load the frame without network access (script-run checks): approved
+   *  `/a/` assets still arrive, every other request aborts. */
+  offline?: boolean
   /** Keep the paper behind a standalone stage element visible. */
   omitBackground?: boolean
   /** capture this region of the frame only (frame px), e.g. a library item's box */
@@ -484,7 +494,7 @@ export function renderFrame(
     'rendering the frame',
     RENDER_TIMEOUT_MS,
     async (page) => {
-      await loadFrameInto(page, frame)
+      await loadFrameInto(page, frame, opts.offline)
       return screenshotOn(page, frame, scale, opts)
     },
     { priority: opts.priority },

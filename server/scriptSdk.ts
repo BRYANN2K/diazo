@@ -268,7 +268,9 @@ async function reviewOf(frame: Frame, actor: Actor, opts: { render?: boolean } =
   let responsive: unknown = null
   let measure: unknown = null
   if (opts.render) {
-    const checks = await checkFrame(frame)
+    /* script runs are offline workloads: a check may serve the server's
+       own assets but must never reach the network on a script's behalf */
+    const checks = await checkFrame(frame, 'interactive', { offline: true })
     responsive = checks ? responsiveResult(checks) : null
     if (checks)
       errors.push(
@@ -340,6 +342,7 @@ async function measureOf(frame: Frame): Promise<Record<string, unknown>> {
   const consoleErrors: string[] = []
   const loaded = await loadFramePage(frame, {
     priority: 'interactive',
+    offline: true,
     onConsole: (type, text) => {
       if (type === 'error' && consoleErrors.length < 20) consoleErrors.push(text.slice(0, 200))
     },
@@ -1225,7 +1228,7 @@ const HANDLERS: Record<string, Entry> = {
   'checks.responsive': {
     fn: async (ctx, args) => {
       const frame = frameOf(ctx, str(args[0], 'frameId'))
-      const out = await checkFrame(frame)
+      const out = await checkFrame(frame, 'interactive', { offline: true })
       if (!out) throw new SdkError('unavailable', 'responsive checks need the server renderer', 'renderer')
       return responsiveResult(out)
     },
@@ -1241,7 +1244,7 @@ const HANDLERS: Record<string, Entry> = {
     fn: async (ctx, args) => {
       const frame = frameOf(ctx, str(args[0], 'frameId'))
       if (!rendererAvailable()) throw new SdkError('unavailable', 'snapshot needs the server renderer', 'renderer')
-      const png = await renderFrame(frame)
+      const png = await renderFrame(frame, 1, { offline: true })
       const meta = await sharp(png).metadata()
       const id = `snap-${++snapshotSeq}-${randomUUID().slice(0, 8)}`
       ctx.snapshots.set(id, {
@@ -1261,7 +1264,7 @@ const HANDLERS: Record<string, Entry> = {
       if (!kept) throw invalid('unknown snapshot — call checks.snapshot first')
       if (kept.frameId !== frame.id) throw invalid('the snapshot was taken of another frame')
       if (!rendererAvailable()) throw new SdkError('unavailable', 'diff needs the server renderer', 'renderer')
-      const png = await renderFrame(frame)
+      const png = await renderFrame(frame, 1, { offline: true })
       const score = await pixelScore(kept.png, png)
       const meta = await sharp(png).metadata()
       const resized = (meta.width ?? 0) !== kept.width || (meta.height ?? 0) !== kept.height
@@ -1305,7 +1308,7 @@ const HANDLERS: Record<string, Entry> = {
       }
       /* tapTarget: grow undersized interactive elements to 44px */
       if (wanted.has('tapTarget')) {
-        const out = await checkFrame(frame).catch(() => null)
+        const out = await checkFrame(frame, 'interactive', { offline: true }).catch(() => null)
         const tapIssues = out ? out.issues.filter((i) => i.ruleId === 'FC-TAP' && i.elementId) : []
         const ops = tapIssues.map((i) => ({
           op: 'style' as const,
@@ -1327,7 +1330,7 @@ const HANDLERS: Record<string, Entry> = {
       }
       /* contrast: move failing text to the nearest token that passes on the same bg */
       if (wanted.has('contrast')) {
-        const out = await checkFrame(frame).catch(() => null)
+        const out = await checkFrame(frame, 'interactive', { offline: true }).catch(() => null)
         const issues = out ? out.issues.filter((i) => i.ruleId === 'FC-CONTRAST' && i.elementId && i.detail) : []
         for (const issue of issues.slice(0, 10)) {
           const m = /^(.*) on (.*)$/.exec(issue.detail!)

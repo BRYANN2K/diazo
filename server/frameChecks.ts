@@ -93,10 +93,16 @@ export async function runChecksOnPage(page: CheckPage, html: string, checkedAt =
   return scoreFrameChecks({ viewports, focus, htmlHash: htmlFingerprint(html), checkedAt })
 }
 
-/** Check one frame in the renderer. Null when no renderer is configured. */
-export async function checkFrame(frame: Frame, priority: RenderPriority = 'interactive'): Promise<FrameChecks | null> {
+/** Check one frame in the renderer. Null when no renderer is configured.
+ *  `offline` loads the page without network (script-run checks): only the
+ *  server's own `/a/` assets still arrive. */
+export async function checkFrame(
+  frame: Frame,
+  priority: RenderPriority = 'interactive',
+  opts: { offline?: boolean } = {},
+): Promise<FrameChecks | null> {
   if (!rendererAvailable()) return null
-  const loaded = await loadFramePage(frame, { priority })
+  const loaded = await loadFramePage(frame, { priority, offline: opts.offline })
   try {
     return await runChecksOnPage(loaded.page, frame.html)
   } finally {
