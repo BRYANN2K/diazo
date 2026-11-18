@@ -222,16 +222,21 @@ describe('check_scene and critique_scene', () => {
   it('check_scene flags what the renderer cannot draw', async () => {
     /* legacy stacks the ops and the body parser now refuse but old
        compositions may carry — the store keeps them, new writes refuse
-       them, check flags them */
+       them, check flags them. Effects on element tracks draw now, so the
+       undrawable stack sits on a caption lane. */
     actions.setComposition(
       canvas.id,
       baseComp([
-        { id: 'el', kind: 'element', frameId, elementId: 'hero', effects: [{ id: 'e1', fx: 'vignette', params: {} }] },
-        { id: 'cam', kind: 'camera', keyframes: [], blend: 'multiply' },
+        { id: 'cap', kind: 'caption' },
+        { id: 'cam', kind: 'camera', keyframes: [] },
       ]),
       pageId,
       actor(),
     )
+    /* legacy stacks the body parser refuses — only injectable directly on
+       the stored comp */
+    comp().tracks.find((t) => t.id === 'cap')!.effects = [{ id: 'e1', fx: 'vignette', params: {} }]
+    comp().tracks.find((t) => t.id === 'cam')!.blend = 'multiply'
     /* an effect id the registry no longer ships — only injectable directly
        on the stored comp, the body parser rejects it */
     comp().tracks.find((t) => t.id === 'cam')!.effects = [{ id: 'm', fx: 'mystery-fx', params: {} }]
@@ -277,29 +282,50 @@ describe('effect stack tools', () => {
       actor(),
     )
 
-  it('add_effect draws only on camera/adjustment tracks — element tracks refuse', () => {
+  it('add_effect draws on element/camera/adjustment tracks — element tracks accept', async () => {
     camTrack()
-    const okd = pro.addEffect(canvas, pageId, { track_id: 'cam', fx: 'vignette' }, actor())
+    const okd = await pro.addEffect(canvas, pageId, { track_id: 'cam', fx: 'vignette' }, actor())
     expect(okd.ok).toBe(true)
     expect(comp().tracks.find((t) => t.id === 'cam')?.effects?.[0]?.fx).toBe('vignette')
-    const bad = pro.addEffect(canvas, pageId, { track_id: 'el', fx: 'vignette' }, actor())
-    expect(bad.ok).toBe(false)
-    if (!bad.ok) expect(bad.error).toMatch(/never render|not drawn|camera and adjustment/)
+    const el = await pro.addEffect(canvas, pageId, { track_id: 'el', fx: 'vignette' }, actor())
+    expect(el.ok).toBe(true)
+    expect(comp().tracks.find((t) => t.id === 'el')?.effects?.[0]?.fx).toBe('vignette')
   })
 
-  it('update_effect refuses a per-effect blend it would silently drop', () => {
+  it('add_effect by frame_id + element_id creates the element track', async () => {
     camTrack()
-    pro.addEffect(canvas, pageId, { track_id: 'cam', fx: 'vignette', id: 'fx1' }, actor())
-    const bad = pro.updateEffect(canvas, pageId, { track_id: 'cam', effect_id: 'fx1', blend: 'multiply' }, actor())
+    const out = await pro.addEffect(canvas, pageId, { frame_id: frameId, element_id: 'sub', fx: 'glow' }, actor())
+    expect(out.ok).toBe(true)
+    const track = comp().tracks.find((t) => t.kind === 'element' && t.elementId === 'sub')
+    expect(track).toBeTruthy()
+    expect(track?.effects?.[0]?.fx).toBe('glow')
+    /* a second call rides the same track */
+    const again = await pro.addEffect(canvas, pageId, { frame_id: frameId, element_id: 'sub', fx: 'invert' }, actor())
+    expect(again.ok).toBe(true)
+    expect(comp().tracks.filter((t) => t.kind === 'element' && t.elementId === 'sub')).toHaveLength(1)
+    const bad = await pro.addEffect(canvas, pageId, { frame_id: frameId, element_id: 'missing', fx: 'glow' }, actor())
+    expect(bad.ok).toBe(false)
+    if (!bad.ok) expect(bad.error).toMatch(/no element/)
+  })
+
+  it('update_effect refuses a per-effect blend it would silently drop', async () => {
+    camTrack()
+    await pro.addEffect(canvas, pageId, { track_id: 'cam', fx: 'vignette', id: 'fx1' }, actor())
+    const bad = await pro.updateEffect(
+      canvas,
+      pageId,
+      { track_id: 'cam', effect_id: 'fx1', blend: 'multiply' },
+      actor(),
+    )
     expect(bad.ok).toBe(false)
     /* mix is drawn — it stays writable */
-    const okd = pro.updateEffect(canvas, pageId, { track_id: 'cam', effect_id: 'fx1', mix: 0.5 }, actor())
+    const okd = await pro.updateEffect(canvas, pageId, { track_id: 'cam', effect_id: 'fx1', mix: 0.5 }, actor())
     expect(okd.ok).toBe(true)
   })
 
-  it('set_effects rewrites the stack and remove_effect deletes', () => {
+  it('set_effects rewrites the stack and remove_effect deletes', async () => {
     camTrack()
-    const set = pro.setEffects(
+    const set = await pro.setEffects(
       canvas,
       pageId,
       {
@@ -317,13 +343,72 @@ describe('effect stack tools', () => {
         .tracks.find((t) => t.id === 'cam')
         ?.effects?.map((e) => e.id),
     ).toEqual(['a', 'b'])
-    const rm = pro.removeEffect(canvas, pageId, { track_id: 'cam', effect_id: 'a' }, actor())
+    const rm = await pro.removeEffect(canvas, pageId, { track_id: 'cam', effect_id: 'a' }, actor())
     expect(rm.ok).toBe(true)
     expect(
       comp()
         .tracks.find((t) => t.id === 'cam')
         ?.effects?.map((e) => e.id),
     ).toEqual(['b'])
+  })
+
+  it('set_effects on an untracked element makes its track', async () => {
+    camTrack()
+    const set = await pro.setEffects(
+      canvas,
+      pageId,
+      {
+        frame_id: frameId,
+        element_id: 'sub',
+        effects: [{ id: 'a', fx: 'glow', params: {} }],
+      },
+      actor(),
+    )
+    expect(set.ok).toBe(true)
+    const track = comp().tracks.find((t) => t.kind === 'element' && t.elementId === 'sub')
+    expect(track?.effects?.map((e) => e.id)).toEqual(['a'])
+    /* and by id it rides the track it already has */
+    const again = await pro.setEffects(
+      canvas,
+      pageId,
+      { frame_id: frameId, element_id: 'hero', effects: [{ id: 'b', fx: 'invert', params: {} }] },
+      actor(),
+    )
+    expect(again.ok).toBe(true)
+    expect(
+      comp()
+        .tracks.find((t) => t.id === 'el')
+        ?.effects?.map((e) => e.id),
+    ).toEqual(['b'])
+  })
+
+  it('set_layer writes the layer contract on an element', async () => {
+    camTrack()
+    const out = await pro.setLayer(
+      canvas,
+      pageId,
+      { frame_id: frameId, element_id: 'hero', layer: { mode: 'on', pad: 24 }, blend: 'screen' },
+      actor(),
+    )
+    expect(out.ok).toBe(true)
+    const track = comp().tracks.find((t) => t.kind === 'element' && t.elementId === 'hero')
+    expect(track?.layer?.mode).toBe('on')
+    expect(track?.blend).toBe('screen')
+    const bad = await pro.setLayer(canvas, pageId, { track_id: 'cam', layer: { mode: 'on' } }, actor())
+    expect(bad.ok).toBe(false)
+  })
+
+  it('get_layer_plan reports the promoted element', async () => {
+    camTrack()
+    await pro.addEffect(canvas, pageId, { track_id: 'el', fx: 'glow' }, actor())
+    const out = await pro.getLayerPlan(canvas, pageId, { frame_id: frameId })
+    expect(out.ok).toBe(true)
+    const data = (
+      out as { ok: true; data: { frames: { frameId: string; layers: { elementId: string; geometry: string }[] }[] } }
+    ).data
+    const plan = data.frames.find((f) => f.frameId === frameId)
+    expect(plan?.layers.map((l) => l.elementId)).toContain('hero')
+    expect(plan?.layers[0]?.geometry).toBe('unavailable')
   })
 
   it('apply_look lands an adjustment track; list_looks names the registry', () => {
@@ -353,20 +438,46 @@ describe('effect stack tools', () => {
 
   it('the ops themselves refuse undrawable stacks', () => {
     camTrack()
+    /* a clip track can never draw an effect — the op refuses it */
+    actions.setComposition(canvas.id, baseComp([{ id: 'ct', kind: 'clip', name: 'Clips', clips: [] }]), pageId, actor())
     const res = actions.patchComposition(
       canvas.id,
       pageId,
-      [{ op: 'add_effect', trackId: 'el', effect: { id: 'x', fx: 'invert', params: {} } }],
+      [{ op: 'add_effect', trackId: 'ct', effect: { id: 'x', fx: 'invert', params: {} } }],
       actor(),
     )
     expect(res.ok).toBe(false)
     const blend = actions.patchComposition(
       canvas.id,
       pageId,
-      [{ op: 'set_blend', trackId: 'cam', blend: 'multiply' }],
+      [{ op: 'set_blend', trackId: 'ct', blend: 'multiply' }],
       actor(),
     )
     expect(blend.ok).toBe(false)
+  })
+
+  it('a render job over the layer budget is refused at creation (AC-9)', () => {
+    /* 25 glowing elements on one frame > MAX_LAYERS_PER_FRAME (24) */
+    const tracks = Array.from({ length: 25 }, (_, i) => ({
+      id: `el${i}`,
+      kind: 'element' as const,
+      frameId,
+      elementId: `el${i}`,
+      effects: [{ id: 'g', fx: 'glow', params: {} }],
+    }))
+    actions.setComposition(canvas.id, baseComp(tracks), pageId, actor())
+    const created = createRenderJob({
+      composition: comp(),
+      format: 'mp4',
+      target: 'browser',
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      range: { start: 0, end: 4 },
+      by: { id: 'u', name: 'test' },
+    })
+    expect(created.ok).toBe(false)
+    if (!created.ok) expect(created.error).toMatch(/layer|budget/i)
   })
 })
 
