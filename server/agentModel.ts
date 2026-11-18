@@ -1,4 +1,5 @@
 import { env } from './env.ts'
+import packageJson from '../package.json' with { type: 'json' }
 import { DESCRIBER_ANTHROPIC_MODEL, DESCRIBER_MODELS } from '../shared/modelMenu.ts'
 import { readConnections, usableAccount, type Connections } from './agentDefaults.ts'
 import { geminiCloudRuns, geminiCloudWorkerFor } from './geminiCloudRuns.ts'
@@ -19,6 +20,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { withFreshToken, accountModelFor, accountVisionFor, accountWithPick, customModelFor } from './modelAccounts.ts'
 import type { AccountKind, BuiltinAccountKind, ModelAccount } from './modelAccounts.ts'
 import { customProviderFetch } from './customProviderFetch.ts'
+import { envHeaderNames, resolvedHeaders } from './anthropicHeaders.ts'
 import { personAnthropicClient } from './personAnthropicClient.ts'
 import { isCustomProviderKind, type CustomModel, type CustomProviderConfig } from '../shared/customProvider.ts'
 import { ModelAuthError, ModelUnavailableError, effortFor, runAzureTurn, runOpenAiTurn } from './openaiAgent.ts'
@@ -266,26 +268,14 @@ export interface CustomTarget {
   headers?: Record<string, string>
 }
 
-/* set by the SDK itself on every request: an env value for one of these must
-   stay — a null would strip the header outright, and a strict gateway needs
-   anthropic-version to answer at all */
-const SDK_OWN_HEADERS = new Set(['anthropic-version', 'user-agent', 'accept'])
-
-/**
- * The header names ANTHROPIC_CUSTOM_HEADERS parses to, each nulled — except
- * the SDK's own. The SDK merges that variable into every client's headers,
- * where the server's own values would ride along to a custom endpoint; nulls
- * in defaultHeaders take them back out. The endpoint's own headers are spread
- * after these, so one it shares a name with still wins.
- */
-function envHeaderNulls(): Record<string, null> {
-  const nulls: Record<string, null> = {}
-  for (const line of (env.ANTHROPIC_CUSTOM_HEADERS ?? '').split('\n')) {
-    const colon = line.indexOf(':')
-    const name = colon >= 0 ? line.slice(0, colon).trim() : ''
-    if (name && !SDK_OWN_HEADERS.has(name.toLowerCase())) nulls[name] = null
-  }
-  return nulls
+/* the SDK sets these on every request itself: an env line naming one is
+   nulled like every other and a fixed value goes out instead — the operator's
+   gateway User-Agent is not a custom endpoint's business, and a strict
+   gateway still gets the anthropic-version it needs to answer */
+const SDK_OWN_HEADERS: Record<string, string> = {
+  'anthropic-version': '2023-06-01',
+  Accept: 'application/json',
+  'User-Agent': `Diazo/${packageJson.version}`,
 }
 
 /**
@@ -307,16 +297,23 @@ export function customTurn(target: CustomTarget, model: CustomModel): AgentModel
       authToken: null,
       baseURL: config.baseUrl,
       fetch: customProviderFetch,
-      defaultHeaders: {
+      /* precedence, lowest first: every env name nulled, the SDK's own names
+         restated fixed, the person's key, then their own headers — each name
+         resolved case-insensitively and restated under every spelling it
+         enters the merge with, or an env re-spelling read last would win */
+      defaultHeaders: resolvedHeaders(
         /* the server's env headers must not reach an endpoint a person named */
-        ...envHeaderNulls(),
+        envHeaderNames().map((name): [string, string | null] => [name, null]),
+        /* the nulls strip the SDK's own headers along with the env's; fixed
+           values go back in their place */
+        Object.entries(SDK_OWN_HEADERS),
         /* without a key, drop the sentinel's header explicitly or the SDK
            refuses to send anything; with one, restate it so an env X-Api-Key
            cannot smuggle the server's in */
-        ...(apiKey ? { 'X-Api-Key': apiKey } : { 'X-Api-Key': null }),
+        [['X-Api-Key', apiKey || null]],
         /* the person's own headers win over all of it */
-        ...headers,
-      },
+        Object.entries(headers),
+      ),
     })
     return async (req) => {
       try {
