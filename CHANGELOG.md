@@ -9,6 +9,13 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 
 ## [Unreleased]
 
+- Add the Motion Studio element-layer backend: element tracks carry effect
+  stacks, 26 colour blend modes, layer contracts, mattes and masks; static
+  layer planning with budgets and lint; 56 seeded element motion presets
+  with staggering; `set_layer`, `get_layer_plan`, `list_element_presets`
+  and `apply_element_preset` on MCP and the resident agent; render jobs
+  refuse over-budget films at creation and `RENDER_GL` picks the headless
+  GL path.
 - Add the partial speech job backend: estimates, persisted transcripts, voice-over
   audio clips, secure desktop relay, and matching canvas tools. Local engine
   installers and the speech sidecar remain pending.

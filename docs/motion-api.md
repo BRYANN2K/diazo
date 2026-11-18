@@ -47,6 +47,11 @@ interface MotionTrack {
   elementId?: string // element tracks only — the target's data-doop-id
   keyframes?: MotionKeyframe[] // camera, element, and gain lanes on audio
   clips?: MotionClip[] // clip, audio, caption lanes
+  effects?: EffectInstance[] // element, camera, adjustment lanes
+  blend?: BlendMode // element tracks — 26 colour modes, default 'normal'
+  layer?: LayerSpec // element tracks — promotion/render contract
+  matte?: LayerMatte // element tracks — stored now, draws in P1
+  masks?: LayerMask[] // element tracks — stored now, draw in P1
 }
 ```
 
@@ -60,6 +65,66 @@ interface MotionTrack {
 - `clip` — shots and media windows (`frame`, `library`, `asset` clips).
 - `audio` — `asset` clips plus optional `gain` keyframes.
 - `caption` — `caption` clips (text + a style preset name).
+
+**Element layers (motion-elements P0).** An element track whose pixels need
+compositor isolation — an enabled effect stack, a non-normal `blend`, a
+`matte`, `masks`, or `layer.mode: 'on'` — becomes a layer: the renderer
+rasterises the element alone into a texture, runs its stack and blends it
+onto the frame buffer. `layer.mode: 'off'` keeps the element in the base
+raster even with a stack (the stack then does not draw). Effects draw on
+element, camera and adjustment tracks; `blend`/`layer`/`matte`/`masks`
+belong on element tracks only — the parser and the ops refuse them anywhere
+else, and lint MO-20 flags data that arrived another way.
+
+```ts
+interface LayerSpec {
+  mode?: 'auto' | 'on' | 'off' // auto = promote on stack/blend/matte/masks
+  visible?: boolean // false = matte/effect-input source only, never drawn
+  transform?: 'compositor' | 'css' // unset = decided from measured geometry
+  pad?: number // extra px around the box, ≤ 512; effect growth adds on top
+  scale?: number // texture px per frame px; unset = planned from zoom, ≤ 4
+  motionBlur?: boolean // P1: per-layer shutter; stored now
+}
+
+type BlendMode =
+  // the W3C Compositing and Blending Level 1 list, 26 modes
+  | 'normal'
+  | 'multiply'
+  | 'screen'
+  | 'overlay'
+  | 'darken'
+  | 'lighten'
+  | 'color-dodge'
+  | 'color-burn'
+  | 'hard-light'
+  | 'soft-light'
+  | 'difference'
+  | 'exclusion'
+  | 'add'
+  | 'subtract'
+  | 'divide'
+  | 'linear-burn'
+  | 'vivid-light'
+  | 'linear-light'
+  | 'pin-light'
+  | 'hard-mix'
+  | 'hue'
+  | 'saturation'
+  | 'color'
+  | 'luminosity'
+  | 'darker-color'
+  | 'lighter-color'
+```
+
+`shared/motionLayers.ts` plans the layers per frame (`planLayers`): static
+(transform-only lanes raster once) vs dynamic content, compositor vs CSS
+transforms, padding, texture scale, order and the MO-15..19 budgets.
+Measured geometry — the element's border box, transform-origin, ink
+overflow, paint order, clipping ancestors — comes from the browser engine;
+`get_layer_plan` reports the static plan with `geometry: 'unavailable'`.
+`shared/motionBlend.ts` holds the CPU reference math (`blendPixel`,
+`compositePixel` on premultiplied pixels) and the GLSL (`BLEND_GLSL`) the
+compositor pastes in — indexed exactly like `BLEND_MODES`.
 
 ### Keyframes
 
@@ -154,6 +219,18 @@ type CompositionOp =
   | { op: 'add_clip'; trackId; clip }
   | { op: 'update_clip'; trackId; clipId; start?; duration?; mediaStart?; gain?; muted?; name?; source?; transition? }
   | { op: 'remove_clip'; trackId; clipId }
+  | { op: 'set_direction'; direction | null } // null clears the Direction
+  | { op: 'set_motion_blur'; motionBlur: { shutter; samples? } | null }
+  | { op: 'add_effect'; trackId; effect; index? }
+  | { op: 'update_effect'; trackId; effectId; enabled?; params?; seed?; mix?; blend? } // blend:null clears
+  | { op: 'remove_effect'; trackId; effectId }
+  | { op: 'reorder_effects'; trackId; effectIds } // every id exactly once
+  | { op: 'set_blend'; trackId; blend: BlendMode | null } // element tracks; null clears
+  | { op: 'set_layer'; trackId; layer: LayerSpec | null }
+  | { op: 'set_matte'; trackId; matte: LayerMatte | null }
+  | { op: 'add_mask'; trackId; mask: LayerMask }
+  | { op: 'update_mask'; trackId; maskId; mask: LayerMask }
+  | { op: 'remove_mask'; trackId; maskId }
 ```
 
 `set_camera` upserts one keyframe per provided property at `t`, creating
@@ -401,30 +478,39 @@ canvas and take `page_id` only. All writes need the `edit` role.
 
 ### The director kit (P0)
 
-| Tool                   | Input                                                                                       | Result                                                                                                                                                                                   |
-| ---------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_direction`        | `page_id`                                                                                   | `{ direction }` — the treatment, beats, look, references, rhythm, palette and pass budget on the composition, `null` when unset                                                          |
-| `set_direction`        | `page_id, direction`                                                                        | `{ composition }` — writes the `Direction`; `null` clears it. Beats (`{seconds, note, transition}` — `cut`/`move`/`push`/`whip`/`fade`) tile the timeline `animate_storyboard` then cuts |
-| `list_motion_presets`  | —                                                                                           | `{ camera_presets, transitions, text_animators, splits, blend_modes }` — the names the preset tools take                                                                                 |
-| `apply_camera_preset`  | `page_id, preset, t?, duration?, amount?, frame_id?, seed?, frequency?, easing?`            | `{ composition, keyframes }` — one of the 13 camera presets as ordinary editable keyframes at `t`, composing with the camera already there (`handheld` is seeded, deterministic)         |
-| `apply_transition`     | `page_id, track_id, clip_id, kind, duration?, direction?, token?, easing?`                  | `{ composition, clip }` — `cut` clears the transition                                                                                                                                    |
-| `apply_text_animation` | `page_id, frame_id, element_id, preset, split?, start?, duration?, stagger?, order?, seed?` | `{ composition, targets }` — a text animator into the frame's `data-doop-motion` block; the element's text stays one editable string                                                     |
-| `get_scene_snapshot`   | `page_id, times?, auto?, max_side?, columns?`                                               | a contact-sheet PNG (image block) + `{ cells: [{t,label,luminance,contrast}], motionEnergy, textBoxes }` — drawn by the same compositor every render target uses                         |
-| `check_scene`          | `page_id, pixels?`                                                                          | `{ lint, pacing, safe_zones, legibility, fx_cost }` — pixel parts report `unavailable` without the instance renderer rather than guessing                                                |
-| `critique_scene`       | `page_id, pixels?`                                                                          | `{ rubric, issues, pass, passes, stop }` — check_scene folded into the fixed rubric; a call on a new revision counts a pass (`direction.passes`, default 3, max 5)                       |
+| Tool                   | Input                                                                                       | Result                                                                                                                                                                                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `get_direction`        | `page_id`                                                                                   | `{ direction }` — the treatment, beats, look, references, rhythm, palette and pass budget on the composition, `null` when unset                                                                                                                        |
+| `set_direction`        | `page_id, direction`                                                                        | `{ composition }` — writes the `Direction`; `null` clears it. Beats (`{seconds, note, transition}` — `cut`/`move`/`push`/`whip`/`fade`) tile the timeline `animate_storyboard` then cuts                                                               |
+| `list_motion_presets`  | —                                                                                           | `{ camera_presets, transitions, text_animators, splits, blend_modes }` — the names the preset tools take                                                                                                                                               |
+| `apply_camera_preset`  | `page_id, preset, t?, duration?, amount?, frame_id?, seed?, frequency?, easing?`            | `{ composition, keyframes }` — one of the 13 camera presets as ordinary editable keyframes at `t`, composing with the camera already there (`handheld` is seeded, deterministic)                                                                       |
+| `apply_transition`     | `page_id, track_id, clip_id, kind, duration?, direction?, token?, easing?`                  | `{ composition, clip }` — `cut` clears the transition                                                                                                                                                                                                  |
+| `apply_text_animation` | `page_id, frame_id, element_id, preset, split?, start?, duration?, stagger?, order?, seed?` | `{ composition, targets }` — a text animator into the frame's `data-doop-motion` block; the element's text stays one editable string                                                                                                                   |
+| `get_scene_snapshot`   | `page_id, times?, auto?, max_side?, columns?`                                               | a contact-sheet PNG (image block) + `{ cells: [{t,label,luminance,contrast}], motionEnergy, textBoxes }` — drawn by the same compositor every render target uses                                                                                       |
+| `check_scene`          | `page_id, pixels?`                                                                          | `{ lint, pacing, safe_zones, legibility, effects, layers, motion_variety }` — `layers` is the static layer plan per frame, `motion_variety` the per-shot spread of animated properties; pixel parts report `unavailable` without the instance renderer |
+| `critique_scene`       | `page_id, pixels?`                                                                          | `{ rubric, issues, pass, passes, stop }` — check_scene folded into the fixed rubric; a call on a new revision counts a pass (`direction.passes`, default 3, max 5)                                                                                     |
 
 ### The effect stack (P1)
 
-| Tool                  | Input                                                                  | Result                                                                                                                                                     |
-| --------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list_motion_effects` | —                                                                      | `{ effects: FxSpec[], blend_modes }` — ~30 registered effects with params, ranges, GPU cost and families                                                   |
-| `add_effect`          | `page_id, track_id, fx, id?, params?, index?`                          | `{ composition, effect }` — pushes a registry effect onto the track's ordered stack (`id` minted when absent)                                              |
-| `update_effect`       | `page_id, track_id, effect_id, enabled?, params?, seed?, mix?, blend?` | `{ composition, effect }` — params merge; `blend: null` clears                                                                                             |
-| `remove_effect`       | `page_id, track_id, effect_id`                                         | `{ composition }` — `fx:` lanes pointing at it dangle; MO-13 reports them                                                                                  |
-| `set_effects`         | `page_id, track_id, effects`                                           | `{ composition }` — replaces the whole stack atomically                                                                                                    |
-| `apply_look`          | `page_id, look, at?, seconds?`                                         | `{ composition, track, clip }` — a named look as an `adjustment` track; `at`/`seconds` gate the window through an adjustment clip, absent = the whole film |
-| `list_looks`          | —                                                                      | `{ looks }` — teal-orange, noir, film-35, crt, glitch, dream, product, riso                                                                                |
-| `set_motion_blur`     | `page_id, shutter?, samples?`                                          | `{ composition }` — shutter angle 0–360 sampled across one frame interval; `0` or absent clears. Deterministic: K sub-seeks averaged, never accumulated    |
+| Tool                  | Input                          | Result                                                                                                                                                     |
+| --------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_motion_effects` | —                              | `{ effects: FxSpec[], blend_modes }` — the 43 registered effects with params, ranges, GPU cost, alpha mode and grow; the 26 blend modes                    |
+| `add_effect`          | `page_id, track_id             | frame_id+element_id, fx, id?, params?, index?`                                                                                                             | `{ composition, effect }` — pushes a registry effect onto the track's ordered stack (`id` minted when absent); with `frame_id`+`element_id` the element track is created when missing |
+| `update_effect`       | `page_id, track_id             | frame_id+element_id, effect_id, enabled?, params?, seed?, mix?, blend?`                                                                                    | `{ composition, effect }` — params merge; `blend: null` clears                                                                                                                        |
+| `remove_effect`       | `page_id, track_id             | frame_id+element_id, effect_id`                                                                                                                            | `{ composition }` — `fx:` lanes pointing at it dangle; MO-13 reports them                                                                                                             |
+| `set_effects`         | `page_id, track_id             | frame_id+element_id, effects`                                                                                                                              | `{ composition }` — replaces the whole stack atomically                                                                                                                               |
+| `apply_look`          | `page_id, look, at?, seconds?` | `{ composition, track, clip }` — a named look as an `adjustment` track; `at`/`seconds` gate the window through an adjustment clip, absent = the whole film |
+| `list_looks`          | —                              | `{ looks }` — teal-orange, noir, film-35, crt, glitch, dream, product, riso                                                                                |
+| `set_motion_blur`     | `page_id, shutter?, samples?`  | `{ composition }` — shutter angle 0–360 sampled across one frame interval; `0` or absent clears. Deterministic: K sub-seeks averaged, never accumulated    |
+
+### Element layers and presets (motion-elements P0)
+
+| Tool                   | Input                                                                                                                          | Result                                                                                                                                                                                                                                             |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `set_layer`            | `page_id, track_id \| frame_id+element_id, layer?, blend?, matte?, masks?`                                                     | `{ composition, track }` — writes the layer contract on an element track (auto-created by `frame_id`+`element_id`); `layer: null`/absent fields clear or keep as documented                                                                        |
+| `get_layer_plan`       | `page_id, frame_id?`                                                                                                           | `{ frames: [{ frameId, layers, issues }] }` — `planLayers`' static plan: promotion, static/dynamic, transform placement, pad, scale, cost, MO-15..19. Measured geometry reports `unavailable` — the browser engine supplies it                     |
+| `list_element_presets` | —                                                                                                                              | `{ presets: [{ id, family, use, params, duration }] }` — the 56 element presets (20 entrances, 20 exits, 16 emphasis)                                                                                                                              |
+| `apply_element_preset` | `page_id, frame_id, element_ids, preset, at?, duration?, direction?, distance?, intensity?, easing?, seed?, params?, stagger?` | `{ composition, tracks }` — compiles one preset to ordinary keyframes on each element's track (created when missing); `stagger` offsets starts (`each`/`amount`, `from`: start/end/center/edges/random/position-x/position-y/grid, `ease`, `seed`) |
 
 `animate_storyboard` semantics: deterministic builder — shots follow the
 frames' reading order (rows top→bottom, left→right inside a row), each shot
@@ -477,6 +563,13 @@ resets the count.
 | MO-12 | warning       | a text animator's target element missing `data-doop-split`, or a split value outside `TEXT_SPLITS`                                                                                      |
 | MO-13 | warning       | an `fx:<id>.<param>` keyframe lane whose effect instance id is not on the track's stack                                                                                                 |
 | MO-14 | warning       | an effect stack the active renderer cannot draw (no GLSL body / no GL context) — reported, never silently skipped                                                                       |
+| MO-15 | error         | layer budgets: >24 layers on one frame, >64 across the film, a layer texture over the 4096 px side or 256 MB total — `planLayers` also refuses a render job at creation                 |
+| MO-16 | error         | reserved — a matte/mask whose source element does not resolve (emitted by the measured plan, P0-FE1)                                                                                    |
+| MO-17 | warning       | layer plan: the transform must stay in CSS — an ancestor carries a rest rotation/skew or clips with a non-plain shape (measured plan)                                                   |
+| MO-18 | warning       | layer plan: non-layer content paints over the layer's box — promote it or reorder (measured plan)                                                                                       |
+| MO-19 | error         | a layer nested inside an effect-carrying layer — the parent's stack would bake into the child's raster and apply again; needs frame markup                                              |
+| MO-20 | error         | effects off element/camera/adjustment tracks, or blend/layer/matte/masks off element tracks — data that arrived outside the parser's gates never renders                                |
+| MO-21 | warning       | an element track whose only animated property is opacity — a fade-only film; `apply_element_preset` names 56 real moves                                                                 |
 
 ## Runtime — `shared/motionRuntime.ts`
 

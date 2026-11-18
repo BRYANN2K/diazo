@@ -1077,7 +1077,24 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `model_duels.kind = 'motion'`). Tests: `motion.test.ts`, `motionPhase2.test.ts`,
   `motionMedia.test.ts`, `motionHttp.test.ts`, `motionPhase5.test.ts`, `blender.test.ts`,
   `motion::tests`, `blender::tests`, `speech::tests`.
-  `render_composition`. `server/storyboard.ts` is the storyboard read `animate_storyboard` adds to
+  `render_composition`. Element layers (motion-elements P0, backend): an element track with an
+  effect stack, a non-normal `blend`, a `matte`, `masks` or `layer.mode: 'on'` promotes to a
+  layer — `shared/motionLayers.ts` `planLayers` decides promotion, static vs dynamic raster
+  content, compositor vs CSS transforms, effect-driven padding (`layerPad`), texture scale,
+  composite order and the layer budgets (lint MO-15..19), with the measured half of the plan
+  (`LayerGeometry`) left to the browser engine; `shared/motionBlend.ts` holds the 26 colour blend
+  modes' CPU reference (`blendPixel`, `compositePixel` on premultiplied pixels) and `BLEND_GLSL`
+  indexed by `BLEND_MODES` position; `shared/motionElementPresets.ts` compiles 56 seeded element
+  presets plus `staggerOffsets` to ordinary keyframes; the effect tools take
+  `frame_id`+`element_id` and auto-create the track, and `set_layer`, `get_layer_plan` (the static
+  plan only — geometry reports `unavailable`), `list_element_presets` and
+  `apply_element_preset` run through `execMotionPro` on MCP and the resident agent;
+  `lintComposition` adds MO-15/19/20/21 and `check_scene` reports `layers` and `motion_variety`;
+  `createRenderJob` refuses an MO-15 film at creation and the headless renderer picks SwiftShader,
+  real GPU or no-3D Chromium flags from `RENDER_GL` (`server/env.ts`, `server/screenshot.ts`,
+  default `swiftshader`). Tests: `motionLayers.test.ts`, `motionBlend.test.ts`,
+  `motionElementPresets.test.ts`, `motionProTools.test.ts`. The browser layer engine and editor
+  UI are P0-FE, not this change. `server/storyboard.ts` is the storyboard read `animate_storyboard` adds to
   each shot — the frame's notes (elements labelled mouvement / transition / son / voix off / notes,
   or the English words, by text or by markup) and its animatable elements with `data-doop-id`s
   stamped in one pass through `server/elementIds.ts` `stampElements` and committed like a comment

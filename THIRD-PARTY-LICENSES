@@ -86,3 +86,12 @@ EffectCraft (motion effects)
   EffectCraft's effect modules informed the family and parameter names at
   the revision above. No EffectCraft code is copied or bundled; every
   shader is an original implementation and the effect ids are Diazo's own.
+
+W3C Compositing and Blending Level 1 (element blend modes)
+  W3C Document License. Reference: https://www.w3.org/TR/compositing-1/
+  The blend-mode math in shared/motionBlend.ts (blendPixel,
+  compositePixel, BLEND_GLSL) implements the spec's separable and
+  non-separable blend formulas and its premultiplied source-over
+  composite. The extended separable modes beyond the spec's list use the
+  common published Photoshop-era definitions. All implementations are
+  Diazo's own; no external code is copied or bundled.

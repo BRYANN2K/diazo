@@ -263,6 +263,17 @@ compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per bu
   a deterministic filmic shutter (`motionBlur`), and a WebGL2 pass in the compositor with a GLSL
   body for every registered effect (lint rule MO-14 still guards anything unregistered). Same
   tools on MCP and the resident agent through `execMotionPro`.
+- **Motion Studio — element layers, blends and presets (backend)** — an element track carrying an
+  effect stack, a non-normal blend, a matte or masks promotes to a layer: `shared/motionLayers.ts`
+  plans promotion, static/dynamic rasters, transform placement, pads, scales and the layer budgets
+  (MO-15..19), `shared/motionBlend.ts` gives the 26 colour blend modes a CPU reference and the
+  compositor's GLSL, and `shared/motionElementPresets.ts` compiles 56 seeded element presets
+  (20 entrances, 20 exits, 16 emphasis) plus staggered starts to ordinary editable keyframes.
+  `add_effect`/`set_effects` accept `frame_id`+`element_id` and create the track; `set_layer`,
+  `get_layer_plan`, `list_element_presets` and `apply_element_preset` ship on MCP and the resident
+  agent; `check_scene` reports `layers` and `motion_variety`; render jobs refuse an over-budget
+  film at creation and the headless renderer picks its GL path through `RENDER_GL`. The browser
+  layer engine and the editor land separately (P0-FE).
 - **Motion Studio ("Rostrum") — a page can be a film (backend, MVP)** — an ordinary page gains a
   seekable, deterministic timeline: duration/fps/size, camera tracks over the page's world,
   per-element property tracks, clips, audio and captions (contract in `shared/motion.ts`, API in
