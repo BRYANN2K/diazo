@@ -15,13 +15,14 @@ import { updateFrameMeta } from './pageTools.ts'
 import { canvasRole, canAccessCanvas } from './access.ts'
 import { roleAllows, type CanvasRole } from '../shared/canvasRole.ts'
 import { canvasesFor } from './workspaces.ts'
-import { canvasPages } from '../shared/pages.ts'
+import { canvasPages, pageFrames } from '../shared/pages.ts'
 import { fontsForCanvas } from './fonts.ts'
 import { webFontFamilies } from '../shared/webFonts.ts'
 import type { Actor, Canvas, Frame } from '../shared/types.ts'
 import type { ComponentDef, ComponentProp } from '../shared/components.ts'
 import type { DesignToken } from '../shared/designTokens.ts'
 import { applyCompositionOps, parseOps, buildStoryboard, newComposition, type Composition } from '../shared/motion.ts'
+import { analyzeShotHtml } from './storyboard.ts'
 import { frameStateAt } from '../shared/motionRuntime.ts'
 import { lintFrame } from './lint.ts'
 import { checkFrame } from './frameChecks.ts'
@@ -1154,6 +1155,29 @@ const HANDLERS: Record<string, Entry> = {
     fn: async (ctx, args) => {
       const pageId = str(args[0], 'pageId')
       const opts = args[1] === undefined ? {} : obj(args[1], 'opts')
+      /* the storyboard stamps every shot frame that lacks element ids —
+         count them and charge the run's frame-write budget before any
+         mutation; the counted set also bounds what the op may write */
+      await store.load(ctx.canvasId)
+      const wanted = Array.isArray(opts.frameIds) ? new Set(opts.frameIds as string[]) : null
+      const shotFrames = pageFrames(canvasOf(ctx), pageId).filter((f) => !wanted || wanted.has(f.id))
+      let stamps = 0
+      for (const frame of shotFrames) {
+        if (stamps > ctx.budgets.frameWrites) break
+        if (
+          frame.html.trim() !== '' &&
+          !actions.isFrameStreaming(frame.id) &&
+          analyzeShotHtml(frame.html).stampedIds.length
+        )
+          stamps++
+      }
+      if (stamps > ctx.budgets.frameWrites)
+        throw new SdkError(
+          'limit',
+          `storyboard would stamp ${stamps} frames; frame_writes has ${ctx.budgets.frameWrites} left`,
+          'frame_writes',
+        )
+      ctx.budgets.frameWrites -= stamps
       if (ctx.dryRun) {
         if (!canvasPages(canvasOf(ctx)).some((p) => p.id === pageId)) throw notFound('page is not on this canvas')
         const { body, shots } = buildStoryboard({
@@ -1187,10 +1211,14 @@ const HANDLERS: Record<string, Entry> = {
             fps: typeof opts.fps === 'number' ? opts.fps : undefined,
             width: typeof opts.width === 'number' ? opts.width : undefined,
             height: typeof opts.height === 'number' ? opts.height : undefined,
-            frame_ids: Array.isArray(opts.frameIds) ? (opts.frameIds as string[]) : undefined,
+            /* the preflighted set: a frame that arrives mid-op is never
+               stamped past the budget — and the caller's own filter is
+               already intersected */
+            frame_ids: shotFrames.length ? shotFrames.map((f) => f.id) : wanted ? [] : undefined,
           } as never,
           ctx.actor,
           journal,
+          () => ctx.active === false,
         ),
       )
       if (!out.ok) throw invalid(String(out.error))

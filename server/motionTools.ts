@@ -227,6 +227,9 @@ export async function animateStoryboard(
      A script run's undo then claims only these, never whatever a
      collaborator touched while a stamp write was out */
   journal?: (kind: 'frame' | 'composition', id: string) => void,
+  /* rechecked between the awaited stamp writes: once it flips true the op
+     stops — a run whose wall ended mid-storyboard stamps nothing further */
+  cancelled?: () => boolean,
 ): Promise<Outcome> {
   if (!pageOn(canvas, pageId)) return fail(`no page ${pageId} on this canvas`)
   /* frame html is deferred until the canvas is loaded — reading .html on
@@ -269,6 +272,7 @@ export async function animateStoryboard(
   const noted = new Map<string, ShotInfo>()
   const described: Record<string, unknown>[] = []
   for (const shot of shots) {
+    if (cancelled?.()) return fail('the run was cut before every stamp landed')
     const frame = byId.get(shot.frameId)
     let notes: ShotNote[] = []
     let targets: ShotTarget[] = []

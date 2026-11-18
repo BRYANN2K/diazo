@@ -10,6 +10,8 @@ vi.mock('../server/db/persist.ts', () => ({
   deleteToken: () => {},
   saveComponent: () => {},
   deleteComponent: () => {},
+  saveComposition: vi.fn(),
+  saveFrameNow: vi.fn(async () => {}),
 }))
 
 import { dispatchScriptCall, nameMatcher, sdkPaths, SdkError, type ScriptRunContext } from '../server/scriptSdk.ts'
@@ -18,6 +20,7 @@ import { createFrame } from '../server/actions.ts'
 import { reloadEnv } from '../server/env.ts'
 import { canvasPages } from '../shared/pages.ts'
 import * as motionJobs from '../server/motionJobs.ts'
+import * as persist from '../server/db/persist.ts'
 
 const OWNER = 'owner-1'
 const ACTOR = { kind: 'agent' as const, name: 'Script', color: '#000', runId: 'run-1' }
@@ -291,5 +294,57 @@ describe('excluded tools', () => {
     )
     expect(created).not.toHaveBeenCalled()
     created.mockRestore()
+  })
+})
+
+describe('storyboard stamping budget', () => {
+  /* a user actor leaves the frame still — an agent-created frame opens a
+     reveal, and streaming frames are never stamped */
+  const stampable = (name: string, text: string) =>
+    createFrame(
+      canvasId,
+      { name, html: `<html><body><h1>${text}</h1></body></html>`, width: 100, height: 100 },
+      { kind: 'user', name: 'Owner', color: '#000' },
+    )!
+  const pageId = () => canvasPages(store.getCanvas(canvasId)!)[0]!.id
+
+  it('refuses a storyboard that would stamp past the frame-write budget, writing nothing', async () => {
+    const first = stampable('S1', 'One')
+    stampable('S2', 'Two')
+    /* two stampable frames, one write left — the call is refused before
+       any composition or stamp lands */
+    const ctx = runCtx({ budgets: { frameWrites: 1 } })
+    await expect(dispatchScriptCall(ctx, 'compositions.storyboard', [pageId()])).rejects.toThrow(/frame_writes/)
+    expect(store.getComposition(canvasId, pageId())).toBeUndefined()
+    expect(store.getFrame(first.id)!.html).not.toContain('data-doop-id')
+  })
+
+  it('spends exactly the counted budget', async () => {
+    const first = stampable('S1', 'One')
+    stampable('S2', 'Two')
+    const ctx = runCtx({ budgets: { frameWrites: 2 } })
+    const out = (await dispatchScriptCall(ctx, 'compositions.storyboard', [pageId()])) as { ok: boolean }
+    expect(out.ok).toBe(true)
+    expect(ctx.budgets.frameWrites).toBe(0)
+    expect(store.getComposition(canvasId, pageId())).toBeTruthy()
+    expect(store.getFrame(first.id)!.html).toContain('data-doop-id')
+  })
+
+  it('stops stamping when the run is cut at an async boundary', async () => {
+    stampable('S1', 'One')
+    stampable('S2', 'Two')
+    const ctx = runCtx({ budgets: { frameWrites: 10 } })
+    let release!: () => void
+    vi.mocked(persist.saveFrameNow).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve
+        }),
+    )
+    const pending = dispatchScriptCall(ctx, 'compositions.storyboard', [pageId()])
+    await vi.waitFor(() => expect(release).toBeDefined())
+    ctx.active = false
+    release()
+    await expect(pending).rejects.toThrow(/cut/)
   })
 })
