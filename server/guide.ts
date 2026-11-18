@@ -187,7 +187,12 @@ The director's kit — how a film is judged:
   ranges, cost), add_effect/update_effect/remove_effect/set_effects manage a track's ordered stack,
   apply_look lays a named grade as an adjustment track, set_blend composites the layer, and
   set_motion_blur is the filmic shutter — deterministic sub-seek averaging, 0 clears. Effect params
-  keyframe through fx:<instanceId>.<param> lanes.`
+  keyframe through fx:<instanceId>.<param> lanes.
+- Elements carry real effects and blends: add_effect/set_effects take frame_id + element_id (the
+  element track is created when missing), set_layer promotes an element to a layer (mode, transform,
+  pad, blend, matte, masks) and get_layer_plan reports what promotes and what it costs.
+  list_element_presets names the 56 entrance/exit/emphasis moves; apply_element_preset writes them
+  as editable keyframes on element_ids, with stagger {each|amount, from, ease, seed} to cascade.`
 
 export const COMPONENTS = `A component is one design used in many places: change its main and every instance follows.
 get_canvas and list_components show a canvas's components with their props.

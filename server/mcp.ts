@@ -55,16 +55,20 @@ import {
 import {
   addEffect,
   applyCameraPreset,
+  applyElementPreset,
   applyLook,
   applyTextAnimation,
   applyTransition,
   getDirection,
+  getLayerPlan,
+  listElementPresets,
   listLooks,
   listMotionEffects,
   listMotionPresets,
   removeEffect,
   setDirection,
   setEffects,
+  setLayer,
   setMotionBlur,
   updateEffect,
 } from './motionProTools.ts'
@@ -2238,14 +2242,16 @@ export function buildMcpServer(
   server.registerTool(
     'add_effect',
     {
-      title: 'Stack an effect on a track',
+      title: 'Stack an effect on a track or element',
       description:
-        'Push an effect onto a track’s stack: `{track_id, fx, id?, params?, index?}` — fx is a registry id from list_motion_effects, params override its defaults (points take [u,v] or "u,v"), index places it in the stack.',
+        'Push an effect onto a track’s stack: `{track_id | frame_id + element_id, fx, id?, params?, index?}` — fx is a registry id from list_motion_effects, params override its defaults (points take [u,v] or "u,v"), index places it in the stack. Element tracks are real stacks now: the element becomes a layer and the effect draws on it — the track is created when missing.',
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
         page_id: z.string(),
-        track_id: z.string(),
+        track_id: z.string().optional().describe('The track — or give frame_id + element_id'),
+        frame_id: z.string().optional().describe('With element_id: the element’s frame'),
+        element_id: z.string().optional().describe('The element’s data-doop-id — an element track is found or made'),
         fx: z.string().describe('Registry effect id'),
         id: z.string().optional().describe('Instance id — minted when absent'),
         params: z.record(z.unknown()).optional(),
@@ -2257,7 +2263,7 @@ export function buildMcpServer(
       const c = canvasFor(canvas_id, 'edit')
       if (!c) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
-      const out = addEffect(c, page_id, input, actorFrom(agent_name))
+      const out = await addEffect(c, page_id, input, actorFrom(agent_name))
       if (!out.ok) return err(out.error)
       return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
     },
@@ -2273,7 +2279,9 @@ export function buildMcpServer(
       inputSchema: {
         canvas_id: z.string(),
         page_id: z.string(),
-        track_id: z.string(),
+        track_id: z.string().optional().describe('The track — or give frame_id + element_id'),
+        frame_id: z.string().optional(),
+        element_id: z.string().optional(),
         effect_id: z.string(),
         enabled: z.boolean().optional(),
         params: z.record(z.unknown()).optional(),
@@ -2287,7 +2295,7 @@ export function buildMcpServer(
       const c = canvasFor(canvas_id, 'edit')
       if (!c) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
-      const out = updateEffect(c, page_id, input, actorFrom(agent_name))
+      const out = await updateEffect(c, page_id, input, actorFrom(agent_name))
       if (!out.ok) return err(out.error)
       return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
     },
@@ -2302,16 +2310,18 @@ export function buildMcpServer(
       inputSchema: {
         canvas_id: z.string(),
         page_id: z.string(),
-        track_id: z.string(),
+        track_id: z.string().optional().describe('The track — or give frame_id + element_id'),
+        frame_id: z.string().optional(),
+        element_id: z.string().optional(),
         effect_id: z.string(),
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, page_id, track_id, effect_id, agent_name }) => {
+    async ({ canvas_id, page_id, track_id, frame_id, element_id, effect_id, agent_name }) => {
       const c = canvasFor(canvas_id, 'edit')
       if (!c) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
-      const out = removeEffect(c, page_id, { track_id, effect_id }, actorFrom(agent_name))
+      const out = await removeEffect(c, page_id, { track_id, frame_id, element_id, effect_id }, actorFrom(agent_name))
       if (!out.ok) return err(out.error)
       return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
     },
@@ -2327,21 +2337,147 @@ export function buildMcpServer(
       inputSchema: {
         canvas_id: z.string(),
         page_id: z.string(),
-        track_id: z.string(),
+        track_id: z.string().optional().describe('The track — or give frame_id + element_id'),
+        frame_id: z.string().optional(),
+        element_id: z.string().optional(),
         effects: z.array(z.record(z.unknown())),
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, page_id, track_id, effects, agent_name }) => {
+    async ({ canvas_id, page_id, track_id, frame_id, element_id, effects, agent_name }) => {
       const c = canvasFor(canvas_id, 'edit')
       if (!c) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
-      const out = setEffects(
+      const out = await setEffects(
         c,
         page_id,
-        { track_id, effects: effects as unknown as EffectInstance[] },
+        { track_id, frame_id, element_id, effects: effects as unknown as EffectInstance[] },
         actorFrom(agent_name),
       )
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  /* ---- the element layer ---- */
+
+  server.registerTool(
+    'set_layer',
+    {
+      title: 'Promote an element to a layer',
+      description:
+        'Set the layer contract on an element: `{track_id | frame_id + element_id, layer?, blend?, matte?, masks?}` — layer carries {mode: auto|on|off, visible, transform: compositor|css, pad, scale, motionBlur}, blend is one of the 26 blend modes (null clears to normal), matte {source: trackId, channel: alpha|luma, invert?} borrows another layer’s coverage (draws in P1), masks is the full vector-mask list (id-keyed diff; draws in P1). Send `layer: null` to clear the spec.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        track_id: z.string().optional().describe('The element track — or give frame_id + element_id'),
+        frame_id: z.string().optional(),
+        element_id: z.string().optional().describe('The element’s data-doop-id'),
+        layer: z
+          .record(z.unknown())
+          .nullable()
+          .optional()
+          .describe('{mode, visible, transform, pad, scale, motionBlur} — null clears'),
+        blend: z.string().nullable().optional().describe('A blend_modes id, or null back to normal'),
+        matte: z
+          .record(z.unknown())
+          .nullable()
+          .optional()
+          .describe('{source, channel, invert?}, null clears — draws in P1'),
+        masks: z.array(z.record(z.unknown())).nullable().optional().describe('The full mask list — draws in P1'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await setLayer(c, page_id, input, actorFrom(agent_name))
+      if (!out.ok) return err(out.error)
+      return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
+    },
+  )
+
+  server.registerTool(
+    'get_layer_plan',
+    {
+      title: 'Which elements promote, and what it costs',
+      description:
+        'The layer plan for a page’s composition — per frame, back to front: each promoted element’s content (static = raster once, dynamic = re-raster), where the transform runs, pad and texture scale, the area-weighted stack cost, and MO-15…19 issues. This is the static plan — measured geometry (rects, paint order, clips) comes from the preview and reports geometry: "unavailable" here.',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        frame_id: z.string().optional().describe('Only this frame — default every frame on the page'),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, frame_id, agent_name }) => {
+      const c = canvasFor(canvas_id, 'view')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await getLayerPlan(c, page_id, { frame_id })
+      return out.ok ? text(out.data as object) : err(out.error)
+    },
+  )
+
+  server.registerTool(
+    'list_element_presets',
+    {
+      title: 'The element motion vocabulary',
+      description:
+        'The 56 named moves apply_element_preset can write: 20 entrances (pop, rise, wipe-in, glitch-in…), 20 exits (their mirrors) and 16 emphasis (pulse, shake, breathe, wiggle…), each with its params and a one-line use.',
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      inputSchema: { agent_name: agentName },
+    },
+    async () => {
+      const out = listElementPresets()
+      return out.ok ? text(out.data as object) : err(out.error)
+    },
+  )
+
+  server.registerTool(
+    'apply_element_preset',
+    {
+      title: 'A named move on elements, as keyframes',
+      description:
+        'Write an element preset onto one or many elements of one frame: `{frame_id, element_ids[], preset, at?, duration?, direction?, distance?, intensity?, easing?, seed?, params?, stagger?}` — stagger {each|amount, from: start|end|center|edges|random|position-x|position-y|grid, ease?, seed?} offsets each element’s start; element tracks are created when missing. Every value lands as an ordinary editable keyframe — entrances end at rest, exits start at rest, emphasis holds rest on both ends.',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      inputSchema: {
+        canvas_id: z.string(),
+        page_id: z.string(),
+        frame_id: z.string(),
+        element_ids: z.array(z.string()).describe('The elements’ data-doop-ids'),
+        preset: z.string().describe('A list_element_presets id'),
+        at: z.number().optional().describe('Seconds on the clock, default 0'),
+        duration: z.number().optional().describe('Seconds the move takes — default the preset’s own'),
+        direction: z
+          .union([z.string(), z.number()])
+          .optional()
+          .describe('up, down, left, right or degrees — travel direction for the moves that take one'),
+        distance: z.number().optional().describe('px of travel, default 80'),
+        intensity: z.number().optional().describe('0..1 magnitude for amplitude-style presets'),
+        easing: z.record(z.unknown()).optional(),
+        seed: z.number().int().optional().describe('Seed for the seeded presets — same seed, same jitter'),
+        params: z.record(z.number()).optional().describe('Preset knobs — list_element_presets names them'),
+        stagger: z
+          .object({
+            each: z.number().optional(),
+            amount: z.number().optional(),
+            from: z.string().optional(),
+            ease: z.record(z.unknown()).optional(),
+            seed: z.number().int().optional(),
+          })
+          .optional(),
+        agent_name: agentName,
+      },
+    },
+    async ({ canvas_id, page_id, agent_name, ...input }) => {
+      const c = canvasFor(canvas_id, 'edit')
+      if (!c) return noCanvas(canvas_id)
+      arrive(canvas_id, agent_name)
+      const out = await applyElementPreset(c, page_id, input, actorFrom(agent_name))
       if (!out.ok) return err(out.error)
       return withStatusNudge(text({ ok: true, ...(out.data as object) }), canvas_id, actorFrom(agent_name))
     },

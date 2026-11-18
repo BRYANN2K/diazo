@@ -2735,28 +2735,33 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'add_effect',
     description:
-      "Push an effect onto a track's stack: fx is a registry id, params override defaults (points take [u,v]), index places it.",
+      "Push an effect onto a track's stack: fx is a registry id, params override defaults (points take [u,v]), index places it. Give track_id, or frame_id + element_id — the element becomes a layer and its track is created when missing.",
     input_schema: {
       type: 'object',
       properties: {
         page_id: { type: 'string' },
         track_id: { type: 'string' },
+        frame_id: { type: 'string' },
+        element_id: { type: 'string' },
         fx: { type: 'string' },
         id: { type: 'string' },
         params: { type: 'object' },
         index: { type: 'number' },
       },
-      required: ['page_id', 'track_id', 'fx'],
+      required: ['page_id', 'fx'],
     },
   },
   {
     name: 'update_effect',
-    description: 'Patch one stacked effect: enabled, params (merged), seed, mix, blend (null clears).',
+    description:
+      'Patch one stacked effect: enabled, params (merged), seed, mix, blend (null clears). track_id, or frame_id + element_id.',
     input_schema: {
       type: 'object',
       properties: {
         page_id: { type: 'string' },
         track_id: { type: 'string' },
+        frame_id: { type: 'string' },
+        element_id: { type: 'string' },
         effect_id: { type: 'string' },
         enabled: { type: 'boolean' },
         params: { type: 'object' },
@@ -2764,33 +2769,110 @@ export const TOOLS: Anthropic.Tool[] = [
         mix: { type: 'number' },
         blend: { type: ['string', 'null'] },
       },
-      required: ['page_id', 'track_id', 'effect_id'],
+      required: ['page_id', 'effect_id'],
     },
   },
   {
     name: 'remove_effect',
-    description: "Remove an effect instance from a track's stack by id.",
+    description: "Remove an effect instance from a track's stack by id. track_id, or frame_id + element_id.",
     input_schema: {
       type: 'object',
       properties: {
         page_id: { type: 'string' },
         track_id: { type: 'string' },
+        frame_id: { type: 'string' },
+        element_id: { type: 'string' },
         effect_id: { type: 'string' },
       },
-      required: ['page_id', 'track_id', 'effect_id'],
+      required: ['page_id', 'effect_id'],
     },
   },
   {
     name: 'set_effects',
-    description: "Make a track's effect stack exactly `effects` (complete instances, in order) — one atomic batch.",
+    description:
+      "Make a track's effect stack exactly `effects` (complete instances, in order) — one atomic batch. track_id, or frame_id + element_id (the track is created when missing).",
     input_schema: {
       type: 'object',
       properties: {
         page_id: { type: 'string' },
         track_id: { type: 'string' },
+        frame_id: { type: 'string' },
+        element_id: { type: 'string' },
         effects: { type: 'array', items: { type: 'object' } },
       },
-      required: ['page_id', 'track_id', 'effects'],
+      required: ['page_id', 'effects'],
+    },
+  },
+  {
+    name: 'set_layer',
+    description:
+      'The layer contract on an element: layer {mode: auto|on|off, visible, transform: compositor|css, pad, scale, motionBlur} (null clears), blend one of the 26 modes (null = normal), matte {source, channel, invert?} and masks (the full id-keyed list) store now and draw in P1.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        track_id: { type: 'string' },
+        frame_id: { type: 'string' },
+        element_id: { type: 'string' },
+        layer: { type: ['object', 'null'] },
+        blend: { type: ['string', 'null'] },
+        matte: { type: ['object', 'null'] },
+        masks: { type: ['array', 'null'], items: { type: 'object' } },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'get_layer_plan',
+    description:
+      'The static layer plan per frame, back to front: which elements promote to layers, static vs dynamic content, where the transform runs, pad/scale, stack cost, and MO-15…19 issues. Measured geometry is the preview’s job and reports unavailable here.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        frame_id: { type: 'string', description: 'Only this frame — default every frame on the page' },
+      },
+      required: ['page_id'],
+    },
+  },
+  {
+    name: 'list_element_presets',
+    description:
+      'The 56 element moves apply_element_preset writes: 20 entrances, 20 exits (the mirrors), 16 emphasis — params and a one-line use each.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'apply_element_preset',
+    description:
+      'Write a named element move as editable keyframes: {frame_id, element_ids[], preset, at?, duration?, direction?, distance?, intensity?, easing?, seed?, params?, stagger?}. stagger {each|amount, from: start|end|center|edges|random|position-x|position-y|grid, ease?, seed?} offsets each element’s start; tracks are created when missing. Entrances end at rest, exits start at rest, emphasis holds rest on both ends.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: { type: 'string' },
+        frame_id: { type: 'string' },
+        element_ids: { type: 'array', items: { type: 'string' } },
+        element_id: { type: 'string', description: 'Single element shorthand' },
+        preset: { type: 'string' },
+        at: { type: 'number' },
+        duration: { type: 'number' },
+        direction: { type: ['string', 'number'] },
+        distance: { type: 'number' },
+        intensity: { type: 'number' },
+        easing: { type: 'object' },
+        seed: { type: 'number' },
+        params: { type: 'object' },
+        stagger: {
+          type: 'object',
+          properties: {
+            each: { type: 'number' },
+            amount: { type: 'number' },
+            from: { type: 'string' },
+            ease: { type: 'object' },
+            seed: { type: 'number' },
+          },
+        },
+      },
+      required: ['page_id', 'frame_id', 'preset'],
     },
   },
   {
@@ -4107,7 +4189,11 @@ export async function execTool(
       case 'set_effects':
       case 'apply_look':
       case 'list_looks':
-      case 'set_motion_blur': {
+      case 'set_motion_blur':
+      case 'set_layer':
+      case 'get_layer_plan':
+      case 'list_element_presets':
+      case 'apply_element_preset': {
         const canvas = store.getCanvas(canvasId)
         if (!canvas) return fail('canvas not found')
         const raw = block.input as Record<string, unknown>

@@ -41,6 +41,14 @@ import {
   type TextOrder,
   type TextSplit,
 } from '../shared/motion.ts'
+import { planLayers, type FramePlan } from '../shared/motionLayers.ts'
+import {
+  elementPreset,
+  elementPresetList,
+  isElementPreset,
+  staggerOffsets,
+  type StaggerOptions,
+} from '../shared/motionElementPresets.ts'
 import { canvasPages } from '../shared/pages.ts'
 import type { Actor, Canvas } from '../shared/types.ts'
 
@@ -368,6 +376,8 @@ export function listMotionEffects(): Outcome {
       label: fx.label,
       family: fx.family,
       cost: fx.cost,
+      alpha: fx.alpha,
+      ...(fx.grow ? { grows: true } : {}),
       params: fx.params,
       ...(fx.gen ? { generates: true } : {}),
       /* luma matte and displacement map bind the layer's own picture on
@@ -377,7 +387,38 @@ export function listMotionEffects(): Outcome {
       ...(fx.selfMapped ? { self_mapped: true } : {}),
     })),
     blend_modes: BLEND_MODES,
+    blend_use: BLEND_USE,
   })
+}
+
+/** one line each so an agent picks the mode that means what it wants */
+const BLEND_USE: Record<string, string> = {
+  normal: 'ordinary stacking — the default',
+  multiply: 'darkens — shadows and ink on paper',
+  screen: 'lightens — glows, light leaks, additive-feeling without clipping',
+  overlay: 'contrast both ways — keeps blacks and whites',
+  darken: 'keeps the darker channel per pixel',
+  lighten: 'keeps the lighter channel per pixel',
+  'color-dodge': 'brightens hard — blown-out light',
+  'color-burn': 'darkens hard — deep scorched shadows',
+  'hard-light': 'the layer lights or shades the base — a light source on it',
+  'soft-light': 'gentle dodge+burn — ambient light',
+  difference: 'absolute delta — inverts overlaps, alignment checks',
+  exclusion: 'soft difference — lower-contrast inversion',
+  add: 'linear add — true additive light, clips at 1',
+  subtract: 'linear subtract — pulls the layer out of the base',
+  divide: 'channel ratio — flat-fields the base',
+  'linear-burn': 'additive darkening — heavy shadow',
+  'vivid-light': 'hard dodge/burn by lightness — posterised light',
+  'linear-light': 'linear burn/dodge by lightness — harsh light',
+  'pin-light': 'swaps darks and lights around mid grey',
+  'hard-mix': 'thresholds to pure primaries — flat posterise',
+  hue: "keeps the layer's hue on the base's shading",
+  saturation: "keeps the layer's saturation on the base's shading",
+  color: "hue + saturation — colourizes the base's shading",
+  luminosity: "keeps the layer's luminance on the base's colour",
+  'darker-color': 'keeps the darker composite colour per pixel',
+  'lighter-color': 'keeps the lighter composite colour per pixel',
 }
 
 /** effect ops share their plumbing: validate ids, patch, report */
@@ -389,21 +430,85 @@ function effectPatch(canvas: Canvas, pageId: string, ops: CompositionOp[], actor
   return ok({ composition: applied.composition })
 }
 
-export function addEffect(
+/** the kinds an effect stack draws on (element tracks join camera and
+ *  adjustment in the layer compositor — motion-elements P0) */
+const EFFECT_TRACK_KINDS = new Set(['camera', 'adjustment', 'element'])
+
+/**
+ * Resolve the track an element-addressed tool targets. `track_id` wins;
+ * else `frame_id` + `element_id` find or — through the returned op —
+ * create the element track. The frame's markup is checked so a typo'd
+ * data-doop-id fails loudly instead of writing a dead lane.
+ */
+async function elementTrack(
   canvas: Canvas,
   pageId: string,
-  input: { track_id?: string; fx?: string; id?: string; params?: Record<string, unknown>; index?: number },
+  comp: { tracks: { id: string; kind: string; frameId?: string; elementId?: string }[] },
+  input: { track_id?: string; frame_id?: string; element_id?: string },
+): Promise<
+  { ok: true; trackId: string; elementTrack: boolean; create?: CompositionOp } | { ok: false; error: string }
+> {
+  if (input.track_id !== undefined) {
+    const track = comp.tracks.find((t) => t.id === input.track_id)
+    if (!track) return { ok: false, error: `no track ${input.track_id}` }
+    return { ok: true, trackId: track.id, elementTrack: track.kind === 'element' }
+  }
+  if (!input.frame_id || !input.element_id) {
+    return { ok: false, error: 'give track_id or frame_id + element_id' }
+  }
+  const existing = comp.tracks.find(
+    (t) => t.kind === 'element' && t.frameId === input.frame_id && t.elementId === input.element_id,
+  )
+  if (existing) return { ok: true, trackId: existing.id, elementTrack: true }
+  const loaded = (await store.load(canvas.id)) ?? canvas
+  const frame = store.getFrame(input.frame_id)
+  if (!frame || frame.pageId !== pageId) return { ok: false, error: `no frame ${input.frame_id} on page ${pageId}` }
+  if (!loaded.frames.some((f) => f.id === frame.id)) {
+    return { ok: false, error: `no frame ${input.frame_id} on page ${pageId}` }
+  }
+  if (!elementHtml(frame.html, input.element_id)) {
+    return { ok: false, error: `no element ${input.element_id} in frame ${input.frame_id}` }
+  }
+  const trackId = `el-${newMotionId().slice(0, 10)}`
+  return {
+    ok: true,
+    trackId,
+    elementTrack: true,
+    create: {
+      op: 'add_track',
+      track: {
+        id: trackId,
+        kind: 'element',
+        frameId: frame.id,
+        elementId: input.element_id,
+        name: `Element ${input.element_id}`,
+      },
+    },
+  }
+}
+
+export async function addEffect(
+  canvas: Canvas,
+  pageId: string,
+  input: {
+    track_id?: string
+    frame_id?: string
+    element_id?: string
+    fx?: string
+    id?: string
+    params?: Record<string, unknown>
+    index?: number
+  },
   actor: Actor,
-): Outcome {
+): Promise<Outcome> {
   const comp = compOf(canvas, pageId)
   if ('error' in comp) return comp
-  const track = comp.tracks.find((t) => t.id === input.track_id)
-  if (!track) return fail(`no track ${input.track_id}`)
-  /* the raster/GL pass only reads camera and adjustment stacks — an effect
-     anywhere else would sit undrawn, so the write is refused */
-  if (track.kind !== 'camera' && track.kind !== 'adjustment') {
+  const target = await elementTrack(canvas, pageId, comp, input)
+  if (!target.ok) return fail(target.error)
+  const track = comp.tracks.find((t) => t.id === target.trackId)
+  if (track && !EFFECT_TRACK_KINDS.has(track.kind)) {
     return fail(
-      `effects only draw on camera and adjustment tracks — ${track.kind} track ${track.id} would never render`,
+      `effects only draw on element, camera and adjustment tracks — ${track.kind} track ${track.id} would never render`,
     )
   }
   const spec = effectSpec(input.fx ?? '')
@@ -415,14 +520,20 @@ export function addEffect(
     fx: spec.id,
     params: { ...spec.defaults(), ...(input.params ?? {}) } as EffectInstance['params'],
   }
-  return effectPatch(canvas, pageId, [{ op: 'add_effect', trackId: track.id, effect, index: input.index }], actor)
+  const ops: CompositionOp[] = [
+    ...(target.create ? [target.create] : []),
+    { op: 'add_effect', trackId: target.trackId, effect, index: input.index },
+  ]
+  return effectPatch(canvas, pageId, ops, actor)
 }
 
-export function updateEffect(
+export async function updateEffect(
   canvas: Canvas,
   pageId: string,
   input: {
     track_id?: string
+    frame_id?: string
+    element_id?: string
     effect_id?: string
     enabled?: boolean
     params?: Record<string, unknown>
@@ -431,10 +542,12 @@ export function updateEffect(
     blend?: string | null
   },
   actor: Actor,
-): Outcome {
+): Promise<Outcome> {
   const comp = compOf(canvas, pageId)
   if ('error' in comp) return comp
-  const track = comp.tracks.find((t) => t.id === input.track_id)
+  const target = await elementTrack(canvas, pageId, comp, input)
+  if (!target.ok) return fail(target.error)
+  const track = comp.tracks.find((t) => t.id === target.trackId)
   if (!track) return fail(`no track ${input.track_id}`)
   const effect = track.effects?.find((e) => e.id === input.effect_id)
   if (!effect) return fail(`no effect ${input.effect_id} on track ${input.track_id}`)
@@ -458,41 +571,43 @@ export function updateEffect(
   return effectPatch(canvas, pageId, [op], actor)
 }
 
-export function removeEffect(
+export async function removeEffect(
   canvas: Canvas,
   pageId: string,
-  input: { track_id?: string; effect_id?: string },
+  input: { track_id?: string; frame_id?: string; element_id?: string; effect_id?: string },
   actor: Actor,
-): Outcome {
+): Promise<Outcome> {
   const comp = compOf(canvas, pageId)
   if ('error' in comp) return comp
-  const track = comp.tracks.find((t) => t.id === input.track_id)
-  if (!track) return fail(`no track ${input.track_id}`)
+  const target = await elementTrack(canvas, pageId, comp, input)
+  if (!target.ok) return fail(target.error)
   return effectPatch(
     canvas,
     pageId,
-    [{ op: 'remove_effect', trackId: track.id, effectId: input.effect_id ?? '' }],
+    [{ op: 'remove_effect', trackId: target.trackId, effectId: input.effect_id ?? '' }],
     actor,
   )
 }
 
 /** Replace a track's whole stack: reorder, rewrite params — one ops batch.
  *  `effects` lists complete instances; the stack becomes exactly that. */
-export function setEffects(
+export async function setEffects(
   canvas: Canvas,
   pageId: string,
-  input: { track_id?: string; effects?: EffectInstance[] },
+  input: { track_id?: string; frame_id?: string; element_id?: string; effects?: EffectInstance[] },
   actor: Actor,
-): Outcome {
+): Promise<Outcome> {
   const comp = compOf(canvas, pageId)
   if ('error' in comp) return comp
-  const track = comp.tracks.find((t) => t.id === input.track_id)
-  if (!track) return fail(`no track ${input.track_id}`)
-  if (track.kind !== 'camera' && track.kind !== 'adjustment' && (input.effects ?? []).length > 0) {
+  const target = await elementTrack(canvas, pageId, comp, input)
+  if (!target.ok) return fail(target.error)
+  const track = comp.tracks.find((t) => t.id === target.trackId)
+  if (track && !EFFECT_TRACK_KINDS.has(track.kind) && (input.effects ?? []).length > 0) {
     return fail(
-      `effects only draw on camera and adjustment tracks — ${track.kind} track ${track.id} would never render`,
+      `effects only draw on element, camera and adjustment tracks — ${track.kind} track ${track.id} would never render`,
     )
   }
+  const trackId = target.trackId
   const wanted = input.effects ?? []
   if (!Array.isArray(wanted) || wanted.length > 20) return fail('effects must be an array of at most 20')
   const seen = new Set<string>()
@@ -506,17 +621,17 @@ export function setEffects(
     const bad = spec.validate(raw.params ?? {})
     if (bad) return fail(bad)
   }
-  const existing = track.effects ?? []
-  const ops: CompositionOp[] = []
+  const existing = track?.effects ?? []
+  const ops: CompositionOp[] = target.create ? [target.create] : []
   for (const e of existing) {
-    if (!seen.has(e.id)) ops.push({ op: 'remove_effect', trackId: track.id, effectId: e.id })
+    if (!seen.has(e.id)) ops.push({ op: 'remove_effect', trackId, effectId: e.id })
   }
   for (const [i, raw] of wanted.entries()) {
     const prev = existing.find((e) => e.id === raw.id)
     if (!prev) {
       ops.push({
         op: 'add_effect',
-        trackId: track.id,
+        trackId,
         index: i,
         effect: {
           id: raw.id,
@@ -531,7 +646,7 @@ export function setEffects(
     } else {
       ops.push({
         op: 'update_effect',
-        trackId: track.id,
+        trackId,
         effectId: raw.id,
         enabled: raw.enabled ?? prev.enabled,
         params: { ...effectSpec(raw.fx)!.defaults(), ...(raw.params ?? {}) },
@@ -541,7 +656,9 @@ export function setEffects(
       })
     }
   }
-  ops.push({ op: 'reorder_effects', trackId: track.id, effectIds: wanted.map((e) => e.id) })
+  if (wanted.length > 0) {
+    ops.push({ op: 'reorder_effects', trackId, effectIds: wanted.map((e) => e.id) })
+  }
   return effectPatch(canvas, pageId, ops, actor)
 }
 
@@ -613,6 +730,241 @@ export function setMotionBlur(
   return ok({ composition: applied.composition, motionBlur: applied.composition.motionBlur ?? null })
 }
 
+/* ---- the element layer (motion-elements P0) ---- */
+
+/**
+ * The layer contract on an element track: `mode`/`visible`/`transform`/
+ * `pad`/`scale`/`motion_blur` land as one `set_layer`, `blend` as
+ * `set_blend`, `matte` as `set_matte`, and `masks` diffs into mask ops.
+ * All fields optional and merge — send `layer: null` to clear the spec.
+ */
+export async function setLayer(
+  canvas: Canvas,
+  pageId: string,
+  input: {
+    track_id?: string
+    frame_id?: string
+    element_id?: string
+    layer?: Record<string, unknown> | null
+    blend?: string | null
+    matte?: Record<string, unknown> | null
+    masks?: Record<string, unknown>[] | null
+  },
+  actor: Actor,
+): Promise<Outcome> {
+  const comp = compOf(canvas, pageId)
+  if ('error' in comp) return comp
+  const target = await elementTrack(canvas, pageId, comp, input)
+  if (!target.ok) return fail(target.error)
+  if (!target.elementTrack) {
+    return fail(`layers only exist on element tracks — ${input.track_id} is not one`)
+  }
+  const track = comp.tracks.find((t) => t.id === target.trackId)
+  const ops: CompositionOp[] = target.create ? [target.create] : []
+  if (input.layer !== undefined) {
+    ops.push({ op: 'set_layer', trackId: target.trackId, layer: input.layer as never })
+  } else if (input.blend === undefined && input.matte === undefined && input.masks === undefined) {
+    return fail('nothing to write — pass layer, blend, matte or masks')
+  }
+  if (input.blend !== undefined) {
+    if (input.blend !== null && !BLEND_MODES.includes(input.blend as never)) {
+      return fail(`blend must be one of ${BLEND_MODES.join(', ')} or null`)
+    }
+    ops.push({ op: 'set_blend', trackId: target.trackId, blend: input.blend as never })
+  }
+  if (input.matte !== undefined) {
+    ops.push({ op: 'set_matte', trackId: target.trackId, matte: input.matte as never })
+  }
+  if (input.masks !== undefined) {
+    const wanted = input.masks ?? []
+    const existing = track?.masks ?? []
+    const kept = new Set(wanted.map((m) => m.id))
+    for (const m of existing) {
+      if (!kept.has(m.id)) ops.push({ op: 'remove_mask', trackId: target.trackId, maskId: m.id })
+    }
+    for (const m of wanted) {
+      const prev = existing.find((e) => e.id === m.id)
+      if (prev) ops.push({ op: 'update_mask', trackId: target.trackId, maskId: prev.id, mask: m as never })
+      else ops.push({ op: 'add_mask', trackId: target.trackId, mask: m as never })
+    }
+  }
+  const applied = actions.patchComposition(canvas.id, pageId, ops, actor)
+  if (!applied.ok) return fail(applied.error ?? 'layer rejected')
+  return ok({ composition: applied.composition, track_id: target.trackId })
+}
+
+/**
+ * The static layer plan: which element tracks promote per frame, in
+ * composite order, with content/transform decisions, texture size (when
+ * measurable server-side — it is not), cost and the MO-15..19 issues.
+ * Measured geometry is the browser engine's job (P0-FE1 `__doopMotionPlan`);
+ * the plan reports `geometry: 'unavailable'` and every rect-free field.
+ */
+export async function getLayerPlan(canvas: Canvas, pageId: string, input: { frame_id?: string }): Promise<Outcome> {
+  const comp = compOf(canvas, pageId)
+  if ('error' in comp) return comp
+  const loaded = (await store.load(canvas.id)) ?? canvas
+  const frames = loaded.frames.filter((f) => f.pageId === pageId).map((f) => ({ id: f.id, html: f.html }))
+  const wanted = input.frame_id ? frames.filter((f) => f.id === input.frame_id) : frames
+  if (input.frame_id && wanted.length === 0) return fail(`no frame ${input.frame_id} on page ${pageId}`)
+  const plans: FramePlan[] = planLayers(comp, wanted, {
+    html: new Map(frames.map((f) => [f.id, f.html])),
+  })
+  return ok({
+    frames: plans,
+    measured: false,
+    note: 'static plan — measured geometry comes from the preview’s __doopMotionPlan; budgets needing a rect report unavailable rather than guessed',
+  })
+}
+
+/* ---- element presets (motion-elements P0, plan d.1) ---- */
+
+export function listElementPresets(): Outcome {
+  return ok({ presets: elementPresetList() })
+}
+
+/**
+ * Compile an element preset into ordinary keyframes on one or many element
+ * tracks of one frame — the track is created when missing. `stagger`
+ * offsets each element's start: `each`/`amount`, an ordering `from`, an
+ * `ease` on the distribution and a `seed` for 'random'.
+ */
+export async function applyElementPreset(
+  canvas: Canvas,
+  pageId: string,
+  input: {
+    frame_id?: string
+    element_ids?: string[]
+    element_id?: string
+    preset?: string
+    at?: number
+    duration?: number
+    direction?: string | number
+    distance?: number
+    intensity?: number
+    easing?: unknown
+    seed?: number
+    params?: Record<string, number>
+    stagger?: { each?: number; amount?: number; from?: string; ease?: unknown; seed?: number }
+  },
+  actor: Actor,
+): Promise<Outcome> {
+  const comp = compOf(canvas, pageId)
+  if ('error' in comp) return comp
+  if (!isElementPreset(input.preset)) {
+    return fail(`preset must be one of the list_element_presets ids`)
+  }
+  const ids = input.element_ids ?? (input.element_id ? [input.element_id] : [])
+  if (ids.length === 0) return fail('element_ids is required')
+  if (ids.length > 64) return fail('element_ids must name at most 64 elements')
+  if (!input.frame_id) return fail('frame_id is required')
+  const loaded = (await store.load(canvas.id)) ?? canvas
+  const frame = store.getFrame(input.frame_id)
+  if (!frame || frame.pageId !== pageId) return fail(`no frame ${input.frame_id} on page ${pageId}`)
+  if (!loaded.frames.some((f) => f.id === frame.id)) return fail(`no frame ${input.frame_id} on page ${pageId}`)
+  const missing = ids.filter((id) => !elementHtml(frame.html, id))
+  if (missing.length > 0) return fail(`no elements ${missing.join(', ')} in frame ${frame.id}`)
+  const at = input.at ?? 0
+  if (!Number.isFinite(at) || at < 0 || at > comp.duration) {
+    return fail(`at must be within the film [0, ${comp.duration}]`)
+  }
+  let easing: MotionEasing | undefined
+  if (input.easing !== undefined) {
+    const parsed = parseEasing(input.easing)
+    if (!parsed) return fail('easing is not valid')
+    easing = parsed
+  }
+  let direction: 'up' | 'down' | 'left' | 'right' | number | undefined
+  if (typeof input.direction === 'number') direction = input.direction
+  else if (input.direction !== undefined) {
+    if (!['up', 'down', 'left', 'right'].includes(input.direction)) {
+      return fail('direction must be up, down, left, right or degrees')
+    }
+    direction = input.direction as 'up' | 'down' | 'left' | 'right'
+  }
+  /* stagger positions: the element's inline left/top when it carries one —
+     the static approximation until the measured plan lands */
+  const positions = ids.map((id) => {
+    const html = elementHtml(frame.html, id) ?? ''
+    const left = /left\s*:\s*(-?[\d.]+)px/.exec(html)?.[1]
+    const top = /top\s*:\s*(-?[\d.]+)px/.exec(html)?.[1]
+    return { x: Number(left ?? 0), y: Number(top ?? 0) }
+  })
+  const stagger = input.stagger
+  let offsets: number[]
+  if (stagger) {
+    const ease = stagger.ease !== undefined ? parseEasing(stagger.ease) : undefined
+    if (stagger.ease !== undefined && !ease) return fail('stagger.ease is not valid')
+    const STAGGER_FROM: readonly string[] = [
+      'start',
+      'end',
+      'center',
+      'edges',
+      'random',
+      'position-x',
+      'position-y',
+      'grid',
+    ]
+    const from = stagger.from ?? 'start'
+    if (!STAGGER_FROM.includes(from)) return fail(`stagger.from must be one of ${STAGGER_FROM.join(', ')}`)
+    const needsPositions = from === 'position-x' || from === 'position-y' || from === 'grid'
+    offsets = staggerOffsets(
+      ids.length,
+      {
+        each: stagger.each,
+        amount: stagger.amount,
+        from: from as StaggerOptions['from'],
+        ease: ease ?? undefined,
+        seed: stagger.seed ?? input.seed,
+      },
+      needsPositions ? positions : undefined,
+    )
+  } else {
+    offsets = ids.map(() => 0)
+  }
+  /* one ops batch: create each missing track, then drop its keyframes */
+  const ops: CompositionOp[] = []
+  const written: { element_id: string; track_id: string; offset: number; keyframes: number }[] = []
+  for (const [i, elementId] of ids.entries()) {
+    const target = await elementTrack(canvas, pageId, comp, {
+      frame_id: frame.id,
+      element_id: elementId,
+    })
+    if (!target.ok) return fail(target.error)
+    if (target.create) ops.push(target.create)
+    /* an auto-created track must be remembered for the next element —
+       elementTrack consults comp.tracks only */
+    if (target.create) {
+      comp.tracks.push({
+        id: target.trackId,
+        kind: 'element',
+        frameId: frame.id,
+        elementId,
+      } as never)
+    }
+    const keyframes = elementPreset(input.preset, {
+      t: at + offsets[i]!,
+      duration: input.duration,
+      direction,
+      distance: input.distance,
+      intensity: input.intensity,
+      easing,
+      seed: (input.seed ?? 1) + i,
+      params: input.params,
+    })
+    for (const keyframe of keyframes) ops.push({ op: 'add_keyframe', trackId: target.trackId, keyframe })
+    written.push({ element_id: elementId, track_id: target.trackId, offset: offsets[i]!, keyframes: keyframes.length })
+  }
+  const applied = actions.patchComposition(canvas.id, pageId, ops, actor)
+  if (!applied.ok) return fail(applied.error ?? 'preset rejected')
+  return ok({
+    composition: applied.composition,
+    preset: input.preset,
+    elements: written,
+    note: 'every value landed as an ordinary editable keyframe',
+  })
+}
+
 /* ---- one dispatch for every surface ---- */
 
 /** The resident agent's flat name→call table; the MCP tools register the same
@@ -654,6 +1006,14 @@ export async function execMotionPro(
       return listLooks()
     case 'set_motion_blur':
       return setMotionBlur(canvas, pageId, raw as { shutter?: number; samples?: number } | null, actor)
+    case 'set_layer':
+      return setLayer(canvas, pageId, raw, actor)
+    case 'get_layer_plan':
+      return getLayerPlan(canvas, pageId, raw)
+    case 'list_element_presets':
+      return listElementPresets()
+    case 'apply_element_preset':
+      return applyElementPreset(canvas, pageId, raw, actor)
     case 'get_scene_snapshot': {
       const { sceneSnapshot } = await import('./motionSnapshot.ts')
       return sceneSnapshot(canvas, pageId, raw as Parameters<typeof sceneSnapshot>[2])
