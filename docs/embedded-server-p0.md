@@ -134,23 +134,35 @@ What landed on top of P0:
   `/dev/null` and the server would exit at once), `DOOP_BROWSER_DIR`, `DOOP_INSTALL=desktop`
   (also inferred from `DOOP_EMBEDDED`; the server skips its own update check — the app's
   updater ships both).
-- `server/dataLock.ts`: one server per data dir, proven by the OS. `<data>/server.lock` is
-  an O_EXCL claim file (holder pid + host + heartbeat); `<data>/server.lock.sock` is a unix
-  socket the holder binds for its lifetime — a refused connection is the kernel's proof the
-  holder is gone, so no pid or hostname comparison decides liveness (a same-pid neighbour in
-  another container cannot fake it). A live holder is refused before any protected state is
-  touched; a provably dead claim is moved aside and re-created under the same O_EXCL gate.
-  Skipped only when `DATABASE_URL` and `BUCKET` are both set (no local state).
+- `server/dataLock.ts`: one server per data dir, proven by a kernel-held file lock.
+  `<data>/server.lock` is a stable file, created once and never unlinked: the holder opens
+  it, takes the OS's exclusive lock (`flock(2)` on POSIX, `LockFileEx` on Windows via
+  `fs-ext`), and keeps the fd for its lifetime — kill -9, OOM or a power cut free it, a
+  suspended or quiet holder keeps it, and heartbeat age never decides death. The locked
+  file's content is a diagnostic claim (pid + host + machine id + when); it is not read for
+  liveness. There is no move-aside and no create race — acquisition is serialized by the
+  lock itself, and a claim written under a different machine identity is refused
+  unconditionally, however old, because on a shared filesystem the remote holder's lock may
+  be real but invisible (pin `DOOP_MACHINE_ID` where the hostname is not stable, e.g. a
+  container that keeps its data volume across recreation). A filesystem that cannot prove
+  locking fails closed — the data dir needs working advisory locking. A live
+  `server.lock.sock` from the old socket design is still honoured: it means an old-version
+  server owns the dir. Skipped only when `DATABASE_URL` and `BUCKET` are both set (no local
+  state).
 - `server/backup.ts`: `<data>/backups/pg-<date>.tar.gz` plus a
   `<data>/backups/pg-<date>.assets.json` manifest of on-disk assets; runs before applying
   pending migrations (on any populated database — journal or not — an empty cluster has
   nothing to lose) and once a day; keeps the newest 7 complete pairs. Both paths stream a
   ustar.gz a block at a time, so a multi-GB data dir never lands in memory: the live one
-  brackets the file copy with `pg_backup_start`/`pg_backup_stop`, then a second `pg_wal`
-  pass and the `backup_label` pg_backup_stop hands back — the same file-level backup
-  Postgres sanctions, which a bare `tar -xzf` restores. The pre-migration one tars the
-  quiescent `pg/` in place. The manifest renames in before the archive, whose name is the
-  completion marker, and real file modes are kept so an extracted dir stays traversable.
+  brackets the file copy with `pg_backup_start`/`pg_backup_stop` while a hoarder hard-links
+  every WAL segment into a `.walhold` dir — backup mode ends before the WAL is archived, so
+  the range from the `backup_label`'s start file through the stop lsn is verified complete
+  before anything is published, and `tar -xzf` restores it. The pre-migration one tars the
+  quiescent `pg/` in place. Files are archived from their open handle at the statted length
+  (a grown tail is ignored, a shrunk body zero-pads — pg_basebackup semantics). The manifest
+  renames in before the archive, whose name is the completion marker; the tree is private —
+  `0700` dir, `0600` files — and real file modes are kept so an extracted dir stays
+  traversable.
 - Migration guards in `server/db/index.ts`: refuses a data dir stamped by a newer migration
   set (newer `created_at` than the bundled journal, or more applied rows than the journal
   has), backs up first when rows exist and migrations are pending.
