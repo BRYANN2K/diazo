@@ -566,46 +566,41 @@ export function resetCritiques(canvasId: string, pageId: string) {
   for (const key of critiques.keys()) if (key.startsWith(prefix)) critiques.delete(key)
 }
 
-/** critique_scene: the check's numbers folded into the rubric, plus the
- *  pass budget — `direction.passes` (default 3, hard max 5). A call on a
- *  new revision is a pass; the same revision again is free. */
-export async function critiqueScene(canvas: Canvas, pageId: string, input: { pixels?: boolean }): Promise<Outcome> {
-  const comp = store.getComposition(canvas.id, pageId)
-  if (!comp) return fail(`page ${pageId} has no composition — nothing to critique`)
-  const checked = await checkScene(canvas, pageId, input)
-  if (!checked.ok) return checked
-  const report = checked.data as {
-    lint: { errors: number; warnings: number }
-    pacing: { dead_beats: { t: number }[]; shot_seconds: { min: number; max: number; variance: number } }
-    legibility: { available?: boolean; under_minimum?: number; low_contrast?: number }
-    safe_zones: { available?: boolean; violations?: unknown[] }
-    effects: {
-      over_budget: boolean
-      unsupported: string[]
-      not_drawn?: { track_id: string; what: string; reason: string }[]
-    }
+/** the check report machineRubric reads */
+export interface CheckReport {
+  lint: { errors: number; warnings: number }
+  pacing: { dead_beats: { t: number }[]; shot_seconds: { min: number; max: number; variance: number } }
+  legibility: { available?: boolean; under_minimum?: number; low_contrast?: number }
+  safe_zones: { available?: boolean; violations?: unknown[] }
+  effects: {
+    over_budget: boolean
+    unsupported: string[]
+    not_drawn?: { track_id: string; what: string; reason: string }[]
   }
+}
 
-  const key = `${canvas.id}/${pageId}/${comp.id}`
-  let state = critiques.get(key)
-  if (!state) {
-    /* bound the map — a canvas left mid-run must not grow it forever */
-    if (critiques.size >= CRITIQUE_STATES_MAX) critiques.delete(critiques.keys().next().value!)
-    critiques.set(key, (state = { revisions: new Set() }))
-  }
-  const maxPasses = Math.min(comp.direction?.passes ?? CRITIQUE_PASS_DEFAULT, CRITIQUE_PASS_MAX)
-  const firstOnRevision = !state.revisions.has(comp.revision)
-  if (firstOnRevision) state.revisions.add(comp.revision)
-  const pass = state.revisions.size
-  const exhausted = pass >= maxPasses
+export interface MachineIssue {
+  severity: 'blocker' | 'major' | 'minor'
+  at?: number
+  on?: string
+  fix: string
+}
 
-  /* machine-gradeable signals land pre-filled; the rest the agent scores
-     from the snapshot and the notes */
+export interface MachineRubric {
+  /** one entry per rubric category, its machine-filed issues */
+  rubric: Record<string, { issues: MachineIssue[]; note?: string }>
+  blockers: number
+  majors: number
+}
+
+/**
+ * The machine-gradeable half of the critique: a check_scene report folded
+ * into the fixed rubric. Pure — the director run and critique_scene share
+ * it, so both count the same blockers on the same film.
+ */
+export function machineRubric(report: CheckReport): MachineRubric {
   const lint = report.lint
-  const rubric: Record<
-    string,
-    { issues: { severity: string; at?: number; on?: string; fix: string }[]; note?: string }
-  > = {}
+  const rubric: Record<string, { issues: MachineIssue[]; note?: string }> = {}
   for (const cat of RUBRIC) rubric[cat] = { issues: [] }
   if (lint.errors > 0) {
     rubric.pacing!.issues.push({
@@ -672,6 +667,110 @@ export async function critiqueScene(canvas: Canvas, pageId: string, input: { pix
   const majors = Object.values(rubric)
     .flatMap((r) => r.issues)
     .filter((i) => i.severity === 'major').length
+  return { rubric, blockers, majors }
+}
+
+/* an issue the model files on its own critique */
+export interface CritiqueIssue {
+  t?: number
+  track_id?: string
+  severity: 'blocker' | 'major' | 'minor'
+  fix: string
+}
+
+const CRITIQUE_ISSUE_MAX = 40
+
+function parseScores(value: unknown): Record<string, number> | string {
+  if (value === undefined) return {}
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'scores is an object'
+  const out: Record<string, number> = {}
+  for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+    if (!(RUBRIC as readonly string[]).includes(key)) return `unknown rubric category ${key}`
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 5) return `scores.${key} is an integer 1–5`
+    out[key] = v
+  }
+  return out
+}
+
+function parseCritiqueIssues(value: unknown): CritiqueIssue[] | string {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) return 'issues is a list'
+  if (value.length > CRITIQUE_ISSUE_MAX) return `issues is capped at ${CRITIQUE_ISSUE_MAX}`
+  const out: CritiqueIssue[] = []
+  for (const raw of value) {
+    if (typeof raw !== 'object' || raw === null) return 'an issue is an object'
+    const i = raw as Record<string, unknown>
+    if (i.severity !== 'blocker' && i.severity !== 'major' && i.severity !== 'minor') {
+      return "issue.severity is 'blocker', 'major' or 'minor'"
+    }
+    if (typeof i.fix !== 'string' || !i.fix.trim()) return 'issue.fix is required'
+    out.push({
+      severity: i.severity,
+      fix: i.fix.trim().slice(0, 400),
+      ...(typeof i.t === 'number' && Number.isFinite(i.t) ? { t: i.t } : {}),
+      ...(typeof i.track_id === 'string' ? { on: i.track_id } : {}),
+    })
+  }
+  return out
+}
+
+/** critique_scene: the check's numbers folded into the rubric, plus the
+ *  pass budget — `direction.passes` (default 3, hard max 5). A call on a
+ *  new revision is a pass; the same revision again is free.
+ *
+ *  `scores` files the model's grades (the 8 rubric categories, 1–5 — a
+ *  category holding a machine blocker caps at 2); `issues` files its own
+ *  findings. Inside a director run the caller supplies `runPass` — the
+ *  run's pass state — and the in-memory budget map is not touched. */
+export async function critiqueScene(
+  canvas: Canvas,
+  pageId: string,
+  input: { pixels?: boolean; scores?: Record<string, number>; issues?: CritiqueIssue[] },
+  runPass?: { index: number; max: number },
+): Promise<Outcome> {
+  const comp = store.getComposition(canvas.id, pageId)
+  if (!comp) return fail(`page ${pageId} has no composition — nothing to critique`)
+  const scores = parseScores(input.scores)
+  if (typeof scores === 'string') return fail(scores)
+  const modelIssues = parseCritiqueIssues(input.issues)
+  if (typeof modelIssues === 'string') return fail(modelIssues)
+  const checked = await checkScene(canvas, pageId, input)
+  if (!checked.ok) return checked
+  const report = checked.data as CheckReport
+  const machine = machineRubric(report)
+  const { rubric, blockers, majors } = machine
+
+  let pass: number
+  let maxPasses: number
+  let firstOnRevision = false
+  if (runPass) {
+    pass = runPass.index
+    maxPasses = runPass.max
+  } else {
+    const key = `${canvas.id}/${pageId}/${comp.id}`
+    let state = critiques.get(key)
+    if (!state) {
+      /* bound the map — a canvas left mid-run must not grow it forever */
+      if (critiques.size >= CRITIQUE_STATES_MAX) critiques.delete(critiques.keys().next().value!)
+      critiques.set(key, (state = { revisions: new Set() }))
+    }
+    maxPasses = Math.min(comp.direction?.passes ?? CRITIQUE_PASS_DEFAULT, CRITIQUE_PASS_MAX)
+    firstOnRevision = !state.revisions.has(comp.revision)
+    if (firstOnRevision) state.revisions.add(comp.revision)
+    pass = state.revisions.size
+  }
+  const exhausted = pass >= maxPasses
+
+  /* a category holding a machine blocker caps the model's score at 2 */
+  const effectiveScores: Record<string, number> = {}
+  for (const [cat, score] of Object.entries(scores)) {
+    const capped = (rubric[cat]?.issues ?? []).some((i) => i.severity === 'blocker') ? Math.min(score, 2) : score
+    effectiveScores[cat] = capped
+  }
+  const scoreList = Object.values(effectiveScores)
+  const meanScore = scoreList.length ? scoreList.reduce((a, b) => a + b, 0) / scoreList.length : undefined
+  const modelBlockers = modelIssues.filter((i) => i.severity === 'blocker').length
+  const modelMajors = modelIssues.filter((i) => i.severity === 'major').length
 
   return ok({
     composition_id: comp.id,
@@ -679,10 +778,22 @@ export async function critiqueScene(canvas: Canvas, pageId: string, input: { pix
     pass,
     max_passes: maxPasses,
     exhausted,
-    stop: exhausted || (blockers === 0 && majors === 0 && !firstOnRevision),
+    stop: exhausted || (blockers === 0 && majors === 0 && !runPass && !firstOnRevision),
     blockers,
     majors,
     rubric,
+    ...(Object.keys(effectiveScores).length || modelIssues.length
+      ? {
+          model: {
+            ...(Object.keys(effectiveScores).length ? { scores: effectiveScores } : {}),
+            ...(meanScore !== undefined ? { mean_score: meanScore } : {}),
+            ...(modelIssues.length ? { issues: modelIssues } : {}),
+            blockers: modelBlockers,
+            majors: modelMajors,
+          },
+        }
+      : {}),
+    ...(Object.keys(effectiveScores).length ? { scores: effectiveScores } : {}),
     check: report,
     note: exhausted
       ? 'pass budget reached — ship what you have and say what stays rough'

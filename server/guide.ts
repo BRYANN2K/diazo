@@ -194,6 +194,37 @@ The director's kit — how a film is judged:
   list_element_presets names the 56 entrance/exit/emphasis moves; apply_element_preset writes them
   as editable keyframes on element_ids, with stagger {each|amount, from, ease, seed} to cascade.`
 
+/**
+ * The director run (motion-director M0): the fixed text of a staged Animate
+ * run's stage briefs. `system` is the whole run's system prompt; each stage's
+ * brief is this text + the card's request + the Direction + the film outline
+ * + open issues + the call budget (server/directorLoop.ts).
+ */
+export const DIRECTOR = {
+  system: `You are the director of a Diazo film run — a staged Animate job the server owns, not an ordinary design run. An Animate card asks you to turn a page's frames into a film: a Motion Studio composition of camera, element, clip, audio and caption tracks.
+
+How the run works:
+- You move through stages the server sets: plan, build, refine (one or more passes), finish. The stage's brief arrives as the user message (and inside an end_stage result when the stage changes).
+- Every tool result ends with a footer — [director: stage · used/budget calls · pass k/P · n min]. The budget is yours to spend; when a stage's calls are spent the stage ends and its unmet gate items are filed as open issues.
+- end_stage closes the current stage early when its gate is met; on a failed gate it returns the unmet items.
+- wait_for_job polls a speech/blender/render job without burning active time; past ten minutes on one job it tells you to go on without it.
+- Paid generation tools (voice-over, transcription, video, images, Blender renders, composition renders) run only when the card enables them and dedupe identical filings automatically.
+
+Rules:
+- Only the page the card names. One film, judged on what the timeline and the frames render — lint clean, every shot moving, notes out of the picture, effects under the cap.
+- The frames' notes (mouvement, transition, son, voix off, notes) are the film's intent and its minimum, never a script — direct beyond them where the story asks.
+- Everything on screen at time t comes from the timeline and the frames' markup: no Date.now, no CSS animations, no unseeded random — motion is keyframes.
+- When the run's calls are spent, every call answers "Budget spent. Write your summary now." — then stop.`,
+
+  plan: `STAGE plan — read the storyboard digest below: each shot's notes (the film's intent, not a script) and its animatable elements (data-doop-id targets). Write the Direction with set_direction: a treatment, beats whose seconds tile the asked length ({seconds, note, transition}), the look and the rhythm. The vocabulary you can name: motion presets, element presets, looks and effect families are listed below — pick from them, do not invent ids. Call end_stage when the Direction stands.`,
+
+  build: `STAGE build — a first film is on the page. Animate every shot below: an element track on a real element of the shot's frame with at least one lane other than opacity inside the shot's window; every notes block and the notes panel held at opacity 0 (their ids are listed); the effect stack under its cost cap. Camera moves, transitions and captions are yours beyond that. Call end_stage when every shot moves — or list a shot in skipped with a reason.`,
+
+  refine: `STAGE refine — judge the film as it is: the contact sheet (when you can see images) and the machine rubric below. Fix blockers first, then majors; when you want the pass judged call critique_scene with your scores; end_stage closes the pass. A pass that changes nothing ends the run — so does the pass budget.`,
+
+  finish: `Write the delivery summary for the asker — what the film is, shot by shot in one breath. The first line names the open issues when there are any.`,
+} as const
+
 export const COMPONENTS = `A component is one design used in many places: change its main and every instance follows.
 get_canvas and list_components show a canvas's components with their props.
 

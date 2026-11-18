@@ -1024,7 +1024,20 @@ export async function execMotionPro(
     }
     case 'critique_scene': {
       const { critiqueScene } = await import('./motionSnapshot.ts')
-      return critiqueScene(canvas, pageId, raw as { pixels?: boolean })
+      const { directorRunForAgentRun } = await import('./directorRuns.ts')
+      /* inside a director run the pass state is the run's — the in-memory
+         critique budget stays for MCP callers outside one */
+      const run = directorRunForAgentRun(actor.runId)
+      return critiqueScene(
+        canvas,
+        pageId,
+        raw as {
+          pixels?: boolean
+          scores?: Record<string, number>
+          issues?: { t?: number; track_id?: string; severity: 'blocker' | 'major' | 'minor'; fix: string }[]
+        },
+        run ? { index: run.pass || 1, max: run.maxPasses } : undefined,
+      )
     }
     default:
       return fail(`unknown motion tool ${name}`)

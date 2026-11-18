@@ -39,7 +39,7 @@ import * as backgrounds from './backgrounds.ts'
 import * as ingest from './ingest.ts'
 import { viewWebsite, referencedUrls } from './website.ts'
 import { createImportedWebpageFrame, findImportedWebpageFrame } from './webpageImport.ts'
-import { COMPONENTS, DESIGN_BRIEF, DESIGN_QUALITY, FRAME_STYLES, LIBRARIES, PROTOTYPES } from './guide.ts'
+import { COMPONENTS, DESIGN_BRIEF, DESIGN_QUALITY, DIRECTOR, FRAME_STYLES, LIBRARIES, PROTOTYPES } from './guide.ts'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import { z } from 'zod'
 import { catalogEntry, compactFrameHtml, findComponent } from './componentActions.ts'
@@ -273,7 +273,7 @@ interface FeedbackItem {
   about: string
 }
 
-interface RunState {
+export interface RunState {
   mutatedFrames: Set<string>
   sourceFrames: Set<string>
   verificationFrames: Set<string>
@@ -574,6 +574,68 @@ async function runAgent(canvasId: string, agentName: string, stalled: Set<string
      and ask_in_chat — nothing that touches the canvas before a human
      presses Go design */
   if (work.chat) return runChat(canvasId, role, payer, picked, actor, stalled, key, runnerFilter)
+  /* an animate card is a director run — one card, no comments, no feedback,
+     no ordinary batch; the staged loop lives in server/directorLoop.ts */
+  if (work.animate) {
+    const card = actions.takeAnimateCard(canvasId, work.animate.cardId, role.name)
+    if (!card) {
+      /* claimed between nextWork and now, or its page already runs a director */
+      stalled.add(key)
+      return 'idle'
+    }
+    if (!picked.userId && RESIDENT_TASK_LIMIT <= 0) {
+      actions.failCard(
+        canvasId,
+        card.id,
+        'The Diazo Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini, DeepSeek, Kimi or Claude API key in Settings, then retry.',
+      )
+      stalled.add(key)
+      return 'no-model'
+    }
+    const meter = startRun(picked, { canvasId, kind: 'design', agent: role.name })
+    const model = meter.model
+    actor.runId = meter.id
+    const heartbeat = setInterval(() => actions.heartbeatAgent(canvasId, actor), 15_000)
+    const abort = new AbortController()
+    /* latched: a stopped card's run must not take a retry for its own */
+    let stopped = false
+    const canceled = () => (stopped ||= !!(card.failedAt || card.endedAt))
+    const stopCheck = () => {
+      if (canceled()) abort.abort()
+    }
+    const checks = stopChecks.get(canvasId) ?? new Set()
+    stopChecks.set(canvasId, checks.add(stopCheck))
+    let delivered = false
+    try {
+      actions.setAgentStatus(canvasId, actor, 'Directing the film…')
+      const { runDirector } = await import('./directorLoop.ts')
+      delivered = await runDirector({
+        canvasId,
+        card,
+        role,
+        payer,
+        model,
+        meter,
+        actor,
+        canceled,
+        abort,
+        exec: execTool,
+        tools: TOOLS,
+        system: DIRECTOR.system,
+      })
+    } catch (err) {
+      console.error('[resident] director run errored', err)
+      if (!card.endedAt && !card.failedAt)
+        actions.failCard(canvasId, card.id, 'Diazo hit a snag before finishing. Retry when you are ready.')
+    } finally {
+      checks.delete(stopCheck)
+      if (checks.size === 0) stopChecks.delete(canvasId)
+      clearInterval(heartbeat)
+      actions.setAgentStatus(canvasId, actor, '')
+      void meter.finish(delivered ? 'done' : stopped ? 'stopped' : 'failed')
+    }
+    return 'ran'
+  }
   if (!picked.userId && RESIDENT_TASK_LIMIT <= 0) {
     const reason =
       'The Diazo Agent needs a connected account — connect your ChatGPT subscription or an OpenAI, OpenRouter, Gemini, DeepSeek, Kimi or Claude API key in Settings, then retry.'
@@ -3138,6 +3200,40 @@ TOOLS.push({
     required: ['component'],
   },
 })
+TOOLS.push({
+  name: 'end_stage',
+  description:
+    'Director runs only: close the current stage when its gate is met. On a failed gate the result lists the unmet items. skipped declines a shot with a reason.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      summary: { type: 'string', description: 'One line on what the stage did' },
+      skipped: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { frame_id: { type: 'string' }, reason: { type: 'string' } },
+          required: ['frame_id', 'reason'],
+        },
+        description: 'Shots this stage declines on purpose, each with a reason',
+      },
+    },
+  },
+})
+TOOLS.push({
+  name: 'wait_for_job',
+  description:
+    'Wait on a queued speech, blender or render job until its state changes or the call times out (90 s max). Time inside does not count against the run; past ten minutes on one job it tells you to go on without it.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      kind: { type: 'string', enum: ['speech', 'video', 'blender', 'render'] },
+      job_id: { type: 'string' },
+      timeout_s: { type: 'number', description: 'Seconds to wait, 5–90, default 90' },
+    },
+    required: ['kind', 'job_id'],
+  },
+})
 
 /* Reads inside the requester's linked local project — offered only when the
    run's payer has a repo_links row on this canvas (runAgent appends them to
@@ -4412,6 +4508,17 @@ export async function execTool(
         )
         if (!out.ok) return fail(out.error)
         return ok(JSON.stringify(out.data))
+      }
+      case 'end_stage':
+        /* the director loop's own tool — outside a director run it means
+           nothing */
+        return fail('end_stage only exists inside a director run')
+      case 'wait_for_job': {
+        const { waitForJob } = await import('./directorLoop.ts')
+        const raw = block.input as { kind?: string; job_id?: string; timeout_s?: number }
+        const timeoutMs = Math.min(90_000, Math.max(5_000, (Number(raw.timeout_s) || 90) * 1_000))
+        const result = await waitForJob(String(raw.kind ?? ''), String(raw.job_id ?? ''), canvasId, timeoutMs)
+        return ok(result.text)
       }
       case 'screenshot_component': {
         const def = findComponent(canvasId, String(input.component ?? ''))
