@@ -9,6 +9,12 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 
 ## [Unreleased]
 
+- Add the Motion Studio director run: Animate cards run a staged
+  `plan → build → refine → finish` loop owned by the server — visible call
+  budgets, gate-checked stages, paid-filing idempotency, metered job waits,
+  pass rubrics from `check_scene`, best-pass restore, and a delivery verdict
+  judged on the film — with persisted runs broadcast to the room and
+  list/get/stop routes.
 - Add the Motion Studio element-layer backend: element tracks carry effect
   stacks, 26 colour blend modes, layer contracts, mattes and masks; static
   layer planning with budgets and lint; 56 seeded element motion presets

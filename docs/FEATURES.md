@@ -263,6 +263,13 @@ compose up -d`, `kubectl -n doop rollout restart deploy/doop`). Dismissed per bu
   a deterministic filmic shutter (`motionBlur`), and a WebGL2 pass in the compositor with a GLSL
   body for every registered effect (lint rule MO-14 still guards anything unregistered). Same
   tools on MCP and the resident agent through `execMotionPro`.
+- **Motion Studio — the director run (backend)** — an Animate card (`kind: 'animate'`) runs a
+  staged director loop the server owns: `plan → build → refine × passes → finish`, per-stage and
+  run call budgets the model sees in every tool result, gate-checked `end_stage`, paid filings
+  deduped on their normalized recipe, `wait_for_job` metered outside active time, `check_scene`
+  folded into pass rubrics, the best pass restored on regression, and the film judged `delivered`,
+  `delivered_with_issues` or `failed` at finish — ordinary cards keep their 24/40-turn runs.
+  Director runs persist (`director_runs`), broadcast on the room and list/get/stop over REST.
 - **Motion Studio — element layers, blends and presets (backend)** — an element track carrying an
   effect stack, a non-normal blend, a matte or masks promotes to a layer: `shared/motionLayers.ts`
   plans promotion, static/dynamic rasters, transform placement, pads, scales and the layer budgets

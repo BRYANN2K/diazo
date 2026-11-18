@@ -621,11 +621,62 @@ the shell; a render's output path is not caller-controlled — renders land
 under `<appData>/blender-renders/`. Python execution is never
 allowlisted.
 
+## The director run
+
+An **animate card** (`kind: 'animate'` on `POST /api/canvases/:id/cards`)
+carries `animate: { pageId, mode?, seconds?, width?, height?, fps?,
+passes? (1–5), freedom?, frameIds?, paid?, note?, parentRunId? }` — the
+kind is never derived from the card's text. Animate cards never join the
+ordinary card batch: `takeAnimateCard` claims exactly one, a second
+animate card on a page with a live run waits, and feedback filed on an
+animate task queues a new card in `mode: 'refine'` with the text as
+`note`. A retry of an `interrupted` card runs `refine` when the page has
+a film.
+
+A claimed card becomes a **director run** (`server/directorLoop.ts`,
+state in `server/directorRuns.ts`, persisted in `director_runs`): the
+server walks `plan → build → refine × passes → finish`, owns every stage
+transition and charges every model tool call — executed or refused —
+against the stage and run budgets (`stageBudgets` in
+`shared/director.ts`, `freedom: 'free'` ×1.5 still capped). Stage entry
+is server work: plan analyses the shots and makes a shell composition so
+`set_direction` lands, build calls `animate_storyboard` with the
+Direction, refine snapshots and `check_scene`s. The model sees each
+stage's brief plus a `[director: stage · used/budget · pass k/P · n min]`
+footer on every tool result, and closes a stage with `end_stage` after
+its gate passes (build: lint clean, shot coverage on real elements or an
+explicit `skipped`, notes hidden, effect cost in budget). Identical
+ineffective calls replay their first result; paid filings
+(`generate_voiceover`, `transcribe_clip`, `generate_video`,
+`generate_image`, `blender_render_frame`, `render_composition`) dedupe on
+their schema-normalized recipe per page; `wait_for_job` waits on a job
+for up to 90 s a call and 10 min per job without burning active time.
+
+Finish is server-only: a final `check_scene`, `machineRubric` blockers,
+restore of the best earlier pass when the last regressed on the run's own
+revision, then `verdict` → `delivered` / `delivered_with_issues` (card
+advances, the summary names open issues) / `failed` (card fails with the
+reason) / `stopped` (nothing posted) / `interrupted` (boot recovery —
+the card fails with a retry reason). REST: `GET
+/api/canvases/:id/director-runs?pageId=&limit=`, `GET
+/api/director-runs/:id`, `POST /api/director-runs/:id/stop` — all behind
+the usual canvas roles, all returning `DirectorRunView` (the ledger stays
+internal). The room sees `{ type: 'director', run }` on every stage
+change and pass record.
+
 ## Changes
 
 Contract changes after the first commit land here, dated.
 
 <!-- append new entries below -->
+
+- **2026-11 — the director run.** Animate cards (`kind: 'animate'`) run a
+  staged director loop — `plan → build → refine × P → finish` — owned by
+  the server: stage budgets the model sees, gate-checked `end_stage`,
+  paid-filing idempotency, metered `wait_for_job` (also on MCP),
+  `critique_scene` model scores/issues folded into pass records, a
+  `director` room message and three director-runs routes. See [The
+  director run](#the-director-run).
 
 - **2026-11 — server renders and review hardening.** Server render jobs run
   one at a time behind the public-network guard with a budget-sized lease,

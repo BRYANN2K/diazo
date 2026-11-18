@@ -248,8 +248,13 @@ Status: current, updated 2026-11-17
   `claudeModels.test.ts`, `modelNames.test.ts`. `pickModel(payerId, pick)` honours it for that run when the named connection is on, a
   model the provider does not know runs on the connection's configured one, and anything else
   runs on the default. One resident run claims work that agrees on the pick (`actions.nextWork`,
-  the `runner` filter on the take functions): comments and automations carry none and run on
-  the default, feedback runs on what its task ran on (kept on the feedback, `feedback.runner`,
+  the `runner` filter on the take functions): animate cards (`kind: 'animate'`) never join the
+  batch — `takeAnimateCard` claims one at a time into the staged director run
+  (`server/directorLoop.ts`, `server/directorRuns.ts`, `director_runs` table): the server walks
+  `plan → build → refine × passes → finish`, charges every tool call against stage and run
+  budgets, gates `end_stage`, dedupes paid filings on normalized `effectiveKey`s, and judges the
+  film at finish; comments and automations carry none and run on the default, feedback runs on
+  what its task ran on (kept on the feedback, `feedback.runner`,
   migration 0047, so a trimmed task history cannot move it). Tests: `agentRunner.test.ts`,
   `runnerQueue.test.ts`, `modelPickerRunners.test.tsx`, the pick cases in
   `localAgentRouting.test.ts`.
