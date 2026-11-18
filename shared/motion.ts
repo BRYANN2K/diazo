@@ -291,6 +291,11 @@ export interface MotionKeyframe {
   value: number | string
   /** interpolation of the segment that leaves this keyframe */
   easing: MotionEasing
+  /** the preset id that authored this keyframe, when one did. `clipPath`
+   *  lanes render only while preset-authored: the parser has accepted the
+   *  property since before it drew, so an unmarked lane is a stored legacy
+   *  lane and must stay raster-inert */
+  preset?: string
 }
 
 /** what a clip shows or plays while it is on screen */
@@ -954,7 +959,14 @@ function parseKeyframe(input: unknown, duration: number): ParseResult<MotionKeyf
   }
   const easing = parseEasing(input.easing ?? { type: 'linear' })
   if (!easing) return bad('keyframe.easing is not a valid easing')
-  return ok({ id: id.value, property: input.property, t: t.value, value: input.value, easing })
+  const out: MotionKeyframe = { id: id.value, property: input.property, t: t.value, value: input.value, easing }
+  if (input.preset !== undefined) {
+    if (typeof input.preset !== 'string' || input.preset.length === 0 || input.preset.length > MOTION_LIMITS.MAX_NAME) {
+      return bad('keyframe.preset must be a short preset id')
+    }
+    out.preset = input.preset
+  }
+  return ok(out)
 }
 
 function parseClipSource(input: unknown): ParseResult<MotionClipSource> {

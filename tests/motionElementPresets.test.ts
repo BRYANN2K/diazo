@@ -89,6 +89,22 @@ describe('the catalogue', () => {
       }
     }
   })
+
+  it('clipPath keyframes carry the preset id — the mark the raster gate reads (AC-8)', () => {
+    /* a stored legacy clipPath lane has no mark and stays inert; the
+       preset's own lane must be distinguishable, so every clipPath key
+       any preset emits is marked and nothing else is */
+    for (const spec of elementPresetList()) {
+      const kfs = elementPreset(spec.id, { t: 0, duration: 0.8 })
+      for (const kf of kfs) {
+        if (kf.property === 'clipPath') expect(kf.preset, spec.id).toBe(spec.id)
+        else expect(kf.preset, `${spec.id} ${kf.property}`).toBeUndefined()
+      }
+    }
+    /* a preset with a clip lane actually has marked keys */
+    const wipe = elementPreset('wipe-in', { t: 0 })
+    expect(wipe.filter((k) => k.property === 'clipPath' && k.preset === 'wipe-in').length).toBeGreaterThan(0)
+  })
 })
 
 describe('determinism', () => {

@@ -1234,8 +1234,10 @@ export function elementPreset(id: ElementPreset, opts: ElementPresetOptions): Mo
   }
   /* exits read direction as where the element travels TO, entrances as
      where it comes FROM — both land on the same offset: entrance start =
-     dir·d away, exit end = dir·d away */
-  return spec.keyframes(resolved)
+     dir·d away, exit end = dir·d away. clipPath keyframes carry the preset
+     id: the runtime draws a clip lane only while preset-authored, so a
+     stored legacy lane keeps its old raster-inert behaviour (AC-8) */
+  return spec.keyframes(resolved).map((kf) => (kf.property === 'clipPath' ? { ...kf, preset: spec.id } : kf))
 }
 
 /* ---- stagger ---- */

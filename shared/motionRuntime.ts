@@ -200,6 +200,16 @@ export function keyframeLanes(kfs: readonly MotionKeyframe[]): Map<string, Motio
   return lanes
 }
 
+/* `clipPath` resolves only from preset-authored keyframes. The parser has
+   accepted the property since before the CSS emission existed, so an
+   unmarked lane is a stored legacy lane and must stay raster-inert — the
+   AC-8 promise that films without layers render bit-identically. The
+   frame-block keyframes (FrameMotionKeyframe) carry no `preset` either, so
+   a block-authored clip lane likewise stays inert. */
+function drawableLane(prop: string, lane: readonly MotionKeyframe[]): readonly MotionKeyframe[] {
+  return prop === 'clipPath' ? lane.filter((kf) => kf.preset !== undefined) : lane
+}
+
 /* ---- the state at t ---- */
 
 export interface CameraState {
@@ -292,7 +302,8 @@ export function frameStateAt(comp: Composition, t: number, opts?: FrameStateOpti
         const k = elementKey(frameId, el)
         for (const [prop, lane] of props) {
           lane.sort((a, b) => a.t - b.t)
-          ;(elements[k] ??= {})[prop] = laneValueAt(lane, clamped, opts.resolveEasing)
+          const drawable = drawableLane(prop, lane)
+          if (drawable.length > 0) (elements[k] ??= {})[prop] = laneValueAt(drawable, clamped, opts.resolveEasing)
         }
       }
     }
@@ -304,7 +315,8 @@ export function frameStateAt(comp: Composition, t: number, opts?: FrameStateOpti
     const key = elementKey(track.frameId, track.elementId)
     const props = (elements[key] ??= {})
     for (const [prop, lane] of lanes) {
-      props[prop] = laneValueAt(lane, clamped, opts?.resolveEasing)
+      const drawable = drawableLane(prop, lane)
+      if (drawable.length > 0) props[prop] = laneValueAt(drawable, clamped, opts?.resolveEasing)
     }
   }
 
