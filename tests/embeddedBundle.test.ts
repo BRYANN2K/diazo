@@ -123,6 +123,27 @@ afterAll(() => {
 })
 
 describe('embedded bundle boot (scripts/build-embedded-server.ts)', () => {
+  it('ships the server and the data tool — no native lock module, no stray .node', () => {
+    /* the sidecar and the restore command line are both in the bundle */
+    expect(fs.existsSync(path.join(installDir, 'server.mjs'))).toBe(true)
+    expect(fs.existsSync(path.join(installDir, 'data-tool.mjs'))).toBe(true)
+    /* the data lock is node:sqlite — a Node built-in: no fs-ext module,
+       and no .node binary anywhere outside sharp's own packages */
+    expect(fs.existsSync(path.join(installDir, 'node_modules', 'fs-ext'))).toBe(false)
+    const stray: string[] = []
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name)
+        if (entry.isDirectory()) walk(full)
+        else if (entry.name.endsWith('.node')) stray.push(path.relative(installDir, full))
+      }
+    }
+    walk(path.join(installDir, 'node_modules'))
+    for (const file of stray) {
+      expect(file, `${file} is a native module outside sharp`).toMatch(/^node_modules[/\\](sharp|@img)[/\\]/)
+    }
+  })
+
   it('boots a read-only install on loopback, prints ready, writes only under DOOP_DATA_DIR, dies with stdin', async () => {
     const env = {
       ...process.env,
@@ -187,8 +208,46 @@ describe('embedded bundle boot (scripts/build-embedded-server.ts)', () => {
     expect(snapshot(installDir)).toEqual(installSnapshot)
     expect(fs.readdirSync(workDir)).toEqual([])
 
-    /* state really did land in the data dir, and a clean exit released the lock */
+    /* state really did land in the data dir, and the clean exit left
+       its released-<N> marker for the next boot */
     expect(fs.existsSync(path.join(dataDir, 'pg'))).toBe(true)
-    expect(fs.existsSync(path.join(dataDir, 'server.lock'))).toBe(false)
-  }, 180_000)
+    const lockEntries = fs.readdirSync(path.join(dataDir, 'lock'))
+    expect(lockEntries.some((n) => /^released-\d+$/.test(n))).toBe(true)
+
+    /* the released lock means the same data dir boots again at once —
+       the restart path a packaged install takes on every relaunch */
+    const port2 = await freePort()
+    const env2 = { ...env, PORT: String(port2), BETTER_AUTH_URL: `http://127.0.0.1:${port2}` }
+    proc = spawn('node', [path.join(installDir, 'server.mjs')], {
+      cwd: workDir,
+      env: env2,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    stdout = ''
+    stderr = ''
+    proc.stdout!.on('data', (c: Buffer) => (stdout += c.toString()))
+    proc.stderr!.on('data', (c: Buffer) => (stderr += c.toString()))
+    const exited2 = new Promise<number | null>((r) => proc!.once('exit', (code) => r(code)))
+    const ready2 = await new Promise<number>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`no ready line on restart in 90s\n${stdout}\n${stderr}`)), 90_000)
+      const seen = () => {
+        const m = /^ready (\d+)$/m.exec(stdout)
+        if (m) {
+          clearTimeout(timer)
+          resolve(Number(m[1]))
+        }
+        void exited2.then((c) =>
+          reject(new Error(`server exited (${c}) before ready on restart\n${stdout}\n${stderr}`)),
+        )
+      }
+      proc!.stdout!.on('data', seen)
+      seen()
+    })
+    expect(ready2).toBe(port2)
+    const health2 = await fetch(`http://127.0.0.1:${port2}/healthz`)
+    expect(health2.ok).toBe(true)
+    proc.stdin!.end()
+    const code2 = await Promise.race([exited2, new Promise<null>((r) => setTimeout(() => r(null), 30_000))])
+    expect(code2, `server did not exit after stdin closed on restart\n${stdout}\n${stderr}`).toBe(0)
+  }, 240_000)
 })

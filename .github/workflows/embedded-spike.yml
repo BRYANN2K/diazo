@@ -3,10 +3,22 @@ name: Embedded spike
 # Boots the bundled server (out/embedded-server, see scripts/build-embedded-server.ts)
 # under plain Node 22 on every desktop OS and asks it for real work, not only
 # /healthz: a sign-up and a canvas write prove PGlite, the migrations and
-# better-auth survived bundling. Manual only — it proves a build shape, so it
-# runs on demand instead of on every push.
+# better-auth survived bundling. Runs on demand, and on every push that
+# touches the data lock, the backup/restore path or the bundle build.
 on:
   workflow_dispatch:
+  push:
+    branches: [feat/embedded-server-spike]
+    paths:
+      - .github/workflows/embedded-spike.yml
+      - server/dataLock.ts
+      - server/backup.ts
+      - server/restore.ts
+      - server/dataTool.ts
+      - scripts/build-embedded-server.ts
+      - tests/dataLock.test.ts
+      - tests/backup.test.ts
+      - tests/restore.test.ts
 
 jobs:
   boot-bundle:
@@ -23,9 +35,10 @@ jobs:
           node-version: 22
       - run: bun install --frozen-lockfile
       - run: bun run build:embedded-server
-      # the data-dir lock is the native seam this job exists for: fs-ext must
-      # build on every OS, and a second process must really be refused
-      - run: bunx vitest run tests/dataLock.test.ts
+      # the data-dir lock is the platform seam this job exists for: a real
+      # second process must really be refused, and the backup pair must
+      # round-trip on every OS — including Windows
+      - run: bunx vitest run tests/dataLock.test.ts tests/backup.test.ts tests/restore.test.ts
       - name: Boot the bundle and check it answers
         shell: bash
         run: |
