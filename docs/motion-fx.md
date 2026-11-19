@@ -19,7 +19,12 @@ compositor all read; `docs/motion-api.md` lists the tool surface.
   bodies take the seed as a uniform, never a clock.
 - `GL_EFFECT_IDS` names the registry ids `src/lib/motion/gl.ts` ships a GLSL
   body for — all 43 today. Lint MO-14 still guards an unsupported effect
-  rather than letting a renderer silently skip it.
+  rather than letting a renderer silently skip it. Stacks cap at 20
+  instances (`EFFECT_STACK_MAX`).
+- `check_scene`'s optional `candidate_stack` vets a stack before it is
+  written: `unknown_fx` (MO-13) and `invalid_param`/`undrawn_effect`
+  (MO-14) diagnostics per instance, without touching the stored
+  composition — `docs/motion-api.md` carries the schema.
 
 ## Renderer
 

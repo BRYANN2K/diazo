@@ -17,9 +17,16 @@ import { env } from './env.ts'
 import { openIsolatedPage, rendererAvailable } from './screenshot.ts'
 import { guardPublicPageRequests } from './publicUrl.ts'
 import { mintRenderToken, renderCookieName, revokeRenderToken } from './motionRender.ts'
-import { lintComposition, lintMotionHtml, motionLintSummary } from '../shared/motionLint.ts'
+import {
+  lintCandidateStack,
+  lintComposition,
+  lintMotionHtml,
+  motionLintSummary,
+  type CandidateStackDiagnostic,
+} from '../shared/motionLint.ts'
 import { frameStateAt } from '../shared/motionRuntime.ts'
-import { EFFECT_COST_CAP, effectCost, effectSpec, GL_EFFECT_IDS } from '../shared/motionFx.ts'
+import { EFFECT_COST_CAP, effectCost, effectSpec, GL_EFFECT_IDS, resolvedEnabled } from '../shared/motionFx.ts'
+import { MOTION_ID_RE } from '../shared/motion.ts'
 import { CRITIQUE_PASS_DEFAULT, CRITIQUE_PASS_MAX, type Composition, type MotionLintIssue } from '../shared/motion.ts'
 import { store } from './store.ts'
 import { canvasPages, pageFrames } from '../shared/pages.ts'
@@ -359,7 +366,11 @@ export function measureChecks(
   return { legItems, violations }
 }
 
-export async function checkScene(canvas: Canvas, pageId: string, input: { pixels?: boolean }): Promise<Outcome> {
+export async function checkScene(
+  canvas: Canvas,
+  pageId: string,
+  input: { pixels?: boolean; candidate_stack?: { track_id?: unknown; effects?: unknown } },
+): Promise<Outcome> {
   if (!canvasPages(canvas).some((p) => p.id === pageId)) return fail(`no page ${pageId} on this canvas`)
   const comp = store.getComposition(canvas.id, pageId)
   if (!comp) return fail(`page ${pageId} has no composition — nothing to check`)
@@ -435,6 +446,66 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
     not_drawn: notDrawn,
   }
 
+  /* the optional read-only what-if: vet the stack set_effects would write
+     on one named track, priced and diagnosed in its own section — the
+     stored composition and the cost report above never change. Shape
+     bounds fail as named input errors like any other bad call; registry
+     problems come back as candidate diagnostics. Evaluated before the
+     pixel pass so a bad candidate never pays for a render. */
+  let candidate:
+    | {
+        track_id: string
+        track_kind: string
+        effects: number
+        cost: number
+        projected_total_cost: number
+        projected_over_budget: boolean
+        ok: boolean
+        diagnostics: CandidateStackDiagnostic[]
+      }
+    | undefined
+  if (input.candidate_stack !== undefined) {
+    const cs = input.candidate_stack
+    if (typeof cs !== 'object' || cs === null || Array.isArray(cs)) {
+      return fail('candidate_stack must be { track_id, effects }')
+    }
+    if (typeof cs.track_id !== 'string' || !MOTION_ID_RE.test(cs.track_id)) {
+      return fail('candidate_stack.track_id must be a track id')
+    }
+    const track = comp.tracks.find((t) => t.id === cs.track_id)
+    if (!track) return fail(`no track ${cs.track_id}`)
+    /* the same refusal the write gives: a non-empty stack on a track whose
+       pixels never reach the GL pass can never be applied */
+    if (track.kind !== 'camera' && track.kind !== 'adjustment' && Array.isArray(cs.effects) && cs.effects.length > 0) {
+      return fail(
+        `effects only draw on camera and adjustment tracks — a candidate on ${track.kind} track ${track.id} would never render`,
+      )
+    }
+    const checked = lintCandidateStack(track, cs.effects)
+    if ('error' in checked) return fail(checked.error)
+    /* the candidate's own bill uses the stored stack's rules — enabled
+       effects only, an unknown id costing the same 2-point fallback — and
+       the write's merge: a reused id that omits `enabled` keeps its stored
+       flag, so resubmitting a disabled instance bare still costs nothing */
+    const wanted = cs.effects as { id: string; fx: string; enabled?: boolean }[]
+    const storedById = new Map((track.effects ?? []).map((s) => [s.id, s]))
+    const cost = wanted.reduce(
+      (a, e) => a + (resolvedEnabled(e, storedById.get(e.id)) ? (effectSpec(e.fx)?.cost ?? 2) : 0),
+      0,
+    )
+    const projected = totalCost - effectCost(track) + cost
+    candidate = {
+      track_id: track.id,
+      track_kind: track.kind,
+      effects: wanted.length,
+      cost,
+      projected_total_cost: projected,
+      projected_over_budget: projected > EFFECT_COST_CAP,
+      ok: !checked.diagnostics.some((d) => d.severity === 'error'),
+      diagnostics: checked.diagnostics,
+    }
+  }
+
   /* 4 — safe zones + legibility need measured text: the harness measure
      pass when the renderer is up, reported unavailable otherwise */
   let legibility: unknown = { available: false, reason: 'no renderer on this instance' }
@@ -474,6 +545,7 @@ export async function checkScene(canvas: Canvas, pageId: string, input: { pixels
     safe_zones: safeZones,
     legibility,
     effects,
+    ...(candidate ? { candidate } : {}),
   })
 }
 

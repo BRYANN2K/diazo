@@ -2703,12 +2703,27 @@ export const TOOLS: Anthropic.Tool[] = [
   {
     name: 'check_scene',
     description:
-      'One scene report: MO-* lint, pacing stats with dead beats, safe-zone violations (90%/80%), effective text px, and the effect-stack cost per track. Pixel parts need the instance renderer and report unavailable without it.',
+      'One scene report: MO-* lint, pacing stats with dead beats, safe-zone violations (90%/80%), effective text px, and the effect-stack cost per track. Pixel parts need the instance renderer and report unavailable without it. candidate_stack vets a stack before set_effects writes it (unknown_fx/invalid_param diagnostics plus projected cost) — nothing persists.',
     input_schema: {
       type: 'object',
       properties: {
         page_id: { type: 'string' },
         pixels: { type: 'boolean', description: 'false skips the render-dependent parts' },
+        candidate_stack: {
+          type: 'object',
+          description:
+            'Read-only what-if: the stack set_effects would write on track_id — the candidate section flags unknown_fx (MO-13) and invalid_param (MO-14) with track, instance and parameter, plus the projected cost; nothing persists',
+          properties: {
+            track_id: { type: 'string' },
+            effects: {
+              type: 'array',
+              maxItems: 20,
+              items: { type: 'object' },
+              description: 'the stack as set_effects takes it: [{id, fx, params?, enabled?, seed?, mix?}]',
+            },
+          },
+          required: ['track_id', 'effects'],
+        },
       },
       required: ['page_id'],
     },

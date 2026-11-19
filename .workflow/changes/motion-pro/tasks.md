@@ -1,46 +1,86 @@
-# Tasks — Motion Studio Pro backend, P0 then P1
+# Implementation tasks
 
-Built on `feat/motion-pro` (worktree `doop-wt/motion-pro`), branched from
-`origin/dev`, with `feat/motion-backend-next` and
-`fix/animate-storyboard-elements` merged in first (`7cbeec21`, `ea0381e2`).
+Status: proposed work. Integrate on a feature branch per workstream after approval. Start with the matching regression fixture, stage by explicit path and keep each task independently reviewable. Before any later commit run the repository typecheck, lint, tests and doc-lint. Publication is outside these tasks. Historical implementation checkboxes and their revisions remain available at `cee4509a`; see evidence.md for carried results.
 
-## P0 — eyes and vocabulary
+### T1. Reconfirm the director tools
 
-- [x] 0. Merge `feat/motion-backend-next` (`7cbeec21`) and
-      `fix/animate-storyboard-elements` (`ea0381e2`); MOTION guide block kept;
-      migrations stay ordered after Orca's 0073; merged tests green.
-- [x] 1. `Direction` type + `direction` field on `Composition`
-      (`shared/motion.ts`), `set_direction`/`get_direction` tools, REST round-trip.
-- [x] 2. `apply_camera_preset`, `apply_transition`, `apply_text_animation`
-      tools in `server/motionTools.ts`, MCP + resident.
-- [x] 3. `get_scene_snapshot`: harness contact-sheet mode + server tool
-      (renderer gate), stats.
-- [x] 4. `check_scene`: lint + pacing + safe zones + legibility + cost report.
-- [x] 5. `critique_scene`: fixed rubric + pass budget (default 3, max 5).
-- [x] 6. Director brief in `server/guide.ts`; `animate_storyboard` consumes
-      `direction` (non-equal beats, non-cut transitions).
-- [x] 7. Parity + `tests/motionSnapshot.test.ts` + builder/direction tests.
+- Status: [ ] open for this revision
+- Owner: backend
+- Files and interfaces: `server/motionProTools.ts`, `server/motionSnapshot.ts`, `server/guide.ts`, `server/mcp.ts`, `server/resident.ts`
+- Implementation: Drive get_scene_snapshot, check_scene, the three preset tools, direction and critique through both registrations. Check a missing renderer and one real image. Check Direction survives reload, all 13 camera presets remain editable, directed beats change shot lengths, and the fifth pass ends the loop.
+- Verification: tests/motionPro.test.ts, tests/motionProTools.test.ts, tests/agentToolParity.test.ts.
+- Covers: AC 1–7.
 
-## P1 — pro finish
+### T2. Close the diagnostic gap
 
-- [x] 8. `shared/motionFx.ts`: `EffectInstance`, `FX_REGISTRY` (≥25 effects,
-      GLSL source keys, param schemas, cost), validation, ops `add_effect` /
-      `update_effect` / `remove_effect` / `reorder_effects`, `fx:` keyframes.
-- [x] 9. Contract additions: `adjustment` track kind, `blend`, `motionBlur` on
-      `Composition`; lint `MO-13`/`MO-14`; interchange "unsupported" lists; CSS
-      export fallbacks.
-- [x] 10. `src/lib/motion/gl/` WebGL2 layer compositor + GLSL effect modules;
-      Canvas 2D fallback flags unshown effects.
-- [x] 11. `list_motion_effects`, `set_effects`/`add_effect`, `apply_look`
-      tools, MCP + resident.
-- [x] 12. `shared/motionLooks.ts`: ≥ 8 built-in looks.
-- [x] 13. Deterministic motion blur (sub-sample `frameStateAt`; `shutter: 0`
-      identity).
-- [x] 14. `shared/motionGraph.ts`: value/speed curves, bezier handles, spring
-      params, easing presets.
-- [x] 15. Golden-frame browser tests per effect + seek-determinism tests.
-- [x] 16. `THIRD-PARTY-LICENSES`: EffectCraft MIT notice + pinned commit.
-- [x] 17. Docs: `docs/motion-api.md`, `docs/motion-fx.md`, `docs/TECHSTACK.md`,
-      FEATURES/CHANGELOG lines.
-- [x] 18. Full verification (typecheck, lint, tests, doc-lint), PR draft at
-      `/tmp/pr-drafts/motion-pro-backend.md`, evidence recorded.
+- Status: [ ] open for this revision
+- Owner: backend
+- Files and interfaces: `shared/motionLint.ts`, `shared/motionFx.ts`, `server/motionSnapshot.ts`, `server/mcp.ts`, `server/motionProTools.ts`, `server/resident.ts`
+- Implementation: Extend checkScene input with optional candidate_stack: {track_id, effects}. Enforce the same stack size limit as the normal edit path. Collect structured diagnostics for the candidate without invoking a write. Use an existing registry validator for bounds, booleans and enums. Identify unknown_fx (MO-13) and invalid_param (MO-14) in the candidate subsection. Keep stored dangling-lane and undrawn-effect issues in their original section. Document reasons and schema.
+- Verification: tests/motionProTools.test.ts and tests/agentToolParity.test.ts: ordinary check, missing track, unknown effect, invalid radius, exact boundary, correct stored costs and unchanged composition revision.
+- Covers: AC 2, 7, 8, 11, 17, 18.
+
+### T3. Verify the render and registry baseline
+
+- Status: [ ] open for this revision
+- Owner: backend
+- Files and interfaces: `shared/motion.ts`, `shared/motionFx.ts`, `shared/motionLooks.ts`, `shared/motionGraph.ts`, `src/lib/motion/gl.ts`, `src/lib/motion/compositor.ts`, `src/pages/MotionRenderHarness.tsx`, `server/motionJobs.ts`, `THIRD-PARTY-LICENSES`
+- Implementation: Exercise effect edits and animation lanes, looks, graph handles, blur and cost cap from the same serialized fixture. Compare fixed-time pixels on supported renderer paths; record GL capability and fallback drops. Check license pin and attribution against the notice.
+- Verification: tests/motionPro.test.ts, tests/motionProTools.test.ts, tests/motionGoldenBrowser.test.ts: retain seek-path identity, shutter zero and existing golden tolerance.
+- Covers: AC 8–18.
+
+### T4. Integrate effect, look and film controls
+
+- Status: [ ] open for this revision
+- Owner: frontend
+- Files and interfaces: `src/components/motion/MotionTimeline.tsx`, `src/components/motion/MotionProPanel.tsx`, `src/components/motion/EffectCatalog.tsx`, `src/components/motion/EffectStack.tsx`, `src/components/motion/EffectParams.tsx`, `src/components/motion/CostMeter.tsx`, `src/lib/motion/pro.ts`
+- Implementation: Port the existing branch components together. Derive field types and options from the registry, edit the selected stack by instance ID, use the shared cap and show reasons on keyboard focus and touch. Test a camera track, adjustment track, missing selection, maximum count and a disabled stack. Verify looks, film shutter and direction edits by reopening the page.
+- Verification: tests/motionEffectStack.test.tsx, tests/motionProUi.test.ts: find the persisted effect, animated param, look track and refusal reason.
+- Covers: AC 9, 13, 17, 19, 23.
+
+### T5. Preserve concurrent work and undo
+
+- Status: [ ] open for this revision
+- Owner: frontend
+- Files and interfaces: `src/lib/motion/sendOps.ts`, `src/lib/motion/pro.ts`, `src/lib/history.ts`, `src/lib/motion/store.ts`
+- Implementation: Serialize page edits. Use the current revision for every send and retry one 409 after reload. Re-resolve operations by ID. A removed target cannot redirect an edit to its neighbor. Coalesce one field burst, preserve its initial inverse, and flush before another action. On final failure keep the history entry. Undo camera creation by removing the added effect only; restore beats against the latest direction.
+- Verification: tests/motionProUndo.test.ts: a second writer keys the camera, edits treatment or deletes the target; exercise a second 409, repeated arrow keys and a failed undo followed by retry.
+- Covers: AC 21, 22.
+
+### T6. Repeat panel and documentation review
+
+- Status: [ ] open for this revision
+- Owner: frontend
+- Files and interfaces: `src/components/motion/MotionTimeline.tsx`, `src/components/motion/MotionProPanel.tsx`, `src/components/motion/WithReason.tsx`, `src/lib/motion/labels.ts`, `src/lib/i18n/en/motionPro.ts`, `src/lib/i18n/pt-BR/motionPro.ts`, `docs/motion-api.md`, `docs/motion-fx.md`, `docs/TECHSTACK.md`
+- Implementation: Inspect all twelve review findings. Open the real canvas with both sidebars, ten effects and a multi-line beat. Inspect each tab, key repeat, undo notice, visible meter and translated registry text. Remove confirmed unused helpers after checking callers. Record the revision, images, locale and dimensions.
+- Verification: tests/motionProPanelBrowser.test.ts and tests/motionProUi.test.ts: 1280/1440, both languages/themes, independent scroll positions and readable ruler. Run all affected tests, parity, typecheck, lint and doc-lint..
+- Covers: AC 18–24.
+
+## Coverage
+
+| Criterion | Tasks      |
+| --------- | ---------- |
+| AC-1      | T1         |
+| AC-2      | T1, T2     |
+| AC-3      | T1         |
+| AC-4      | T1         |
+| AC-5      | T1         |
+| AC-6      | T1         |
+| AC-7      | T1, T2     |
+| AC-8      | T2, T3     |
+| AC-9      | T3, T4     |
+| AC-10     | T3         |
+| AC-11     | T2, T3     |
+| AC-12     | T3         |
+| AC-13     | T3, T4     |
+| AC-14     | T3         |
+| AC-15     | T3         |
+| AC-16     | T3         |
+| AC-17     | T2, T3, T4 |
+| AC-18     | T2, T3, T6 |
+| AC-19     | T4, T6     |
+| AC-20     | T6         |
+| AC-21     | T5, T6     |
+| AC-22     | T5, T6     |
+| AC-23     | T4, T6     |
+| AC-24     | T6         |

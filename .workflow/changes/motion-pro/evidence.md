@@ -1,5 +1,63 @@
 # Evidence
 
+Subject: `ffce4679cc26ff5f460a903da18e9ad8ddcef73bcc6c026cdcefc25f3828714a`
+
+- AC-1: unverified — Partial: tool parity + no_renderer gate verified (tests/agentToolParity.test.ts; server/motionSnapshot.ts:81); real renders via tests/motionGoldenBrowser.test.ts 8/8 on WebGL2/ANGLE Metal M4. Live get_scene_snapshot contact-sheet PNG through openIsolatedPage not re-captured — tests/motionServerRender.test.ts mocks the page. See evidence.md residuals.
+- AC-2: passed — tests/motionProTools.test.ts 'check_scene reports lint, pacing and the effect bill headlessly' + 'flags what the renderer cannot draw'; live MCP callTool returns the report in tests/agentToolParity.test.ts.
+- AC-3: passed — tests/motionProTools.test.ts 'apply_camera_preset writes editable camera keyframes — every one of the 13' applies all CAMERA_PRESETS through the write path; transitions and rise-blur animator covered in the same describe.
+- AC-4: passed — tests/motionPro.test.ts 'direction' round-trip + passes clamp; tests/motionHttp.test.ts 'keeps direction and motionBlur through a reboot' — real server restart re-reads both fields, 14/14 green.
+- AC-5: passed — server/guide.ts:126 MOTION brief intact (included :603); tests/motionPro.test.ts 'storyboard consumes direction' — beats produce non-equal shot seconds, non-cut transitions, unknown→cut.
+- AC-6: passed — tests/motionProTools.test.ts critique budget test: revision-bound passes, same-revision free, set_direction reset, passes:5 → 5th pass exhausted+stop.
+- AC-7: passed — tests/agentToolParity.test.ts: candidate_stack present in both MCP zod and resident TOOLS schemas; live in-memory MCP callTool('check_scene',{candidate_stack}) reaches checkScene and returns the candidate section.
+- AC-8: passed — tests/motionPro.test.ts 'effect stack': 43 effects, unique ids, validators; unknown id/out-of-range/bad type refused at parseEffectInstance; candidate path reuses effectSpec().validate.
+- AC-9: passed — tests/motionProTools.test.ts 'effect stack tools' + tests/motionPro.test.ts: add/update/remove/reorder/set_effects/set_blend atomic+typed; fx: lanes parse; apply_look writes adjustment track; element tracks refuse.
+- AC-10: passed — Shared paintAt entry; missing-WebGL2 named FxDrops + Canvas2D fallback verified in tests/motionGoldenBrowser.test.ts; check_scene not_drawn in tests/motionProTools.test.ts.
+- AC-11: passed — check_scene candidate_stack mirrors set_effects contract: unknown id → MO-13 unknown_fx, id reused with different fx → MO-13 fx_mismatch (refused both paths), bad param/type/range/enum → MO-14 invalid_param, undrawn → undrawn_effect; stored issues keep original section with dangling_lane/undrawn_effect kinds; read-only, revision unchanged; missing track/>20/non-GL track named errors; boundary passes; enabled merge parity (reused id keeps stored flag) proven in both directions — tests/motionProTools.test.ts candidate block incl. 'refuses a reused id carrying a different fx in simulation and write alike'.
+- AC-12: passed — tests/motionGoldenBrowser.test.ts shutter-zero identity + blur accumulation purity tests.
+- AC-13: passed — tests/motionPro.test.ts 'looks' — all 8 looks resolve to valid enabled drawn stacks; apply_look lands adjustment track in tests/motionProTools.test.ts.
+- AC-14: passed — tests/motionGoldenBrowser.test.ts 8/8 on real GPU: same-t bit-identical, seek-path identity, all 24 GL effects within ±2/255 of golden probe grid.
+- AC-15: passed — THIRD-PARTY-LICENSES: EffectCraft dual MIT OR Apache-2.0, pinned commit 0d1fc924a35e09644e0d9f2f2457cce11da94cb0; registry ids Diazo-owned.
+- AC-16: passed — tests/motionPro.test.ts 'graph model' — laneSegments/curve presets/handles tested; no contract change.
+- AC-17: passed — EFFECT_COST_CAP=36; tests/motionProTools.test.ts 'server render cost cap' — over-cap film refused, browser target renders; check_scene cost_cap + candidate projected_over_budget.
+- AC-18: passed — docs/motion-api.md candidate_stack section + kinds + examples; docs/motion-fx.md + docs/TECHSTACK.md updated; doc-lint clean; parity + affected vitest green.
+- AC-19: unverified — Frontend T4 — outside this backend slice; not exercised.
+- AC-20: unverified — Frontend T6 — outside this backend slice; not exercised.
+- AC-21: unverified — Frontend T5/T6 — outside this backend slice; not exercised.
+- AC-22: unverified — Frontend T5/T6 — outside this backend slice; not exercised.
+- AC-23: unverified — Frontend T4/T6 — outside this backend slice; not exercised.
+- AC-24: unverified — Frontend T6 — outside this backend slice; not exercised.
+
+## Residuals and gaps kept explicit
+
+- **Live snapshot image**: a real `get_scene_snapshot` contact-sheet PNG through `openIsolatedPage` was not captured in this slice; `tests/motionServerRender.test.ts` mocks the page. Real rendered pixels are proven through the same `MotionRenderHarness`/`paintAt` path by the golden suite instead.
+- **No matched baseline/candidate pixel artifacts**: `candidate_stack` is read-only diagnostics — it produces no render output, so there is nothing to diff; the 8/8 golden pass confirms the render path itself is unchanged.
+- **Renderer of record**: `ANGLE (Apple, ANGLE Metal Renderer: Apple M4, Unspecified Version) | WebGL 2.0 (OpenGL ES 3.0 Chromium)` under Chrome for Testing `157.0.8103.50` (`.chrome-version` pin, `~/.cache/doop-chrome`).
+
+## Gates (this revision)
+
+| Gate        | Result | Evidence                                                                                                                                                                                                                                            |
+| ----------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| typecheck   | passed | `tsgo --noEmit` clean.                                                                                                                                                                                                                              |
+| lint        | passed | `oxlint --type-aware --deny-warnings` + `eslint --max-warnings 0` clean (before the 2026-11-19 parity lots; their diffs linted per-file below).                                                                                                     |
+| format      | passed | `prettier --check` clean on all touched files.                                                                                                                                                                                                      |
+| doc-lint    | passed | `doc-lint passed (0 warning(s))` — rerun after the `fx_mismatch` doc lines.                                                                                                                                                                         |
+| affected    | passed | `tests/motionPro.test.ts`, `tests/motionProTools.test.ts` (incl. candidate block, all-13 presets, 5-pass stop, enabled-merge + fx-mismatch parity), `tests/agentToolParity.test.ts` (incl. live MCP wire call), `tests/motionServerRender.test.ts`. |
+| golden      | passed | `tests/motionGoldenBrowser.test.ts` 8/8 on real WebGL2 (renderer string above).                                                                                                                                                                     |
+| http/reload | passed | `tests/motionHttp.test.ts` 14/14 incl. `direction`/`motionBlur` surviving a real server restart.                                                                                                                                                    |
+
+## Targeted checks — candidate/write contract parity (2026-11-19)
+
+- **`enabled` merge**: `set_effects` keeps a reused id's stored flag (`raw.enabled ?? prev.enabled`); the candidate had billed an omitted `enabled` as on, so its cost and `projected_over_budget` could contradict the write. Fix: `resolvedEnabled(input, prev)` in `shared/motionFx.ts`, read by both `checkScene` and `lintCandidateStack`. Test 'bills a reused disabled instance without `enabled` exactly like the write' pins cost + budget decision on both branches.
+- **`fx` identity**: `update_effect` carries no `fx` field — an id's `fx` is immutable, so a reused id with a different `fx` was silently re-typed by nothing and silently kept by the diff (params even validated against two different specs). Both paths now refuse: `set_effects` fails with a named error, the candidate reports MO-13 `fx_mismatch` (error). Test 'refuses a reused id carrying a different fx in simulation and write alike' uses two different-cost effects (gaussian-blur 4 → bloom 5) and covers `enabled` omitted and set; the documented remove+add escape is exercised too.
+- **Checks run**: `bunx vitest run tests/motionProTools.test.ts --maxWorkers=1` → 35/35; `tsgo --noEmit` clean; oxlint clean on the touched files; `doc-lint` clean; prettier applied.
+- **Coverage limits**: unit-level only (`checkScene` + `setEffects` + `applyOp` on the in-memory store). `undrawn_effect` cannot fire on this build (all 43 registry effects ship GL bodies), so its gate is verified by code path. No browser, no full suite this lot; contract files untouched.
+
+## Runs still owed
+
+A live `get_scene_snapshot` contact-sheet capture through the server harness (AC-1), and the pro-panel integration run with two writers, both locales and default sidebars (T4–T6 / AC-19–24).
+
+## Historical record before rewrite
+
 Recorded on `feat/motion-pro` (worktree `doop-wt/motion-pro`).
 
 ## Setup — merges

@@ -2,9 +2,18 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { expect, it, vi } from 'vitest'
 import { buildMcpServer } from '../server/mcp.ts'
-import { RESIDENT_TOOL_NAMES } from '../server/resident.ts'
+import { RESIDENT_TOOL_NAMES, TOOLS } from '../server/resident.ts'
 
-vi.mock('../server/db/persist.ts', () => ({ saveCanvas: () => {}, saveFrame: () => {}, saveActivity: () => {} }))
+vi.mock('../server/db/persist.ts', () => ({
+  saveCanvas: () => {},
+  saveFrame: () => {},
+  saveFrameNow: async () => {},
+  saveTask: () => {},
+  saveActivity: () => {},
+  saveComposition: () => {},
+  saveCompositionVersion: () => {},
+  deleteComposition: () => {},
+}))
 
 /* The resident agents should be able to do whatever an agent connected over
    MCP can do on a canvas. Every MCP tool is either in the resident set under
@@ -53,7 +62,7 @@ const MISSING = [
   'suggest_code_links', // a resident run with a linked project searches it itself with repo_search
 ]
 
-async function mcpToolNames(): Promise<string[]> {
+async function mcpTools() {
   const server = buildMcpServer('Test Owner', 'test-owner-id')
   const client = new Client({ name: 'parity-test', version: '1.0.0' })
   const [a, b] = InMemoryTransport.createLinkedPair()
@@ -62,7 +71,11 @@ async function mcpToolNames(): Promise<string[]> {
   const { tools } = await client.listTools()
   await client.close()
   await server.close()
-  return tools.map((tool) => tool.name)
+  return tools
+}
+
+async function mcpToolNames(): Promise<string[]> {
+  return (await mcpTools()).map((tool) => tool.name)
 }
 
 it('gives resident agents every MCP tool, or records why not', async () => {
@@ -81,6 +94,76 @@ it('keeps the exception lists honest', async () => {
     expect(resident.has(name), `${name} is now a resident tool; drop it from the exceptions`).toBe(false)
   }
   for (const names of Object.values(EQUIVALENT)) for (const name of names) expect(resident.has(name)).toBe(true)
+})
+
+it('exposes check_scene candidate_stack on both surfaces', async () => {
+  /* the read-only what-if input must reach the same code path from MCP and
+     the resident dispatcher — a schema on one side only would silently drop
+     the diagnostic for the other agent */
+  const mcp = (await mcpTools()).find((tool) => tool.name === 'check_scene')
+  const mcpProps = (mcp?.inputSchema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}
+  expect(Object.keys(mcpProps)).toContain('candidate_stack')
+  const resident = TOOLS.find((tool) => tool.name === 'check_scene')
+  const resProps = (resident?.input_schema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}
+  expect(Object.keys(resProps)).toContain('candidate_stack')
+})
+
+it('routes an MCP check_scene candidate_stack call through execMotionPro', async () => {
+  /* the whole wire path: zod schema → checkScene → the candidate section,
+     on a canvas the connecting account owns */
+  const actions = await import('../server/actions.ts')
+  const { store } = await import('../server/store.ts')
+  const { canvasPages } = await import('../shared/pages.ts')
+  actions.wire(
+    () => {},
+    () => {},
+  )
+  const canvas = store.createCanvas('parity', 'test-owner-id')!
+  const pageId = canvasPages(canvas)[0]!.id
+  actions.setComposition(
+    canvas.id,
+    {
+      duration: 4,
+      fps: 30,
+      width: 1280,
+      height: 720,
+      tracks: [{ id: 'cam', kind: 'camera', keyframes: [] }],
+    },
+    pageId,
+    actions.resolveActor({ name: 'parity', kind: 'agent' }),
+  )
+  const server = buildMcpServer('Test Owner', 'test-owner-id')
+  const client = new Client({ name: 'parity-wire', version: '1.0.0' })
+  const [a, b] = InMemoryTransport.createLinkedPair()
+  await server.connect(b)
+  await client.connect(a)
+  const result = await client.callTool({
+    name: 'check_scene',
+    arguments: {
+      canvas_id: canvas.id,
+      page_id: pageId,
+      pixels: false,
+      agent_name: 'parity-agent',
+      candidate_stack: {
+        track_id: 'cam',
+        effects: [
+          { id: 'a', fx: 'gaussin-blur', params: {} },
+          { id: 'b', fx: 'gaussian-blur', params: { radius: 200 } },
+        ],
+      },
+    },
+  })
+  await client.close()
+  await server.close()
+  expect(result.isError).toBeFalsy()
+  const [first] = result.content as { type: string; text?: string }[]
+  const payload = JSON.parse(first?.text ?? '{}') as {
+    ok: boolean
+    candidate: { ok: boolean; diagnostics: { kind: string; instance: string }[] }
+  }
+  expect(payload.ok).toBe(true)
+  expect(payload.candidate.ok).toBe(false)
+  expect(payload.candidate.diagnostics).toEqual([expect.objectContaining({ kind: 'unknown_fx', instance: 'a' })])
 })
 
 it('gives resident agents the prototype tools', () => {

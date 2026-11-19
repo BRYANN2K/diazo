@@ -1,6 +1,6 @@
 # TECHSTACK - Diazo
 
-Status: current, updated 2026-11-17
+Status: current, updated 2026-11-18
 
 ## 1. Language and Runtime
 
@@ -1077,7 +1077,12 @@ data-doop-webfonts>` for the roster families the frame names and does not load i
   `model_duels.kind = 'motion'`). Tests: `motion.test.ts`, `motionPhase2.test.ts`,
   `motionMedia.test.ts`, `motionHttp.test.ts`, `motionPhase5.test.ts`, `blender.test.ts`,
   `motion::tests`, `blender::tests`, `speech::tests`.
-  `render_composition`. `server/storyboard.ts` is the storyboard read `animate_storyboard` adds to
+  `render_composition`. The motion-pro kit (`server/motionProTools.ts`, `server/motionSnapshot.ts`,
+  registries in `shared/motionFx.ts` / `shared/motionLooks.ts` / `shared/motionGraph.ts`) adds the
+  direction, presets, `get_scene_snapshot`, `check_scene`, `critique_scene` and the effect-stack
+  ops over one dispatch (`execMotionPro`); `check_scene` also vets an optional `candidate_stack`
+  read-only (MO-13 `unknown_fx`, MO-14 `invalid_param`/`undrawn_effect`, `docs/motion-api.md`).
+  `server/storyboard.ts` is the storyboard read `animate_storyboard` adds to
   each shot — the frame's notes (elements labelled mouvement / transition / son / voix off / notes,
   or the English words, by text or by markup) and its animatable elements with `data-doop-id`s
   stamped in one pass through `server/elementIds.ts` `stampElements` and committed like a comment

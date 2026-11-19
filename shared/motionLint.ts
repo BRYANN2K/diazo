@@ -10,6 +10,7 @@
  */
 
 import {
+  BLEND_MODES,
   DURATION_ATTR,
   MOTION_BLOCK_ATTR,
   SCENE_ATTR,
@@ -18,10 +19,12 @@ import {
   TEXT_SPLITS,
   TEXT_SPLIT_ATTR,
   parseMotionBlock,
+  type BlendMode,
   type Composition,
   type MotionLintIssue,
+  type MotionTrack,
 } from './motion.ts'
-import { GL_EFFECT_IDS } from './motionFx.ts'
+import { EFFECT_STACK_MAX, GL_EFFECT_IDS, effectSpec, resolvedEnabled } from './motionFx.ts'
 
 /** the MO-* rule ids, in firing order */
 export const MO_RULES = {
@@ -358,6 +361,7 @@ export function lintComposition(comp: Composition, opts?: { frameIds?: ReadonlyS
       if (instance && !stackIds.has(instance)) {
         issues.push({
           rule: 'MO-13',
+          kind: 'dangling_lane',
           severity: 'warning',
           message: `keyframe ${kf.id} targets fx:${instance} but no effect ${instance} is on track ${track.id}`,
         })
@@ -370,6 +374,7 @@ export function lintComposition(comp: Composition, opts?: { frameIds?: ReadonlyS
       if (!GL_EFFECT_IDS.has(e.fx)) {
         issues.push({
           rule: 'MO-14',
+          kind: 'undrawn_effect',
           severity: 'warning',
           message: `effect ${e.fx} (${e.id}) on ${track.id} has no WebGL2 body — the compositor reports it instead of drawing it wrong`,
         })
@@ -377,6 +382,153 @@ export function lintComposition(comp: Composition, opts?: { frameIds?: ReadonlyS
     }
   }
   return issues
+}
+
+/* ---- check_scene's candidate stack (motion-pro AC-11) ----
+ * A caller can price and vet the stack set_effects would write before it
+ * writes it. The candidate never persists: shape problems come back as an
+ * input error, registry problems as diagnostics under the same MO-13/MO-14
+ * families the stored composition uses, with a `kind` that keeps them
+ * distinct from the stored meanings (dangling_lane / undrawn_effect). */
+
+/** one candidate diagnostic — an issue plus where in the stack it sits */
+export interface CandidateStackDiagnostic extends MotionLintIssue {
+  /** unknown_fx | fx_mismatch | invalid_param | undrawn_effect — all but
+   *  undrawn refuse the write as errors; an undrawn candidate warns like
+   *  the stored rule */
+  kind: 'unknown_fx' | 'fx_mismatch' | 'invalid_param' | 'undrawn_effect'
+  track_id: string
+  /** the effect instance id, when the shape gave one */
+  instance?: string
+  /** the offending param or field, when one is named */
+  parameter?: string
+}
+
+const FX_ID_RE = /^[a-z][a-z0-9-]{0,59}$/
+
+/** the shape gate a write applies at parse — registry and param values are
+ *  the diagnostics' job below; a null return means the candidate is
+ *  shape-clean enough to evaluate */
+function candidateShapeError(effects: unknown): string | null {
+  if (!Array.isArray(effects)) return 'candidate_stack.effects must be an array'
+  if (effects.length > EFFECT_STACK_MAX) return `candidate_stack.effects must be at most ${EFFECT_STACK_MAX}`
+  const seen = new Set<string>()
+  for (const [i, raw] of effects.entries()) {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return `candidate effect ${i} must be an object`
+    const e = raw as Record<string, unknown>
+    if (typeof e.id !== 'string' || !/^[A-Za-z0-9_-]{1,100}$/.test(e.id))
+      return `candidate effect ${i}.id must be a 1-100 char id`
+    if (seen.has(e.id)) return `duplicate candidate effect id ${e.id}`
+    seen.add(e.id)
+    if (typeof e.fx !== 'string' || !FX_ID_RE.test(e.fx))
+      return `candidate effect ${e.id}.fx must be a registry id (lowercase, dashes)`
+    if (e.enabled !== undefined && typeof e.enabled !== 'boolean')
+      return `candidate effect ${e.id}.enabled must be a boolean`
+    if (e.seed !== undefined && (typeof e.seed !== 'number' || !Number.isInteger(e.seed) || e.seed < 0)) {
+      return `candidate effect ${e.id}.seed must be a non-negative integer`
+    }
+    if (e.mix !== undefined && (typeof e.mix !== 'number' || !Number.isFinite(e.mix) || e.mix < 0 || e.mix > 1)) {
+      return `candidate effect ${e.id}.mix must be in [0, 1]`
+    }
+    if (e.blend !== undefined && !BLEND_MODES.includes(e.blend as BlendMode)) {
+      return `candidate effect ${e.id}.blend must be one of ${BLEND_MODES.join(', ')}`
+    }
+    if (e.params !== undefined) {
+      if (typeof e.params !== 'object' || e.params === null || Array.isArray(e.params)) {
+        return `candidate effect ${e.id}.params must be an object`
+      }
+      for (const v of Object.values(e.params)) {
+        if (typeof v !== 'number' && typeof v !== 'string' && typeof v !== 'boolean') {
+          return `candidate effect ${e.id}.params values must be numbers, strings or booleans`
+        }
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Vet a candidate stack for `track` without writing it. Returns the input
+ * error when the shape fails the same bounds a write enforces, else the
+ * structured diagnostics: `unknown_fx` under MO-13 for an id the registry
+ * does not carry, `invalid_param` under MO-14 for a value the registry
+ * validator rejects (bounds, booleans, enums) or a blend the write refuses,
+ * and `undrawn_effect` under MO-14 for an enabled registry effect this GL
+ * build cannot draw.
+ */
+export function lintCandidateStack(
+  track: MotionTrack,
+  effects: unknown,
+): { error: string } | { diagnostics: CandidateStackDiagnostic[] } {
+  const shapeError = candidateShapeError(effects)
+  if (shapeError) return { error: shapeError }
+  const diagnostics: CandidateStackDiagnostic[] = []
+  for (const raw of effects as Record<string, unknown>[]) {
+    const e = raw as { id: string; fx: string; enabled?: boolean; blend?: string; params?: Record<string, unknown> }
+    const base = { track_id: track.id, instance: e.id }
+    const spec = effectSpec(e.fx)
+    if (!spec) {
+      diagnostics.push({
+        ...base,
+        rule: 'MO-13',
+        kind: 'unknown_fx',
+        severity: 'error',
+        message: `effect ${e.fx} is not in the registry — list_motion_effects names what the stack may carry`,
+      })
+      continue
+    }
+    /* same contract the write applies: an id reused with a different fx is
+       refused — set_effects merges onto the stored instance, whose fx is
+       immutable identity */
+    const prev = (track.effects ?? []).find((s) => s.id === e.id)
+    if (prev && prev.fx !== e.fx) {
+      diagnostics.push({
+        ...base,
+        rule: 'MO-13',
+        kind: 'fx_mismatch',
+        severity: 'error',
+        message: `effect ${e.id} is ${prev.fx} — an id keeps its fx through set_effects; remove it and add a new instance to change the type`,
+      })
+    }
+    for (const key of Object.keys(e.params ?? {})) {
+      /* one param per call, so the diagnostic can name the field — the
+         message is the registry validator's own */
+      const bad = spec.validate({ [key]: e.params![key] })
+      if (bad) {
+        diagnostics.push({
+          ...base,
+          rule: 'MO-14',
+          kind: 'invalid_param',
+          severity: 'error',
+          parameter: key,
+          message: bad,
+        })
+      }
+    }
+    if (e.blend !== undefined) {
+      diagnostics.push({
+        ...base,
+        rule: 'MO-14',
+        kind: 'invalid_param',
+        severity: 'error',
+        parameter: 'blend',
+        message: 'effect blend is not drawn yet — the write refuses it, leave blend unset',
+      })
+    }
+    /* the write's merge decides what draws: a reused id that omits
+       `enabled` keeps its stored flag, so a disabled instance resubmitted
+       bare stays dark and must not warn */
+    if (resolvedEnabled(e, prev) && !GL_EFFECT_IDS.has(e.fx)) {
+      diagnostics.push({
+        ...base,
+        rule: 'MO-14',
+        kind: 'undrawn_effect',
+        severity: 'warning',
+        message: `effect ${e.fx} (${e.id}) has no WebGL2 body in this build — the compositor reports it instead of drawing it wrong`,
+      })
+    }
+  }
+  return { diagnostics }
 }
 
 /** one number agents can quote: errors first */

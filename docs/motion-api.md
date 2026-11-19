@@ -1,6 +1,6 @@
 # Motion API — Motion Studio ("Rostrum")
 
-Status: current, updated 2026-11-16
+Status: current, updated 2026-11-18
 
 A film is a page with a clock. This is the contract the timeline editor, the
 player, the renderers and the agents code against. The types live in
@@ -401,30 +401,73 @@ canvas and take `page_id` only. All writes need the `edit` role.
 
 ### The director kit (P0)
 
-| Tool                   | Input                                                                                       | Result                                                                                                                                                                                   |
-| ---------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_direction`        | `page_id`                                                                                   | `{ direction }` — the treatment, beats, look, references, rhythm, palette and pass budget on the composition, `null` when unset                                                          |
-| `set_direction`        | `page_id, direction`                                                                        | `{ composition }` — writes the `Direction`; `null` clears it. Beats (`{seconds, note, transition}` — `cut`/`move`/`push`/`whip`/`fade`) tile the timeline `animate_storyboard` then cuts |
-| `list_motion_presets`  | —                                                                                           | `{ camera_presets, transitions, text_animators, splits, blend_modes }` — the names the preset tools take                                                                                 |
-| `apply_camera_preset`  | `page_id, preset, t?, duration?, amount?, frame_id?, seed?, frequency?, easing?`            | `{ composition, keyframes }` — one of the 13 camera presets as ordinary editable keyframes at `t`, composing with the camera already there (`handheld` is seeded, deterministic)         |
-| `apply_transition`     | `page_id, track_id, clip_id, kind, duration?, direction?, token?, easing?`                  | `{ composition, clip }` — `cut` clears the transition                                                                                                                                    |
-| `apply_text_animation` | `page_id, frame_id, element_id, preset, split?, start?, duration?, stagger?, order?, seed?` | `{ composition, targets }` — a text animator into the frame's `data-doop-motion` block; the element's text stays one editable string                                                     |
-| `get_scene_snapshot`   | `page_id, times?, auto?, max_side?, columns?`                                               | a contact-sheet PNG (image block) + `{ cells: [{t,label,luminance,contrast}], motionEnergy, textBoxes }` — drawn by the same compositor every render target uses                         |
-| `check_scene`          | `page_id, pixels?`                                                                          | `{ lint, pacing, safe_zones, legibility, fx_cost }` — pixel parts report `unavailable` without the instance renderer rather than guessing                                                |
-| `critique_scene`       | `page_id, pixels?`                                                                          | `{ rubric, issues, pass, passes, stop }` — check_scene folded into the fixed rubric; a call on a new revision counts a pass (`direction.passes`, default 3, max 5)                       |
+| Tool                   | Input                                                                                       | Result                                                                                                                                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_direction`        | `page_id`                                                                                   | `{ direction }` — the treatment, beats, look, references, rhythm, palette and pass budget on the composition, `null` when unset                                                                             |
+| `set_direction`        | `page_id, direction`                                                                        | `{ composition }` — writes the `Direction`; `null` clears it. Beats (`{seconds, note, transition}` — `cut`/`move`/`push`/`whip`/`fade`) tile the timeline `animate_storyboard` then cuts                    |
+| `list_motion_presets`  | —                                                                                           | `{ camera_presets, transitions, text_animators, splits, blend_modes }` — the names the preset tools take                                                                                                    |
+| `apply_camera_preset`  | `page_id, preset, t?, duration?, amount?, frame_id?, seed?, frequency?, easing?`            | `{ composition, keyframes }` — one of the 13 camera presets as ordinary editable keyframes at `t`, composing with the camera already there (`handheld` is seeded, deterministic)                            |
+| `apply_transition`     | `page_id, track_id, clip_id, kind, duration?, direction?, token?, easing?`                  | `{ composition, clip }` — `cut` clears the transition                                                                                                                                                       |
+| `apply_text_animation` | `page_id, frame_id, element_id, preset, split?, start?, duration?, stagger?, order?, seed?` | `{ composition, targets }` — a text animator into the frame's `data-doop-motion` block; the element's text stays one editable string                                                                        |
+| `get_scene_snapshot`   | `page_id, times?, auto?, max_side?, columns?`                                               | a contact-sheet PNG (image block) + `{ cells: [{t,label,luminance,contrast}], motionEnergy, textBoxes }` — drawn by the same compositor every render target uses                                            |
+| `check_scene`          | `page_id, pixels?, candidate_stack?`                                                        | `{ lint, pacing, safe_zones, legibility, effects, candidate? }` — pixel parts report `unavailable` without the instance renderer rather than guessing; `candidate_stack` vets a stack read-only (see below) |
+| `critique_scene`       | `page_id, pixels?`                                                                          | `{ rubric, issues, pass, passes, stop }` — check_scene folded into the fixed rubric; a call on a new revision counts a pass (`direction.passes`, default 3, max 5)                                          |
+
+`check_scene` takes an optional `candidate_stack: { track_id, effects }` —
+the read-only what-if for `set_effects`. The report gains a `candidate`
+section and nothing persists: no write, no revision bump, the stored
+composition's cost report unchanged. `effects` is the same shape
+`set_effects` takes (`[{id, fx, params?, enabled?, seed?, mix?}]`, ≤ 20).
+Input bounds fail like any bad call — an unnamed or over-limit stack, a
+missing `track_id`, or a non-empty stack aimed at a track kind that never
+reaches the GL pass (anything but `camera`/`adjustment`).
+
+```ts
+candidate: {
+  track_id: string
+  track_kind: string
+  effects: number                    // candidate count
+  cost: number                       // the candidate's own bill, effectCost rules
+  projected_total_cost: number       // film's bill with this stack swapped in
+  projected_over_budget: boolean     // projected > cost_cap (36)
+  ok: boolean                        // no error-severity diagnostics
+  diagnostics: {
+    rule: 'MO-13' | 'MO-14'
+    kind: 'unknown_fx' | 'fx_mismatch' | 'invalid_param' | 'undrawn_effect'
+    severity: 'error' | 'warning'
+    track_id: string
+    instance: string                 // the candidate effect's id
+    parameter?: string               // the offending param or field
+    message: string
+  }[]
+}
+```
+
+Reason codes: `unknown_fx` (MO-13, error) — the registry carries no such
+`fx`; `fx_mismatch` (MO-13, error) — the id already exists on the track
+with a different `fx` (`set_effects` merges onto the stored instance, whose
+`fx` is immutable — remove the id and add a new instance to change the
+type); `invalid_param` (MO-14, error) — the registry validator rejects a
+param (range, boolean, enum, or an unknown param name) or a `blend` the
+write refuses; `undrawn_effect` (MO-14, warning) — a valid registry effect
+this GL build cannot draw. A reused id that omits `enabled` keeps the
+stored flag on both paths — simulation and write bill the same. Example:
+`effects: [{id:'a', fx:'gaussin-blur'}]`
+→ `unknown_fx` on `a`; `effects: [{id:'b', fx:'gaussian-blur', params:
+{radius: 999}}]` → `invalid_param` `radius` (`must be in [0, 200]`).
 
 ### The effect stack (P1)
 
-| Tool                  | Input                                                                  | Result                                                                                                                                                     |
-| --------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list_motion_effects` | —                                                                      | `{ effects: FxSpec[], blend_modes }` — ~30 registered effects with params, ranges, GPU cost and families                                                   |
-| `add_effect`          | `page_id, track_id, fx, id?, params?, index?`                          | `{ composition, effect }` — pushes a registry effect onto the track's ordered stack (`id` minted when absent)                                              |
-| `update_effect`       | `page_id, track_id, effect_id, enabled?, params?, seed?, mix?, blend?` | `{ composition, effect }` — params merge; `blend: null` clears                                                                                             |
-| `remove_effect`       | `page_id, track_id, effect_id`                                         | `{ composition }` — `fx:` lanes pointing at it dangle; MO-13 reports them                                                                                  |
-| `set_effects`         | `page_id, track_id, effects`                                           | `{ composition }` — replaces the whole stack atomically                                                                                                    |
-| `apply_look`          | `page_id, look, at?, seconds?`                                         | `{ composition, track, clip }` — a named look as an `adjustment` track; `at`/`seconds` gate the window through an adjustment clip, absent = the whole film |
-| `list_looks`          | —                                                                      | `{ looks }` — teal-orange, noir, film-35, crt, glitch, dream, product, riso                                                                                |
-| `set_motion_blur`     | `page_id, shutter?, samples?`                                          | `{ composition }` — shutter angle 0–360 sampled across one frame interval; `0` or absent clears. Deterministic: K sub-seeks averaged, never accumulated    |
+| Tool                  | Input                                                                  | Result                                                                                                                                                                |
+| --------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_motion_effects` | —                                                                      | `{ effects: FxSpec[], blend_modes }` — ~30 registered effects with params, ranges, GPU cost and families                                                              |
+| `add_effect`          | `page_id, track_id, fx, id?, params?, index?`                          | `{ composition, effect }` — pushes a registry effect onto the track's ordered stack (`id` minted when absent)                                                         |
+| `update_effect`       | `page_id, track_id, effect_id, enabled?, params?, seed?, mix?, blend?` | `{ composition, effect }` — params merge; `blend: null` clears                                                                                                        |
+| `remove_effect`       | `page_id, track_id, effect_id`                                         | `{ composition }` — `fx:` lanes pointing at it dangle; MO-13 reports them                                                                                             |
+| `set_effects`         | `page_id, track_id, effects`                                           | `{ composition }` — replaces the whole stack atomically; an existing id keeps its `fx` (submit remove + add to change it) and its `enabled` when the field is omitted |
+| `apply_look`          | `page_id, look, at?, seconds?`                                         | `{ composition, track, clip }` — a named look as an `adjustment` track; `at`/`seconds` gate the window through an adjustment clip, absent = the whole film            |
+| `list_looks`          | —                                                                      | `{ looks }` — teal-orange, noir, film-35, crt, glitch, dream, product, riso                                                                                           |
+| `set_motion_blur`     | `page_id, shutter?, samples?`                                          | `{ composition }` — shutter angle 0–360 sampled across one frame interval; `0` or absent clears. Deterministic: K sub-seeks averaged, never accumulated               |
 
 `animate_storyboard` semantics: deterministic builder — shots follow the
 frames' reading order (rows top→bottom, left→right inside a row), each shot
@@ -461,22 +504,22 @@ resets the count.
 
 `lintMotionHtml(html)` (static, per frame) + `lintComposition(comp)`:
 
-| Rule  | Severity      | Fires on                                                                                                                                                                                |
-| ----- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| MO-01 | error         | `Date.now`, `new Date`, `performance.now` in a script — wall clock ≠ t                                                                                                                  |
-| MO-02 | error         | `setInterval`/`setTimeout`/`requestAnimationFrame` in a script that doesn't listen for `doop:seek`                                                                                      |
-| MO-03 | error         | `Math.random` without a seed marker — seed a local PRNG                                                                                                                                 |
-| MO-04 | error         | CSS `animation`/`infinite` not bound to `var(--t)` via paused+delay                                                                                                                     |
-| MO-05 | error         | GSAP (`gsap`, `TweenMax`, `<script src=…gsap>`)                                                                                                                                         |
-| MO-06 | warning       | `fetch`/`XHR`/`WebSocket` in scene scripts — load once at setup                                                                                                                         |
-| MO-07 | error         | `<video/audio autoplay>` — the runtime seeks media                                                                                                                                      |
-| MO-08 | error         | timed media nested inside another `data-start` element                                                                                                                                  |
-| MO-09 | warning       | `data-doop-scene` root without `data-duration`                                                                                                                                          |
-| MO-10 | error         | a `data-doop-motion` block that doesn't parse                                                                                                                                           |
-| MO-11 | error/warning | composition checks: >1 camera track, dangling element/frame refs, out-of-range keyframes/clips, clips on the wrong track kind, transitions longer than their clip or on non-clip tracks |
-| MO-12 | warning       | a text animator's target element missing `data-doop-split`, or a split value outside `TEXT_SPLITS`                                                                                      |
-| MO-13 | warning       | an `fx:<id>.<param>` keyframe lane whose effect instance id is not on the track's stack                                                                                                 |
-| MO-14 | warning       | an effect stack the active renderer cannot draw (no GLSL body / no GL context) — reported, never silently skipped                                                                       |
+| Rule  | Severity      | Fires on                                                                                                                                                                                                            |
+| ----- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MO-01 | error         | `Date.now`, `new Date`, `performance.now` in a script — wall clock ≠ t                                                                                                                                              |
+| MO-02 | error         | `setInterval`/`setTimeout`/`requestAnimationFrame` in a script that doesn't listen for `doop:seek`                                                                                                                  |
+| MO-03 | error         | `Math.random` without a seed marker — seed a local PRNG                                                                                                                                                             |
+| MO-04 | error         | CSS `animation`/`infinite` not bound to `var(--t)` via paused+delay                                                                                                                                                 |
+| MO-05 | error         | GSAP (`gsap`, `TweenMax`, `<script src=…gsap>`)                                                                                                                                                                     |
+| MO-06 | warning       | `fetch`/`XHR`/`WebSocket` in scene scripts — load once at setup                                                                                                                                                     |
+| MO-07 | error         | `<video/audio autoplay>` — the runtime seeks media                                                                                                                                                                  |
+| MO-08 | error         | timed media nested inside another `data-start` element                                                                                                                                                              |
+| MO-09 | warning       | `data-doop-scene` root without `data-duration`                                                                                                                                                                      |
+| MO-10 | error         | a `data-doop-motion` block that doesn't parse                                                                                                                                                                       |
+| MO-11 | error/warning | composition checks: >1 camera track, dangling element/frame refs, out-of-range keyframes/clips, clips on the wrong track kind, transitions longer than their clip or on non-clip tracks                             |
+| MO-12 | warning       | a text animator's target element missing `data-doop-split`, or a split value outside `TEXT_SPLITS`                                                                                                                  |
+| MO-13 | warning       | `dangling_lane`: an `fx:<id>.<param>` keyframe lane whose effect instance id is not on the track's stack; check_scene candidate diagnostics reuse the family as `unknown_fx`                                        |
+| MO-14 | warning       | `undrawn_effect`: an effect stack the active renderer cannot draw (no GLSL body / no GL context) — reported, never silently skipped; candidate diagnostics reuse the family as `invalid_param` and `undrawn_effect` |
 
 ## Runtime — `shared/motionRuntime.ts`
 
@@ -531,6 +574,15 @@ allowlisted.
 ## Changes
 
 Contract changes after the first commit land here, dated.
+
+- **2026-11-18 — check_scene candidate stacks.** `check_scene` gains an
+  optional `candidate_stack` (`{track_id, effects}`): the report's
+  `candidate` section vets the stack `set_effects` would write —
+  `unknown_fx` (MO-13) and `invalid_param`/`undrawn_effect` (MO-14)
+  diagnostics with track, instance and parameter, plus the stack's cost
+  and projected budget. Read-only; the stored report is unchanged. Lint
+  issues now carry an optional `kind` naming the sub-meaning inside a rule
+  family (stored MO-13 `dangling_lane`, stored MO-14 `undrawn_effect`).
 
 <!-- append new entries below -->
 

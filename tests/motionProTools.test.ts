@@ -35,6 +35,7 @@ const snapshot = await import('../server/motionSnapshot.ts')
 const { readFileSync } = await import('node:fs')
 const { CAMERA_PRESETS } = await import('../shared/motionPresets.ts')
 const { MOTION_LOOKS } = await import('../shared/motionLooks.ts')
+const { effectCost } = await import('../shared/motionFx.ts')
 import type { Canvas } from '../shared/types.ts'
 import type { MotionTrack } from '../shared/motion.ts'
 
@@ -86,16 +87,22 @@ describe('director kit — direction, presets, transitions, shutter', () => {
     const data = (
       out as { ok: true; data: { camera_presets: { id: string }[]; transitions: unknown[]; text_animators: string[] } }
     ).data
-    expect(data.camera_presets.length).toBeGreaterThan(5)
+    expect(data.camera_presets).toHaveLength(CAMERA_PRESETS.length)
     expect(data.transitions.length).toBeGreaterThan(0)
     expect(data.text_animators).toContain('rise-blur')
   })
 
-  it('apply_camera_preset writes editable camera keyframes', () => {
-    const out = pro.applyCameraPreset(canvas, pageId, { preset: CAMERA_PRESETS[0], t: 0, duration: 2 }, actor())
-    expect(out.ok).toBe(true)
+  it('apply_camera_preset writes editable camera keyframes — every one of the 13', () => {
+    /* the registry row count is the contract: a renamed or dropped preset
+       fails here, and each must still apply through the same write path */
+    for (const [i, preset] of CAMERA_PRESETS.entries()) {
+      const out = pro.applyCameraPreset(canvas, pageId, { preset, t: i * 0.4, duration: 1 }, actor())
+      expect(out.ok, `preset ${preset}`).toBe(true)
+      const wrote = (out as { ok: true; data: { keyframes: number } }).data.keyframes
+      expect(wrote, `preset ${preset} wrote no keyframes`).toBeGreaterThan(0)
+    }
     const camera = comp().tracks.find((t) => t.kind === 'camera')
-    expect(camera?.keyframes?.length).toBeGreaterThan(0)
+    expect(camera?.keyframes?.length).toBeGreaterThanOrEqual(CAMERA_PRESETS.length)
     const bad = pro.applyCameraPreset(canvas, pageId, { preset: 'not-a-preset' }, actor())
     expect(bad.ok).toBe(false)
   })
@@ -242,6 +249,349 @@ describe('check_scene and critique_scene', () => {
     expect(data.effects.unsupported).toContain('mystery-fx')
   })
 
+  it('check_scene runs a candidate stack read-only — diagnostics, cost, no write', async () => {
+    actions.setComposition(
+      canvas.id,
+      baseComp([{ id: 'cam', kind: 'camera', keyframes: [], effects: [{ id: 's', fx: 'vignette', params: {} }] }]),
+      pageId,
+      actor(),
+    )
+    const revision = comp().revision
+    const out = await snapshot.checkScene(canvas, pageId, {
+      pixels: false,
+      candidate_stack: {
+        track_id: 'cam',
+        effects: [
+          { id: 'a', fx: 'invert', params: {} },
+          { id: 'b', fx: 'pixelate', params: { size: 8 } },
+        ],
+      },
+    })
+    expect(out.ok).toBe(true)
+    const data = (
+      out as {
+        ok: true
+        data: {
+          effects: { total_cost: number }
+          candidate: { ok: boolean; cost: number; projected_total_cost: number; diagnostics: unknown[] }
+        }
+      }
+    ).data
+    /* the stored stack (vignette = 1) stays the report's bill; the
+       candidate's own cost and the projection land in its section */
+    expect(data.effects.total_cost).toBe(1)
+    expect(data.candidate.ok).toBe(true)
+    expect(data.candidate.cost).toBe(2)
+    expect(data.candidate.projected_total_cost).toBe(2)
+    expect(data.candidate.diagnostics).toEqual([])
+    /* read-only: no write, no revision bump */
+    expect(comp().revision).toBe(revision)
+    expect(
+      comp()
+        .tracks.find((t) => t.id === 'cam')
+        ?.effects?.map((e) => e.id),
+    ).toEqual(['s'])
+  })
+
+  it('an ordinary check_scene without candidate_stack reports no candidate section', async () => {
+    const out = await snapshot.checkScene(canvas, pageId, { pixels: false })
+    expect(out.ok).toBe(true)
+    expect('candidate' in (out as { data: object }).data).toBe(false)
+  })
+
+  it('candidate_stack names its errors: missing track, over-limit stack, wrong track kind', async () => {
+    actions.setComposition(
+      canvas.id,
+      baseComp([
+        { id: 'cam', kind: 'camera', keyframes: [] },
+        { id: 'el', kind: 'element', frameId, elementId: 'hero' },
+      ]),
+      pageId,
+      actor(),
+    )
+    const missing = await snapshot.checkScene(canvas, pageId, {
+      pixels: false,
+      candidate_stack: { track_id: 'ghost', effects: [] },
+    })
+    expect(missing.ok).toBe(false)
+    if (!missing.ok) expect(missing.error).toMatch(/no track ghost/)
+    const overLimit = await snapshot.checkScene(canvas, pageId, {
+      pixels: false,
+      candidate_stack: {
+        track_id: 'cam',
+        effects: Array.from({ length: 21 }, (_, i) => ({ id: `e${i}`, fx: 'invert', params: {} })),
+      },
+    })
+    expect(overLimit.ok).toBe(false)
+    if (!overLimit.ok) expect(overLimit.error).toMatch(/at most 20/)
+    const wrongKind = await snapshot.checkScene(canvas, pageId, {
+      pixels: false,
+      candidate_stack: { track_id: 'el', effects: [{ id: 'e', fx: 'invert', params: {} }] },
+    })
+    expect(wrongKind.ok).toBe(false)
+    if (!wrongKind.ok) expect(wrongKind.error).toMatch(/camera and adjustment/)
+  })
+
+  it('candidate diagnostics flag unknown_fx as MO-13 and invalid_param as MO-14', async () => {
+    actions.setComposition(canvas.id, baseComp([{ id: 'cam', kind: 'camera', keyframes: [] }]), pageId, actor())
+    const out = await snapshot.checkScene(canvas, pageId, {
+      pixels: false,
+      candidate_stack: {
+        track_id: 'cam',
+        effects: [
+          { id: 'a', fx: 'gaussin-blur', params: {} },
+          { id: 'b', fx: 'gaussian-blur', params: { radius: 999, angle: 1 } },
+        ],
+      },
+    })
+    expect(out.ok).toBe(true)
+    const candidate = (
+      out as {
+        ok: true
+        data: {
+          candidate: {
+            ok: boolean
+            diagnostics: { rule: string; kind: string; severity: string; instance: string; parameter?: string }[]
+          }
+        }
+      }
+    ).data.candidate
+    expect(candidate.ok).toBe(false)
+    const unknown = candidate.diagnostics.find((d) => d.kind === 'unknown_fx')
+    expect(unknown?.rule).toBe('MO-13')
+    expect(unknown?.severity).toBe('error')
+    expect(unknown?.instance).toBe('a')
+    /* the bad radius is named; angle (a param gaussian-blur does not carry)
+       reports as its own invalid_param */
+    const invalid = candidate.diagnostics.filter((d) => d.kind === 'invalid_param')
+    expect(invalid.map((d) => d.parameter).sort()).toEqual(['angle', 'radius'])
+    expect(invalid.every((d) => d.rule === 'MO-14' && d.severity === 'error' && d.instance === 'b')).toBe(true)
+  })
+
+  it('the exact param boundary passes the candidate check', async () => {
+    actions.setComposition(canvas.id, baseComp([{ id: 'cam', kind: 'camera', keyframes: [] }]), pageId, actor())
+    const out = await snapshot.checkScene(canvas, pageId, {
+      pixels: false,
+      candidate_stack: {
+        track_id: 'cam',
+        effects: [{ id: 'a', fx: 'gaussian-blur', params: { radius: 200 } }],
+      },
+    })
+    expect(out.ok).toBe(true)
+    const candidate = (out as { ok: true; data: { candidate: { ok: boolean; diagnostics: unknown[] } } }).data.candidate
+    expect(candidate.ok).toBe(true)
+    expect(candidate.diagnostics).toEqual([])
+  })
+
+  it('a candidate over the cost cap projects over_budget without touching the stored report', async () => {
+    actions.setComposition(canvas.id, baseComp([{ id: 'cam', kind: 'camera', keyframes: [] }]), pageId, actor())
+    const out = await snapshot.checkScene(canvas, pageId, {
+      pixels: false,
+      candidate_stack: {
+        track_id: 'cam',
+        effects: Array.from({ length: 10 }, (_, i) => ({ id: `g${i}`, fx: 'gaussian-blur', params: {} })),
+      },
+    })
+    expect(out.ok).toBe(true)
+    const data = (
+      out as {
+        ok: true
+        data: {
+          effects: { total_cost: number; over_budget: boolean }
+          candidate: { cost: number; projected_over_budget: boolean }
+        }
+      }
+    ).data
+    /* 10 × gaussian-blur (4) = 40 > 36 — the projection trips while the
+       stored film stays under */
+    expect(data.candidate.cost).toBe(40)
+    expect(data.candidate.projected_over_budget).toBe(true)
+    expect(data.effects.total_cost).toBe(0)
+    expect(data.effects.over_budget).toBe(false)
+  })
+
+  it('bills a reused disabled instance without `enabled` exactly like the write — cost and budget decision', async () => {
+    /* set_effects merges: a reused id that omits `enabled` keeps its stored
+       flag. The candidate must bill it the same way or the rehearsal lies —
+       here the stack sits at 33 of 36, so misreading parked `a` (4) flips
+       over_budget and the two paths would disagree */
+    const enabledStack = [
+      { id: 'e1', fx: 'bloom', params: {} },
+      { id: 'e2', fx: 'lens-blur', params: {} },
+      { id: 'e3', fx: 'god-rays', params: {} },
+      { id: 'e4', fx: 'glow', params: {} },
+      { id: 'e5', fx: 'radial-blur', params: {} },
+      { id: 'e6', fx: 'directional-blur', params: {} },
+      { id: 'e7', fx: 'whip-blur', params: {} },
+      { id: 'e8', fx: 'lens-flare', params: {} },
+      { id: 'e9', fx: 'light-leak', params: {} },
+    ]
+    const bareResubmit = { id: 'a', fx: 'gaussian-blur', params: { radius: 20 } }
+    actions.setComposition(
+      canvas.id,
+      baseComp([
+        {
+          id: 'cam',
+          kind: 'camera',
+          keyframes: [],
+          effects: [...enabledStack, { id: 'a', fx: 'gaussian-blur', params: { radius: 8 }, enabled: false }],
+        },
+      ]),
+      pageId,
+      actor(),
+    )
+    const track = () => comp().tracks.find((t) => t.id === 'cam')!
+    expect(effectCost(track())).toBe(33)
+
+    /* the simulation — `a` arrives bare, its parked flag must carry */
+    const sim = (await snapshot.checkScene(canvas, pageId, {
+      pixels: false,
+      candidate_stack: { track_id: 'cam', effects: [...enabledStack, bareResubmit] },
+    })) as {
+      ok: true
+      data: { candidate: { cost: number; projected_total_cost: number; projected_over_budget: boolean } }
+    }
+    expect(sim.data.candidate.cost).toBe(33)
+    expect(sim.data.candidate.projected_total_cost).toBe(33)
+    expect(sim.data.candidate.projected_over_budget).toBe(false)
+
+    /* the write itself — same list, same bill, same decision */
+    const write = pro.setEffects(canvas, pageId, { track_id: 'cam', effects: [...enabledStack, bareResubmit] }, actor())
+    expect(write.ok).toBe(true)
+    expect(track().effects?.find((e) => e.id === 'a')?.enabled).toBe(false)
+    expect(effectCost(track())).toBe(33)
+    const written = (await snapshot.checkScene(canvas, pageId, { pixels: false })) as {
+      ok: true
+      data: { effects: { total_cost: number; over_budget: boolean } }
+    }
+    expect(written.data.effects.total_cost).toBe(33)
+    expect(written.data.effects.over_budget).toBe(false)
+
+    /* and the explicit branch: `enabled: true` flips both paths together */
+    const explicit = { ...bareResubmit, enabled: true }
+    const sim2 = (await snapshot.checkScene(canvas, pageId, {
+      pixels: false,
+      candidate_stack: { track_id: 'cam', effects: [...enabledStack, explicit] },
+    })) as { ok: true; data: { candidate: { cost: number; projected_over_budget: boolean } } }
+    expect(sim2.data.candidate.cost).toBe(37)
+    expect(sim2.data.candidate.projected_over_budget).toBe(true)
+    const write2 = pro.setEffects(canvas, pageId, { track_id: 'cam', effects: [...enabledStack, explicit] }, actor())
+    expect(write2.ok).toBe(true)
+    expect(track().effects?.find((e) => e.id === 'a')?.enabled).toBe(true)
+    expect(effectCost(track())).toBe(37)
+    const written2 = (await snapshot.checkScene(canvas, pageId, { pixels: false })) as {
+      ok: true
+      data: { effects: { over_budget: boolean } }
+    }
+    expect(written2.data.effects.over_budget).toBe(true)
+  })
+
+  it('refuses a reused id carrying a different fx in simulation and write alike', async () => {
+    /* an instance's fx is its identity — update_effect carries no fx field,
+       so the write can only keep the stored one. Submitting a different fx
+       on a stored id must refuse identically on both paths, whether or not
+       `enabled` is given — otherwise the simulation rehearses a stack the
+       write silently re-types */
+    actions.setComposition(
+      canvas.id,
+      baseComp([
+        {
+          id: 'cam',
+          kind: 'camera',
+          keyframes: [],
+          effects: [
+            { id: 'a', fx: 'gaussian-blur', params: { radius: 8 }, enabled: false },
+            { id: 'v', fx: 'vignette', params: {} },
+          ],
+        },
+      ]),
+      pageId,
+      actor(),
+    )
+    const track = () => comp().tracks.find((t) => t.id === 'cam')!
+
+    /* two effects of different costs: gaussian-blur bills 4, bloom 5 —
+       a silent swap would also move the bill */
+    for (const enabled of [undefined, true]) {
+      const submitted = {
+        id: 'a',
+        fx: 'bloom',
+        params: {},
+        ...(enabled !== undefined ? { enabled } : {}),
+      }
+      const sim = (await snapshot.checkScene(canvas, pageId, {
+        pixels: false,
+        candidate_stack: { track_id: 'cam', effects: [submitted, { id: 'v', fx: 'vignette', params: {} }] },
+      })) as {
+        ok: true
+        data: {
+          candidate: { ok: boolean; diagnostics: { rule: string; kind: string; severity: string; instance: string }[] }
+        }
+      }
+      const mismatch = sim.data.candidate.diagnostics.find((d) => d.kind === 'fx_mismatch')
+      expect(mismatch, `candidate (enabled ${enabled})`).toMatchObject({
+        rule: 'MO-13',
+        severity: 'error',
+        instance: 'a',
+      })
+      expect(sim.data.candidate.ok).toBe(false)
+
+      const write = pro.setEffects(
+        canvas,
+        pageId,
+        { track_id: 'cam', effects: [submitted, { id: 'v', fx: 'vignette', params: {} }] },
+        actor(),
+      )
+      expect(write.ok, `write (enabled ${enabled})`).toBe(false)
+      expect((write as { ok: false; error: string }).error).toContain('keeps its fx')
+      /* nothing moved: the stored instance keeps its fx, its flag, its bill */
+      expect(track().effects?.find((e) => e.id === 'a')).toMatchObject({
+        fx: 'gaussian-blur',
+        enabled: false,
+        params: { radius: 8 },
+      })
+      expect(effectCost(track())).toBe(1)
+    }
+
+    /* the documented escape: remove the id, then the new fx lands as a
+       fresh instance */
+    const swapped = pro.setEffects(
+      canvas,
+      pageId,
+      {
+        track_id: 'cam',
+        effects: [
+          { id: 'b', fx: 'bloom', params: {} },
+          { id: 'v', fx: 'vignette', params: {} },
+        ],
+      },
+      actor(),
+    )
+    expect(swapped.ok).toBe(true)
+    expect(track().effects?.map((e) => `${e.id}:${e.fx}`)).toEqual(['b:bloom', 'v:vignette'])
+    expect(effectCost(track())).toBe(6)
+  })
+
+  it('stored MO-13/MO-14 issues carry their kinds, distinct from the candidate kinds', async () => {
+    actions.setComposition(
+      canvas.id,
+      baseComp([
+        {
+          id: 'cam',
+          kind: 'camera',
+          keyframes: [{ id: 'k1', t: 0, property: 'fx:ghost.amount', value: 1, easing: { type: 'linear' } }],
+        },
+      ]),
+      pageId,
+      actor(),
+    )
+    comp().tracks.find((t) => t.id === 'cam')!.effects = [{ id: 'm', fx: 'mystery-fx', params: {} }]
+    const out = await snapshot.checkScene(canvas, pageId, { pixels: false })
+    const issues = (out as { ok: true; data: { lint: { issues: { rule: string; kind?: string }[] } } }).data.lint.issues
+    expect(issues.find((i) => i.rule === 'MO-13')?.kind).toBe('dangling_lane')
+    expect(issues.find((i) => i.rule === 'MO-14')?.kind).toBe('undrawn_effect')
+  })
+
   it('critique passes count new revisions and the budget resets on set_direction', async () => {
     const critic = () => snapshot.critiqueScene(canvas, pageId, { pixels: false })
     const first = (await critic()) as { ok: true; data: { pass: number; exhausted: boolean } }
@@ -262,6 +612,19 @@ describe('check_scene and critique_scene', () => {
     const fresh = (await critic()) as { ok: true; data: { pass: number; exhausted: boolean } }
     expect(fresh.data.pass).toBe(1)
     expect(fresh.data.exhausted).toBe(false)
+    /* the hard cap: a direction may ask for 5 passes and the fifth ends it */
+    pro.setDirection(canvas, pageId, { treatment: 'Final pass.', passes: 5 }, actor())
+    const opening = (await critic()) as { ok: true; data: { pass: number } }
+    expect(opening.data.pass).toBe(1)
+    for (let i = 2; i <= 5; i++) {
+      await actions.setComposition(canvas.id, baseComp(), pageId, actor())
+      const r = (await critic()) as { ok: true; data: { pass: number; exhausted: boolean; stop: boolean } }
+      expect(r.data.pass).toBe(i)
+      if (i === 5) {
+        expect(r.data.exhausted).toBe(true)
+        expect(r.data.stop).toBe(true)
+      }
+    }
   })
 })
 

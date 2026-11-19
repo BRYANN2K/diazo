@@ -13,7 +13,7 @@
  */
 
 import { nanoid } from 'nanoid'
-import { effectSpec } from './motionFx.ts'
+import { EFFECT_STACK_MAX, effectSpec } from './motionFx.ts'
 
 export const MOTION_SCHEMA_VERSION = 1
 
@@ -773,6 +773,10 @@ export interface MotionLintIssue {
   rule: string
   severity: MotionLintSeverity
   message: string
+  /** the sub-meaning inside a rule family — MO-13 splits a stored
+   *  `dangling_lane` from a candidate's `unknown_fx`, MO-14 a stored
+   *  `undrawn_effect` from a candidate's `invalid_param` */
+  kind?: string
   frameId?: string
   /** the offending HTML fragment, trimmed for display */
   snippet?: string
@@ -1127,8 +1131,8 @@ export function parseTrack(input: unknown, duration: number): ParseResult<Motion
     track.elementId = elementId.value
   }
   if (input.effects !== undefined) {
-    if (!Array.isArray(input.effects) || input.effects.length > 20) {
-      return bad('track.effects must be an array of at most 20')
+    if (!Array.isArray(input.effects) || input.effects.length > EFFECT_STACK_MAX) {
+      return bad(`track.effects must be an array of at most ${EFFECT_STACK_MAX}`)
     }
     const effects: EffectInstance[] = []
     const seen = new Set<string>()
@@ -1749,7 +1753,7 @@ function applyOp(comp: Composition, op: CompositionOp): string | null {
       if (track.kind !== 'camera' && track.kind !== 'adjustment')
         return `effects only draw on camera and adjustment tracks, not ${track.kind} tracks`
       const effects = (track.effects ??= [])
-      if (effects.length >= 20) return 'too many effects on the track'
+      if (effects.length >= EFFECT_STACK_MAX) return 'too many effects on the track'
       if (effects.some((e) => e.id === op.effect.id)) return `effect ${op.effect.id} already exists`
       const index = op.index === undefined ? effects.length : Math.min(op.index, effects.length)
       effects.splice(index, 0, op.effect)

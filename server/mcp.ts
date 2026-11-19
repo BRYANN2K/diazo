@@ -2175,20 +2175,32 @@ export function buildMcpServer(
     {
       title: 'The whole scene check, numbers in',
       description:
-        "One report: the seek-safety lint (MO-* rules), pacing stats per shot with dead beats flagged, safe-zone violations (broadcast's 90%/80%), legibility (effective text px on screen), and the effect-stack cost per track. Structure always answers; the pixel parts need the instance renderer — without it they report unavailable, not a guess.",
+        "One report: the seek-safety lint (MO-* rules), pacing stats per shot with dead beats flagged, safe-zone violations (broadcast's 90%/80%), legibility (effective text px on screen), and the effect-stack cost per track. Structure always answers; the pixel parts need the instance renderer — without it they report unavailable, not a guess. `candidate_stack` vets a stack before set_effects writes it: the report's `candidate` section flags unknown_fx (MO-13) and invalid_param (MO-14) with track, instance and parameter, plus the stack's cost and projected budget — nothing is persisted.",
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
       inputSchema: {
         canvas_id: z.string(),
         page_id: z.string(),
         pixels: z.boolean().optional().describe('false skips the render-dependent parts'),
+        candidate_stack: z
+          .object({
+            track_id: z.string(),
+            effects: z
+              .array(z.record(z.string(), z.unknown()))
+              .max(20)
+              .describe('the stack as set_effects takes it: [{id, fx, params?, enabled?, seed?, mix?}]'),
+          })
+          .optional()
+          .describe(
+            'Read-only what-if: diagnose the stack set_effects would write on track_id — unknown_fx/invalid_param diagnostics and the projected cost, nothing persisted',
+          ),
         agent_name: agentName,
       },
     },
-    async ({ canvas_id, page_id, pixels, agent_name }) => {
+    async ({ canvas_id, page_id, pixels, candidate_stack, agent_name }) => {
       const c = canvasFor(canvas_id, 'view')
       if (!c) return noCanvas(canvas_id)
       arrive(canvas_id, agent_name)
-      const out = await checkScene(c, page_id, { pixels })
+      const out = await checkScene(c, page_id, { pixels, candidate_stack })
       if (!out.ok) return err(out.error)
       return text({ ok: true, ...(out.data as object) })
     },
