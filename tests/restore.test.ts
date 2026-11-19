@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -178,6 +178,52 @@ describe('server/restore.ts', () => {
     },
     120_000,
   )
+
+  /* restoring an older archive after a newer one: the replaced dir the
+     CURRENT operation produced is kept — and the returned path exists */
+  it('keeps the replaced dir of the current restore even when its stamp sorts older', async () => {
+    const data = tmpDataDir()
+    const pg = new PGlite(path.join(data, 'pg'))
+    pglites.push(pg)
+    await pg.query('create table keepme (id serial primary key, v text)')
+    await pg.query("insert into keepme (v) values ('v1')")
+    const older = await backupNow(pg, 'manual')
+    await pg.query("insert into keepme (v) values ('v2')")
+    const newer = await backupNow(pg, 'manual')
+    await pg.close()
+    pglites.pop()
+
+    /* pin the pairs to fixed stamps — the older archive's stamp must
+       sort BELOW a replaced dir a later restore already made */
+    const olderStamp = '2020-01-01T00-00-00-000Z'
+    const newerStamp = '2025-01-01T00-00-00-000Z'
+    const backups = path.join(data, 'backups')
+    const restamp = (file: string, stamp: string) =>
+      fs.rename(file, path.join(backups, `pg-${stamp}${/\.manifest\.json$/.test(file) ? '.manifest.json' : '.tar.gz'}`))
+    await restamp(older.archive, olderStamp)
+    await restamp(older.manifest, olderStamp)
+    await restamp(newer.archive, newerStamp)
+    await restamp(newer.manifest, newerStamp)
+
+    /* the newer archive first: its restore makes pg.replaced-<newer> */
+    const first = await restoreBackup(path.join(backups, `pg-${newerStamp}.tar.gz`))
+    expect(path.basename(first.replaced!)).toBe(`pg.replaced-${newerStamp}`)
+
+    /* now the OLDER archive: it produces pg.replaced-<older>, which
+       sorts BEFORE the existing one — the pruning must not eat it */
+    const second = await restoreBackup(path.join(backups, `pg-${olderStamp}.tar.gz`))
+    expect(second.replaced).not.toBeNull()
+    expect(readdirSync(data)).toContain(`pg.replaced-${olderStamp}`)
+    expect(readdirSync(data)).not.toContain(`pg.replaced-${newerStamp}`)
+    /* and the path it hands back is real */
+    expect(statSync(second.replaced!).isDirectory()).toBe(true)
+
+    /* the restored database really is the older snapshot */
+    const reopened = new PGlite(path.join(data, 'pg'))
+    pglites.push(reopened)
+    const rows = await reopened.query<{ n: number }>('select count(*)::int as n from keepme')
+    expect(Number(rows.rows[0]?.n)).toBe(1)
+  }, 180_000)
 
   /* AC-27: the interrupted swap completes or refuses — never limps */
   it('completeInterruptedRestore finishes a ready swap and refuses a lost pg', async () => {

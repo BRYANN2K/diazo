@@ -99,7 +99,7 @@ export async function restoreBackup(archive: string): Promise<{ restoredFrom: st
     }
     fsSync.renameSync(stage, pg)
     fsSync.rmSync(ready)
-    pruneReplaced(data)
+    pruneReplaced(data, replaced === null ? null : path.basename(replaced))
     return { restoredFrom: file, replaced }
   } catch (error) {
     fsSync.rmSync(stage, { recursive: true, force: true })
@@ -140,14 +140,20 @@ export function completeInterruptedRestore(dataDirPath: string): void {
   }
 }
 
-/** Keep only the newest `pg.replaced-*` — the dir is the recovery path
- *  for a restore that turned out wrong, and one generation is enough. */
-function pruneReplaced(data: string): void {
+/** Keep the `pg.replaced-*` this restore just made — it is the recovery
+ *  path for the CURRENT operation and the path the caller gets back,
+ *  so pruning must never eat it. Its name sorts by the restored
+ *  archive's stamp, not by recency: restoring an older archive names
+ *  an older dir, and "keep the lexically newest" would keep the stale
+ *  one. When this restore produced none, keep the newest existing. */
+function pruneReplaced(data: string, keep: string | null): void {
   const names = fsSync
     .readdirSync(data)
     .filter((name) => /^pg\.replaced-/.test(name))
     .sort()
-  for (const old of names.slice(0, -1)) {
+  const fallback = names[names.length - 1]
+  for (const old of names) {
+    if (old === (keep ?? fallback)) continue
     fsSync.rmSync(path.join(data, old), { recursive: true, force: true })
   }
 }
