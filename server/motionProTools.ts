@@ -19,7 +19,7 @@ import { elementHtml } from '../shared/motionLint.ts'
 import { elementText, expandTextAnimator } from '../shared/motionText.ts'
 import { cameraPreset, CAMERA_PRESETS, isCameraPreset, cameraPresetNote } from '../shared/motionPresets.ts'
 import { frameStateAt } from '../shared/motionRuntime.ts'
-import { effectSpec, MOTION_EFFECTS } from '../shared/motionFx.ts'
+import { EFFECT_STACK_MAX, effectSpec, MOTION_EFFECTS } from '../shared/motionFx.ts'
 import { MOTION_LOOKS, lookEffects } from '../shared/motionLooks.ts'
 import {
   BLEND_MODES,
@@ -494,7 +494,10 @@ export function setEffects(
     )
   }
   const wanted = input.effects ?? []
-  if (!Array.isArray(wanted) || wanted.length > 20) return fail('effects must be an array of at most 20')
+  if (!Array.isArray(wanted) || wanted.length > EFFECT_STACK_MAX) {
+    return fail(`effects must be an array of at most ${EFFECT_STACK_MAX}`)
+  }
+  const existing = track.effects ?? []
   const seen = new Set<string>()
   for (const raw of wanted) {
     if (typeof raw?.id !== 'string' || typeof raw?.fx !== 'string') return fail('each effect needs id and fx')
@@ -502,11 +505,20 @@ export function setEffects(
     seen.add(raw.id)
     const spec = effectSpec(raw.fx)
     if (!spec) return fail(`no effect ${raw.fx} — list_motion_effects names the registry`)
+    /* an instance's fx is its identity — update_effect carries no fx field,
+       so a reused id can only ever keep the stored one. A different fx here
+       means remove + add, not an in-place rewrite the diff would silently
+       drop */
+    const prev = existing.find((e) => e.id === raw.id)
+    if (prev && prev.fx !== raw.fx) {
+      return fail(
+        `effect ${raw.id} is ${prev.fx} — an id keeps its fx through set_effects; remove it and add a new instance to change the type`,
+      )
+    }
     if (raw.blend != null) return fail('effect blend is not drawn yet — leave blend unset')
     const bad = spec.validate(raw.params ?? {})
     if (bad) return fail(bad)
   }
-  const existing = track.effects ?? []
   const ops: CompositionOp[] = []
   for (const e of existing) {
     if (!seen.has(e.id)) ops.push({ op: 'remove_effect', trackId: track.id, effectId: e.id })
@@ -660,7 +672,7 @@ export async function execMotionPro(
     }
     case 'check_scene': {
       const { checkScene } = await import('./motionSnapshot.ts')
-      return checkScene(canvas, pageId, raw as { pixels?: boolean })
+      return checkScene(canvas, pageId, raw as Parameters<typeof checkScene>[2])
     }
     case 'critique_scene': {
       const { critiqueScene } = await import('./motionSnapshot.ts')

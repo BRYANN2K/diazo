@@ -533,6 +533,18 @@ export function enabledEffects(track: MotionTrack): EffectInstance[] {
   return (track.effects ?? []).filter((e) => e.enabled !== false)
 }
 
+/** the enabled bit a stack rewrite leaves behind — `set_effects` keeps a
+ *  reused id's stored flag when the field is omitted (`raw.enabled ??
+ *  prev.enabled`), so a simulation must read it the same way or its bill
+ *  disagrees with the write it rehearses */
+export function resolvedEnabled(input: { enabled?: boolean }, prev: EffectInstance | undefined): boolean {
+  return input.enabled ?? prev?.enabled ?? true
+}
+
+/** how many instances one track's stack may hold — the ops, the body
+ *  parser, set_effects and check_scene's candidate all enforce this */
+export const EFFECT_STACK_MAX = 20
+
 /** the whole-film effect budget — the preview's rule of thumb (six layers
  *  × three mid-cost passes ≈ 36) and the cap a server render refuses to
  *  exceed; check_scene reports it as `cost_cap` */
