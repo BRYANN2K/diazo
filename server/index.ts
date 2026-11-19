@@ -13,7 +13,8 @@ import { hydrateCurations, resumeCurations } from './libraryCuration.ts'
 import { resumeApplies } from './libraryCurationApply.ts'
 import { env } from './env.ts'
 import { dataDir, distDir } from './paths.ts'
-import { acquireDataLock } from './dataLock.ts'
+import { acquireDataLock, DataDirInUseError } from './dataLock.ts'
+import { resolveLockMode } from './dataLockMode.ts'
 import { sweepBrowserProfiles } from './browserGuard.ts'
 import { startDailyBackups } from './backup.ts'
 import { listenHost } from './listenHost.ts'
@@ -235,15 +236,29 @@ const BUILD_ID = (() => {
 })()
 
 /* one writer per data dir, ahead of any state touching it — PGlite, on-disk
-   assets, backups, the renderer's profile. Skipped only when no local state
-   exists at all (a managed Postgres plus a bucket). A held lock is refused,
-   a crashed holder's stale one is retaken (server/dataLock.ts). Dead boots'
-   profile-* dirs are swept here, beneath the same lock they live under
+   assets, backups, the renderer's profile. The mode comes from the install
+   (server/dataLockMode.ts): managed storage locks nothing, the embedded
+   sidecar is strict, a checkout or container takes a dead claim over. A
+   refusal prints the `data-lock <reason> [id]` line the shell reads and
+   exits 3, or 4 when a takeover token would free it. Dead boots' profile-*
+   dirs are swept here, beneath the same lock they live under
    (<data>/browser-profiles): sweeping on browser launch instead let every
    test worker and managed-storage peer delete the live profiles of the
    others. */
-if (!(env.DATABASE_URL && env.BUCKET)) {
-  await acquireDataLock(dataDir(), { mode: 'strict' })
+const lockMode = resolveLockMode()
+if (lockMode !== 'off') {
+  try {
+    await acquireDataLock(dataDir(), {
+      mode: lockMode,
+      embedded: !!env.DOOP_EMBEDDED,
+      takeoverToken: env.DOOP_DATA_LOCK_TAKEOVER,
+    })
+  } catch (error) {
+    if (!(error instanceof DataDirInUseError)) throw error
+    console.error(`[data] ${error.message}`)
+    console.log(`data-lock ${error.reason}${error.claimId ? ` ${error.claimId}` : ''}`)
+    process.exit(error.reason === 'needs-takeover' ? 4 : 3)
+  }
   sweepBrowserProfiles()
 }
 
