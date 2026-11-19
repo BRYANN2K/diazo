@@ -179,6 +179,36 @@ describe('server/restore.ts', () => {
     120_000,
   )
 
+  /* an archive that holds no cluster must leave the live state intact:
+     a staged dir without PG_VERSION would let PGlite initdb a fresh
+     empty database that then "verifies" — and the swap would install
+     nothing over real data */
+  it.each([
+    ['an empty archive', []],
+    [
+      'a torn cluster — PG_VERSION but no base/ or global/',
+      [tarMember('PG_VERSION', '0', Buffer.from('16')), tarMember('postgresql.conf', '0', Buffer.from('# stub'))],
+    ],
+  ])(
+    'refuses %s and keeps the live pg',
+    async (_label, members) => {
+      const data = tmpDataDir()
+      await seedRealPgDir(data)
+      const archive = path.join(data, 'backups', 'pg-2020-01-01T00-00-00-000Z.tar.gz')
+      await fs.mkdir(path.dirname(archive), { recursive: true })
+      await fs.writeFile(archive, makeTarGz(members))
+
+      await expect(restoreBackup(archive)).rejects.toThrow(/cluster/)
+      /* nothing staged, nothing moved aside — pg exactly as seeded */
+      expect(readdirSync(data).filter((n) => /^pg\.(?:replaced|restore)-/.test(n))).toEqual([])
+      const reopened = new PGlite(path.join(data, 'pg'))
+      pglites.push(reopened)
+      const rows = await reopened.query<{ v: string }>('select v from keepme')
+      expect(rows.rows[0]?.v).toBe('seeded')
+    },
+    120_000,
+  )
+
   /* restoring an older archive after a newer one: the replaced dir the
      CURRENT operation produced is kept — and the returned path exists */
   it('keeps the replaced dir of the current restore even when its stamp sorts older', async () => {

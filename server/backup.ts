@@ -153,9 +153,18 @@ async function backupOnce(
 }
 
 /** The staged copy, reopened and asked for its applied journal — the
- *  verification every published pair passed. PGlite is imported lazily:
- *  a managed-Postgres install must never load it. */
+ *  verification every published pair passed. The cluster markers must
+ *  already be there BEFORE opening: `new PGlite(dir)` on a dir without
+ *  `PG_VERSION` runs initdb and a torn archive would "verify" as a
+ *  fresh empty database — then the swap installs it over live data.
+ *  PGlite is imported lazily: a managed-Postgres install must never
+ *  load it. */
 export async function verifyPgDir(dir: string): Promise<{ count: number; newest: number }> {
+  for (const marker of ['PG_VERSION', 'base', 'global']) {
+    if (!fsSync.existsSync(path.join(dir, marker))) {
+      throw new Error(`[data] ${dir} holds no database cluster — missing ${marker}`)
+    }
+  }
   const { PGlite } = await import('@electric-sql/pglite')
   const client = new PGlite(dir)
   try {

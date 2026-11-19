@@ -451,4 +451,20 @@ describe('server/backup.ts', () => {
     /* the seeded dir has user tables but no drizzle journal yet */
     expect(result).toEqual({ count: 0, newest: 0 })
   }, 60_000)
+
+  /* a dir without an existing cluster is refused BEFORE PGlite can
+     initdb a fresh empty database into it — the refusal leaves the dir
+     untouched as proof nothing was initialized */
+  it('verifyPgDir refuses a dir that holds no cluster', async () => {
+    const data = tmpDataDir()
+    const empty = path.join(data, 'not-a-cluster')
+    await fs.mkdir(empty)
+    await expect(verifyPgDir(empty)).rejects.toThrow(/cluster/)
+    expect(await fs.readdir(empty)).toEqual([])
+
+    /* PG_VERSION alone is not a cluster either */
+    await fs.writeFile(path.join(empty, 'PG_VERSION'), '16')
+    await expect(verifyPgDir(empty)).rejects.toThrow(/cluster/)
+    expect((await fs.readdir(empty)).sort()).toEqual(['PG_VERSION'])
+  })
 })
