@@ -10,6 +10,8 @@
  * Produces:
  *   out/embedded-server/
  *     server.mjs       the whole server (express, ws, drizzle, auth, mcp), minified
+ *     data-tool.mjs    the backup/restore command line — `node data-tool.mjs
+ *                      backups|restore` against the install's DOOP_DATA_DIR
  *     node_modules/    only the externals the bundle does not carry — sharp
  *                      with the target's @img/* packages and libvips, and
  *                      @electric-sql/pglite (finds its .wasm and data files by
@@ -141,6 +143,25 @@ await build({
   /* bundled CommonJS deps keep dynamic require() calls (conditionals,
      optionals) that ESM has no answer for — give them a real one, named so it
      cannot collide with a createRequire import a dep may carry */
+  banner: {
+    js: "import { createRequire as __embeddedCreateRequire } from 'node:module'\nglobalThis.require = __embeddedCreateRequire(import.meta.url)",
+  },
+  logLevel: 'info',
+})
+
+/* the data tool — the same bundle options, a second entry: it must not
+   pull in server/index.ts (its top level boots the server), so it gets
+   its own file rather than a flag on the main bundle */
+await build({
+  entryPoints: [path.join(ROOT, 'server/dataTool.ts')],
+  outfile: path.join(outDir, 'data-tool.mjs'),
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node22',
+  minify: true,
+  keepNames: true,
+  external: EXTERNALS,
   banner: {
     js: "import { createRequire as __embeddedCreateRequire } from 'node:module'\nglobalThis.require = __embeddedCreateRequire(import.meta.url)",
   },

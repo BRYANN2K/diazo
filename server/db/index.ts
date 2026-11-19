@@ -1,6 +1,7 @@
 import { env } from '../env.ts'
 import { dataDir } from '../paths.ts'
 import { backupNow } from '../backup.ts'
+import { completeInterruptedRestore } from '../restore.ts'
 import { appliedJournal, bundledJournal, newerDataMessage } from './journal.ts'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -47,6 +48,11 @@ export async function initDb(): Promise<void> {
   } else {
     const { PGlite } = await import('@electric-sql/pglite')
     const { drizzle } = await import('drizzle-orm/pglite')
+    /* a crash mid-restore can leave the swap half done: a ready
+       `pg.restore-*` waiting to become `pg`, or `pg` moved aside with
+       nothing to take its place. Finish or refuse BEFORE the dir is
+       created — mkdir first would hide the state behind a fresh pg */
+    completeInterruptedRestore(dataDir())
     const dir = path.join(dataDir(), 'pg')
     fs.mkdirSync(dir, { recursive: true }) // PGlite's own mkdir isn't recursive
     const client = new PGlite(dir)

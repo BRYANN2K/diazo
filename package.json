@@ -9,6 +9,7 @@
     "build": "bun run build:claude-extension && vite build",
     "build:claude-extension": "node scripts/build-claude-extension.mjs",
     "build:embedded-server": "bun scripts/build-embedded-server.ts",
+    "data": "tsx server/dataTool.ts",
     "diazo": "bun cli/bin/doop.ts",
     "doop": "bun cli/bin/doop.ts",
     "start": "NODE_ENV=production tsx server/index.ts",
