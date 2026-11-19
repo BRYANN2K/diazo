@@ -68,7 +68,25 @@ and run the Bun-built archive under Node, including its nested runtime dependenc
 Apple's `container` CLI on macOS (Apple silicon, macOS 26+), Docker on Linux, or Podman
 when Docker is missing (`DOOP_RUNTIME` overrides); each lives behind its own small
 functions in the script. No `DATABASE_URL`: PGlite and uploads live in `~/.diazo/data`,
-mounted at `/app/data`; `BETTER_AUTH_SECRET` and `SECRETS_ENCRYPTION_KEYS` are generated
+mounted at `/app/data`. One server owns a data dir at a time (`<data>/lock/` — a
+kernel-held lock plus claim epochs): `DOOP_DATA_LOCK` picks `strict`, `takeover` or `off`;
+unset, `DATABASE_URL` means off, the embedded install `strict`, everything else
+`takeover`. The install backs its PGlite data dir up to `~/.diazo/data/backups/` itself — a
+pair is `pg-<date>.tar.gz` plus `pg-<date>.manifest.json` (archive bytes and sha256, the
+applied journal) — before every migrating boot and once a day while running, keeping the
+newest seven `daily` pairs and three of every other reason (`server/backup.ts`). Restore on
+a checkout with `bun run data restore latest`; on the container install, stop `diazo` and
+run the same entry in a one-off container on the data folder:
+
+```sh
+container run --rm --env-file ~/.diazo/diazo.env -v ~/.diazo/data:/app/data \
+  ghcr.io/bryann2k/diazo:main node_modules/.bin/tsx server/dataTool.ts restore latest
+```
+
+It takes the data lock first, verifies the archive's sha256, reopens the staged dir with
+PGlite and refuses data newer than the image — the same refusal an older image gives a
+data dir written by a newer build, in every `NODE_ENV`. `bun run data backups` lists what
+is restorable. `BETTER_AUTH_SECRET` and `SECRETS_ENCRYPTION_KEYS` are generated
 on the machine into `~/.diazo/diazo.env` (mode 600). An install from before the rename
 keeps `~/.doop` and its `doop.env` where they are (nothing is moved; `DOOP_HOME`
 overrides), and its old `doop` container is replaced only when it runs this fork's former

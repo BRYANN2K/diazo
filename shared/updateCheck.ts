@@ -4,9 +4,9 @@
  */
 
 /** How this instance was installed, which decides how it updates. */
-export type InstallType = 'local' | 'docker' | 'kubernetes' | 'source'
+export type InstallType = 'local' | 'docker' | 'kubernetes' | 'source' | 'desktop'
 
-export const INSTALL_TYPES: readonly InstallType[] = ['local', 'docker', 'kubernetes', 'source']
+export const INSTALL_TYPES: readonly InstallType[] = ['local', 'docker', 'kubernetes', 'source', 'desktop']
 
 export type UpdateState =
   /** the check is switched off (DOOP_UPDATE_CHECK=false) */
@@ -78,6 +78,8 @@ export function updateCommand(install: InstallType): string {
       return 'kubectl -n doop rollout restart deploy/doop'
     case 'source':
       return 'git pull && bun install && bun run build'
+    case 'desktop':
+      return ''
   }
 }
 

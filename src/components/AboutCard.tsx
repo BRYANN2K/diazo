@@ -88,7 +88,7 @@ export function statusLine(t: Translate, status: UpdateStatus): string {
     case 'diverged':
       return t('updates.statusDiverged', vars)
     case 'disabled':
-      return t('updates.statusDisabled')
+      return status.install === 'desktop' ? t('updates.statusDisabledDesktop') : t('updates.statusDisabled')
     case 'unknown':
       return status.reason === 'no-build-sha'
         ? t('updates.statusNoSha')

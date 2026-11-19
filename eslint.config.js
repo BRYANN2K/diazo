@@ -131,6 +131,7 @@ export default tseslint.config(
   {
     ignores: [
       'dist/',
+      'out/',
       'node_modules/',
       'desktop/src-tauri/target/',
       'desktop/src-tauri-chromium/target/',

@@ -1,4 +1,5 @@
 import type { Browser, BrowserContext, Page } from 'puppeteer-core'
+import { killProcessTree, releaseGuarded } from './browserGuard.ts'
 
 /**
  * The lifecycle of the server's headless Chromium: who may open a page, on
@@ -368,7 +369,12 @@ export function createRenderer(deps: RendererDeps): Renderer {
       () => true,
       () => false,
     )
-    if (child && child.exitCode === null && child.signalCode === null) killProcessTree(child)
+    if (child) {
+      if (child.exitCode === null && child.signalCode === null) killProcessTree(child)
+      /* the guard goes once the process does — its watchdog stands down and
+         a later pid reuser is never reaped by mistake */
+      releaseGuarded(child)
+    }
     /* a remote browser has no process to kill: drop the socket, and its
        session ends on the provider's idle timeout */
     if (!child && !closed) await browser.disconnect().catch(() => {})
@@ -566,30 +572,6 @@ export function createRenderer(deps: RendererDeps): Renderer {
       retire(generation)
       await generation.browser.then(terminate, () => {})
     },
-  }
-}
-
-interface ChildLike {
-  pid?: number
-  kill: (signal?: NodeJS.Signals) => boolean
-}
-
-/** Chromium's renderers and GPU process are children of the browser
- *  process; puppeteer launches it as a process-group leader off Windows, so
- *  the group goes down together and no orphaned renderer keeps its memory. */
-function killProcessTree(child: ChildLike): void {
-  try {
-    if (process.platform !== 'win32' && child.pid) {
-      process.kill(-child.pid, 'SIGKILL')
-      return
-    }
-  } catch {
-    /* not a group leader: fall through to the process itself */
-  }
-  try {
-    child.kill('SIGKILL')
-  } catch {
-    /* already gone */
   }
 }
 

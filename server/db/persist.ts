@@ -3,6 +3,7 @@ import path from 'node:path'
 import { nanoid } from 'nanoid'
 import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm'
 import { db } from './index.ts'
+import { dataDir } from '../paths.ts'
 import * as t from './schema.ts'
 import { extractAssetIds } from '../assets.ts'
 import { canonicalAgentName, roleByAgentName } from '../../shared/agents.ts'
@@ -1416,13 +1417,24 @@ export async function flush(getFrame: (id: string) => Frame | undefined): Promis
   const ids = [...dirtyFrames.keys()]
   for (const [, timer] of frameTimers) clearTimeout(timer)
   frameTimers.clear()
-  await Promise.allSettled(
+  const results = await Promise.allSettled(
     ids.map((id) => {
       const f = getFrame(id)
       return f ? writeFrame(f) : Promise.resolve()
     }),
   )
+  /* the version queue drains too — it is its own durability story, not a
+     reason to hide a frame-write failure behind a clean exit */
   await pendingVersionWrites(() => true)
+  const failed: string[] = []
+  for (const [i, id] of ids.entries()) {
+    const result = results[i]
+    if (result?.status === 'rejected') {
+      console.error(`[persist] flush could not write frame ${id}`, result.reason)
+      failed.push(id)
+    }
+  }
+  if (failed.length) throw new Error(`flush failed for ${failed.length} frame(s): ${failed.join(', ')}`)
 }
 
 /* ------------------------------------------------------------------ */
@@ -1868,7 +1880,7 @@ export async function hydrate(): Promise<Hydrated> {
 
 /** One-time import of the pre-DB data/store.json so existing canvases survive. */
 export async function importLegacyJson(): Promise<Canvas[] | null> {
-  const file = path.join(process.cwd(), 'data', 'store.json')
+  const file = path.join(dataDir(), 'store.json')
   let parsed: Canvas[]
   try {
     parsed = JSON.parse(fs.readFileSync(file, 'utf8'))

@@ -14,6 +14,7 @@ export const updates = {
   statusAhead: { one: '{count} commit ahead of {repo} {branch}', other: '{count} commits ahead of {repo} {branch}' },
   statusDiverged: 'Diverged from {repo} {branch}',
   statusDisabled: 'Update check off (DOOP_UPDATE_CHECK=false)',
+  statusDisabledDesktop: 'Updates come with the Diazo app',
   statusNoSha: 'Unknown: this build does not know its commit',
   statusNotFound: 'Unknown: GitHub does not know this commit',
   statusRateLimited: 'Unknown: GitHub rate limit reached, checking again later',
@@ -30,6 +31,7 @@ export const updates = {
     'In the folder of your compose file. Built from this repository instead? git pull && docker compose up -d --build',
   hintKubernetes: 'The deployment pulls the :main image again (imagePullPolicy Always).',
   hintSource: 'In your checkout, then restart the server.',
+  hintDesktop: 'Server and app update together from the app’s own updater.',
   /* the desktop app's Local Server menu (macOS), read in About */
   localServerRow: 'This Mac’s server',
   localRunning: 'Running at {url}',

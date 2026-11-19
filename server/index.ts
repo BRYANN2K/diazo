@@ -12,6 +12,13 @@ import { wireLibraryDescribe } from './libraryDescribe.ts'
 import { hydrateCurations, resumeCurations } from './libraryCuration.ts'
 import { resumeApplies } from './libraryCurationApply.ts'
 import { env } from './env.ts'
+import { dataDir, distDir } from './paths.ts'
+import { acquireDataLock, DataDirInUseError } from './dataLock.ts'
+import { resolveLockMode } from './dataLockMode.ts'
+import { sweepBrowserProfiles } from './browserGuard.ts'
+import { startDailyBackups } from './backup.ts'
+import { listenHost } from './listenHost.ts'
+import { installShutdown } from './shutdown.ts'
 import {
   catalogEntry,
   changeInstances,
@@ -132,7 +139,7 @@ import { extensions } from './extensions.ts'
 import * as workspaces from './workspaces.ts'
 import * as billing from './billing.ts'
 import * as demo from './demo.ts'
-import { db, initDb } from './db/index.ts'
+import { db, initDb, pglite } from './db/index.ts'
 import { resealSecrets } from './secretBackfill.ts'
 import { encryptionConfigured } from './secretBox.ts'
 import * as authSchema from './db/auth-schema.ts'
@@ -220,7 +227,7 @@ const PORT = env.PORT
 const BUILD_ID = (() => {
   try {
     return createHash('sha1')
-      .update(readFileSync(path.join(process.cwd(), 'dist', 'index.html')))
+      .update(readFileSync(path.join(distDir(), 'index.html')))
       .digest('hex')
       .slice(0, 12)
   } catch {
@@ -228,8 +235,39 @@ const BUILD_ID = (() => {
   }
 })()
 
+/* one writer per data dir, ahead of any state touching it — PGlite, on-disk
+   assets, backups, the renderer's profile. The mode comes from the install
+   (server/dataLockMode.ts): managed storage locks nothing, the embedded
+   sidecar is strict, a checkout or container takes a dead claim over. A
+   refusal prints the `data-lock <reason> [id]` line the shell reads and
+   exits 3, or 4 when a takeover token would free it. Dead boots' profile-*
+   dirs are swept here, beneath the same lock they live under
+   (<data>/browser-profiles): sweeping on browser launch instead let every
+   test worker and managed-storage peer delete the live profiles of the
+   others. */
+const lockMode = resolveLockMode()
+if (lockMode !== 'off') {
+  try {
+    await acquireDataLock(dataDir(), {
+      mode: lockMode,
+      embedded: !!env.DOOP_EMBEDDED,
+      takeoverToken: env.DOOP_DATA_LOCK_TAKEOVER,
+    })
+  } catch (error) {
+    if (!(error instanceof DataDirInUseError)) throw error
+    console.error(`[data] ${error.message}`)
+    console.log(`data-lock ${error.reason}${error.claimId ? ` ${error.claimId}` : ''}`)
+    process.exit(error.reason === 'needs-takeover' ? 4 : 3)
+  }
+  sweepBrowserProfiles()
+}
+
 /* boot: connect the DB, hydrate memory, import pre-DB store.json once */
 await initDb()
+/* the PGlite install backs itself up daily (a migrating boot got one ahead
+   of the migrator already) */
+const embeddedDb = pglite()
+if (embeddedDb) startDailyBackups(embeddedDb)
 await backgrounds.initBackgrounds()
 initAuth()
 await syncAdmins() // ADMIN_EMAILS -> user.role, for accounts that already exist
@@ -310,17 +348,9 @@ process.on('unhandledRejection', (reason) => {
   console.error('[unhandled-rejection]', reason)
 })
 
-/* flush debounced frame writes before the process dies — with a hard-exit
-   timeout so a wedged DB can never keep the process (and the port) alive */
-for (const sig of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(sig, () => {
-    setTimeout(() => process.exit(0), 1500).unref()
-    persist
-      .flush((id) => store.getFrame(id))
-      .catch((err) => console.error('flush on shutdown failed', err))
-      .finally(() => process.exit(0))
-  })
-}
+/* flush debounced frame writes, close the render browser and the embedded
+   database before the process dies — server/shutdown.ts */
+installShutdown()
 
 /* ------------------------------------------------- realtime rooms */
 
@@ -4492,7 +4522,7 @@ app.get('/sitemap.xml', (_req, res) => {
 
 /* production: serve the built client */
 if (env.isProduction) {
-  const dist = path.join(process.cwd(), 'dist')
+  const dist = distDir()
   app.use(express.static(dist))
   /* a missing bundle or source map is a 404, not the app shell: HTML served
      as a .js or .map breaks module loads and source map resolution */
@@ -4761,7 +4791,13 @@ wss.on('connection', (ws, upgradeReq) => {
   })
 })
 
-server.listen(PORT, () => {
+const onListening = () => {
+  /* the sidecar's handshake: the shell reads one `ready <port>` line to
+     learn when (and where) the server came up */
+  if (env.DOOP_EMBEDDED) {
+    const address = server.address()
+    console.log(`ready ${typeof address === 'object' && address ? address.port : PORT}`)
+  }
   console.log(`⟡ diazo server    http://localhost:${PORT}`)
   /* frame HTML is loaded per canvas; a canvas nobody has used for
      CANVAS_IDLE_MS gives it back, unless a room, agent or stream is on it.
@@ -4821,4 +4857,13 @@ server.listen(PORT, () => {
   startScheduler()
   startMcpTokenPrune()
   for (const extension of extensions) extension.startWorker?.()
-})
+}
+
+/* the embedded install binds loopback even when the shell forgot to pass
+   DOOP_LISTEN_HOST (server/listenHost.ts); unset keeps the container
+   behaviour of listening on every interface */
+{
+  const host = listenHost()
+  if (host) server.listen(PORT, host, onListening)
+  else server.listen(PORT, onListening)
+}
