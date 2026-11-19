@@ -11,9 +11,9 @@ import { fileURLToPath } from 'node:url'
  * call time so tests can flip the variables.
  */
 
-/** State: PGlite, uploaded assets (no BUCKET), backups, server.lock, the
- *  legacy store.json import. Unset = ./data under the working directory, the
- *  layout the checkout and the container use. */
+/** State: PGlite, uploaded assets (no BUCKET), backups, the data lock's
+ *  `lock/` dir, the legacy store.json import. Unset = ./data under the
+ *  working directory, the layout the checkout and the container use. */
 export function dataDir(): string {
   return env.DOOP_DATA_DIR ?? path.join(process.cwd(), 'data')
 }

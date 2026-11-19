@@ -126,46 +126,58 @@ stopped-container start, not a fresh VM.
 What landed on top of P0:
 
 - `server/paths.ts`: every mutable path resolves under `DOOP_DATA_DIR` (PGlite, assets,
-  backups, `server.lock`, browser profiles); runtime resources resolve beside the bundle
+  backups, `lock/`, browser profiles); runtime resources resolve beside the bundle
   (`import.meta.url`) so `DOOP_DIST_DIR`/`DOOP_MIGRATIONS_DIR` are only overrides, never
   required. The install dir stays read-only at runtime.
 - Env switches: `DOOP_EMBEDDED=1` (stdin-close shutdown + `ready <port>` on stdout once
   listening + loopback bind — the piped sidecar only: under systemd/launchd/nohup stdin is
   `/dev/null` and the server would exit at once), `DOOP_BROWSER_DIR`, `DOOP_INSTALL=desktop`
   (also inferred from `DOOP_EMBEDDED`; the server skips its own update check — the app's
-  updater ships both).
-- `server/dataLock.ts`: one server per data dir, proven by a kernel-held file lock.
-  `<data>/server.lock` is a stable file, created once and never unlinked: the holder opens
-  it, takes the OS's exclusive lock (`flock(2)` on POSIX, `LockFileEx` on Windows via
-  `fs-ext`), and keeps the fd for its lifetime — kill -9, OOM or a power cut free it, a
-  suspended or quiet holder keeps it, and heartbeat age never decides death. The locked
-  file's content is a diagnostic claim (pid + host + machine id + when); it is not read for
-  liveness. There is no move-aside and no create race — acquisition is serialized by the
-  lock itself, and a claim written under a different machine identity is refused
-  unconditionally, however old, because on a shared filesystem the remote holder's lock may
-  be real but invisible (pin `DOOP_MACHINE_ID` where the hostname is not stable, e.g. a
-  container that keeps its data volume across recreation). A filesystem that cannot prove
-  locking fails closed — the data dir needs working advisory locking. A live
-  `server.lock.sock` from the old socket design is still honoured: it means an old-version
-  server owns the dir. Skipped only when `DATABASE_URL` and `BUCKET` are both set (no local
-  state).
-- `server/backup.ts`: `<data>/backups/pg-<date>.tar.gz` plus a
-  `<data>/backups/pg-<date>.assets.json` manifest of on-disk assets; runs before applying
-  pending migrations (on any populated database — journal or not — an empty cluster has
-  nothing to lose) and once a day; keeps the newest 7 complete pairs. Both paths stream a
-  ustar.gz a block at a time, so a multi-GB data dir never lands in memory: the live one
-  brackets the file copy with `pg_backup_start`/`pg_backup_stop` while a hoarder hard-links
-  every WAL segment into a `.walhold` dir — backup mode ends before the WAL is archived, so
-  the range from the `backup_label`'s start file through the stop lsn is verified complete
-  before anything is published, and `tar -xzf` restores it. The pre-migration one tars the
-  quiescent `pg/` in place. Files are archived from their open handle at the statted length
-  (a grown tail is ignored, a shrunk body zero-pads — pg_basebackup semantics). The manifest
-  renames in before the archive, whose name is the completion marker; the tree is private —
-  `0700` dir, `0600` files — and real file modes are kept so an extracted dir stays
-  traversable.
-- Migration guards in `server/db/index.ts`: refuses a data dir stamped by a newer migration
-  set (newer `created_at` than the bundled journal, or more applied rows than the journal
-  has), backs up first when rows exist and migrations are pending.
+  updater ships both), `DOOP_DATA_LOCK`/`DOOP_DATA_LOCK_TAKEOVER` (below).
+- `server/dataLock.ts`: one server per data dir, in two layers under `<data>/lock/`.
+  `lock/kernel.lock` is a kernel-held lock through `node:sqlite` (`BEGIN EXCLUSIVE`, never
+  committed — an `fcntl` on POSIX, `LockFileEx` on Windows; the kernel drops it however the
+  process dies, and it is never unlinked or read). Claim epochs ride beside it:
+  `claim-<N>.json` created `wx`, `beat-<N>` rewritten by a worker thread (PGlite's query
+  chain starves main-thread timers — the beat cannot live there), `released-<N>` on clean
+  exit. The kernel lock covers one kernel; a foreign claim that still beats means another
+  kernel owns the dir (`alive-elsewhere`), one that went quiet for the observe window is a
+  takeover question the mode answers — `takeover` takes it, `strict` refuses until
+  `DOOP_DATA_LOCK_TAKEOVER=<claim id>` names it. No pid, hostname, mtime or socket decides
+  anything, and the worker fences itself: lose the inode, the claim or the epoch and it
+  writes one stderr line and SIGKILLs — no flush. `DOOP_DATA_LOCK=off` skips it
+  (`DATABASE_URL` does that by default; the embedded install defaults `strict`, everything
+  else `takeover`).
+  The contract the desktop shell reads: a refused boot prints `data-lock <reason> [id]` on
+  stdout — `held`, `alive-elsewhere`, `needs-takeover <claim id>` or `unsupported` — and
+  exits 3, or 4 for `needs-takeover` (the token answer). Exit 3 needs another server stopped
+  or the dir moved; exit 4 wants the token dialog.
+- `server/backup.ts`: `<data>/backups/pg-<date>.tar.gz` plus
+  `pg-<date>.manifest.json` (reason, build, applied-journal count/newest, archive bytes and
+  sha256, asset sizes); runs before applying pending migrations (on any populated database —
+  journal or not — an empty cluster has nothing to lose) and once a day, catching up at
+  boot. Keeps the newest 7 `daily` pairs and the newest 3 of every other reason. The live
+  `pg/` is copied under the database's own mutex (`client.runExclusive(fs.cp)` — no query
+  interleaves, nothing else runs inside the section), the STAGED copy is reopened with
+  PGlite and its applied journal read before anything is published, and the pair goes out
+  as two atomic renames — manifest first, archive last, whose name is the completion
+  marker. Everything streams one file at a time; the tree is private (`0700`/`0600`)
+  whatever the umask.
+- `server/restore.ts` + `server/dataTool.ts`: `node data-tool.mjs restore <archive|latest>`
+  (the checkout's `bun run data`) takes the data lock, checks the archive's sha256 against
+  its manifest, unpacks into `pg.restore-<stamp>/` with a streaming ustar reader that
+  refuses anything but regular files and directories and any name that escapes, reopens the
+  stage with PGlite, refuses data newer than this build in every `NODE_ENV`, then swaps by
+  rename — `pg` moves to `pg.replaced-<stamp>` beside a `.ready` marker, the restore takes
+  its place. A crash inside the two renames is completed or refused at the next boot; the
+  live dir is never edited in place. The tool loads `server/env.ts`, so it needs the
+  install's own environment — a production install refuses without its secrets.
+- Migration guards in `server/db/index.ts`: completes or refuses a half-done restore
+  before opening `pg` (`completeInterruptedRestore`), refuses a data dir stamped by a newer
+  migration set (newer `created_at` than the bundled journal, or more applied rows than the
+  journal has — a warning in development, a refusal elsewhere), and backs up on the open
+  client when rows exist and migrations are pending — the backup failure rejects `initDb`
+  before the migrator runs.
 - `server/browserGuard.ts`: the leak fix. Each launched browser is killed by its process
   group (`kill(-pid)` POSIX, `taskkill /t` Windows) from a synchronous `exit` hook, and a
   detached `node -e` watchdog reaps the group when the server dies without hooks (kill -9);
