@@ -266,7 +266,7 @@ it('OpenAI: lists the GPT and o-series chat families, newest first after the cur
 
 it('Gemini: pages through the catalog and keeps the generateContent models with room for a turn', async () => {
   seen.length = 0
-  await alice.post('/api/model-account/gemini-key', { apiKey: 'AIzaSyGeminiTestKey0123456789abcdefghij' })
+  await alice.post('/api/model-account/gemini-key', { apiKey: 'gemini-catalog-test-key-not-a-secret' })
   const catalog = await (await alice.get('/api/model-account/models?kind=gemini-key')).json()
   expect(catalog.live).toBe(true)
   expect(ids(catalog)).toEqual(['gemini-3.7-flash', 'gemini-4-argon'])
