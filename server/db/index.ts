@@ -1,5 +1,7 @@
 import { env } from '../env.ts'
 import { dataDir } from '../paths.ts'
+import { backupNow } from '../backup.ts'
+import { appliedJournal, bundledJournal, newerDataMessage } from './journal.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -47,9 +49,8 @@ export async function initDb(): Promise<void> {
     const { drizzle } = await import('drizzle-orm/pglite')
     const dir = path.join(dataDir(), 'pg')
     fs.mkdirSync(dir, { recursive: true }) // PGlite's own mkdir isn't recursive
-    /* the guard may close the client to take its pre-migration backup on a
-       quiescent dir, then reopen it — bind the client we get back */
-    const client = await guardMigrations(new PGlite(dir), dir)
+    const client = new PGlite(dir)
+    await guardMigrations(client)
     pgliteClient = client
     const pgliteDb = drizzle(client, { schema })
     const { migrate } = await import('drizzle-orm/pglite/migrator')
@@ -65,27 +66,6 @@ export async function initDb(): Promise<void> {
    pending ones, so a bad migration never strands real data. A managed
    Postgres keeps its own story, so DATABASE_URL stays untouched. */
 
-interface JournalEntry {
-  tag: string
-  when: number
-}
-
-function bundledJournal(): JournalEntry[] {
-  const journal = JSON.parse(fs.readFileSync(path.join(MIGRATIONS, 'meta', '_journal.json'), 'utf8')) as {
-    entries: JournalEntry[]
-  }
-  return journal.entries
-}
-
-async function appliedJournal(client: PGlite): Promise<{ count: number; newest: number }> {
-  const exists = await client.query<{ t: string | null }>(`select to_regclass('drizzle.__drizzle_migrations') as t`)
-  if (!exists.rows[0]?.t) return { count: 0, newest: 0 }
-  const rows = await client.query<{ n: number; newest: number | string | null }>(
-    'select count(*)::int as n, max(created_at) as newest from drizzle.__drizzle_migrations',
-  )
-  return { count: Number(rows.rows[0]?.n ?? 0), newest: Number(rows.rows[0]?.newest ?? 0) }
-}
-
 /** Whether the database holds user tables — what separates a populated
  *  pre-journal database (created by the pre-migration boot DDL, real data
  *  and no `drizzle.__drizzle_migrations` journal to count) from a freshly
@@ -98,23 +78,20 @@ async function hasUserTables(client: PGlite): Promise<boolean> {
   return Number(rows.rows[0]?.n ?? 0) > 0
 }
 
-async function guardMigrations(client: PGlite, pgDir: string): Promise<PGlite> {
+async function guardMigrations(client: PGlite): Promise<void> {
   const journal = bundledJournal()
   const applied = await appliedJournal(client)
-  const bundledNewest = Math.max(0, ...journal.map((entry) => entry.when))
-  /* timestamps normally order the two journals; the count catches the same
-     newest `when` reached by extra entries the bundle does not carry */
-  if (applied.newest > bundledNewest || applied.count > journal.length) {
-    const message = `[db] this data dir was written by a newer build (applied migration at ${applied.newest} is past this bundle's ${bundledNewest})`
+  const newer = newerDataMessage(applied, journal)
+  if (newer) {
     /* a dev checkout moves the same data dir between branches — switching
        back to dev after a branch with an extra migration must not refuse
        to boot. Production and tests keep the hard refusal: an older build
        on newer data is a silent downgrade */
     if (env.isDev) {
-      console.warn(`${message} — booting anyway, NODE_ENV=development tolerates it`)
+      console.warn(`${newer} — booting anyway, NODE_ENV=development tolerates it`)
     } else {
       await client.close().catch(() => {})
-      throw new Error(`${message} — update Diazo instead of running an older build on it`)
+      throw new Error(`${newer} — update Diazo instead of running an older build on it`)
     }
   }
   /* a first boot applies the whole journal to an empty database: pending,
@@ -122,15 +99,10 @@ async function guardMigrations(client: PGlite, pgDir: string): Promise<PGlite> {
      populated one is backed up whether or not a journal counted it —
      databases created before the journal existed hold real data too */
   if (journal.some((entry) => entry.when > applied.newest) && (await hasUserTables(client))) {
-    /* dumpDataDir would copy the whole data dir into memory — at boot, on
-       a possibly multi-GB install, that is an OOM waiting to happen. Close
-       the client, stream the quiescent dir into a tar.gz (server/backup.ts),
-       then reopen: the backup never holds more than a block */
-    const { PGlite } = await import('@electric-sql/pglite')
-    const { backupPgDir } = await import('../backup.ts')
-    await client.close()
-    await backupPgDir(pgDir, 'pre-migration')
-    return new PGlite(pgDir)
+    /* the snapshot runs under the database's own mutex on THIS client —
+       the open handle is the point: closing and reopening to copy a
+       quiescent dir is what the backup's critical section replaced
+       (server/backup.ts) */
+    await backupNow(client, 'pre-migration')
   }
-  return client
 }

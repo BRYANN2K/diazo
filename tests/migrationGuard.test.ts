@@ -89,7 +89,12 @@ describe('migration guards (server/db/index.ts)', () => {
     await initDb()
     const backups = fs.readdirSync(path.join(dir, 'backups'))
     expect(backups.filter((n) => n.endsWith('.tar.gz')).length).toBeGreaterThan(0)
-    expect(backups.filter((n) => n.endsWith('.assets.json')).length).toBeGreaterThan(0)
+    const manifests = backups.filter((n) => n.endsWith('.manifest.json'))
+    expect(manifests.length).toBeGreaterThan(0)
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'backups', manifests[0]!), 'utf8')) as {
+      reason: string
+    }
+    expect(manifest.reason).toBe('pre-migration')
   }, 240_000)
 
   it('backs up a populated database that has no journal yet', async () => {
@@ -107,7 +112,7 @@ describe('migration guards (server/db/index.ts)', () => {
     await initDb()
     const backups = fs.readdirSync(path.join(dir, 'backups'))
     expect(backups.filter((n) => n.endsWith('.tar.gz')).length).toBeGreaterThan(0)
-    expect(backups.filter((n) => n.endsWith('.assets.json')).length).toBeGreaterThan(0)
+    expect(backups.filter((n) => n.endsWith('.manifest.json')).length).toBeGreaterThan(0)
     /* the legacy table survived the journaled migrations */
     const rows = await pglite()!.query<{ id: string }>('select id from legacy_frames')
     expect(rows.rows[0]?.id).toBe('f1')
@@ -118,4 +123,17 @@ describe('migration guards (server/db/index.ts)', () => {
     await initDb()
     expect(fs.existsSync(path.join(dir, 'backups'))).toBe(false)
   }, 240_000)
+
+  it('rejects before the migrator when the pre-migration backup fails — nothing is published', async () => {
+    const dir = tmpDataDir()
+    await seedMigrationsTable(dir, [{ hash: 'old', created_at: 1 }])
+    /* the backup cannot create its dir — backups/ is a file */
+    fs.writeFileSync(path.join(dir, 'backups'), 'not-a-dir')
+    await expect(initDb()).rejects.toThrow()
+    /* the migrator never ran: the journal still holds only the seed row */
+    const check = new PGlite(path.join(dir, 'pg'))
+    const rows = await check.query<{ n: number }>('select count(*)::int as n from drizzle.__drizzle_migrations')
+    expect(Number(rows.rows[0]?.n)).toBe(1)
+    await check.close()
+  }, 120_000)
 })

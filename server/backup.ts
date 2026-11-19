@@ -1,182 +1,246 @@
-import fsSync, { createWriteStream, type Dirent } from 'node:fs'
-import fs, { type FileHandle } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import fsSync, { createWriteStream } from 'node:fs'
+import fs from 'node:fs/promises'
 import path from 'node:path'
-import { Readable } from 'node:stream'
+import { Readable, Transform } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { createGzip } from 'node:zlib'
 import type { PGlite } from '@electric-sql/pglite'
+import { buildInfo } from './buildInfo.ts'
+import { appliedJournal } from './db/journal.ts'
 import { backupsDir, dataDir } from './paths.ts'
 
 /**
- * Local backups of the embedded install: a gzipped tar of PGlite's data
- * dir (`pg-<date>.tar.gz`) plus a manifest of the on-disk asset files the
- * dump does not contain (`pg-<date>.assets.json`). Written before a boot
- * applies pending migrations — a bad migration must never be
- * unrecoverable — and once a day while the server runs, catching up at
- * boot when the newest complete pair is already a day old. The KEEP
- * newest pairs are kept, the rest pruned.
+ * Local backups of the embedded install: a verified snapshot of PGlite's
+ * data dir, streamed into a gzipped tar plus the manifest that describes
+ * it — `pg-<date>.tar.gz` and `pg-<date>.manifest.json` under
+ * `<data>/backups`. Taken before a boot applies pending migrations — a
+ * bad migration must never be unrecoverable — and once a day while the
+ * server runs, catching up at boot when the newest complete pair is
+ * already a day old. The seven newest `daily` pairs and the three newest
+ * of every other reason together are kept; the rest is pruned.
  *
  * PGlite-only by construction (a managed Postgres has its own backup
  * story), and every file lands under the data dir so the install stays
- * read-only. A pair counts as a backup only once both files exist: the
- * manifest is renamed into place first and the archive last, so the
- * archive's name — what `backupOverdue` counts — is the completion
- * marker. Nothing is staged or buffered whole: the cold path tars the
- * quiescent dir in place, the daily one runs under `pg_backup_start` —
- * the checkpoint it forces and the full-page images it switches on are
- * what make a file-level copy of a LIVE data dir restorable (torn pages
- * replay from the archived WAL), where `dumpDataDir` would assemble the
- * whole tar in memory first and could OOM every boot on a big install.
+ * read-only. Everything is private to the owner — 0700 dirs, 0600
+ * files, regardless of umask.
  *
- * The WAL itself is the restorable half: backup_label names the segment
- * the archive MUST carry, and once backup mode ends nothing pins it —
- * a checkpoint between pg_backup_stop and the WAL copy recycles it and
- * the published archive cannot reach consistency. So every live backup
- * retains WAL continuously: a hoarder hard-links each segment that
- * appears in pg_wal into a `.walhold` dir (recycling cannot reclaim a
- * hard-linked file), and coverage — every segment from the label's start
- * through the stop lsn — is verified BEFORE the archive is published.
- * Missing segments fail the backup loudly rather than publish an
- * unrestorable one.
+ * How a backup stays restorable:
+ *   1. the live data dir is copied under the database's own mutex —
+ *      `client.runExclusive(fs.cp)`: no query can interleave with the
+ *      copy, so nothing tears mid-page and no segment is needed twice;
+ *      nothing else runs inside the section — no query, no hashing, no
+ *      gzip;
+ *   2. the STAGED copy is reopened with PGlite and its applied journal
+ *      read before anything is published — an archive is only as good
+ *      as the database it restores to;
+ *   3. the pair goes out as two atomic renames, manifest first and
+ *      archive last: the archive's name is the completion marker, so a
+ *      torn publish never counts as a backup.
  *
- * The directory and everything in it is private to the owner: created
- * 0700/0600 regardless of umask — the data volume may be traversable
- * while pg/ itself was restricted.
+ * Nothing buffers a whole member: the tar walks the stage one file at a
+ * time, and the sha256 and byte count the manifest reports are measured
+ * on the bytes that actually reach the archive stream.
  */
 
-const KEEP = 7
+export interface BackupManifest {
+  format: 1
+  at: string
+  reason: string
+  /** the build that took it (the commit), null when none is recorded */
+  build: string | null
+  migrations: { count: number; newest: number }
+  /** of the archive on disk — bytes are the gzipped stream's */
+  archive: { bytes: number; sha256: string }
+  assets: { key: string; bytes: number }[]
+}
+
 const DAY_MS = 24 * 60 * 60_000
+const KEEP_DAILY = 7
+const KEEP_OTHER = 3
 
-interface AssetEntry {
-  key: string
-  bytes: number
+/* backupNow calls are serialized on this chain: an overlapping second
+   call queues behind the first rather than race the same staging names
+   and retention sweeps */
+let chain: Promise<unknown> = Promise.resolve()
+
+export function backupNow(
+  client: PGlite,
+  reason: string,
+  opts?: { onStaged?: (stage: string) => void | Promise<void> },
+): Promise<{ archive: string; manifest: string }> {
+  const run = chain.then(() => backupOnce(client, reason, opts))
+  chain = run.catch(() => {})
+  return run
 }
 
-interface StopRow {
-  lsn: string
-  labelfile: string
-  spcmapfile: string
-}
-
-/** One backup pair, written under `<data>/backups`, from the RUNNING
- *  database: pg_backup_start .. pg_backup_stop bracket the file copy the
- *  way Postgres itself sanctions it, and the WAL hoarder keeps every
- *  segment the backup needs out of the recycler's reach until the
- *  archive holds it. */
-export async function backupNow(client: PGlite, reason: string): Promise<{ archive: string; manifest: string }> {
+async function backupOnce(
+  client: PGlite,
+  reason: string,
+  opts?: { onStaged?: (stage: string) => void | Promise<void> },
+): Promise<{ archive: string; manifest: string }> {
   const dir = backupsDir()
   await fs.mkdir(dir, { recursive: true, mode: 0o700 })
   await fs.chmod(dir, 0o700).catch(() => {})
   await sweepLeftovers(dir)
-  const stamp = stampNow()
+  const stamp = await uniqueStamp(dir)
   const archive = path.join(dir, `pg-${stamp}.tar.gz`)
   const tmp = `${archive}.tmp`
-  const walhold = path.join(dir, `pg-${stamp}.walhold`)
+  const stage = path.join(dir, `pg-${stamp}.stage`)
+  const manifestFile = path.join(dir, `pg-${stamp}.manifest.json`)
+  const manifestTmp = `${manifestFile}.tmp`
   const pgDir = path.join(dataDir(), 'pg')
-  const done = { stopped: false }
-  await fs.mkdir(walhold, { mode: 0o700 })
-  const hoarder = startWalHoarder(path.join(pgDir, 'pg_wal'), walhold)
   try {
-    await client.query(`select pg_backup_start('diazo-${reason}', true)`)
-    await client.syncToFs()
-    hoarder.sweep() /* the start segment exists now — retain from here */
+    /* flush what it can so the copy carries less WAL — a refused
+       checkpoint only makes the stage bigger, not wrong */
+    await client
+      .query('CHECKPOINT')
+      .catch((error: unknown) => console.warn('[backup] CHECKPOINT failed — copying anyway', error))
+    /* the critical section: Postgres cannot write inside the data dir
+       while its mutex is held, so the copy is a consistent snapshot —
+       the property pg_backup_start's WAL-retention dance approximated,
+       here in one call. Nothing else inside: no query, no hashing, no
+       gzip — every extra second in the section stalls the database. */
+    await fs.mkdir(stage, { mode: 0o700 })
+    await client.runExclusive(() =>
+      fs.cp(pgDir, path.join(stage, 'pg'), { recursive: true, mode: fsSync.constants.COPYFILE_FICLONE }),
+    )
+    /* test seam: let a test corrupt the stage before verification */
+    await opts?.onStaged?.(stage)
+    /* reopen the COPY before anything is published: an archive of a dir
+       PGlite cannot open is an unrestorable backup nobody asked for */
+    const migrations = await verifyPgDir(path.join(stage, 'pg'))
+    const hash = createHash('sha256')
+    let bytes = 0
+    const meter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        hash.update(chunk)
+        bytes += chunk.length
+        callback(null, chunk)
+      },
+    })
     await pipeline(
-      Readable.from(liveBackupEntries(client, pgDir, walhold, hoarder, done)),
+      Readable.from(tarEntries(path.join(stage, 'pg'))),
       createGzip(),
+      meter,
       createWriteStream(tmp, { mode: 0o600 }),
     )
-  } catch (error) {
-    await fs.rm(tmp, { force: true }).catch(() => {})
-    throw error
-  } finally {
-    /* the generator stops the backup on its own path; when the stream dies
-       first, backup mode must still be left — it doubles WAL work until
-       stopped, and a second start would error */
-    hoarder.stop()
-    if (!done.stopped) {
-      await client
-        .query('select pg_backup_stop(false)')
-        .catch((stopError: unknown) => console.error('[backup] pg_backup_stop failed after a torn backup', stopError))
+    const manifest: BackupManifest = {
+      format: 1,
+      at: new Date().toISOString(),
+      reason,
+      build: buildInfo().sha,
+      migrations,
+      archive: { bytes, sha256: hash.digest('hex') },
+      assets: await listAssets(path.join(dataDir(), 'assets')),
     }
-    await fs.rm(walhold, { recursive: true, force: true }).catch(() => {})
+    await fs.writeFile(manifestTmp, JSON.stringify(manifest, null, 2), { mode: 0o600 })
+    /* a creation mode still bows to a pathological umask — chmod makes
+       the privacy unconditional before the names become public */
+    await fs.chmod(manifestTmp, 0o600)
+    await fs.rename(manifestTmp, manifestFile)
+    /* the archive's name is the completion marker: it lands last */
+    await fs.chmod(tmp, 0o600)
+    await fs.rename(tmp, archive)
+    console.log(`[backup] wrote ${path.basename(archive)} (+ ${manifest.assets.length} asset(s) in its manifest)`)
+    return { archive, manifest: manifestFile }
+  } finally {
+    await fs.rm(stage, { recursive: true, force: true }).catch(() => {})
+    await fs.rm(tmp, { force: true }).catch(() => {})
+    await fs.rm(manifestTmp, { force: true }).catch(() => {})
+    await prune(dir).catch((error: unknown) => console.error('[backup] prune failed', error))
   }
-  return publish(dir, stamp, tmp, archive, reason)
 }
 
-/** The pre-migration boot backup — the cold twin of backupNow(). `pgDir`
- *  must be quiescent — the caller runs this while PGlite is not holding
- *  it — so it tars in place: no staging copy to strand disk space on
- *  ENOSPC or an abrupt exit, and the archive never holds more than a
- *  block in memory either way. */
-export async function backupPgDir(pgDir: string, reason: string): Promise<{ archive: string; manifest: string }> {
-  const dir = backupsDir()
-  await fs.mkdir(dir, { recursive: true, mode: 0o700 })
-  await fs.chmod(dir, 0o700).catch(() => {})
-  await sweepLeftovers(dir)
-  const stamp = stampNow()
-  const archive = path.join(dir, `pg-${stamp}.tar.gz`)
-  const tmp = `${archive}.tmp`
+/** The staged copy, reopened and asked for its applied journal — the
+ *  verification every published pair passed. PGlite is imported lazily:
+ *  a managed-Postgres install must never load it. */
+export async function verifyPgDir(dir: string): Promise<{ count: number; newest: number }> {
+  const { PGlite } = await import('@electric-sql/pglite')
+  const client = new PGlite(dir)
   try {
-    await pipeline(Readable.from(tarEntries(pgDir)), createGzip(), createWriteStream(tmp, { mode: 0o600 }))
+    await client.query('select 1')
+    return await appliedJournal(client)
+  } finally {
+    await client.close()
+  }
+}
+
+interface BackupPair {
+  stamp: string
+  archive: string
+  manifest: BackupManifest
+}
+
+/** Every complete pair under `dir`, oldest first — an archive only
+ *  counts once its manifest exists beside it (the publish order's
+ *  completion marker, read backwards). */
+async function readPairs(dir: string): Promise<BackupPair[]> {
+  let names: string[]
+  try {
+    names = await fs.readdir(dir)
   } catch (error) {
-    await fs.rm(tmp, { force: true }).catch(() => {})
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
     throw error
   }
-  return publish(dir, stamp, tmp, archive, reason)
+  const pairs: BackupPair[] = []
+  for (const name of names) {
+    const stamp = /^pg-(.+)\.tar\.gz$/.exec(name)?.[1]
+    if (!stamp) continue
+    const manifestFile = path.join(dir, `pg-${stamp}.manifest.json`)
+    try {
+      const manifest = JSON.parse(await fs.readFile(manifestFile, 'utf8')) as BackupManifest
+      pairs.push({ stamp, archive: path.join(dir, name), manifest })
+    } catch {
+      /* an unparseable manifest is not a backup — and its archive is
+         never ours */
+    }
+  }
+  return pairs.sort((a, b) => a.stamp.localeCompare(b.stamp))
+}
+
+export async function listBackups(): Promise<{ stamp: string; archive: string; manifest: BackupManifest }[]> {
+  return readPairs(backupsDir())
 }
 
 /** A backup a day while running — and one right away when the newest
  *  complete pair is already a day old: an app opened for a workday never
  *  reaches a bare 24 h interval, so without the catch-up a desktop
- *  install's backups would only ever happen on migrating boots. */
+ *  install's backups would only ever happen on migrating boots. The
+ *  hourly tick logs failures and never throws out of the timer. */
 export function startDailyBackups(client: PGlite): void {
-  void backupOverdue(client).catch((error: unknown) => console.error('[backup] boot backup failed', error))
-  const timer = setInterval(() => {
-    backupNow(client, 'daily').catch((error: unknown) => console.error('[backup] daily backup failed', error))
-  }, DAY_MS)
+  const check = () => {
+    backupOverdue(client).catch((error: unknown) => console.error('[backup] overdue check failed', error))
+  }
+  check()
+  const timer = setInterval(check, 60 * 60_000)
   timer.unref()
 }
 
-/** Back up when there is no complete pair yet, or the newest is older than
- *  a day. An archive without its manifest does not count — it is the torn
- *  half of a crash mid-publish, not a backup. */
+/** Back up when there is no complete pair yet, or the newest is older
+ *  than a day. An archive without its manifest does not count — it is
+ *  the torn half of a crash mid-publish, not a backup. */
 async function backupOverdue(client: PGlite): Promise<void> {
-  const dir = backupsDir()
-  let newest = 0
-  try {
-    for (const name of await fs.readdir(dir)) {
-      const stamp = /^pg-(.+)\.tar\.gz$/.exec(name)?.[1]
-      if (!stamp || !(await exists(path.join(dir, `pg-${stamp}.assets.json`)))) continue
-      const mtime = (await fs.stat(path.join(dir, name))).mtimeMs
-      if (mtime > newest) newest = mtime
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-  }
+  const pairs = await readPairs(backupsDir())
+  const newest = pairs.reduce((acc, pair) => Math.max(acc, Date.parse(pair.manifest.at) || 0), 0)
   if (Date.now() - newest > DAY_MS) await backupNow(client, 'daily')
 }
 
 const stampNow = () => new Date().toISOString().replace(/[:.]/g, '-')
 
-/** The manifest, the renames and the prune — the tail both paths share
- *  once the archive's bytes sit in their `.tmp`. The manifest is written
- *  atomically and renamed BEFORE the archive: the archive's name is the
- *  completion marker, so it only ever appears once the pair is whole. */
-async function publish(dir: string, stamp: string, tmp: string, archive: string, reason: string) {
-  const manifest = path.join(dir, `pg-${stamp}.assets.json`)
-  const assets = await listAssets(path.join(dataDir(), 'assets'))
-  await fs.writeFile(`${manifest}.tmp`, JSON.stringify({ at: new Date().toISOString(), reason, assets }, null, 2), {
-    mode: 0o600,
-  })
-  /* a creation mode still bows to a pathological umask — chmod makes the
-     privacy unconditional before the names become public */
-  await fs.chmod(`${manifest}.tmp`, 0o600)
-  await fs.rename(`${manifest}.tmp`, manifest)
-  await fs.chmod(tmp, 0o600)
-  await fs.rename(tmp, archive)
-  console.log(`[backup] wrote ${path.basename(archive)} (+ ${assets.length} asset(s) in its manifest)`)
-  await prune(dir)
-  return { archive, manifest }
+/** ISO-millisecond stamps collide when two backups land inside one —
+ *  the serialized calls differ by the suffix, never the name. */
+async function uniqueStamp(dir: string): Promise<string> {
+  const base = stampNow()
+  for (let i = 0; ; i++) {
+    const stamp = i === 0 ? base : `${base}-${i}`
+    const taken =
+      (await exists(path.join(dir, `pg-${stamp}.tar.gz`))) ||
+      (await exists(path.join(dir, `pg-${stamp}.manifest.json`))) ||
+      (await exists(`${path.join(dir, `pg-${stamp}.tar.gz`)}.tmp`)) ||
+      (await exists(path.join(dir, `pg-${stamp}.stage`)))
+    if (!taken) return stamp
+  }
 }
 
 async function exists(file: string): Promise<boolean> {
@@ -188,17 +252,18 @@ async function exists(file: string): Promise<boolean> {
   }
 }
 
-/** What crashed or older backups leave behind, swept before each attempt
- *  while the data lock guarantees only this server writes here: `.tmp`
- *  archives torn mid-write, `.work` staging dirs from the staging-copy
- *  version, `.walhold` dirs from a backup that died mid-copy, and
- *  manifests whose archive never landed. */
+/** What crashed backups leave behind, swept before each attempt while
+ *  the data lock guarantees only this server writes here: `.tmp` files
+ *  torn mid-publish, `.stage` dirs from a backup that died mid-copy, and
+ *  manifests whose archive never landed. An archive without a manifest
+ *  is never ours — the manifest renames first, so it must have come from
+ *  elsewhere — and is left alone. */
 async function sweepLeftovers(dir: string): Promise<void> {
   for (const name of await fs.readdir(dir)) {
     const drop =
-      /\.(?:tmp|work|walhold)$/.test(name) ||
-      (/^pg-.+\.assets\.json$/.test(name) &&
-        !(await exists(path.join(dir, name.replace(/\.assets\.json$/, '.tar.gz')))))
+      /\.(?:tmp|stage)$/.test(name) ||
+      (/^pg-.+\.manifest\.json$/.test(name) &&
+        !(await exists(path.join(dir, name.replace(/\.manifest\.json$/, '.tar.gz')))))
     if (drop) await fs.rm(path.join(dir, name), { recursive: true, force: true }).catch(() => {})
   }
 }
@@ -221,294 +286,74 @@ async function listAssets(dir: string): Promise<AssetEntry[]> {
   return out
 }
 
-/** Keep the KEEP newest complete `pg-<date>` pairs, drop the rest — and
- *  any stray half of a pair (an archive or a manifest on its own is not a
- *  backup and must not occupy a retention slot). */
+interface AssetEntry {
+  key: string
+  bytes: number
+}
+
+/** Retention: the KEEP_DAILY newest `daily` pairs plus the KEEP_OTHER
+ *  newest of every other reason pooled — a burst of pre-migration boots
+ *  must not evict a week of dailies. Only complete pairs count; a stray
+ *  half is swept by the next attempt, not kept by retention. */
 async function prune(dir: string): Promise<void> {
-  const names = await fs.readdir(dir)
-  const stamps = [
-    ...new Set(
-      names
-        .map((name) => /^pg-(.+?)\.tar\.gz$/.exec(name)?.[1])
-        .filter((stamp): stamp is string => !!stamp)
-        .filter((stamp) => names.includes(`pg-${stamp}.assets.json`)),
-    ),
-  ].sort()
-  const keep = new Set(stamps.slice(-KEEP))
-  for (const name of names) {
-    const stamp = /^pg-(.+?)(?:\.tar\.gz|\.assets\.json)$/.exec(name)?.[1]
-    if (stamp && !keep.has(stamp)) await fs.rm(path.join(dir, name), { force: true }).catch(() => {})
-  }
-}
-
-/* ------------------------------------------------------------ WAL retain
-   The live backup's guarantee: every segment between the backup_label's
-   START WAL file and the stop lsn's segment is IN the archive. Postgres
-   recycles WAL at checkpoints once backup mode's need is unexpressed —
-   a hard link in `.walhold` keeps the bytes reachable for us while the
-   postmaster unlinks or renames its own. The hoarder sweeps on fs.watch
-   events and on a short poll so a create+recycle between two events is
-   still caught; a final explicit sweep runs right after pg_backup_stop
-   and pg_switch_wal flush the stop segment. */
-
-const SEGMENT = /^[0-9A-F]{24}$/
-
-export interface WalHoarder {
-  /** link every WAL segment currently present in pg_wal into the hold dir */
-  sweep(): void
-  /** stop watching and polling; one last sweep inside */
-  stop(): void
-}
-
-export function startWalHoarder(walDir: string, holdDir: string): WalHoarder {
-  const sweep = () => {
-    let names: string[] = []
-    try {
-      names = fsSync.readdirSync(walDir)
-    } catch {
-      return
-    }
-    for (const name of names) {
-      if (!SEGMENT.test(name)) continue
-      try {
-        fsSync.linkSync(path.join(walDir, name), path.join(holdDir, name))
-      } catch {
-        /* already held, or the file vanished between readdir and link */
-      }
-    }
-  }
-  sweep()
-  let watcher: fsSync.FSWatcher | null = null
-  try {
-    watcher = fsSync.watch(walDir, sweep)
-    watcher.on('error', () => watcher?.close())
-  } catch {
-    watcher = null
-  }
-  const timer = setInterval(sweep, 150)
-  timer.unref()
-  return {
-    sweep,
-    stop: () => {
-      watcher?.close()
-      clearInterval(timer)
-      sweep()
-    },
-  }
-}
-
-/** Parse 'H/L' (hex log/offset) into a byte position. */
-function lsnToBytes(lsn: string): bigint {
-  const [hi = '0', lo = '0'] = lsn.split('/')
-  return BigInt(`0x${hi}`) * (1n << 32n) + BigInt(`0x${lo}`)
-}
-
-/** `16MB`/`2048kB`/… as Postgres prints settings → bytes. */
-function parseWalSize(text: string): number {
-  const m = /^(\d+)\s*(B|kB|MB|GB|TB)$/i.exec(text.trim())
-  if (!m) return 0
-  const n = Number(m[1])
-  const unit = (m[2] ?? '').toLowerCase()
-  const mult =
-    unit === 'b' ? 1 : unit === 'kb' ? 1024 : unit === 'mb' ? 1024 ** 2 : unit === 'gb' ? 1024 ** 3 : 1024 ** 4
-  return n * mult
-}
-
-/** Segment number ↔ file name: tli + hi + lo, `segsPerLog` segments per
- *  hi unit — the naming Postgres uses. */
-function segNoFromName(name: string, segsPerLog: number): number {
-  return parseInt(name.slice(8, 16), 16) * segsPerLog + parseInt(name.slice(16, 24), 16)
-}
-
-function segName(tli: string, segNo: number, segsPerLog: number): string {
-  const hi = Math.floor(segNo / segsPerLog)
-  const lo = segNo % segsPerLog
-  return `${tli}${hi.toString(16).padStart(8, '0')}${lo.toString(16).padStart(8, '0')}`.toUpperCase()
-}
-
-/** The contract of a restorable archive: every WAL segment from the
- *  backup_label's start file through the stop lsn's segment sits in the
- *  hold dir. Anything missing was recycled before we could keep it —
- *  fail the backup here, never publish an unrestorable pair. */
-async function verifyWalCoverage(client: PGlite, holdDir: string, stop: StopRow | undefined): Promise<void> {
-  const label = stop?.labelfile ?? ''
-  const m = /START WAL LOCATION:\s*([0-9A-Fa-f]+\/[0-9A-Fa-f]+)\s*\(file\s+([0-9A-Fa-f]{24})\)/.exec(label)
-  const stopLsn = /^[0-9A-Fa-f]+\/[0-9A-Fa-f]+$/.test(stop?.lsn ?? '') ? stop!.lsn : null
-  if (!m || !stopLsn) return /* a stubbed client without a real label has no range to check */
-  /* PGlite answers SHOW but not pg_current_setting() — read the first
-     column whatever the row calls it */
-  const segRow = await client.query<Record<string, string>>('show wal_segment_size')
-  const segSize = parseWalSize(Object.values(segRow.rows[0] ?? {})[0] ?? '')
-  if (!segSize) throw new Error('[backup] wal_segment_size is unparseable — coverage cannot be verified')
-  const segsPerLog = 0x1_0000_0000 / segSize
-  const tli = m[2]!.slice(0, 8).toUpperCase()
-  const startSeg = segNoFromName(m[2]!.toUpperCase(), segsPerLog)
-  const stopSeg = Number(lsnToBytes(stopLsn) / BigInt(segSize))
-  const held = new Set(await fs.readdir(holdDir).catch(() => []))
-  const missing: string[] = []
-  for (let n = startSeg; n <= stopSeg; n++) {
-    const name = segName(tli, n, segsPerLog)
-    if (!held.has(name)) missing.push(name)
-  }
-  if (missing.length) {
-    throw new Error(
-      `[backup] required WAL was recycled before archiving — ${missing.length} segment(s) missing of ${m[2]}..${segName(tli, stopSeg, segsPerLog)} (e.g. ${missing[0]}); the backup is unpublishable`,
-    )
+  const pairs = await readPairs(dir)
+  const keep = new Set<string>()
+  for (const pair of pairs.filter((p) => p.manifest.reason === 'daily').slice(-KEEP_DAILY)) keep.add(pair.stamp)
+  for (const pair of pairs.filter((p) => p.manifest.reason !== 'daily').slice(-KEEP_OTHER)) keep.add(pair.stamp)
+  for (const pair of pairs) {
+    if (keep.has(pair.stamp)) continue
+    await fs.rm(pair.archive, { force: true }).catch(() => {})
+    await fs.rm(path.join(dir, `pg-${pair.stamp}.manifest.json`), { force: true }).catch(() => {})
   }
 }
 
 /* ------------------------------------------------------------- tar.gz
-   The archive writer both paths share: a plain ustar stream so the data
-   dir passes through one block at a time — the shape dumpDataDir
-   produces (relative paths, gzip) without its in-memory buffer. A PGlite
-   dir holds only regular files and directories, ASCII names well under a
-   hundred chars; anything else is refused loudly rather than archived
-   wrong. Modes come from the files themselves — PGlite's data dirs are
-   0700 and must stay traversable on restore; a flat 0644 would extract a
-   database nobody can open. */
-
-/* runtime files a live postmaster leaves behind: postmaster.pid would
-   make the restored dir look occupied; the rest Postgres rebuilds on
-   boot — pg_basebackup skips the same set */
-const SKIP_FILES = new Set(['postmaster.pid', 'postmaster.opts'])
-const SKIP_DIR_CONTENTS = new Set(['pg_dynshmem', 'pg_notify', 'pg_serial', 'pg_snapshots', 'pg_stat_tmp'])
-/* pass one of the live backup: the WAL reaches the archive from the hold
-   dir, after pg_backup_stop — its segments there are retained through
-   the stop lsn */
-const SKIP_WAL = new Set(['pg_wal'])
+   The archive writer: a plain ustar stream over the STAGED copy, one
+   file at a time — the stage is frozen (the snapshot was verified before
+   a byte is read), so a file whose bytes differ from its stat is
+   corruption, not a race, and fails the backup. Modes come from the
+   files themselves — PGlite's data dirs are 0700 and must stay
+   traversable on restore. */
 
 async function* tarEntries(root: string): AsyncGenerator<Buffer> {
   yield* tarWalk(root, '')
   yield Buffer.alloc(1024) /* end-of-archive: two zero blocks */
 }
 
-/** The live backup's stream, driven between pg_backup_start and
- *  pg_backup_stop: data files first (torn pages are repaired by WAL at
- *  restore — that is what backup mode is for), then the retained WAL
- *  once coverage is proven, then the backup_label pg_backup_stop hands
- *  back so the restored dir does archive recovery instead of trusting a
- *  torn checkpoint. */
-async function* liveBackupEntries(
-  client: PGlite,
-  pgDir: string,
-  walhold: string,
-  hoarder: WalHoarder,
-  done: { stopped: boolean },
-): AsyncGenerator<Buffer> {
-  try {
-    yield* tarWalk(pgDir, '', SKIP_WAL)
-    const stop = await client.query<StopRow>('select lsn, labelfile, spcmapfile from pg_backup_stop(false)')
-    done.stopped = true
-    /* the archive must carry the WAL from the start checkpoint to the
-       stop lsn or a restore cannot reach consistency. Backup mode is over
-       so nothing pins it — the hoarder already holds the bytes; flush the
-       stop record's segment to disk, retain it, then PROVE the range is
-       complete before it goes into the archive */
-    await client.query('select pg_switch_wal()')
-    await client.syncToFs()
-    hoarder.sweep()
-    await verifyWalCoverage(client, walhold, stop.rows[0])
-    yield* tarWalk(walhold, 'pg_wal/')
-    const label = stop.rows[0]?.labelfile
-    if (label) yield tarFile('backup_label', Buffer.from(label))
-    const map = stop.rows[0]?.spcmapfile
-    if (map) yield tarFile('tablespace_map', Buffer.from(map))
-  } finally {
-    if (!done.stopped) {
-      await client
-        .query('select pg_backup_stop(false)')
-        .then(() => {
-          done.stopped = true
-        })
-        .catch(() => {})
-    }
-  }
-  yield Buffer.alloc(1024)
-}
-
-async function* tarWalk(dir: string, prefix: string, skipTop?: Set<string>): AsyncGenerator<Buffer> {
-  let entries: Dirent[]
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true })
-  } catch (error) {
-    /* a live dir loses files as Postgres rotates them — ENOENT is a skip,
-       not a failure (pg_basebackup tolerates the same) */
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
-    throw error
-  }
+async function* tarWalk(dir: string, prefix: string): AsyncGenerator<Buffer> {
+  const entries = await fs.readdir(dir, { withFileTypes: true })
   entries.sort((a, b) => a.name.localeCompare(b.name))
   for (const entry of entries) {
     const name = prefix + entry.name
     const full = path.join(dir, entry.name)
-    if (prefix === '' && (SKIP_FILES.has(entry.name) || skipTop?.has(entry.name))) continue
     if (entry.isDirectory()) {
-      const stat = await statOrNull(full)
-      if (!stat) continue
+      const stat = await fs.stat(full)
       yield tarHeader(`${name}/`, '5', 0, stat.mode & 0o777, stat.mtimeMs)
-      /* the dir entry is emitted even when its contents are skipped — an
-         empty pg_wal/ in the archive is what a restore expects to find */
-      if (prefix === '' && (SKIP_DIR_CONTENTS.has(entry.name) || skipTop?.has(entry.name))) continue
       yield* tarWalk(full, `${name}/`)
     } else if (entry.isFile()) {
-      /* open first, then take the size from the OPEN handle — a stat on
-         the path is a second lookup the file could change under, and the
-         open size is the contract pg_basebackup reads to */
-      const handle = await openOrNull(full)
-      if (!handle) continue
-      try {
-        const stat = await handle.stat()
-        yield tarHeader(name, '0', stat.size, stat.mode & 0o777, stat.mtimeMs)
-        yield* fileBody(handle, stat.size)
-      } finally {
-        await handle.close()
-      }
+      const stat = await fs.stat(full)
+      yield tarHeader(name, '0', stat.size, stat.mode & 0o777, stat.mtimeMs)
+      yield* fileBody(full, stat.size)
     } else {
       throw new Error(`[backup] cannot archive ${full} — not a regular file or directory`)
     }
   }
 }
 
-/** Exactly `size` bytes from an open handle — PostgreSQL base-backup
- *  semantics for a file changing mid-copy: a grown tail is ignored (the
- *  archived length is what the header advertises and WAL replay covers
- *  the rest) and a shrunk file is zero-padded, where failing on the size
- *  difference would throw away the whole backup over ordinary relation
- *  growth. Exported for tests. */
-export async function* fileBody(handle: FileHandle, size: number): AsyncGenerator<Buffer> {
-  let remaining = size
-  for await (const chunk of handle.createReadStream() as AsyncIterable<Buffer>) {
-    if (remaining <= 0) break
-    const part = chunk.length <= remaining ? chunk : chunk.subarray(0, remaining)
-    remaining -= part.length
-    yield part
+/** Exactly `size` bytes from the file, then the tar block pad. The stage
+ *  is frozen — fewer bytes is corruption the archive must not silently
+ *  pad out, more is a file we mismeasured: either way the pair fails. */
+async function* fileBody(full: string, size: number): AsyncGenerator<Buffer> {
+  let read = 0
+  for await (const chunk of fsSync.createReadStream(full) as AsyncIterable<Buffer>) {
+    read += chunk.length
+    yield chunk
   }
-  if (remaining > 0) yield Buffer.alloc(remaining)
+  if (read !== size) {
+    throw new Error(`[backup] ${full} changed under the archive — ${read} bytes read, ${size} announced`)
+  }
   const pad = (512 - (size % 512)) % 512
   if (pad) yield Buffer.alloc(pad)
-}
-
-async function statOrNull(full: string) {
-  try {
-    return await fs.stat(full)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-    throw error
-  }
-}
-
-async function openOrNull(full: string) {
-  try {
-    return await fs.open(full)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-    throw error
-  }
-}
-
-/** A file generated for the archive (backup_label, tablespace_map). */
-function tarFile(name: string, body: Buffer): Buffer {
-  const pad = (512 - (body.length % 512)) % 512
-  return Buffer.concat([tarHeader(name, '0', body.length, 0o600), body, Buffer.alloc(pad)])
 }
 
 /** One 512-byte ustar header: name (with the 155/100 prefix split when
