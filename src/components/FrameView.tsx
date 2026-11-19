@@ -32,6 +32,7 @@ import { gesture } from '../lib/gesture'
 import { resolvePointerAction } from '../lib/tools'
 import { FrameContextMenu } from './FrameContextMenu'
 import { FrameApprovalBadge } from './FrameApproval'
+import { DevTaskBadge } from './DevTasks'
 import { FrameLintBadge } from './FrameLintBadge'
 import { scheduleFrameLint } from '../lib/frameLint'
 import { FrameChecksBadge } from './FrameChecksBadge'
@@ -1817,6 +1818,7 @@ export const FrameView = memo(function FrameView({
               {isLive && <LiveFrameBadge frame={frame} />}
               <span className="min-w-0 overflow-hidden text-ellipsis">{frame.name}</span>
               <FrameApprovalBadge frame={frame} />
+              <DevTaskBadge frame={frame} />
               <FrameLintBadge frame={frame} />
               <FrameChecksBadge frame={frame} />
               <span className="flex shrink-0 gap-1 @max-[180px]/title:order-first">

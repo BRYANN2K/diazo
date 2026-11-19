@@ -9,6 +9,7 @@ Diazo started on 2026-11-12 from doop 0.14.0. Versions up to 0.14.0 are doop's o
 
 ## [Unreleased]
 
+- Send a frame to Orca from the desktop app and track its worktree task on the canvas.
 - Add the partial speech job backend: estimates, persisted transcripts, voice-over
   audio clips, secure desktop relay, and matching canvas tools. Local engine
   installers and the speech sidecar remain pending.

@@ -8,6 +8,7 @@ import { localRepo } from '../server/localRepo.ts'
 import {
   applyAgentUpdate,
   applyDeviceReport,
+  buildDevTaskBrief,
   cancelDevTask,
   createDevTask,
   devTaskFor,
@@ -21,6 +22,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { REPO_POLL_MS, type RepoLink } from '../shared/localRepo.ts'
 import type { Canvas, Frame } from '../shared/types.ts'
+import type { CodeLink } from '../shared/codeLinks.ts'
+import type { ComponentDef } from '../shared/components.ts'
 import { DEV_TASK_LAUNCH_TTL_MS, devTaskSlug, type DevTaskBrief, type DevTaskState } from '../shared/devTasks.ts'
 
 /**
@@ -43,6 +46,7 @@ vi.mock('../server/db/persist.ts', () => ({
   saveActivity: () => {},
   saveMember: () => {},
   deleteMember: () => {},
+  saveToken: () => {},
 }))
 
 const owner = { id: 'owner-1', name: 'Owner' }
@@ -564,6 +568,101 @@ describe('failStaleDevTasks', () => {
   })
 })
 
+describe('buildDevTaskBrief', () => {
+  const PNG = Buffer.from('png-bytes')
+  const okPng = async () => PNG
+
+  const link = (targetKind: 'frame' | 'component', targetId: string, path: string): CodeLink => ({
+    id: `cl-${targetId}`,
+    canvasId: canvas.id,
+    targetKind,
+    targetId,
+    path,
+    exportName: null,
+    source: 'manual',
+    updatedBy: 'tester',
+    updatedAt: 0,
+  })
+
+  const component = (id: string, name: string): ComponentDef => ({
+    id,
+    name,
+    description: '',
+    template: '<button></button>',
+    css: '',
+    rawCss: '',
+    head: [],
+    props: [],
+    slots: [],
+    rev: 1,
+    mainFrameId: null,
+    history: [],
+    createdAt: 0,
+    updatedAt: 0,
+    updatedBy: 'tester',
+  })
+
+  it('renders every frame and carries the canvas’s tokens', async () => {
+    store.setTokens(canvas.id, [{ name: '--color-ink', type: 'color', value: '#111' }], 'tester')
+    const brief = await buildDevTaskBrief(canvas, [frame], { renderPng: okPng })
+    expect(brief).toMatchObject({
+      title: 'Checkout',
+      canvasId: canvas.id,
+      warnings: [],
+      frames: [{ id: frame.id, name: 'Checkout', png: PNG.toString('base64') }],
+    })
+    expect(brief.frames[0]?.width).toBe(Math.round(frame.width))
+    expect(brief.tokens?.tokens).toEqual([{ name: '--color-ink', type: 'color', value: '#111' }])
+  })
+
+  it('a frame whose render fails still ships a usable brief with a warning', async () => {
+    const broken = store.createFrame(canvas.id, { name: 'Broken', html: '<p>x</p>' }, owner.name)!
+    const brief = await buildDevTaskBrief(canvas, [frame, broken], {
+      renderPng: async (f) => {
+        if (f.id === broken.id) throw new Error('render blew up')
+        return PNG
+      },
+    })
+    /* AC-10: the missing PNG becomes a named warning; the rest of the
+       brief — title, meta, the good frame — lands whole */
+    expect(brief.warnings).toEqual(['"Broken" could not be rendered: render blew up'])
+    expect(brief.frames.find((f) => f.id === broken.id)).not.toHaveProperty('png')
+    expect(brief.frames.find((f) => f.id === frame.id)?.png).toBe(PNG.toString('base64'))
+    expect(brief.title).toBe('Checkout')
+    expect(brief.frames).toHaveLength(2)
+  })
+
+  it('narrows the code links to the brief’s frames and the components they use', async () => {
+    canvas.components = [component('cmp-1', 'PayButton'), component('cmp-2', 'Unused')]
+    const linked = store.createFrame(
+      canvas.id,
+      { name: 'Linked', html: '<div data-doop-instance="cmp-1"></div>' },
+      owner.name,
+    )!
+    const other = store.createFrame(canvas.id, { name: 'Other', html: '<p>else</p>' }, owner.name)!
+    const brief = await buildDevTaskBrief(canvas, [linked], {
+      renderPng: okPng,
+      codeLinks: [
+        link('frame', linked.id, 'src/checkout.tsx'),
+        link('component', 'cmp-1', 'src/components/PayButton.tsx'),
+        link('frame', other.id, 'src/other.tsx'),
+        link('component', 'cmp-2', 'src/components/Unused.tsx'),
+      ],
+    })
+    /* a frame outside the brief and a component no frame uses stay out */
+    expect(brief.codeLinks).toEqual([
+      { kind: 'frame', name: 'Linked', path: 'src/checkout.tsx' },
+      { kind: 'component', name: 'PayButton', path: 'src/components/PayButton.tsx' },
+    ])
+    canvas.components = []
+  })
+
+  it('carries the launch plan when one was given', async () => {
+    const brief = await buildDevTaskBrief(canvas, [frame], { renderPng: okPng, plan: 'build the form first' })
+    expect(brief.plan).toBe('build the form first')
+  })
+})
+
 describe('MCP tools', () => {
   it('get_handoff hands the requester’s agent the stored brief', async () => {
     const { task } = await launch([frame.id])
@@ -627,6 +726,20 @@ describe('MCP tools', () => {
     store.removeMember(canvas.id, 'user-2')
     const denied = await mcp.call('update_dev_task', { task_id: task.id, state: 'needs_input' })
     expect(denied.isError).toBe(true)
+    await mcp.close()
+  })
+
+  it('get_canvas lists the canvas’s dev tasks in their public shape', async () => {
+    const { task } = await launch([frame.id])
+    const mcp = await mcpFor(owner.id)
+    const result = await mcp.call('get_canvas', { canvas_id: canvas.id })
+    const body = JSON.parse((result.content as { text: string }[])[0]!.text)
+    const listed = (body.dev_tasks as { id: string }[]).find((t) => t.id === task.id)
+    expect(listed).toMatchObject({ id: task.id, state: 'queued', agent: 'claude' })
+    /* the stored brief never reaches the public row, here either */
+    expect(listed).not.toHaveProperty('handoff')
+    expect(listed).not.toHaveProperty('requestedByUserId')
+    expect(listed).not.toHaveProperty('deviceId')
     await mcp.close()
   })
 })

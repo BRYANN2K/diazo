@@ -874,6 +874,16 @@ pub async fn orca_launch_task(
     .map_err(|e| e.to_string())?
 }
 
+/// Insert `key` only when `value` is `Some` — a field that is absent is
+/// omitted, never sent as `null`. The REST report accepts either spelling
+/// but the canonical wire encoding is omission, matching the shared
+/// `DevTask*Report` types where absent means `undefined`.
+fn set_opt(map: &mut serde_json::Map<String, Value>, key: &str, value: Option<impl Into<Value>>) {
+    if let Some(v) = value {
+        map.insert(key.to_string(), v.into());
+    }
+}
+
 /// `worktree create`'s answer trimmed to what the page may see. The
 /// worktree's own id embeds its absolute path (`<repoId>::<path>` — over
 /// the report's caps as soon as the path is long), so it never crosses:
@@ -881,18 +891,30 @@ pub async fn orca_launch_task(
 fn launch_reply(out: &Value, identity: &str, branch: &str) -> Value {
     let launch = out.get("launch");
     let outcome = launch.and_then(|l| l.get("outcome"));
-    json!({
-        "ok": true,
-        "orcaIdentity": identity,
-        "branch": branch,
-        "launchKind": outcome.and_then(|o| o.get("kind")).and_then(Value::as_str),
-        "launchHandle": outcome
+    let mut reply = serde_json::Map::new();
+    reply.insert("ok".to_string(), true.into());
+    reply.insert("orcaIdentity".to_string(), identity.into());
+    reply.insert("branch".to_string(), branch.into());
+    set_opt(&mut reply, "launchKind", outcome.and_then(|o| o.get("kind")).and_then(Value::as_str));
+    set_opt(
+        &mut reply,
+        "launchHandle",
+        outcome
             .and_then(|o| o.get("handle"))
             .and_then(Value::as_str)
             .or_else(|| out.get("agentTerminalHandle").and_then(Value::as_str)),
-        "orcaSessionId": outcome.and_then(|o| o.get("orcaSessionId")).and_then(Value::as_str),
-        "operationId": launch.and_then(|l| l.get("operationId")).and_then(Value::as_str),
-    })
+    );
+    set_opt(
+        &mut reply,
+        "orcaSessionId",
+        outcome.and_then(|o| o.get("orcaSessionId")).and_then(Value::as_str),
+    );
+    set_opt(
+        &mut reply,
+        "operationId",
+        launch.and_then(|l| l.get("operationId")).and_then(Value::as_str),
+    );
+    Value::Object(reply)
 }
 
 /// The main agent's row in a `worktree ps` entry: each agent carries a
@@ -909,9 +931,13 @@ fn main_agent(row: &Value) -> Option<&Value> {
 /// One watched identity's trimmed report row — what DevTaskPollReport
 /// carries, and nothing else (the path stays here).
 fn poll_row(identity: &str, row: Option<&Value>) -> Value {
+    let mut trimmed = serde_json::Map::new();
+    trimmed.insert("identity".to_string(), identity.into());
     let Some(row) = row else {
-        return json!({ "identity": identity, "found": false });
+        trimmed.insert("found".to_string(), false.into());
+        return Value::Object(trimmed);
     };
+    trimmed.insert("found".to_string(), true.into());
     let agent = main_agent(row);
     /* the outcome lives on `mainAgent` — `programStatus.state` is only a
        fallback (real Orca reports `working`/`done` there, never one) */
@@ -925,28 +951,47 @@ fn poll_row(identity: &str, row: Option<&Value>) -> Value {
                 .and_then(Value::as_str)
                 .filter(|s| TERMINAL_OUTCOMES.contains(s))
         });
-    json!({
-        "identity": identity,
-        "found": true,
-        "status": row.get("status").and_then(Value::as_str),
-        "agentState": agent
+    set_opt(&mut trimmed, "status", row.get("status").and_then(Value::as_str));
+    set_opt(
+        &mut trimmed,
+        "agentState",
+        agent
             .and_then(|a| a.pointer("/mainAgent/state"))
             .or_else(|| agent.and_then(|a| a.get("state")))
             .and_then(Value::as_str),
-        "outcome": outcome,
-        "lastAssistantMessage": agent.and_then(|a| a.get("lastAssistantMessage")).and_then(Value::as_str),
-        /* Orca may report linkedPR as an object — the report schema takes
-           a string, so reduce it to its URL here */
-        "linkedPR": row
-            .get("linkedPR")
+    );
+    set_opt(&mut trimmed, "outcome", outcome);
+    set_opt(
+        &mut trimmed,
+        "lastAssistantMessage",
+        agent.and_then(|a| a.get("lastAssistantMessage")).and_then(Value::as_str),
+    );
+    /* Orca may report linkedPR as an object — the report schema takes
+       a string, so reduce it to its URL here */
+    set_opt(
+        &mut trimmed,
+        "linkedPR",
+        row.get("linkedPR")
             .and_then(|pr| pr.as_str().or_else(|| pr.get("url").and_then(Value::as_str))),
-        "orcaSessionId": agent.and_then(|a| a.get("orcaSessionId")).and_then(Value::as_str),
-        "branch": row
-            .get("branch")
+    );
+    set_opt(
+        &mut trimmed,
+        "orcaSessionId",
+        agent.and_then(|a| a.get("orcaSessionId")).and_then(Value::as_str),
+    );
+    set_opt(
+        &mut trimmed,
+        "branch",
+        row.get("branch")
             .and_then(Value::as_str)
             .map(|b| b.trim_start_matches("refs/heads/")),
-        "workspaceStatus": row.get("workspaceStatus").and_then(Value::as_str),
-    })
+    );
+    set_opt(
+        &mut trimmed,
+        "workspaceStatus",
+        row.get("workspaceStatus").and_then(Value::as_str),
+    );
+    Value::Object(trimmed)
 }
 
 /// One poll's trimmed report rows for the watched identities. `worktree

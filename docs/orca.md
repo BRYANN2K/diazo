@@ -44,6 +44,7 @@ The split of trust:
 | Route                             | Role                 | Body → answer                                               |
 | --------------------------------- | -------------------- | ----------------------------------------------------------- |
 | `POST /api/frames/:id/dev-tasks`  | edit                 | `{ agent, model?, effort?, environment? }` → `{ task }`     |
+| `GET /api/frames/:id/dev-tasks`   | view                 | → `{ tasks: DevTask[] }` for this frame (newest first)      |
 | `GET /api/canvases/:id/dev-tasks` | view                 | → `{ tasks: DevTask[] }` (newest first)                     |
 | `POST /api/dev-tasks/:id/report`  | the launching device | `{ deviceId, requestId?, launch?, poll? }` → `{ ok, task }` |
 | `POST /api/dev-tasks/:id/cancel`  | edit                 | → `{ task }`                                                |
@@ -89,7 +90,7 @@ workspaceStatus?, devUrl? }`. `found:false` maps to `cancelled` — and is
 
 ```json
 {
-  "taskId": "dt_…",
+  "taskId": "a1B2c3D4e5",
   "worktreeName": "doop-checkout-mobile-a3f",
   "branch": "doop/checkout-mobile-a3f",
   "agent": "claude",

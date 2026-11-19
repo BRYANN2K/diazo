@@ -9,6 +9,7 @@ import type { DuelView, ModelDuel } from '../../shared/duel'
 import type { LocalAgentPreference, LocalAgentJob, LocalAgentResult } from '../../shared/localAgent'
 import type { AcpAgent, AcpAgentPreference, AcpCatalogModel } from '../../shared/acpAgent'
 import type { RepoLink, RepoLinkStatus, RepoRequest, RepoResult } from '../../shared/localRepo'
+import type { DevTask, DevTaskCreateBody, DevTaskReport } from '../../shared/devTasks'
 import type { DriftComparison, DriftFetchRequest, DriftFetchResult } from '../../shared/drift'
 import type { BuiltHookInfo } from '../../shared/built'
 import type { CodeLink, CodeLinkInput, CodeLinkKind } from '../../shared/codeLinks'
@@ -525,6 +526,18 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ deviceId, ...result }),
     }),
+  /* dev tasks: a signed-off frame sent to Orca (docs/orca.md) — the launch
+     job itself reaches the device through the repo bridge poll above */
+  createDevTask: (frameId: string, body: DevTaskCreateBody) =>
+    req<{ task: DevTask }>(`/api/frames/${frameId}/dev-tasks`, { method: 'POST', body: JSON.stringify(body) }),
+  canvasDevTasks: (canvasId: string) => req<{ tasks: DevTask[] }>(`/api/canvases/${canvasId}/dev-tasks`),
+  frameDevTasks: (frameId: string) => req<{ tasks: DevTask[] }>(`/api/frames/${frameId}/dev-tasks`),
+  reportDevTask: (taskId: string, report: DevTaskReport) =>
+    req<{ ok: boolean; task: DevTask }>(`/api/dev-tasks/${taskId}/report`, {
+      method: 'POST',
+      body: JSON.stringify(report),
+    }),
+  cancelDevTask: (taskId: string) => req<{ task: DevTask }>(`/api/dev-tasks/${taskId}/cancel`, { method: 'POST' }),
   /* component ↔ file mapping: where a component or frame lives in the linked repo */
   codeLinks: (canvasId: string) => req<{ links: CodeLink[] }>(`/api/canvases/${canvasId}/code-links`),
   putCodeLink: (canvasId: string, input: CodeLinkInput) =>

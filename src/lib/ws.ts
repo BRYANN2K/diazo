@@ -4,6 +4,7 @@ import type { ClientMessage, ServerMessage } from '../../shared/types'
 import { isPeerViewport } from '../../shared/viewport'
 import { roleAllows } from '../../shared/canvasRole'
 import { getIdentity } from './identity'
+import { hydrateDevTasks } from './devTasks'
 import { useStore } from './store'
 import { useMotionStore } from './motion/store'
 
@@ -191,6 +192,9 @@ function handle(msg: ServerMessage) {
       s.setChat(msg.chat)
       s.setDecisions(msg.decisions)
       s.setProposals(msg.proposals)
+      /* dev tasks travel outside init: hydrate from REST, merging over any
+         dev-task broadcast that landed while the fetch was in flight */
+      void hydrateDevTasks(msg.canvas.id)
       break
     case 'frames:html':
       s.mergeFrameHtml(msg.frames)
@@ -218,6 +222,9 @@ function handle(msg: ServerMessage) {
       break
     case 'task':
       s.upsertTask(msg.task)
+      break
+    case 'dev-task':
+      s.upsertDevTask(msg.task)
       break
     case 'feedback':
       s.upsertFeedback(msg.feedback)

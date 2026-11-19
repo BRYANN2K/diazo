@@ -1342,7 +1342,7 @@ app.delete('/api/canvases/:id/repo', async (req, res) => {
 })
 
 /* ---- Send to Orca (docs/orca.md). A ready-for-dev frame launches a dev
-   task: the pack is built and stored on the row, the launch job rides the
+   task: the brief is built and stored on the row, the launch job rides the
    same poll bridge to the requester's desktop, which runs the typed orca.rs
    commands. Status comes back through the report route and the coding
    agent's own update_dev_task; every stored change broadcasts `dev-task`. */
@@ -1428,36 +1428,55 @@ app.get('/api/frames/:id/dev-tasks', async (req, res) => {
   res.json({ tasks })
 })
 
+/* a field that only ever means "absent" when unset — older desktop shells
+   send it as explicit `null`, newer ones omit the key; normalize both to
+   `undefined` so the merge and the DevTask*Report types see one shape.
+   Validation still applies to a present value — only the spelling of
+   "absent" is normalized. `devUrl` stays nullable: its `null` clears the
+   stored URL rather than reading as absent. */
+const absentString = (max: number) =>
+  z
+    .string()
+    .max(max)
+    .nullish()
+    .transform((v) => v ?? undefined)
+const absentBool = () =>
+  z
+    .boolean()
+    .nullish()
+    .transform((v) => v ?? undefined)
+
 const devTaskReportSchema = z.object({
   deviceId: z.string().uuid(),
-  requestId: z.string().uuid().optional(),
+  requestId: z
+    .string()
+    .uuid()
+    .nullish()
+    .transform((v) => v ?? undefined),
   launch: z
     .object({
       ok: z.boolean(),
-      cancelled: z.boolean().optional(),
-      error: z.string().max(1_000).optional(),
-      orcaIdentity: z.string().max(120).optional(),
-      branch: z.string().max(200).optional(),
-      launchKind: z.string().max(40).optional(),
-      launchHandle: z.string().max(200).optional(),
-      orcaSessionId: z.string().max(200).optional(),
-      operationId: z.string().max(120).optional(),
+      cancelled: absentBool(),
+      error: absentString(1_000),
+      orcaIdentity: absentString(120),
+      branch: absentString(200),
+      launchKind: absentString(40),
+      launchHandle: absentString(200),
+      orcaSessionId: absentString(200),
+      operationId: absentString(120),
     })
     .optional(),
   poll: z
     .object({
       found: z.boolean(),
-      status: z.string().max(40).optional(),
-      agentState: z.string().max(40).optional(),
-      outcome: z.string().max(40).optional(),
-      lastAssistantMessage: z
-        .string()
-        .max(DEV_TASK_SUMMARY_CHARS + 500)
-        .optional(),
+      status: absentString(40),
+      agentState: absentString(40),
+      outcome: absentString(40),
+      lastAssistantMessage: absentString(DEV_TASK_SUMMARY_CHARS + 500),
       linkedPR: z.string().max(500).nullable().optional(),
-      orcaSessionId: z.string().max(200).optional(),
-      branch: z.string().max(200).optional(),
-      workspaceStatus: z.string().max(60).optional(),
+      orcaSessionId: absentString(200),
+      branch: absentString(200),
+      workspaceStatus: absentString(60),
       devUrl: z.string().max(500).nullable().optional(),
     })
     .optional(),

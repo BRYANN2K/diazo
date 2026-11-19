@@ -22,6 +22,7 @@ import type {
   TaskFeedback,
 } from '../../shared/types'
 import { roleAllows, type CanvasRole } from '../../shared/canvasRole'
+import type { DevTask } from '../../shared/devTasks'
 import { clearComposerDraft, readComposerDraft, writeComposerDraft } from './composerDrafts'
 import type { SnapGuide } from './snap'
 import { isDrawingTool, type Tool } from './tools'
@@ -55,6 +56,9 @@ interface State {
   activity: ActivityItem[]
   /** agent task history (newest first) — every set_status becomes a task */
   tasks: AgentTask[]
+  /** Orca dev tasks on the open canvas, keyed by id — hydrated from REST at
+   *  join/reconnect, then kept current by `dev-task` room broadcasts */
+  devTasks: Record<string, DevTask>
   /** human feedback on tasks (newest first) */
   feedback: TaskFeedback[]
   /** element-anchored comments (newest first) */
@@ -205,6 +209,11 @@ interface State {
   pushActivity(item: ActivityItem): void
   setTasks(tasks: AgentTask[]): void
   upsertTask(task: AgentTask): void
+  /** REST hydration: merge the canvas's task list over what the room sent
+   *  while the fetch was in flight (newer updatedAt wins); `canvasId` pins
+   *  the answer so a late response after navigation cannot leak in */
+  setDevTasks(tasks: DevTask[], canvasId: string): void
+  upsertDevTask(task: DevTask): void
   setFeedback(feedback: TaskFeedback[]): void
   upsertFeedback(fb: TaskFeedback): void
   setComments(comments: ElementComment[]): void
@@ -330,6 +339,7 @@ export const useStore = create<State>((set, get) => ({
   peerViewports: {},
   activity: [],
   tasks: [],
+  devTasks: {},
   feedback: [],
   comments: [],
   chat: [],
@@ -380,6 +390,9 @@ export const useStore = create<State>((set, get) => ({
     set((s) => ({
       /* the stage paints frames in array order: back to front */
       canvas: canvas && { ...canvas, frames: sortByStack(canvas.frames) },
+      /* switching canvases never shows the previous canvas's dev tasks;
+         a re-join of the same canvas keeps them until hydration refreshes */
+      devTasks: canvas && canvas.id === s.canvas?.id ? s.devTasks : {},
       /* leaving a canvas (CanvasPage unmounts or its id changes) ends ⌘.
          hide-UI, so the next canvas never opens with its chrome gone; a
          re-join of the same canvas keeps it */
@@ -502,6 +515,27 @@ export const useStore = create<State>((set, get) => ({
         ? s.tasks.map((t) => (t.id === task.id ? task : t))
         : [task, ...s.tasks].slice(0, 100)
       return { tasks }
+    }),
+  setDevTasks: (tasks, canvasId) =>
+    set((s) => {
+      if (s.canvas?.id !== canvasId) return {}
+      const devTasks: Record<string, DevTask> = {}
+      for (const task of tasks) if (task.canvasId === canvasId) devTasks[task.id] = task
+      /* room events that arrived while the list was in flight win when newer —
+         a task created between the list's snapshot and now also survives */
+      for (const task of Object.values(s.devTasks)) {
+        if (task.canvasId !== canvasId) continue
+        const listed = devTasks[task.id]
+        if (!listed || listed.updatedAt <= task.updatedAt) devTasks[task.id] = task
+      }
+      return { devTasks }
+    }),
+  upsertDevTask: (task) =>
+    set((s) => {
+      if (task.canvasId !== s.canvas?.id) return {}
+      const existing = s.devTasks[task.id]
+      if (existing && existing.updatedAt >= task.updatedAt) return {}
+      return { devTasks: { ...s.devTasks, [task.id]: task } }
     }),
   setFeedback: (feedback) => set({ feedback }),
   setComments: (comments) => set({ comments }),

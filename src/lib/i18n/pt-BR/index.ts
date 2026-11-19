@@ -24,6 +24,7 @@ import { components } from './components'
 import { actions } from './actions'
 import { lint } from './lint'
 import { checks } from './checks'
+import { devTasks } from './devTasks'
 import { built } from './built'
 import { usage } from './usage'
 import { replay } from './replay'
@@ -58,6 +59,7 @@ export const ptBR: Catalog = {
   actions,
   lint,
   checks,
+  devTasks,
   built,
   usage,
   replay,

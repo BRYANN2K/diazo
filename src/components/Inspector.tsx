@@ -11,6 +11,8 @@ import { deleteFrameTracked, recordUpdate, trackSave } from '../lib/history'
 import { setFramesLocked } from '../lib/layerEdits'
 import { FrameHistoryModal } from './FrameHistoryModal'
 import { FrameApprovalControl } from './FrameApproval'
+import { DevTaskSection } from './DevTasks'
+import { hasDevTaskForFrame } from '../lib/devTasks'
 import { CodeLinkSection } from './CodeLinkSection'
 import { FrameCodeModal } from './FrameCodeModal'
 import { cn } from '@/lib/utils'
@@ -58,6 +60,8 @@ export function Inspector({
   const canEdit = useStore(canEditOpenCanvas)
   /* a component's main frame maps the component; any other frame maps itself */
   const mainOf = useStore((s) => s.canvas?.components?.find((c) => c.mainFrameId === frame.id))
+  /* the Build card shows on a signed-off frame, or while it still carries tasks */
+  const showBuild = useStore((s) => hasDevTaskForFrame(s.devTasks, frame.id))
   /* the raw HTML editor is a power tool — collapsed by default so the panel
      reads as frame properties, not a code dump; the choice sticks */
   const [showHtml, setShowHtml] = useState(() => localStorage.getItem(HTML_OPEN_KEY) === '1')
@@ -248,6 +252,11 @@ export function Inspector({
             </Button>
           )}
         </InspectorGroup>
+        {(frame.approval?.status === 'ready_for_dev' || showBuild) && (
+          <InspectorGroup title={t('devTasks.groupBuild')}>
+            <DevTaskSection frame={frame} />
+          </InspectorGroup>
+        )}
         <InspectorGroup title={t('inspector.codeLinkTitle')}>
           <CodeLinkSection
             key={mainOf ? `component:${mainOf.id}` : `frame:${frame.id}`}
